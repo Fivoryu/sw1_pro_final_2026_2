@@ -1,0 +1,2931 @@
+PROCESO DE DESARROLLO SCRUM
+
+CAPITULO 1 ­ REQUERIMENTOS (Sprint 0)
+
+1. Propósito
+El propósito del Sprint 0 es establecer la base inicial del proyecto mediante la identificación,
+análisis y organización de los requerimientos necesarios para el desarrollo de la Plataforma
+Inteligente de Seguimiento Operativo y Productividad en Trabajo Remoto.
+
+En esta etapa se define el alcance general del sistema, los objetivos del producto, los actores
+principales, las funcionalidades iniciales, el Product Backlog, la planificación de los Sprints, los
+criterios de calidad y la infraestructura tecnológica requerida para el desarrollo. Este Sprint
+permite preparar el trabajo técnico y documental antes de iniciar la implementación de las
+funcionalidades principales.
+
+Asimismo, el Sprint 0 permite al equipo SCRUM comprender el problema que se desea
+resolver y organizar el desarrollo de los componentes principales del sistema: la aplicación de
+escritorio para el trabajador remoto, el panel administrativo web para supervisores y
+administradores, y el backend/API encargado de centralizar la lógica de negocio, la
+autenticación, la persistencia de datos y la comunicación entre módulos.
+
+De esta manera, el Sprint 0 constituye la etapa de preparación del proyecto, donde se
+consolidan los requerimientos, se estructuran las historias de usuario y se dejan definidas las
+condiciones necesarias para iniciar el Sprint 1 con una base clara, ordenada y coherente.
+
+2. Ámbito del sistema
+El sistema estará orientado al registro, monitoreo y análisis de la actividad laboral de
+trabajadores remotos, mediante una plataforma integrada compuesta por una aplicación de
+escritorio, un panel administrativo web, un backend/API y una base de datos centralizada. Su
+finalidad es brindar trazabilidad operativa sobre la jornada laboral, el uso de herramientas de
+trabajo, los periodos de inactividad, los eventos relevantes y la comunicación entre
+trabajadores, supervisores y administradores.
+
+                                                                                                              85
+La aplicación de escritorio estará dirigida al trabajador remoto y permitirá iniciar sesión,
+registrar el inicio, pausa, reanudación y finalización de la jornada laboral. Además, permitirá
+monitorear aplicaciones activas, registrar navegación autorizada durante la jornada, detectar
+periodos de inactividad, mostrar notificaciones y facilitar la comunicación operativa con
+supervisores mediante mecanismos integrados al sistema.
+
+El panel administrativo web estará dirigido a administradores y supervisores. Desde este
+componente será posible gestionar usuarios, roles y permisos, configurar jornadas laborales,
+visualizar el estado actual de los trabajadores, consultar dashboards, revisar reportes, analizar
+aplicaciones utilizadas, consultar historial de navegación, verificar periodos de inactividad,
+revisar alertas y acceder a información consolidada para apoyar la toma de decisiones.
+
+El backend/API será el componente encargado de centralizar la lógica de negocio del sistema,
+gestionar la autenticación, aplicar permisos por rol, recibir la información enviada desde la
+aplicación de escritorio, almacenar los registros en la base de datos y proporcionar los
+servicios necesarios para que el panel web pueda consultar y representar la información de
+forma organizada.
+
+El ámbito del sistema comprende los módulos de autenticación, administración de usuarios y
+roles, control de jornada, monitoreo de actividad, registro de navegación, detección de
+inactividad, productividad, notificaciones, bitácora administrativa, reportes, dashboards,
+alertas y comunicación operativa. Las funcionalidades relacionadas con cámara, registro de
+voz o visualización de ubicación se consideran módulos avanzados u opcionales, sujetos a
+disponibilidad técnica, consentimiento del trabajador y políticas internas de la organización.
+
+    1. Objetivo del producto
+Desarrollar una Plataforma Inteligente de Seguimiento Operativo y Productividad en Trabajo
+Remoto, compuesta por una aplicación de escritorio para trabajadores, un panel
+administrativo web para supervisores y administradores, y un backend/API centralizado que
+permita registrar, monitorear, almacenar y analizar la actividad laboral durante la jornada de
+trabajo.
+
+                                                                                                              86
+El producto tiene como objetivo brindar trazabilidad operativa sobre el cumplimiento de
+jornadas, el uso de aplicaciones, la navegación autorizada, los periodos de inactividad, las
+alertas generadas, las evidencias registradas y la comunicación operativa entre los usuarios
+del sistema.
+
+De esta manera, la plataforma busca apoyar a las organizaciones en la supervisión del trabajo
+remoto, facilitando el seguimiento de actividades, la generación de reportes, la identificación
+de eventos relevantes y la toma de decisiones basada en información objetiva, segura y
+organizada.
+
+    2. Descripción general del producto
+El producto consiste en una plataforma tecnológica orientada a fortalecer la supervisión,
+trazabilidad y análisis de la productividad en el trabajo remoto dentro de una organización.
+La solución está compuesta por una aplicación de escritorio instalada en el equipo del
+trabajador, un panel administrativo web utilizado por supervisores y administradores, un
+backend/API encargado de centralizar la lógica del sistema y una base de datos para
+almacenar la información generada durante la jornada laboral.
+
+La aplicación de escritorio permitirá al trabajador iniciar sesión y registrar su jornada laboral,
+incluyendo inicio, pausa, reanudación y cierre. Durante la jornada, el sistema podrá detectar
+la aplicación activa en uso, registrar el tiempo utilizado por aplicación, identificar sitios o
+dominios visitados en navegadores autorizados, detectar periodos de inactividad y recibir
+notificaciones operativas enviadas desde el sistema. Este componente funcionará como
+agente de monitoreo, enviando información al backend de manera controlada y asociada al
+usuario correspondiente.
+
+El panel administrativo web permitirá centralizar y visualizar la información capturada por la
+aplicación de escritorio. Desde este panel, los supervisores y administradores podrán
+consultar dashboards, gráficos, reportes, historial de jornadas, aplicaciones utilizadas,
+navegación registrada, periodos de inactividad, estado actual de los trabajadores, bitácora
+administrativa y notificaciones. Además, podrán gestionar usuarios, roles, permisos, jornadas
+laborales y configuraciones necesarias para el funcionamiento de la plataforma.
+
+                                                                                                              87
+El backend/API será responsable de recibir, validar, procesar y almacenar la información
+proveniente de la aplicación de escritorio, así como de proporcionar los servicios que
+consume el panel administrativo web. Este componente también gestionará la autenticación,
+los permisos por rol, la lógica de negocio, la comunicación entre módulos y la persistencia de
+datos en la base de datos PostgreSQL.
+
+El sistema busca mejorar el control operativo del trabajo remoto, proporcionar información
+objetiva sobre la actividad laboral, facilitar la detección de desviaciones, apoyar la toma de
+decisiones y fortalecer la comunicación entre supervisores y trabajadores. Las
+funcionalidades de evidencias por captura, cámara, ubicación o registro de voz serán tratadas
+como módulos avanzados, sujetos a consentimiento, políticas internas de la organización y
+criterios de seguridad y privacidad.
+
+3. Equipo SCRUM
+
+    3.1. Descripción del equipo SCRUM
+
+El equipo SCRUM está conformado por los integrantes responsables de planificar, analizar,
+diseñar, desarrollar, probar y documentar la Plataforma Inteligente de Seguimiento Operativo
+y Productividad en Trabajo Remoto. El trabajo se organiza de manera colaborativa, siguiendo
+los principios de Scrum y dividiendo las responsabilidades según los roles definidos dentro del
+proyecto.
+
+Durante el Sprint 0, el equipo se encarga principalmente de comprender el problema, definir
+el alcance del sistema, organizar el Product Backlog, identificar las historias de usuario,
+establecer los criterios de calidad, preparar la infraestructura tecnológica y dejar una base
+clara para iniciar el desarrollo de los siguientes Sprints.
+
+3.2. Roles del equipo SCRUM
+
+           VALORES                  ROL          CARACTERISTICAS
+El Scrum Master representa   SCRUM MASTER  Asegura que Scrum se
+compromiso con la mejora                   entienda y aplique bien.
+continua, enfoque en                       Facilita el trabajo del equipo,
+
+                                           88
+facilitar al equipo, respeto                  elimina impedimentos y
+                                              protege de distracciones.
+por todos y coraje para                       También promueve la
+                                              mejora continua y actúa
+enfrentar        obstáculos.                  como guía y facilitador del
+                                              proceso.
+Fomenta la confianza, la                      Define y prioriza el Product
+                                              Backlog. Asegura que el
+colaboración y el uso                         equipo trabaje en lo que más
+                                              valor aporta. Es el puente
+correcto de Scrum.                            entre stakeholders y equipo,
+                                              comunicando objetivos y
+El Product Owner destaca                      necesidades del negocio.
+
+por su responsabilidad en
+
+generar valor, claridad al
+
+priorizar tareas y visión      PRODUCT OWNER
+                                  DEVELOPERS
+estratégica. Es empático
+
+para entender al cliente y
+
+comunicarse de forma clara
+
+con el equipo.
+
+El equipo de desarrollo vive                  Grupo autoorganizado y
+
+la              colaboración,                 multifuncional           que
+
+adaptabilidad, compromiso                     desarrolla los elementos del
+
+y respeto por el trabajo en                   Sprint Backlog. Colabora
+
+equipo. Son responsables,                     cada día, toma decisiones
+
+proactivos y orientados a                     técnicas y entrega
+
+entregar            valor                     incrementos funcionales de
+
+constantemente.                               calidad en cada Sprint.
+
+               NOMBRE                                   ROL
+    Chumacero Miranda Nelson                     Product Owner
+                                                 Scrum Master
+     Guzman Rojas Luis David                  Scrum Development
+      Ardaya Campos Nathalia                  Scrum Development
+      Calero Suyo Trevor Félix                Scrum Development
+       Jimenez Peña Marcelo                   Scrum Development
+       Mendieta Alban Letizia
+                                                                                    89
+3.3. Responsabilidades del equipo
+
+        ROL                                 RESPONSABILIDADES
+Product Owner  Definir la visión del producto, priorizar el Product Backlog, validar
+Scrum Master   requerimientos y aprobar las funcionalidades entregadas.
+Developers     Coordinar el proceso Scrum, organizar reuniones, dar seguimiento al
+               avance del equipo y ayudar a resolver impedimentos.
+               Analizar, diseñar, desarrollar, probar y documentar las funcionalidades
+               del sistema durante cada Sprint.
+
+    4. Requerimientos iniciales
+A partir del análisis del problema, las necesidades del entorno de trabajo remoto y la
+definición inicial del Product Backlog, se identificaron los requerimientos centrales que el
+sistema debe satisfacer. Estos requerimientos permiten establecer una base funcional para el
+desarrollo de la plataforma y sirven como guía para organizar las historias de usuario, los
+módulos del sistema y los Sprints posteriores.
+
+    4.1. Necesidades identificadas
+    1. Control de jornada laboral: Las organizaciones requieren un mecanismo
+
+         automatizado para registrar el inicio, pausa, reanudación y finalización de la jornada
+         de cada trabajador remoto, reduciendo la dependencia de reportes manuales.
+    2. Visibilidad de la actividad laboral: Los supervisores necesitan consultar qué
+         aplicaciones utilizan los trabajadores, qué sitios o dominios visitan durante la jornada
+         y cuál es su estado operativo.
+    3. Detección de inactividad: Es necesario identificar automáticamente los períodos en
+         los que el trabajador no interactúa con el teclado o el ratón, con el fin de diferenciar
+         tiempos activos e inactivos.
+    4. Registro de eventos y evidencias: Ante eventos relevantes o sospechosos definidos
+         por reglas del sistema, la plataforma debe registrar información asociada al usuario,
+
+                                                                                                              90
+         jornada, fecha, hora y tipo de evento. Las evidencias visuales o capturas solo deberán
+         gestionarse bajo autorización y políticas internas de la organización.
+    5. Centralización de la información: Toda la información generada por la aplicación de
+         escritorio debe consolidarse en un sistema centralizado, accesible desde el panel web,
+         para que administradores y supervisores puedan analizar datos actuales e históricos.
+    6. Comunicación interna: Se necesita un canal de comunicación operativo entre
+         supervisores y trabajadores para enviar avisos, instrucciones o notificaciones sin
+         depender únicamente de herramientas externas.
+    7. Gestión de acceso segura: El sistema debe permitir el acceso únicamente a usuarios
+         autorizados, diferenciando permisos según el rol asignado: owner, administrador,
+         supervisor o trabajador.
+    8. Trazabilidad de acciones: Las operaciones administrativas relevantes deben quedar
+         registradas en una bitácora, permitiendo auditoría y control interno sobre las acciones
+         realizadas en el sistema.
+
+    4.2. Requerimientos generales del sistema
+El sistema por desarrollar, denominado "Plataforma Inteligente de Seguimiento Operativo y
+Productividad en Trabajo Remoto", se compone de varios componentes integrados que
+trabajan de forma coordinada:
+
+    · Aplicación de escritorio: agente instalado en el equipo del trabajador, desarrollado
+         con Electron, Vite y TypeScript. Este componente permite iniciar sesión, registrar la
+         jornada laboral, detectar actividad del sistema, registrar aplicaciones activas,
+         identificar periodos de inactividad, capturar navegación autorizada y comunicarse con
+         el backend.
+
+    · Panel administrativo web: interfaz desarrollada con React, Vite, TypeScript y Tailwind
+         CSS. Está dirigida a administradores y supervisores, permitiendo gestionar usuarios,
+         roles, jornadas, reportes, dashboards, navegación, aplicaciones, productividad,
+         inactividad, notificaciones y bitácora administrativa.
+
+    · Backend/API: componente desarrollado con Django y Django REST Framework. Es
+         responsable de centralizar la lógica de negocio, gestionar autenticación, aplicar
+
+                                                                                                              91
+    permisos, recibir información desde la aplicación de escritorio, atender las peticiones
+    del panel web y mantener la comunicación entre los módulos del sistema.
+· Base de datos: sistema de persistencia implementado en PostgreSQL, encargado de
+    almacenar usuarios, roles, jornadas, eventos, aplicaciones, navegación, inactividad,
+    notificaciones, bitácora administrativa y demás registros operativos del sistema.
+
+Ambos clientes, la aplicación de escritorio y el panel web, se comunican con el backend
+mediante servicios API REST, utilizando autenticación basada en tokens JWT y mecanismos
+de control de acceso según el rol del usuario.
+
+    4.3. Requisitos funcionales
+A continuación, se detallan los requisitos funcionales (RF) del sistema, agrupados por módulo,
+que han sido refinados y priorizados para el desarrollo.
+
+CÓDIGO  MÓDULO     REQUERIMIENTO                                     PRIORIDAD
+ RF-01
+ RF-02             El sistema debe permitir al trabajador iniciar
+ RF-03
+ RF-04  Autenticación sesión en la aplicación de escritorio con      Alta
+ RF-05
+ RF-06             correo y contraseña.
+ RF-07
+                   El sistema debe permitir a los
+
+        Autenticación administradores y supervisores iniciar sesión  Alta
+
+                   en el panel web.
+
+        Gestión de El administrador debe poder crear, editar,        Alta
+
+        usuarios   desactivar y consultar usuarios del sistema.
+
+        Gestión de El administrador debe poder gestionar roles       Alta
+
+        roles      y permisos asociados a los usuarios.
+
+                   La aplicación de escritorio debe permitir al
+
+        Jornada laboral trabajador registrar inicio, pausa,          Alta
+
+                   reanudación y cierre de jornada.
+
+                   El administrador debe poder configurar
+
+        Jornada laboral horarios de jornada y asignarlos a           Alta
+
+                   trabajadores.
+
+        Monitoreo de La aplicación de escritorio debe detectar la    Alta
+
+        actividad  ventana activa y registrar el título y proceso
+                   utilizado durante la jornada.
+
+                                                                           92
+RF-08  Monitoreo de  El sistema debe calcular el tiempo de uso por     Alta
+RF-09     actividad  aplicación y permitir clasificarla como           Alta
+RF-10                productiva, neutra o no laboral.                  Alta
+RF-11   Navegación   La aplicación de escritorio debe registrar        Alta
+RF-12   Inactividad  dominios o URLs visitadas durante la              Alta
+RF-13    Eventos y   jornada, de acuerdo con las políticas             Alta
+RF-14    evidencias  definidas.                                        Alta
+RF-15   Supervisión  El sistema debe detectar y registrar períodos     Alta
+RF-16   Supervisión  sin actividad de teclado o ratón.                Media
+RF-17                El sistema debe registrar eventos                Media
+           Alertas   sospechosos o relevantes según reglas de          Baja
+RF-18                negocio, asociándolos al usuario, jornada,
+       Comunicación  fecha y hora.                                             93
+         Auditoría   El panel web debe mostrar un dashboard
+          Reportes   general con el estado actual de los
+                     trabajadores monitoreados.
+          Módulos    El panel web debe permitir consultar el
+         opcionales  historial de jornadas, aplicaciones y
+                     navegación por trabajador y período.
+                     El sistema debe generar alertas automáticas
+                     ante desviaciones como exceso de
+                     inactividad o uso de aplicaciones no
+                     laborales.
+                     El sistema debe permitir el envío de
+                     notificaciones o mensajes operativos entre
+                     supervisores y trabajadores.
+                     El sistema debe registrar acciones
+                     administrativas relevantes en una bitácora.
+                     El sistema debe permitir la generación de
+                     reportes de actividad y productividad, con
+                     posibilidad de exportación.
+                     El sistema podrá integrar funcionalidades
+                     avanzadas como cámara, ubicación
+                     referencial o registro de voz, únicamente
+                     bajo autorización, consentimiento y políticas
+                     organizacionales.
+
+4.4. Requisitos no funcionales
+
+Estos requisitos definen las cualidades y restricciones del sistema.
+CÓDIGO  CATEGORÍA                 REQUERIMIENTO
+RNF-01
+RNF-02   Rendimiento    La aplicación de escritorio debe operar en segundo
+RNF-03     Seguridad    plano sin afectar de forma significativa el rendimiento
+RNF-04     Seguridad    normal del equipo del trabajador.
+RNF-05                  Las comunicaciones entre la aplicación de escritorio, el
+RNF-06  Compatibilidad  panel web y el backend deben realizarse mediante
+RNF-07     Fiabilidad   canales seguros.
+RNF-08    Usabilidad    Las contraseñas de los usuarios deben almacenarse
+                        utilizando mecanismos de hash seguro.
+        Mantenibilidad  La aplicación de escritorio debe estar orientada
+          Privacidad    inicialmente a equipos con sistema operativo Windows
+                        10 o superior.
+                        La aplicación de escritorio debe poder guardar eventos
+                        localmente si no existe conexión y sincronizarlos
+                        cuando el servicio vuelva a estar disponible.
+                        La interfaz de la aplicación de escritorio debe ser clara,
+                        no intrusiva y permitir al trabajador conocer el estado
+                        de su jornada.
+                        El backend, frontend y desktop deben organizarse de
+                        forma modular para facilitar correcciones,
+                        ampliaciones y mantenimiento futuro.
+                        El sistema debe respetar criterios de consentimiento,
+                        autorización, control de acceso y uso proporcional de la
+                        información monitoreada.
+
+4.5. Reglas de negocio iniciales
+
+1. Unicidad de jornada: Un trabajador no puede tener dos jornadas activas
+    simultáneamente. Para iniciar una nueva jornada, la anterior debe estar cerrada.
+
+2. Tolerancia de horario: El sistema podrá considerar como "fuera de horario" a un
+    trabajador que no inicie su jornada dentro del margen de tolerancia definido en la
+    configuración correspondiente.
+
+3. Clasificación de aplicaciones: Las aplicaciones detectadas se clasificarán inicialmente
+    como neutras. Posteriormente, el administrador o supervisor podrá clasificarlas como
+    productivas, neutras o no laborales.
+
+                                                 94
+4. Cálculo de productividad: El sistema calculará la productividad considerando el
+    tiempo asociado a aplicaciones productivas frente al tiempo total de jornada,
+    inactividad y uso de aplicaciones no laborales.
+
+5. Registro de eventos sospechosos: Se considerará evento sospechoso la combinación
+    de condiciones definidas por el sistema, como inactividad prolongada y uso de
+    aplicaciones clasificadas como no laborales.
+
+6. Gestión de evidencias: Las evidencias visuales, capturas o registros relacionados con
+    cámara deberán generarse únicamente bajo autorización y de acuerdo con las
+    políticas internas de la organización.
+
+7. Privacidad y consentimiento: Antes de iniciar el monitoreo, el trabajador debe
+    conocer qué datos serán recolectados, con qué finalidad y bajo qué condiciones serán
+    utilizados.
+
+8. Eliminación de usuarios: No se deberá eliminar definitivamente un usuario que tenga
+    registros de jornada, eventos, navegación, inactividad, mensajes o bitácora asociada.
+    En su lugar, el sistema deberá permitir su desactivación.
+
+    5. Funciones del producto
+
+A continuación, se describen las principales funciones que compondrán la Plataforma
+Inteligente de Seguimiento Operativo y Productividad en Trabajo Remoto. Las funciones se
+encuentran organizadas por módulo y plataforma, tomando como base los 46 elementos
+definidos en el Product Backlog.
+
+    5.1. Funciones del panel web
+
+El panel administrativo web estará dirigido a los roles Owner, Administrador y Supervisor. Su
+finalidad es centralizar la información generada por la aplicación de escritorio, permitir la
+administración del sistema y facilitar el análisis de la actividad laboral de los trabajadores
+remotos.
+
+             FUNCIÓN  DESCRIPCIÓN  BACKLOG
+Login seguro
+                      Permite a administradores, supervisores y PB-02
+                      owner iniciar sesión en el panel web
+
+                                                                       95
+Gestión de usuarios          mediante credenciales válidas y control de      PB-03
+                             acceso por rol.                                 PB-04
+Gestión de roles y permisos  Permite crear, editar, desactivar y consultar   PB-31
+                             usuarios del sistema, asignando datos           PB-06
+Administración de jornada    principales, empresa, rol y cargo.              PB-07
+                             Permite administrar roles y permisos para       PB-15
+Historial de jornadas        controlar qué funcionalidades puede utilizar    PB-16
+                             cada tipo de usuario.                           PB-17
+Estado de trabajadores       Permite configurar horarios laborales, días     PB-18
+                             de trabajo, tolerancias y asignaciones de       PB-19
+Consulta de aplicaciones     jornada a trabajadores.                         PB-20
+Historial de navegación      Permite consultar las jornadas registradas      PB-22
+Filtros de navegación        por trabajador, incluyendo inicio, pausa,       PB-23
+Consulta de inactividad      reanudación y cierre.                           PB-24
+Resumen gráfico de           Muestra el estado actual de los trabajadores,
+inactividad                  como activo, pausado, inactivo o fuera de
+                             jornada.
+                             Permite visualizar las aplicaciones utilizadas
+                             por un trabajador, junto con los tiempos
+                             acumulados de uso.
+                             Permite consultar dominios o URLs visitadas
+                             por trabajador y por período.
+                             Permite filtrar el historial de navegación por
+                             fechas, trabajador o dominio específico.
+                             Permite consultar los períodos de inactividad
+                             registrados durante la jornada laboral.
+
+                             Presenta información visual sobre tiempos
+                             de inactividad por trabajador o período.
+
+Catálogo de clasificación Permite clasificar aplicaciones como
+
+productiva                   productivas, neutras o no laborales.
+
+Configuración              de Permite definir criterios o fórmula para
+productividad                   calcular el porcentaje de productividad.
+
+Consulta de productividad    Permite visualizar el porcentaje de
+Bitácora administrativa      productividad por trabajador y jornada.
+                             Permite consultar acciones administrativas
+                             realizadas en el sistema, como creación,
+                             edición o cambios de configuración.
+
+                                                                                    96
+                            Permite visualizar capturas o evidencias
+
+Galería de evidencias       asociadas a eventos, trabajador y fecha,        PB-32
+                            siempre que estén autorizadas por las
+                                                                            PB-33,
+                            políticas del sistema.                          PB-34
+                                                                            PB-35,
+Dashboard general           Presenta indicadores generales del sistema,     PB-36
+                            como trabajadores activos, productividad        PB-37
+                                                                            PB-38
+                            media y alertas activas.                        PB-39
+                                                                            PB-40
+Gestión de alertas          Permite visualizar alertas generadas por
+                            eventos relevantes o desviaciones de            PB-44
+
+                            actividad.
+
+Configuración de reglas de Permite crear o editar reglas de alerta, como
+
+alerta                      umbrales de inactividad o uso de
+                            aplicaciones no laborales.
+
+Reporte en PDF              Permite generar reportes de actividad,
+                            inactividad y productividad en formato PDF.
+
+Reporte en Excel            Permite generar reportes de actividad,
+                            inactividad y productividad en formato Excel.
+
+Envío de mensajes           Permite al supervisor enviar mensajes o
+                            instrucciones operativas a un trabajador
+
+                            específico.
+
+Visualización en mapa       Permite visualizar la ubicación referencial de
+                            trabajadores, cuando esta funcionalidad esté
+
+                            autorizada y habilitada.
+
+5.2. Funciones de la aplicación de escritorio
+
+La aplicación de escritorio estará dirigida al trabajador remoto. Su función principal es
+permitir el registro de jornada, capturar eventos de actividad laboral y enviar información al
+backend de forma controlada durante el horario de trabajo.
+
+           FUNCIÓN                          DESCRIPCIÓN                 BACKLOG
+Login seguro de escritorio  Permite al trabajador iniciar sesión en la    PB-01
+                            aplicación de escritorio mediante
+Registro de jornada         credenciales válidas.                         PB-05
+Estado operativo del        Permite registrar el inicio, pausa,           PB-07
+trabajador                  reanudación y finalización de la jornada
+                            laboral.
+                            Muestra el estado actual de la jornada del
+                            trabajador y permite conocer si se
+
+                                                                                    97
+                              encuentra activo, pausado o fuera de
+
+                              jornada.
+
+                              Permite   recibir          notificaciones
+
+Notificaciones en escritorio  emergentes enviadas desde el sistema o      PB-26, PB-41
+                                                                              PB-42
+Widget de chat flotante       por el supervisor.                              PB-43
+                                                                              PB-45
+Registro de ubicación         Permite al trabajador visualizar mensajes,      PB-46
+referencial
+                              revisar historial y responder
+Captura periódica por
+cámara                        comunicaciones operativas desde una
+Consulta de capturas
+periódicas                    ventana flotante.
+
+                              Permite registrar una ubicación
+
+                              referencial del trabajador, siempre que
+
+                              exista autorización y se encuentre
+
+                              habilitada la función.
+
+                              Permite realizar capturas periódicas
+
+                              mediante cámara web únicamente con
+
+                              consentimiento explícito y según políticas
+
+                              organizacionales.
+
+                              Permite almacenar y asociar las capturas
+
+                              periódicas autorizadas para su posterior
+
+                              consulta en el panel web.
+
+5.3. Funciones de monitoreo y registro de actividad
+
+Estas funciones son ejecutadas por la aplicación de escritorio durante la jornada laboral del
+trabajador. Su finalidad es registrar información operativa sobre el uso del equipo,
+aplicaciones, navegación e inactividad, sin afectar de forma significativa el rendimiento del
+dispositivo.
+
+            FUNCIÓN                               DESCRIPCIÓN                   BACKLOG
+                                                                                  PB-08
+Captura de proceso activo          Registra el proceso y la ventana activa del    PB-09
+                                   sistema durante la jornada laboral.
+                                                                                  PB-10
+Acumulación de tiempo por Calcula el tiempo de uso de cada
+                                                                                  PB-11
+aplicación                         aplicación detectada durante la jornada.
+
+Persistencia  de     uso      por  Almacena    los tiempos de uso por
+aplicación                         aplicación  asociados a la sesión de
+
+                                   jornada correspondiente.
+
+Intercepción de URL activa         Detecta la URL activa en navegadores
+                                   autorizados durante la jornada laboral.
+
+                                                                                        98
+Registro de visitas de          Guarda cada visita de navegación              PB-12
+navegación                      asociada al trabajador, jornada, fecha y      PB-13
+                                dominio correspondiente.                      PB-14
+Detección de inactividad        Identifica periodos sin interacción del       PB-21
+Registro de períodos de         teclado o ratón.                              PB-25
+inactividad                     Almacena cada período de inactividad con
+Clasificación automática de     hora de inicio, hora de fin y duración.       PB-27
+aplicaciones                    Asigna una clasificación a cada aplicación
+                                detectada según el catálogo configurado.      PB-28
+Registro de eventos del agente  Registra los eventos generados por la         PB-29
+                                aplicación de escritorio, como cambios de     PB-30
+Detección   de  evento          aplicación, navegación e inactividad.
+                                Identifica eventos sospechosos según
+sospechoso                      reglas definidas, como inactividad
+                                prolongada combinada con uso de
+Captura de imagen por evento    aplicaciones no laborales.
+                                Permite generar una captura asociada a
+Guardado local de captura       un evento sospechoso, únicamente bajo
+Subida de captura al servidor   autorización y reglas definidas.
+                                Guarda la captura de evidencia en el
+                                equipo local con metadatos como fecha,
+                                usuario y evento.
+                                Envía la captura autorizada al servidor y la
+                                vincula con el evento correspondiente.
+
+5.4. Funciones de reportes, alertas y supervisión
+
+Estas funciones se ejecutan principalmente desde el backend y se visualizan en el panel
+administrativo web. Su objetivo es transformar los datos registrados en información útil para
+supervisión, análisis y toma de decisiones.
+
+          FUNCIÓN                            DESCRIPCIÓN                       BACKLOG
+Cálculo de productividad   Aplica la fórmula definida para calcular           PB-22, PB-23
+                           tiempo productivo, improductivo e inactivo
+Indicadores generales vía  por trabajador o jornada.                              PB-33
+API                        Expone indicadores generales como
+                           trabajadores activos, productividad media y
+                           alertas activas.
+
+                                                                                     99
+Widgets del dashboard        Muestra tarjetas, gráficos e indicadores           PB-34
+                             visuales para facilitar el análisis de la
+Motor de alertas continuas   información.                                       PB-35
+                             Evalúa reglas de inactividad, uso de
+Notificaciones de alerta en  aplicaciones no laborales y eventos                PB-36
+panel                        sospechosos para generar alertas.                  PB-37
+Configuración de reglas de   Muestra notificaciones visuales al supervisor
+alerta                       cuando se genera una alerta relevante.         PB-38, PB-39
+                             Permite administrar umbrales y condiciones
+Reportes de actividad        que activan alertas dentro del sistema.        PB-40, PB-41,
+                             Genera reportes de jornada, aplicaciones,          PB-42
+Comunicación operativa       navegación, inactividad y productividad por
+                             trabajador o período.                          PB-43, PB-44
+Supervisión  geográfica      Permite el envío y recepción de mensajes
+referencial                  entre supervisor y trabajador mediante API,    PB-28, PB-29,
+                             notificaciones y widget de chat.               PB-30, PB-45,
+Supervisión avanzada por     Permite registrar y visualizar ubicación
+cámara                       referencial, siempre que exista autorización       PB-46
+                             y esté habilitada la función.
+                             Permite gestionar capturas por evento o
+                             capturas periódicas como evidencia,
+                             únicamente bajo consentimiento explícito y
+                             políticas de privacidad.
+
+6. Product Backlog
+
+                             PRODUCT BACKLOG
+
+PROYECTO                     Plataforma inteligente de seguimiento operativo y
+                                       productividad en trabajo remoto.
+
+PRODUCT OWNER                Nelson Chumacero Miranda
+
+VERSIÓN                 1.0                   Fecha
+
+PB-01 Login escritorio       Permitir al trabajador iniciar sesión en la        Alta
+                             aplicación de escritorio.
+
+PB-02 Login panel web        Permitir a administradores y supervisores          Alta
+                             iniciar sesión en el panel web.
+
+                                                                                100
+                              Permitir crear usuarios en el sistema y
+PB-03  Gestión de usuarios administrarlos.                                Alta
+PB-04
+PB-05  Gestión de roles       Administrar y asignar roles a los usuarios. Alta
+PB-06
+PB-07  Registro de Actividad  Permite registrar el inicio, pausa,         Alta
+PB-08  de Jornada             reanudación y finalización de la jornada
+PB-09
+PB-10                         laboral.
+PB-11
+PB-12  Historial de jornadas Guardar historial de jornadas por Alta
+PB-13                              trabajador.
+PB-14
+PB-15  Estado            de Visualizar el estado actual de los
+PB-16  trabajadores           trabajadores (activo, pausa, fuera de Alta
+PB-17                         jornada).
+
+       Capturar proceso La aplicación de escritorio registra el           Alta
+
+       activo                 proceso y ventana activa del sistema.
+
+       Acumular tiempo por El sistema acumula el tiempo de uso por        Alta
+
+       aplicación             cada aplicación durante la jornada.
+
+       Persistir sesión de Los tiempos de uso se almacenan en la          Alta
+
+       uso por aplicación base de datos por sesión de jornada.
+
+       Interceptar       URL Se captura la URL activa del navegador en Alta
+
+       activa en navegador tiempo real.
+
+       Guardar visita de Cada visita a un dominio o URL se Alta
+       navegación             almacena asociada al trabajador y jornada.
+
+       Detectar inactividad Se identifican periodos sin uso de teclado    Alta
+       de mouse/teclado o ratón.
+
+       Registrar período de Cada período de inactividad se guarda con     Alta
+
+       inactividad            hora de inicio, fin y duración.
+
+       Consulta          de El supervisor puede consultar las             Alta
+       aplicaciones           aplicaciones usadas por un trabajador.
+
+       Endpoint de historial API para obtener el historial de navegación  Alta
+
+       de navegación          de un trabajador por período.
+
+       Filtros en historial de El panel permite filtrar navegación por    Alta
+
+       navegación             fechas y dominios específicos.
+
+                                                                          101
+       Endpoint        de      API para consultar los períodos       de
+       períodos                inactividad de un trabajador.
+PB-18  inactividad     de                                                 Alta
+PB-19
+PB-20  Vista resumen de El panel muestra un resumen gráfico de            Alta
+PB-21
+PB-22  inactividad             inactividad por trabajador.
+PB-23
+PB-24  Catálogo        de Se gestiona un catálogo para clasificar         Alta
+PB-25  clasificación        aplicaciones como productivas o no.
+PB-26  productiva
+PB-27
+PB-28  Clasificar aplicación El sistema asigna clasificación a cada       Alta
+PB-29
+       al registrar            aplicación detectada según catálogo.
+
+       Definir fórmula de Se define y aplica la fórmula para calcular     Alta
+       tiempo productivo tiempo productivo.
+
+       Endpoint        de      API que entrega el porcentaje de           Alta
+       porcentaje      de      productividad por trabajador y jornada.
+       productividad
+
+       Bitácora                Registrar acciones administrativas Media
+       administrativa          relevantes para auditoría.
+
+                               Todos los eventos capturados por el
+
+       Registro de eventos agente (app activa, navegación,
+                               inactividad) quedan registrados en Alta
+       del agente
+
+                               bitácora.
+
+       Notificaciones          Mostrar notificaciones emergentes          Alta
+                               básicas en la app de escritorio.
+
+       Detectar evento El sistema identifica eventos sospechosos          Alta
+
+       sospechoso              combinando inactividad + app no laboral.
+
+       Capturar imagen por     Ante un evento sospechoso, se activa la    Alta
+       evento (cámara)         cámara web y se toma una foto del
+                               trabajador.
+
+       Guardar        captura  La captura de cámara se almacena en disco  Alta
+                               local con metadatos (fecha, usuario,
+       localmente
+                               evento).
+
+                                                                          102
+       Subir captura          La captura se envía al servidor y se vincula
+       servidor           al al evento correspondiente en la base de
+PB-30                         datos.                                        Alta
+PB-31
+PB-32  Administración     de Configurar horarios laborales y asignarlos     Alta
+PB-33  jornada                 a trabajadores.
+PB-34
+PB-35  Galería de capturas    El panel web muestra una galería de           Alta
+PB-36  por trabajador         capturas filtrables por fecha y tipo de
+PB-37                         evento.
+PB-38
+PB-39  Indicadores            La API entrega indicadores: trabajadores
+PB-40  generales vía API      activos, productividad media, alertas Alta
+                              activas.
+
+       Widgets            del El dashboard muestra widgets visuales
+       dashboard                (tarjetas, gráficas) con los indicadores Alta
+                                generales.
+
+       Motor de   alertas     Motor que evalúa reglas (inactividad, apps    Alta
+       continuas              no laborales) y dispara alertas
+
+                              automáticamente.
+
+       Notificaciones     de  Cuando se dispara una alerta, el supervisor   Alta
+       alerta en panel        ve una notificación destacada en el panel
+
+                              web.
+
+       Configuración      de Interfaz para que el administrador
+       reglas de alerta        cree/edite umbrales (ej. inactividad > 15 Media
+                               min).
+
+       Reporte en PDF         Exportar reporte en PDF con actividad,
+                              inactividad y productividad de un Media
+                              trabajador.
+
+       Reporte en Excel       Exportar el mismo reporte en formato          Media
+                              Excel.
+
+       Envío  de  mensajes    Endpoint para que el supervisor envíe         Alta
+       (API)                  mensajes de texto a un trabajador
+
+                              específico.
+
+                                                                            103
+       Recepción      de            La app de escritorio recibe y muestra el
+       mensajes                     mensaje como notificación emergente.
+PB-41  escritorio     en                                                      Alta
+PB-42
+PB-43  Widget de      chat          Ventana flotante en la app de escritorio  Baja
+PB-44  flotante                     que permite ver historial y responder
+PB-45
+PB-46                               mensajes.
+
+       Registro       de            Capturar ubicación (IP pública o GPS) y   Media
+                                    almacenarla asociada a la jornada.
+       ubicación referencial
+
+       Visualización  en            Mostrar en el panel web un mapa con la    Media
+       mapa                         última ubicación conocida de cada
+
+                                    trabajador activo.
+
+       Captura periódica Con consentimiento explícito, acceder a la
+                                    cámara web y tomar una imagen cada N Alta
+       por cámara                   minutos.
+
+       Almacenar            y Guardar las imágenes periódicas de
+
+       consultar capturas cámara como evidencia y mostrarlas en el Alta
+
+       periódicas                   panel (con autorización legal).
+
+6.1. Lista de historias de usuario
+
+ID     ROL         HISTORIA DE USUARIO PRIORIDAD SPRINT              PLATAFORMA
+                                                                        Desktop
+                   Como trabajador
+                                                                          Web
+                   quiero iniciar sesión
+
+                   en la aplicación de
+
+HU-01 Trabajador escritorio         para Alta           1
+
+                   acceder a mis
+
+                   funciones laborales
+
+                   de manera segura.
+
+                   Como administrador
+
+                   o supervisor quiero
+
+                   iniciar sesión en el
+
+HU-02  Administrador panel web para            Alta     1
+        / Supervisor acceder a las
+
+                   herramientas de
+
+                   control            y
+
+                   supervisión.
+
+                                                                              104
+                   Como administrador
+
+                   quiero gestionar
+
+                   usuarios (crear,
+
+HU-03 Administrador editar, desactivar, Alta       1    Web
+                                                        Web
+                   consultar)         para            Desktop
+                                                        Web
+                   administrar        las               Web
+
+                   cuentas del sistema.                          105
+
+                   Como owner o
+
+                   administrador
+
+                   quiero gestionar
+
+HU-04  Owner / roles y permisos para         Alta  1
+
+       Administrador controlar        qué
+
+                   funcionalidades
+
+                   puede usar cada tipo
+
+                   de usuario.
+
+                   Como trabajador
+
+                   quiero registrar el
+
+                   inicio,        pausa,
+
+HU-05  Trabajador  reanudación y cierre      Alta  1
+                   de mi jornada laboral
+
+                   para               dejar
+
+                   constancia de mi
+
+                   actividad diaria.
+
+                   Como supervisor
+
+                   quiero consultar el
+
+                   historial de jornadas
+
+HU-06 Supervisor de los trabajadores Alta          1
+
+                   para verificar el
+
+                   cumplimiento de sus
+
+                   horarios.
+
+                   Como supervisor
+
+                   quiero visualizar el
+
+HU-07 Supervisor estado actual de los Alta         1
+
+                   trabajadores (activo,
+
+                   en pausa, fuera de
+
+                   jornada) para hacer
+                   seguimiento en
+                   tiempo real.
+
+                   Como trabajador
+
+                   quiero que la
+
+                   aplicación          de
+
+HU-08  Trabajador  escritorio capture el   Alta  2  Desktop
+                   proceso y la ventana
+                                                    Desktop
+                   activa del sistema
+                                                    Desktop
+                   para registrar mi
+                                                    Desktop
+                   actividad.                         Web
+                                                               106
+                   Como trabajador
+
+                   quiero que el
+
+                   sistema acumule el
+
+HU-09  Trabajador  tiempo de uso por       Alta  2
+
+                   cada        aplicación
+
+                   durante mi jornada
+
+                   para reflejar mi
+
+                   dedicación.
+
+                   Como trabajador
+
+                   quiero que los
+
+                   tiempos de uso por
+
+HU-10  Trabajador  aplicación          se  Alta  2
+
+                   almacenen en la
+
+                   base de datos
+
+                   asociados a mi
+
+                   sesión de jornada.
+
+                   Como trabajador
+
+                   quiero que el
+
+                   sistema intercepte la
+
+HU-11  Trabajador  URL activa en mi        Alta  2
+                   navegador para
+
+                   registrar los sitios
+
+                   que visito durante la
+
+                   jornada.
+
+                   Como supervisor
+
+HU-12 Supervisor quiero que cada Alta            2
+
+                   visita a un dominio o
+                     URL se guarde en la
+
+                     base de datos
+
+                     asociada         al
+
+                     trabajador y su
+
+                     jornada para poder
+
+                     consultarla después.
+
+                     Como trabajador (y
+
+                     supervisor) quiero
+
+HU-13  Trabajador /  que el sistema          Alta  2 Desktop / Web
+        Supervisor   detecte periodos sin
+                     uso de teclado o
+
+                     ratón para identificar
+
+                     inactividad.
+
+                     Como supervisor
+
+                     quiero que cada
+
+                     período          de
+
+HU-14  Supervisor    inactividad      se     Alta  2  Web
+
+                     registre con hora de
+
+                     inicio, fin y duración
+
+                     para analizar las
+
+                     interrupciones.
+
+                     Como supervisor
+
+                     quiero consultar las
+
+                     aplicaciones
+
+HU-15  Supervisor    utilizadas por un       Alta  2  Web
+                     trabajador para
+
+                     revisar el uso de
+
+                     herramientas
+
+                     laborales.
+
+                     Como supervisor
+
+                     quiero obtener el
+
+                     historial        de
+
+HU-16 Supervisor navegación de un Alta             2  Web
+
+                     trabajador       por
+
+                     período a través del
+
+                     panel web.
+
+                                                           107
+                   Como supervisor
+
+                   quiero filtrar el
+
+                   historial        de
+
+                   navegación       por
+
+HU-17 Supervisor fechas y dominios Alta          2  Web
+
+                   específicos para
+
+                   encontrar
+
+                   información
+
+                   concreta.
+
+                   Como supervisor
+
+                   quiero consultar los
+
+                   períodos         de
+
+HU-18  Supervisor  inactividad de un       Alta  2  Web
+                   trabajador mediante
+
+                   la API (o panel) para
+
+                   evaluar          su
+
+                   disponibilidad.
+
+                   Como supervisor
+
+                   quiero ver un
+
+                   resumen gráfico de
+
+HU-19 Supervisor inactividad        por Alta     2  Web
+
+                   trabajador en el
+
+                   panel web para
+
+                   identificar patrones.
+
+                   Como administrador
+
+                   o supervisor quiero
+
+                   gestionar        un
+
+HU-20  Administrador catálogo       para   Alta  2  Web
+        / Supervisor clasificar
+
+                   aplicaciones como
+
+                   productivas, neutras
+
+                   o no laborales.
+
+                   Como          sistema,
+
+       Sistema     quiero asignar una
+
+HU-21  (automático) clasificación a cada   Alta  2  Backend
+
+                   aplicación detectada
+
+                   según el catálogo
+
+                                                             108
+                      definido         para
+
+                      calcular métricas.
+
+                      Como administrador
+
+                      quiero definir la
+
+                      fórmula de tiempo
+
+HU-22  Administrador  productivo        (ej.  Alta   2    Web
+                      tiempo en        apps               Web
+
+                      productivas / tiempo                Web
+
+                      total) para que el                  Web
+                                                        Desktop
+                      sistema la aplique.
+                                                                   109
+                      Como supervisor
+
+                      quiero obtener el
+
+                      porcentaje          de
+
+HU-23 Supervisor productividad por Alta              2
+
+                      trabajador y jornada
+
+                      a través del panel
+
+                      web.
+
+                      Como administrador
+
+                      quiero que las
+
+                      acciones
+
+                      administrativas
+
+HU-24  Administrador  relevantes (crear       Media  1
+                      usuario, cambiar rol,
+
+                      etc.)       queden
+
+                      registradas en una
+
+                      bitácara         para
+
+                      auditoría.
+
+                      Como supervisor
+
+                      quiero consultar el
+
+                      registro de eventos
+
+HU-25  Supervisor     del agente (cambios     Alta   2
+                      de app, navegación,
+
+                      inactividad) para
+
+                      auditar la actividad
+
+                      capturada.
+
+HU-26 Trabajador Como trabajador Alta                1
+
+                      quiero      recibir
+                   notificaciones
+
+                   emergentes básicas
+
+                   en la aplicación de
+
+                   escritorio        para
+
+                   enterarme de alertas
+
+                   o instrucciones.
+
+                   Como supervisor
+
+                   quiero que el
+
+                   sistema detecte
+
+HU-27  Supervisor  eventos sospechosos     Alta       3 Backend / Web
+                   (combinación de
+
+                   inactividad + app no
+
+                   laboral) para tomar
+
+                   acciones.
+
+                                 Como supervisor      3  Desktop
+                                 quiero que ante un
+                                 evento sospechoso
+HU-28 Supervisor se active la cámara Alta
+                                 web y se tome una
+                                 foto del trabajador
+                                 como evidencia.
+
+                   Como supervisor
+
+                   quiero que la captura
+
+                   de cámara se guarde
+
+HU-29 Supervisor localmente          con Alta         3  Desktop
+
+                   metadatos (fecha,
+
+                   usuario, evento)
+
+                   para respaldo.
+
+                   Como supervisor
+
+                   quiero que la captura
+
+                   se suba al servidor y
+
+HU-30 Supervisor se vincule al evento Alta            3 Desktop / Web
+
+                   correspondiente
+
+                   para        consulta
+
+                   centralizada.
+
+                                                                  110
+                      Como administrador
+
+                      o supervisor quiero
+
+HU-31  Administrador  configurar   horarios   Alta   1  Web
+        / Supervisor  laborales            y
+                      asignarlos           a
+
+                      trabajadores para
+
+                      controlar jornadas.
+
+                      Como supervisor
+
+                      quiero ver una
+
+                      galería de capturas
+
+HU-32  Supervisor     (cámara)       por      Alta   3  Web
+
+                      trabajador, filtrable
+
+                      por fecha y tipo de
+
+                      evento, para revisar
+
+                      evidencias.
+
+                      Como administrador
+
+                      o supervisor quiero
+
+                      que la API entregue
+
+                      indicadores
+
+HU-33  Administrador  generales               Alta   3  Web
+        / Supervisor  (trabajadores
+                      activos,
+
+                      productividad
+
+                      media,         alertas
+
+                      activas) para el
+
+                      dashboard.
+
+                      Como administrador
+
+                      o supervisor quiero
+
+                      ver widgets visuales
+
+HU-34  Administrador (tarjetas, gráficas) en  Alta   3  Web
+        / Supervisor el dashboard con los
+
+                      indicadores
+
+                      generales
+
+                      actualizados.
+
+                                 Como supervisor     3 Backend / Web
+HU-35 Supervisor quiero un motor de Alta                                      111
+
+                                 alertas que evalúe
+                      continuamente las
+
+                      reglas (inactividad,
+
+                      apps no laborales) y
+
+                      dispare         alertas
+
+                      automáticamente.
+
+                      Como supervisor
+
+                      quiero          recibir
+
+                      notificaciones
+
+HU-36  Supervisor     visuales destacadas      Alta   3  Web
+                      en el panel web
+                                                         Web
+                      cuando se dispara
+                                                         Web
+                      una alerta para                    Web
+                                                         Web
+                      reaccionar rápido.
+                                                                  112
+                      Como administrador
+
+                      quiero una interfaz
+
+                      para crear y editar
+
+HU-37  Administrador  reglas de       alerta   Media  3
+                      (umbrales       como
+
+                      "inactividad > 15
+
+                      min" o "app no
+
+                      laboral > 10 min").
+
+                      Como administrador
+
+                      o supervisor quiero
+
+       Administrador  exportar un reporte
+        / Supervisor
+HU-38                 en PDF con actividad,    Media  3
+
+                      inactividad          y
+
+                      productividad de un
+
+                      trabajador.
+
+                      Como administrador
+
+HU-39  Administrador  o supervisor quiero      Media  3
+        / Supervisor  exportar el mismo
+                      reporte en formato
+
+                      Excel.
+
+                      Como supervisor
+
+HU-40 Supervisor quiero               enviar Alta     3
+
+                      mensajes de texto a
+
+                      un       trabajador
+                   específico a través
+                   del panel web
+                   (usando una API).
+
+                   Como trabajador
+
+                   quiero que la
+
+                   aplicación      de
+
+HU-41  Trabajador  escritorio reciba y      Alta  3  Desktop
+HU-42  Trabajador                           Baja
+HU-43  Supervisor  muestre el mensaje      Media
+HU-44  Supervisor                          Media
+                   del supervisor como
+
+                   notificación
+
+                   emergente.
+
+                   Como trabajador
+
+                   quiero contar con un
+
+                   widget de chat
+
+                   flotante en la
+
+                   aplicación      de             3  Desktop
+
+                   escritorio que me
+
+                   permita ver el
+
+                   historial y responder
+
+                   mensajes.
+
+                   Como supervisor
+
+                   quiero registrar la
+
+                   ubicación referencial
+
+                   del trabajador (por IP
+
+                   pública o GPS)                 3 Desktop / Web
+
+                   asociada a su
+
+                   jornada         para
+
+                   conocer         desde
+
+                   dónde trabaja.
+
+                   Como supervisor                3  Web
+                   quiero ver en un
+                   mapa la última
+                   ubicación conocida
+                   de cada trabajador
+                   activo para una vista
+                   geográfica.
+
+                                                              113
+                       Como supervisor,
+
+                       previo
+
+                       consentimiento
+
+                       explícito       del
+
+HU-45      Supervisor  trabajador, quiero    Alta                 3  Desktop
+                       acceder a la cámara                             Web
+
+                       web y tomar una
+
+                       imagen cada N
+
+                       minutos         para
+
+                       verificar presencia.
+
+                       Como supervisor
+
+                       quiero que las
+
+                       imágenes periódicas
+
+                       de cámara se
+
+HU-46 Supervisor almacenen como Alta                              3
+
+                       evidencia y se
+
+                       puedan consultar en
+
+                       el panel (solo con
+
+                       autorización legal).
+
+    7. Casos de uso
+
+Los casos de uso permiten representar las principales interacciones entre los actores del
+sistema y las funcionalidades de la Plataforma Inteligente de Seguimiento Operativo y
+Productividad en Trabajo Remoto. A través de estos casos se identifican las acciones que
+pueden realizar los usuarios según su rol, así como los procesos automáticos que ejecuta el
+sistema durante la jornada laboral.
+
+Para mantener una mejor organización, los casos de uso se agrupan en seis paquetes
+funcionales. Cada paquete representa un conjunto de funcionalidades relacionadas, lo que
+permite ordenar el sistema por áreas de responsabilidad y facilitar la elaboración de los
+diagramas UML.
+
+       ID                                    CASO DE USO
+
+       CU1             Autenticación en aplicación de escritorio
+
+                                                                              114
+CU2   Autenticación en panel web
+CU3   Administración de usuarios
+CU4   Administración de roles y permisos
+CU5   Registro de bitácora administrativa
+CU6   Configuración y asignación de jornada laboral
+CU7   Registro de jornada desde escritorio
+CU8   Consulta de historial de jornadas
+CU9   Visualización del estado actual de trabajadores
+CU10  Envío y recepción de notificaciones básicas
+CU11  Captura de proceso y ventana activa
+CU12  Registro y acumulación de tiempo por aplicación
+CU13  Persistencia de uso de aplicaciones por jornada
+CU14  Captura de URL activa en navegador
+
+CU15  Registro de visitas de navegación
+CU16  Detección de inactividad de teclado y mouse
+CU17  Registro de períodos de inactividad
+CU18  Consulta de aplicaciones utilizadas
+CU19  Consulta y filtrado de historial de navegación
+CU20  Consulta de períodos de inactividad
+CU21  Visualización gráfica de inactividad
+CU22  Gestión del catálogo de clasificación de aplicaciones
+CU23  Clasificación automática de aplicaciones
+CU24  Configuración y cálculo de productividad
+CU25  Registro de eventos del agente
+CU26  Detección de eventos sospechosos
+CU27  Captura de evidencia por cámara ante evento sospechoso
+CU28  Gestión de capturas de evidencia
+
+                                                                                   115
+CU29             Visualización de galería de evidencias
+CU30             Generación de indicadores generales
+CU31             Visualización de dashboard operativo
+CU32             Gestión de alertas y reglas de alerta
+CU33             Generación y exportación de reportes
+CU34             Comunicación operativa, chat y ubicación referencial
+
+7.1. Identificación de actores
+
+     ACTOR                                          DESCRIPCIÓN
+Owner            Usuario con el mayor nivel de control dentro del sistema. Tiene acceso
+Administrador    a la administración general de la plataforma, configuración global,
+Supervisor       gestión de roles, permisos y supervisión completa.
+Trabajador       Usuario encargado de administrar el sistema. Puede gestionar usuarios,
+                 roles, jornadas laborales, reglas de alerta, reportes, bitácora
+                 administrativa y configuraciones operativas.
+                 Usuario responsable del seguimiento de los trabajadores. Puede
+                 visualizar estados, jornadas, aplicaciones utilizadas, navegación,
+                 inactividad, alertas, evidencias, reportes y comunicarse con los
+                 trabajadores.
+                 Usuario que utiliza la aplicación de escritorio. Registra su jornada
+                 laboral, recibe notificaciones, interactúa con el sistema y permite el
+                 monitoreo de actividad durante su horario de trabajo autorizado.
+
+    7.2. Paquetes y casos de uso
+Los casos de uso del sistema se organizan en seis paquetes funcionales, con el objetivo de
+agrupar las funcionalidades según su relación dentro del sistema y evitar diagramas
+demasiado extensos o desordenados.
+
+     PAQUETE        CASOS DE USO                          DESCRIPCIÓN
+   FUNCIONAL       RELACIONADOS
+                                      Agrupa las funciones de inicio de sesión,
+Autenticación y  CU1, CU2, CU3, CU4,  administración de usuarios, roles, permisos,
+administración         CU5, CU6       bitácora administrativa y configuración de
+                                      jornadas laborales.
+
+                                                                       116
+Jornada laboral y    CU7, CU8, CU9,   Comprende el registro de jornada desde la
+estado operativo           CU10       aplicación de escritorio, la consulta de historial,
+                                      la visualización del estado actual de
+Monitoreo de       CU11, CU12, CU13,  trabajadores y el envío o recepción de
+actividad          CU14, CU15, CU16,  notificaciones básicas.
+                                      Agrupa las funciones relacionadas con captura
+Supervisión y              CU17       de ventana activa, tiempo por aplicación,
+productividad                         persistencia de uso, navegación, visitas
+                   CU18, CU19, CU20,  registradas, detección de inactividad y registro
+Eventos,           CU21, CU22, CU23,  de periodos inactivos.
+evidencias y                          Incluye consultas de aplicaciones utilizadas,
+alertas                    CU24       historial de navegación, períodos de
+                                      inactividad, gráficos, catálogo de clasificación,
+Dashboard,         CU25, CU26, CU27,  clasificación automática y cálculo de
+reportes y         CU28, CU29, CU32   productividad.
+comunicación                          Agrupa el registro de eventos del agente,
+operativa          CU30, CU31, CU33,  detección de eventos sospechosos, captura de
+                           CU34       evidencias autorizadas, gestión de capturas,
+                                      galería de evidencias y gestión de alertas o
+                                      reglas.
+                                      Incluye generación de indicadores generales,
+                                      visualización del dashboard operativo,
+                                      generación y exportación de reportes,
+                                      comunicación operativa, chat y ubicación
+                                      referencial autorizada.
+
+                                      117
+118
+119
+120
+    8. Planificación de Sprints
+
+La planificación de Sprints permite organizar el desarrollo del sistema en incrementos
+funcionales, siguiendo un avance progresivo y coherente con la prioridad de los
+requerimientos definidos en el Product Backlog. Para este proyecto se definieron tres Sprints
+principales, además del Sprint 0 utilizado para la planificación, preparación del entorno,
+definición inicial del producto, organización documental y diseño preliminar de la solución.
+
+Cada Sprint concentra un bloque funcional del sistema, evitando mezclar funcionalidades
+base con módulos avanzados que dependen de procesos previos. De esta manera, el
+desarrollo avanza de forma incremental: primero se construye la base administrativa y el
+control de jornada; luego se implementa el monitoreo de actividad del trabajador; y
+finalmente se integran reportes, alertas, evidencias, comunicación operativa y funciones
+avanzadas.
+
+La distribución se realiza tomando como base los 46 elementos del Product Backlog. El Sprint
+1 agrupa 10 elementos orientados a autenticación, administración y jornada laboral. El Sprint
+2 concentra 17 elementos relacionados con monitoreo de aplicaciones, navegación,
+inactividad y productividad. El Sprint 3 agrupa 19 elementos vinculados con eventos,
+evidencias, alertas, dashboard, reportes, comunicación, ubicación y funciones avanzadas.
+Esta organización permite mantener una entrega progresiva, verificable y alineada con las
+dependencias funcionales del sistema.
+
+    8.1. Duración de los Sprints
+
+Cada Sprint tendrá una duración aproximada de 21 días calendario, siguiendo un ciclo de
+trabajo que incluye planificación, desarrollo, revisión y retrospectiva. El Sprint 0 se considera
+una fase inicial de preparación del proyecto, por lo que tiene una duración ligeramente mayor
+debido a la definición documental, técnica y organizativa.
+
+NRO. SPRINT  FECHA DE    FECHA DE    DURACIÓN   PROPÓSITO
+               INICIO  FINALIZACIÓN    24 días
+                                                PRINCIPAL
+                        17/04/2026
+                                                Planificación,
+
+1 Sprint 0 24/03/2026                           definición      del
+
+                                                producto,
+
+                                                arquitectura inicial y
+
+                                                                121
+                                                 preparación del
+
+                                                 entorno.
+
+                                                 Base administrativa,
+
+2 Sprint 1 18/04/2026 09/05/2026  21 días        autenticación,
+3 Sprint 2 10/05/2026 31/05/2026  21 días
+4 Sprint 3 01/06/2026 22/06/2026  21 días        usuarios, roles y
+
+                                                 control de jornada.
+
+                                                 Monitoreo       de
+
+                                                 aplicaciones,
+
+                                                 navegación,
+
+                                                 inactividad          y
+
+                                                 eventos.
+
+                                                 Reportes, alertas,
+
+                                                 evidencias, chat,
+
+                                                 ubicación y cámara
+
+                                                 como           función
+
+                                                 avanzada.
+
+        Diagrama de Gantt general de los Sprint
+
+SPRIN   24/30
+   T         MA R
+               31
+                     MAR/06
+                       07/13
+                           ABR
+                             1A4B/R17
+                                     1A8B/R24
+                                             ABR
+                                               25
+                                                     ABR/01
+                                                       02/09
+                                                          MA Y
+                                                             1M0/A1Y6
+                                                                     1M7/A2Y3
+                                                                             MA Y
+                                                                               24/31
+                                                                                    MA Y
+                                                                                       01/07
+                                                                                            J0U8/N14
+                                                                                                    J1U5/N22
+                                                                                                            JUN
+
+Sprint    
+
+0
+
+Sprint      
+
+1
+
+Sprint                            
+
+2
+
+Sprint                                           
+
+3
+
+                                                                 122
+    8.2. Criterios para la división de Sprints
+La división de Sprints no se realizó únicamente por cantidad de historias, sino también por
+dependencia funcional, prioridad, complejidad técnica y valor incremental. El objetivo es que
+cada Sprint entregue un incremento coherente, verificable y útil para el avance del sistema.
+
+CRITERIO                        APLICACIÓN EN EL PROYECTO
+
+Dependencia   Primero se implementan login, usuarios, roles, jornadas y estado
+funcional     operativo; posteriormente se desarrolla el monitoreo; finalmente se
+              integran reportes, alertas, evidencias y funciones avanzadas.
+
+Prioridad           Se priorizan las funciones necesarias para que el sistema pueda operar:
+negocio       del
+
+                    acceso seguro, administración, control de jornada y estado del
+                    trabajador.
+
+Complejidad   Las funciones de cámara, ubicación, capturas, reportes y alertas se
+técnica       ubican al final porque dependen de datos previamente recolectados y
+              de reglas ya definidas.
+
+Equilibrio         Los 46 elementos del Product Backlog se distribuyen en tres Sprints
+carga         de
+
+                   principales: 10 elementos en Sprint 1, 17 elementos en Sprint 2 y 19
+                   elementos en Sprint 3.
+
+Valor         Cada Sprint entrega una parte funcional del sistema que puede
+incremental   revisarse, probarse y mejorarse antes de avanzar al siguiente bloque
+              de funcionalidades.
+
+              Cada elemento del Product Backlog mantiene relación con historias de
+
+Trazabilidad  usuario, casos de uso, módulos del sistema y entregables del Sprint
+
+              correspondiente.
+
+    8.3. Sprint 1 - Base administrativa y control de jornada
+Objetivo: implementar la base administrativa del sistema, incluyendo autenticación, gestión
+de usuarios, roles, permisos, configuración de jornadas, registro de actividad de jornada,
+historial, estado de trabajadores y notificaciones básicas.
+
+                                                           123
+ PB        HISTORIA DE       PRIORIDAD            RESULTADO ESPERADO
+PB-01        USUARIO             Alta
+PB-02                            Alta   El trabajador puede iniciar sesión desde la
+PB-03  Login escritorio          Alta   aplicación de escritorio.
+PB-04                            Alta   Administradores y supervisores acceden
+       Login panel web                  al panel web según su rol.
+PB-05                            Alta   El administrador crea, edita, desactiva y
+       Gestión de usuarios              consulta usuarios.
+PB-06                            Alta   El sistema controla el acceso según rol y
+PB-07  Gestión de roles y        Alta   permisos asignados.
+PB-24                           Media
+PB-26  permisos                  Alta   El trabajador registra inicio, pausa,
+PB-31                            Alta   reanudación y cierre.
+       Registro          de
+                                        El panel permite consultar jornadas
+       Actividad         de             registradas por trabajador.
+                                        El supervisor visualiza estados como
+       Jornada                          activo, pausado o fuera de jornada.
+                                        Las acciones relevantes quedan
+       Historial         de             registradas para auditoría.
+                                        El sistema muestra avisos básicos
+       jornadas                         relacionados con jornada o supervisión.
+                                        Se configuran horarios y se asignan a
+       Estado            de             trabajadores.
+
+       trabajadores
+
+       Bitácora
+
+       administrativa
+
+       Notificaciones
+
+       Administración de
+       jornada
+
+Entregable principal del Sprint 1: incremento funcional con autenticación, administración
+inicial, control de jornada y visualización básica del estado de trabajadores.
+
+                                        124
+    8.4. Sprint 2 - Monitoreo de actividad del trabajador
+Objetivo: implementar los mecanismos principales de monitoreo de actividad laboral,
+registrando aplicaciones activas, navegación, inactividad y eventos asociados durante la
+jornada del trabajador.
+
+PB     HISTORIA DE USUARIO PRIORIDAD      RESULTADO ESPERADO
+
+PB-08  Capturar proceso activo      Alta  La aplicación de escritorio registra el
+
+       del sistema                        proceso y ventana activa.
+
+       Acumular tiempo de uso             El sistema acumula el tiempo de uso
+
+PB-09  por aplicación               Alta por cada aplicación durante la
+
+                                          jornada.
+
+       Persistir sesión de uso por        Los tiempos de uso se almacenan en
+
+PB-10  aplicación                   Alta la base de datos por sesión de
+
+                                          jornada.
+
+PB-11  Interceptar URL activa en    Alta  Se captura la URL activa del
+
+       el navegador                       navegador en tiempo real.
+
+       Guardar visita de                  Cada visita a un dominio o URL se
+
+PB-12  navegación en DB             Alta almacena asociada al trabajador y
+
+                                          jornada.
+
+PB-13  Detectar inactividad de      Alta  Se identifican periodos sin uso de
+
+       mouse/teclado                      teclado o ratón.
+
+PB-14  Registrar período de         Alta  Cada período de inactividad se guarda
+
+       inactividad                        con hora de inicio, fin y duración.
+
+PB-15 Consulta de aplicaciones                  El supervisor puede consultar las
+                                    Alta aplicaciones usadas por un
+
+                                                trabajador.
+
+                                                                               125
+       Endpoint de consulta de            API para obtener el historial de
+
+PB-16  historial de navegación      Alta navegación de un trabajador por
+
+                                          período.
+
+PB-17  Filtros por fecha y dominio  Alta  El panel permite filtrar navegación
+
+       en historial                       por fechas y dominios específicos.
+
+PB-18  Endpoint de períodos de      Alta  API para consultar los períodos de
+
+       inactividad                        inactividad de un trabajador.
+
+PB-19  Vista resumen de             Alta  El panel muestra un resumen gráfico
+
+       inactividad en panel               de inactividad por trabajador.
+
+PB-20  Catálogo de clasificación    Alta  Se gestiona un catálogo para clasificar
+
+       productiva/no productiva           aplicaciones como productivas o no.
+
+PB-21  Clasificar aplicación al     Alta  El sistema asigna clasificación a cada
+
+       momento de registrar               aplicación detectada según catálogo.
+
+PB-22  Definir fórmula de tiempo    Alta  Se define y aplica la fórmula para
+
+       productivo                         calcular tiempo productivo.
+
+       Endpoint de porcentaje de          API que entrega el porcentaje de
+
+PB-23  productividad                Alta productividad por trabajador y
+
+                                          jornada.
+
+       Registro de eventos del            Todos los eventos capturados por el
+
+PB-25  agente                       Alta agente quedan registrados en
+
+                                          bitácora.
+
+Entregable principal del Sprint 2: módulo de monitoreo funcional capaz de capturar, registrar
+y consultar actividad del trabajador durante su jornada.
+
+                                                                              126
+    8.5. Sprint 3 - Reportes, alertas y funciones avanzadas
+
+Objetivo: consolidar los datos recolectados mediante reportes, dashboards, alertas,
+evidencias, comunicación operativa y funciones avanzadas. En este Sprint se incluye la
+detección por cámara como funcionalidad complementaria, sujeta a viabilidad técnica y
+criterios de consentimiento.
+
+PB     HISTORIA DE USUARIO PRIORIDAD         RESULTADO ESPERADO
+
+       Detectar evento sospechoso            El sistema identifica eventos
+
+PB-27 según reglas (inactividad +      Alta  sospechosos           combinando
+
+       app no laboral)                       inactividad y app no laboral.
+
+       Activar cámara web y                  Ante un evento sospechoso, se
+
+PB-28 capturar imagen del              Alta  activa la cámara y se toma una
+
+       trabajador en el evento               foto del trabajador.
+
+       Guardar captura en disco              La captura se almacena
+
+PB-29 local con metadatos (fecha,      Alta  localmente con metadatos
+
+       usuario, evento)                      asociados.
+
+       Subir captura al servidor y           La captura se envía al servidor y
+
+PB-30 asociarla al evento en base      Alta  se vincula al evento
+
+       de datos                              correspondiente.
+
+       Mostrar galería de capturas           El panel web muestra una galería
+
+PB-32 por trabajador (filtro           Alta  de capturas filtrables por fecha y
+
+       fecha/evento)                         tipo de evento.
+
+                                             La API entrega indicadores:
+
+PB-33  Calcular y exponer vía API los  Alta  trabajadores          activos,
+
+       indicadores generales                 productividad media, alertas
+
+                                             activas.
+
+                                                                            127
+PB-34  Construir widgets visuales en      Alta  El dashboard muestra widgets
+       el panel web (tarjetas,            Alta  con los indicadores generales
+       gráficas)                          Alta  actualizados.
+                                         Media
+PB-35  Implementar motor de              Media  Motor continuo que evalúa
+       alertas que evalúe                Media  reglas y dispara alertas
+       inactividad y apps no              Alta  automáticamente.
+       laborales                          Alta
+                                                Cuando se dispara una alerta, el
+       Mostrar     notificaciones               supervisor ve una notificación
+                                                destacada.
+PB-36  visuales en el panel web al
+                                                El administrador puede
+       supervisor                               configurar condiciones como
+                                                "inactividad > 15 min" o "app no
+PB-37  Interfaz para que el                     laboral > 10 min".
+       administrador cree/edite
+       reglas de alerta (umbrales)              Se puede exportar un reporte en
+                                                PDF con las métricas de un
+PB-38  Generar reporte en PDF con               trabajador.
+       actividad, inactividad y
+       productividad                            Se puede exportar el mismo
+                                                reporte en formato Excel.
+           Generar reporte en Excel con
+PB-39                                           El supervisor envía mensajes de
+                                                texto vía API a un trabajador
+           los mismos datos                     específico.
+
+PB-40  Endpoint API para que el                 El trabajador ve el mensaje en su
+       supervisor envíe mensajes a              escritorio al instante.
+       un trabajador
+
+PB-41  La app de escritorio recibe y
+       muestra el mensaje como
+       notificación emergente
+
+                                                128
+       Implementar  ventana                   Widget de chat flotante que
+                                              permite ver historial y responder
+PB-42  flotante en la app de            Baja  mensajes.
+                                       Media
+       escritorio (historial y         Media  Se registra la ubicación
+                                        Alta  referencial del trabajador
+       respuesta)                       Alta  durante su jornada.
+                                              El supervisor visualiza en un
+       Capturar     ubicación                 mapa la ubicación referencial de
+                                              los trabajadores.
+PB-43  referencial (IP pública o GPS)
+                                              Con autorización, el sistema
+       por jornada                            toma fotos periódicas para
+                                              verificar presencia.
+PB-44  Mostrar en el panel web un
+       mapa con la última ubicación           Las imágenes periódicas se
+       de cada trabajador activo              guardan como evidencia y se
+                                              consultan desde el panel.
+PB-45  Acceder a cámara web
+       (consentimiento explícito) y
+       capturar imagen cada N
+       minutos
+
+PB-46      Almacenar capturas
+         periódicas de cámara y
+       mostrarlas en el panel (con
+
+            autorización legal)
+
+Entregable principal del Sprint 3: panel de análisis y supervisión con reportes, alertas,
+evidencias y funciones avanzadas de comunicación, ubicación y presencia.
+
+    9. Infraestructura tecnológica
+La infraestructura tecnológica define las herramientas, plataformas y componentes
+necesarios para gestionar el proyecto, desarrollar el software, controlar versiones, realizar
+pruebas y preparar el despliegue del sistema. Para el presente proyecto, la infraestructura se
+organiza considerando los tres componentes principales de la plataforma: backend/API, panel
+administrativo web y aplicación de escritorio.
+
+                                                                                                             129
+La selección tecnológica busca facilitar el desarrollo modular, la integración entre
+componentes, la seguridad en el acceso, la persistencia de datos y la posibilidad de escalar el
+sistema en futuras versiones.
+
+    9.1. Infraestructura para la gestión del proyecto
+La gestión del proyecto se apoya en herramientas colaborativas que permiten organizar
+tareas, registrar avances, compartir documentación y mantener comunicación constante
+entre los integrantes del equipo Scrum.
+
+ELEMENTO            HERRAMIENTA                        USO DENTRO DEL PROYECTO
+
+                    PROPUESTA                 Organizar Product Backlog, Sprint Backlog,
+                                              tareas, responsables y estados.
+Gestión de tareas   Tablero       Scrum       Redactar, revisar y consolidar la
+                                              documentación académica del proyecto.
+                    equivalente               Coordinar reuniones, Daily Scrum, revisión de
+                                              avances y resolución de dudas.
+Documentación       Google Drive /
+compartida                                    Registrar decisiones importantes, cambios de
+Comunicación del    Microsoft Word            alcance y responsabilidades.
+equipo
+                    WhatsApp, Google          Verificar que la documentación y el código
+                                              coincidan con los avances reales del sistema.
+                    Meet
+
+Control         de  Actas de reunión o
+
+acuerdos            documento       de
+
+                    seguimiento
+
+Revisión        de  Documentos
+
+entregables         compartidos     y
+
+                    repositorios
+
+9.2. Infraestructura para el desarrollo del software
+
+  COMPONENTE              TECNOLOGÍA                        RESPONSABILIDAD
+Backend API         Python, Django, Django    Gestionar autenticación, usuarios, roles,
+                    REST Framework            jornadas, eventos, monitoreo, navegación,
+Base de datos                                 inactividad, productividad, notificaciones,
+                    PostgreSQL                reportes y servicios del sistema.
+Panel        web                              Almacenar usuarios, roles, jornadas,
+                    React, Vite, TypeScript,  eventos, aplicaciones, navegación,
+administrativo      Tailwind CSS              inactividad, productividad, notificaciones,
+                                              bitácora administrativa y demás registros
+                                              operativos.
+                                              Permitir a administradores y supervisores
+                                              gestionar usuarios, roles, jornadas,
+
+                                                                                                130
+                                           dashboards,        reportes,  alertas,
+
+                                           productividad y consultas de actividad
+
+                                           laboral.
+
+                                           Permitir al trabajador iniciar sesión,
+
+Aplicación de     Electron,        Vite,   registrar jornada, detectar actividad del
+escritorio
+                  TypeScript               equipo, enviar eventos al backend y recibir
+Autenticación
+                                           notificaciones operativas.
+Comunicación
+cliente-servidor  JWT                      Controlar sesiones, validar identidad del
+Notificaciones y
+actualización de                           usuario y restringir el acceso según rol.
+estado
+Contenedores /                             Permitir el intercambio de información
+despliegue local
+                  API REST / JSON          entre la aplicación de escritorio, el panel
+
+                                           web y el backend.
+
+                  WebSocket        o       Facilitar la comunicación en tiempo real
+
+                  mecanismo equivalente    para estados, notificaciones o eventos
+
+                                           relevantes.
+
+                  Docker o Dockerfile      Facilitar la configuración de servicios y la
+                  según el componente
+                                           ejecución del sistema en ambientes de
+
+                                           prueba.
+
+9.3. Herramientas de desarrollo
+
+     ÁREA              HERRAMIENTA                            FINALIDAD
+Editor de      Visual Studio Code          Desarrollo de backend, frontend y
+código         Python, Django, Django      aplicación de escritorio.
+               REST Framework              Construcción de servicios API y lógica de
+Backend        Node.js, React, Vite,       negocio.
+               TypeScript, Tailwind CSS
+Frontend       Electron, Vite, TypeScript  Construcción del panel administrativo web.
+web            PostgreSQL, pgAdmin o
+Aplicación     cliente SQL equivalente     Construcción del cliente de escritorio del
+desktop        Postman                     trabajador.
+
+Base de datos  npm, pip                    Diseño, consulta y administración de datos.
+
+Pruebas de     Docker Compose              Validar endpoints, autenticación y
+API                                        respuestas del backend.
+Control de                                 Instalar y administrar librerías necesarias
+dependencias                               para cada componente.
+Pruebas de                                 Ejecutar servicios integrados en ambiente
+integración                                local.
+
+                                                                                      131
+9.4. Herramientas de control de versiones
+
+HERRAMIENTA                      USO RECOMENDADO
+
+Git               Registrar cambios del código fuente, crear ramas de trabajo y controlar
+                  versiones.
+
+GitHub            Repositorio remoto para compartir avances, revisar código y centralizar
+                  el proyecto.
+
+Ramas         de Separar funcionalidades por módulo o historia de usuario antes de
+
+trabajo           integrarlas a la versión principal.
+
+Commits           Usar mensajes claros, por ejemplo: "PB-05: registrar inicio y cierre de
+
+descriptivos      jornada".
+
+Revisión entre Revisar cambios importantes antes de integrarlos a la rama principal del
+
+compañeros proyecto.
+
+Los repositorios definidos para el proyecto son:
+
+REPOSITORIO       PROPÓSITO
+sw1-g12-backend   Contiene el código del backend/API, configuración del servidor,
+sw1-g12-frontend  conexión con PostgreSQL y servicios principales del sistema.
+sw1-g12-desktop   Contiene el código del panel administrativo web desarrollado con
+                  React, Vite, TypeScript y Tailwind CSS.
+                  Contiene el código de la aplicación de escritorio desarrollada con
+                  Electron, Vite y TypeScript.
+
+9.5. Herramientas de despliegue
+
+ELEMENTO          HERRAMIENTA O SERVICIO          APLICACIÓN EN EL PROYECTO
+Ambiente local                                    Ejecutar PostgreSQL, backend y
+Backend           Docker Compose                  frontend en un entorno reproducible
+Base de datos                                     para pruebas.
+Frontend web      Render, Railway o servidor      Publicar la API Django para que el panel
+                  compatible con Python           web y la app de escritorio puedan
+                                                  conectarse.
+                  PostgreSQL administrado en      Almacenar datos del sistema en
+                  Render, Railway o similar       ambiente de prueba o producción
+                  Vercel, Netlify o servidor      académica.
+                  estático                        Publicar el panel administrativo
+                                                  construido con React.
+
+                                                       132
+Aplicación  de Instalador generado desde Distribuir la app del trabajador en
+escritorio                                 equipos Windows para pruebas
+               Electron                    controladas.
+
+La infraestructura tecnológica propuesta permite separar responsabilidades, facilitar el
+mantenimiento, mejorar la organización del trabajo y permitir que cada módulo pueda
+desarrollarse, probarse y desplegarse de manera independiente.
+
+    10. Patrón de desarrollo
+
+El patrón de desarrollo define la forma en que el equipo organizará las actividades técnicas
+durante los Sprints, estableciendo una guía común para el análisis, diseño, implementación,
+pruebas, integración y documentación del sistema. Para este proyecto se adopta un enfoque
+incremental e iterativo, donde cada Sprint agrega nuevas funcionalidades sobre una base
+previamente construida.
+
+La Plataforma Inteligente de Seguimiento Operativo y Productividad en Trabajo Remoto
+requiere una organización modular, debido a que está compuesta por una aplicación de
+escritorio, un panel administrativo web, un backend/API y una base de datos centralizada.
+Por esta razón, el desarrollo se estructura en componentes separados, pero integrados
+mediante servicios API y mecanismos de comunicación cliente-servidor.
+
+    10.1. Patrón arquitectónico propuesto
+Para el desarrollo de la plataforma se propone una arquitectura cliente-servidor organizada
+en capas, donde cada componente cumple una responsabilidad específica dentro del sistema.
+
+La solución estará compuesta por los siguientes módulos principales:
+
+COMPONENTE     TECNOLOGIA PROPUESTA                    RESPONSABILIDAD
+               Electron, Vite, TypeScript  Permitir al trabajador iniciar sesión,
+Aplicación de                              registrar jornada, monitorear actividad
+   escritorio                              del equipo, detectar inactividad,
+                                           registrar navegación autorizada, recibir
+                                           notificaciones y enviar eventos al
+                                           backend.
+
+                                                                      133
+                                          Permitir a administradores y
+
+  Panel web     React, Vite, TypeScript,  supervisores gestionar usuarios, roles,
+administrativo        Tailwind CSS
+                                          jornadas, reportes, dashboards, alertas,
+Backend / API   Python, Django, Django
+                    REST Framework        productividad y consultas de actividad
+Base de datos
+                       PostgreSQL         laboral.
+
+                                          Centralizar la lógica de negocio,
+
+                                          autenticación, control de roles, gestión
+
+                                          de datos, recepción de eventos,
+
+                                          consultas, auditoría y comunicación
+
+                                          entre módulos.
+
+                                          Almacenar usuarios, roles, jornadas,
+
+                                          eventos, aplicaciones, navegación,
+
+                                          inactividad,               productividad,
+
+                                          notificaciones, bitácora administrativa
+
+                                          y otros registros operativos.
+
+El patrón arquitectónico principal combina los siguientes enfoques:
+
+         PATRÓN                             APLICACIÓN EN EL PROYECTO
+Cliente-servidor        El panel web y la aplicación de escritorio consumen servicios
+                        expuestos por el backend/API.
+Arquitectura en capas   Se separan responsabilidades entre presentación, lógica de
+                        negocio, acceso a datos y persistencia.
+MVT / MVC               Django organiza el backend mediante modelos,
+                        vistas/controladores, serializadores, servicios y repositorios.
+API REST                La comunicación entre frontend, escritorio y backend se realiza
+Control de acceso por   mediante endpoints HTTP y datos en formato JSON.
+roles                   El sistema restringe funcionalidades según el rol del usuario:
+                        owner, administrador, supervisor o trabajador.
+Repositorios separados  El proyecto se divide en tres repositorios principales: frontend,
+                        backend y desktop, permitiendo trabajo paralelo y organización
+                        modular.
+
+La arquitectura propuesta permite separar responsabilidades, facilitar el mantenimiento del
+sistema, mejorar la seguridad, reducir el acoplamiento entre módulos y permitir que cada
+componente sea desarrollado, probado y desplegado de forma independiente.
+
+                                                                         134
+10.2. Actividades técnicas durante los Sprints
+
+Durante el desarrollo del proyecto se aplicará un proceso incremental, donde cada Sprint
+incorpora nuevas capacidades funcionales al sistema. El Sprint 0 establece la base técnica y
+documental, mientras que los Sprints posteriores desarrollan e integran los módulos
+principales de la plataforma.
+
+SPRINT    ACTIVIDADES TÉCNICAS PRINCIPALES                 RESULTADO ESPERADO
+Sprint 0
+Sprint 1  Definir alcance, requerimientos, Product         Base técnica y documental
+Sprint 2  Backlog, arquitectura inicial, casos de uso,     preparada para iniciar el
+Sprint 3  modelos preliminares, criterios de calidad,      desarrollo.
+          repositorios y tecnologías del proyecto.
+
+          Implementar autenticación, gestión de
+
+          usuarios, roles, permisos, administración de     Módulo administrativo base y
+          jornadas, registro de jornada, estado de         control de jornada funcional.
+          trabajadores, notificaciones básicas y bitácora
+
+          administrativa.
+
+          Implementar monitoreo de aplicación activa,
+
+          acumulación de tiempo por aplicación, Módulo de monitoreo
+
+          registro de navegación, detección de operativo funcional e
+
+          inactividad, eventos del agente, clasificación integrado con el backend.
+
+          de aplicaciones y cálculo de productividad.
+
+          Implementar dashboards, reportes, alertas, Plataforma integrada con
+
+          evidencias, comunicación operativa, funciones de supervisión,
+
+          ubicación referencial y funciones avanzadas análisis y comunicación
+
+          como cámara bajo autorización.                   operativa.
+
+Las actividades técnicas se organizan siguiendo el Product Backlog y el Sprint Backlog
+definidos. Cada Sprint debe entregar un incremento funcional que pueda ser revisado,
+probado y documentado antes de avanzar al siguiente bloque de desarrollo.
+
+                                                                                    135
+10.3. Flujo de trabajo de desarrollo
+
+El equipo utilizará Git y GitHub como herramientas principales para el control de versiones.
+El flujo de trabajo se basará en repositorios separados por componente, permitiendo que el
+backend, el panel web y la aplicación de escritorio evolucionen de manera organizada.
+
+Los repositorios definidos para el proyecto son:
+
+          REPOSITORIO                             PROPÓSITO
+sw1-g12-frontend       Código del panel administrativo web desarrollado con
+sw1-g12-backend        React, Vite, TypeScript y Tailwind CSS.
+sw1-g12-desktop        Código del backend/API, configuración del servidor,
+                       conexión con PostgreSQL, servicios, autenticación y lógica
+                       de negocio.
+                       Código de la aplicación de escritorio desarrollada con
+                       Electron, Vite y TypeScript.
+
+El flujo de trabajo recomendado se organiza de la siguiente manera:
+
+       RAMA                                              USO
+main              Contiene la versión estable del proyecto o del componente
+                  correspondiente.
+develop           Contiene la integración de funcionalidades terminadas y revisadas
+feature/nombre-   antes de pasar a la rama principal.
+funcionalidad     Rama temporal para desarrollar una historia de usuario, módulo o
+fix/nombre-error  corrección específica.
+                  Rama temporal para corregir errores detectados durante pruebas o
+                  revisión.
+
+    10.4. Estrategia de integración entre módulos
+La integración entre módulos se realizará mediante una API REST centralizada en el backend.
+Tanto el panel administrativo web como la aplicación de escritorio consumirán los servicios
+
+                                                                     136
+expuestos por el backend para autenticación, consulta, registro y actualización de
+información.
+
+MÓDULO ORIGEN MÓDULO DESTINO                TIPO DE INTEGRACIÓN
+
+                                            HTTP/REST para login, usuarios, roles,
+
+Panel administrative                        jornadas, reportes, dashboards,
+                             Backend / API  productividad, alertas y consultas de
+
+web
+
+                                            supervisión.
+
+Aplicación     de                           HTTP/REST para login, registro de jornada,
+escritorio          Backend / API           envío de eventos, aplicaciones activas,
+                                            navegación, inactividad y notificaciones.
+
+Backend / API  Base de                               Persistencia de datos mediante consultas,
+               PostgreSQL                   datos
+
+                                                     modelos, servicios o repositorios definidos
+                                                     en el backend.
+
+Backend / API  Sistema                      de Validación de credenciales, emisión de
+               autenticación                     tokens JWT y control de acceso según rol.
+
+Backend / API  Bitácora                     Registro automático de acciones
+               administrativa               importantes realizadas por usuarios
+                                            administradores o supervisores.
+
+Backend/API    Notificaciones                   Comunicación en tiempo real o semitiempo
+               WebSocket                    o
+
+                                                real para notificaciones, estados y eventos
+                                                relevantes.
+
+La integración se realizará de forma progresiva. En el Sprint 1 se integran autenticación,
+administración y jornada laboral. En el Sprint 2 se integran los eventos operativos de
+monitoreo, navegación e inactividad. En el Sprint 3 se integran reportes, alertas, evidencias,
+comunicación operativa y módulos avanzados.
+
+Esta estrategia evita que el panel web o la aplicación de escritorio accedan directamente a la
+base de datos. Toda operación debe pasar por el backend/API para garantizar validación,
+seguridad, control de roles, trazabilidad y consistencia de la información.
+
+                                                                                                             137
+    11. Modelos iniciales
+Los modelos iniciales permiten representar de manera gráfica y conceptual la estructura
+general del sistema antes de iniciar la implementación completa de las funcionalidades. Estos
+modelos forman parte del Sprint 0, ya que ayudan al equipo SCRUM a comprender el alcance
+del producto, identificar los componentes principales, organizar los casos de uso y establecer
+una base para el diseño técnico de los siguientes Sprints.
+En esta sección se presentan los modelos preliminares de contexto, casos de uso, datos,
+arquitectura e interfaces principales de la Plataforma Inteligente de Seguimiento Operativo y
+Productividad en Trabajo Remoto.
+
+    11.1. Modelo de contexto
+El modelo de contexto muestra la relación general entre los actores externos y la plataforma.
+En este modelo se identifica cómo interactúan los trabajadores, supervisores,
+administradores y owner con los principales componentes del sistema.
+El trabajador interactúa principalmente con la aplicación de escritorio, desde donde registra
+su jornada laboral, recibe notificaciones y genera información operativa relacionada con
+aplicaciones, navegación e inactividad. El supervisor y el administrador interactúan con el
+panel administrativo web, desde donde pueden consultar información, gestionar usuarios,
+revisar reportes, visualizar estados y configurar aspectos operativos del sistema.
+El backend/API actúa como componente central, recibiendo la información enviada desde la
+aplicación de escritorio, procesando solicitudes del panel web y almacenando los datos en la
+base de datos PostgreSQL.
+
+                                                                                                             138
+    11.2. Modelo de casos de uso
+El modelo de casos de uso representa las funcionalidades principales que ofrece el sistema a
+cada tipo de actor. Para mantener el orden del modelo, los casos de uso se agrupan en seis
+paquetes funcionales:
+
+    · Autenticación y administración.
+    · Jornada laboral y estado operativo.
+    · Monitoreo de actividad.
+    · Supervisión y productividad.
+    · Eventos, evidencias y alertas.
+    · Dashboard, reportes y comunicación operativa.
+Los actores principales identificados son Owner, Administrador, Supervisor, Trabajador y
+Sistema. El actor Sistema representa los procesos automáticos ejecutados por la plataforma,
+como clasificación de aplicaciones, detección de inactividad, cálculo de productividad,
+registro de eventos y generación de alertas.
+
+                                                                                                             139
+    11.3. Modelo inicial de datos
+
+El modelo inicial de datos permite identificar las entidades principales que serán almacenadas
+y gestionadas por el sistema. Estas entidades representan la información necesaria para
+controlar usuarios, roles, jornadas, eventos de actividad, navegación, inactividad,
+productividad, notificaciones y bitácora administrativa.
+
+Entre las principales entidades consideradas se encuentran:
+
+       ENTIDAD                                       DESCRIPCIÓN
+Usuario              Representa a las personas registradas en el sistema, como
+Rol                  trabajadores, supervisores, administradores y owner.
+Jornada              Define el nivel de acceso y permisos asociados a cada usuario.
+                     Representa la configuración de horarios laborales asignados a los
+Registro de jornada  trabajadores.
+Aplicación           Almacena los eventos de inicio, pausa, reanudación y cierre de
+monitoreada          jornada laboral.
+Uso de aplicación
+                     Registra las aplicaciones detectadas durante la jornada laboral.
+Navegación
+Inactividad          Almacena el tiempo de uso de cada aplicación por trabajador y
+Evento del agente    jornada.
+Evidencia            Registra dominios o URLs visitadas durante la jornada laboral
+                     autorizada.
+Notificación         Almacena períodos sin interacción de teclado o ratón.
+Bitácora             Registra eventos generados por la aplicación de escritorio.
+administrativa       Representa capturas o registros asociados a eventos, cuando estén
+                     autorizados por políticas del sistema.
+                     Almacena mensajes o avisos enviados entre el sistema,
+                     supervisores y trabajadores.
+                     Registra acciones relevantes realizadas por usuarios con permisos
+                     administrativos.
+
+                                                             140
+Este modelo de datos servirá como base para el diseño lógico y físico de la base de datos
+PostgreSQL, que será desarrollado y refinado durante los Sprints posteriores.
+
+    11.4. Modelo de arquitectura inicial
+El modelo de arquitectura inicial representa la organización técnica de la plataforma. El
+sistema se estructura mediante una arquitectura cliente-servidor, donde la aplicación de
+escritorio y el panel administrativo web consumen servicios proporcionados por el
+backend/API.
+La aplicación de escritorio, desarrollada con Electron, Vite y TypeScript, se ejecuta en el
+equipo del trabajador y se encarga de registrar jornada, detectar actividad del equipo y enviar
+eventos al backend. El panel administrativo web, desarrollado con React, Vite, TypeScript y
+Tailwind CSS, permite a supervisores y administradores consultar y gestionar la información
+del sistema. El backend/API, desarrollado con Django y Django REST Framework, centraliza la
+lógica de negocio, autenticación, permisos y acceso a datos. La base de datos PostgreSQL
+almacena toda la información persistente de la plataforma.
+
+                                                                                                             141
+COMPONENTE    RESPONSABILIDAD
+
+Aplicación    de Captura actividad laboral, registra jornada, detecta inactividad,
+
+escritorio    envía eventos y recibe notificaciones.
+
+Panel administrativo Visualiza dashboards, reportes, usuarios, roles, jornadas,
+
+web           navegación, productividad, inactividad y alertas.
+
+Backend/API   Gestiona autenticación, permisos, lógica de negocio, recepción de
+              eventos, consultas y auditoría.
+
+Base de datos Almacena usuarios, roles, jornadas, eventos, aplicaciones,
+
+PostgreSQL    navegación, inactividad, notificaciones y bitácora.
+
+Servicios     de Permiten comunicación mediante API REST, JSON y mecanismos
+
+comunicación  de notificación o WebSocket.
+
+    11.5. Esbozo de interfaces principales
+El esbozo de interfaces principales permite definir de forma preliminar las pantallas que serán
+implementadas en el sistema. Estas interfaces ayudan a visualizar cómo interactuarán los
+usuarios con la plataforma y qué información será presentada en cada módulo.
+Las interfaces principales consideradas son:
+
+                                                                                                             142
+INTERFAZ                    USUARIO PRINCIPAL             DESCRIPCIÓN
+
+                                                          Permite al trabajador iniciar
+
+Login de escritorio         Trabajador                    sesión en la aplicación de
+
+                                                          escritorio.
+
+                                                          Permite iniciar, pausar,
+
+Panel de jornada            Trabajador                    reanudar y cerrar la jornada
+
+                                                          laboral.
+
+                                                          Muestra el estado actual del
+
+Widget o ventana de estado  Trabajador                    trabajador y notificaciones
+
+                                                          operativas.
+
+Login web                   Administrador / Supervisor /  Permite acceder al panel
+                                         Owner            administrativo web según el
+                                                          rol.
+
+                                                          Muestra        indicadores
+
+Dashboard general                                                generales de actividad,
+                            Administrador / Supervisor
+
+                                                                 productividad y estado de
+
+                                                          trabajadores.
+
+                                                          Permite crear, editar,
+
+Gestión de usuarios         Administrador / Owner desactivar y consultar
+
+                                                          usuarios.
+
+Gestión de roles            Administrador / Owner         Permite administrar roles y
+                                                          permisos del sistema.
+
+                                                                           Permite configurar horarios
+Administración de jornadas Administrador / Supervisor
+
+                                                                           y asignarlos a trabajadores.
+
+                                                          Permite consultar jornadas,
+
+Historial de actividad      Supervisor                    aplicaciones, navegación e
+
+                                                          inactividad por trabajador.
+
+                                                          Permite revisar reportes,
+
+Reportes y alertas          Supervisor / Administrador alertas y eventos relevantes
+
+                                                          del sistema.
+
+                                                                         143
+Estos esbozos servirán como referencia para el diseño de interfaz y la implementación de las
+pantallas durante los Sprints de desarrollo.
+
+    12. Criterios de calidad
+
+Los criterios de calidad permiten establecer las condiciones mínimas que debe cumplir el
+trabajo realizado durante el Sprint 0. Estos criterios sirven para verificar que la planificación,
+los requerimientos, la arquitectura inicial, los modelos, el Product Backlog y la organización
+del proyecto sean coherentes, completos y útiles para iniciar el desarrollo de los siguientes
+Sprints.
+
+En este apartado se definen criterios relacionados con la calidad del proyecto, la calidad del
+producto, la aceptación de historias de usuario, la seguridad, la usabilidad y el rendimiento
+esperado de la plataforma.
+
+    12.1. Criterios de calidad del proyecto
+Los criterios de calidad del proyecto están orientados a evaluar la organización del trabajo
+realizado por el equipo SCRUM durante el Sprint 0.
+
+CRITERIO                       DESCRIPCIÓN                     INDICADOR
+
+                    El alcance del sistema debe estar
+
+Definición     del  claramente descrito, identificando los     Alcance documentado y
+alcance             componentes principales: aplicación de     aprobado por el equipo.
+                    escritorio, panel web, backend/API y base
+
+                    de datos.
+
+Product Backlog     El Product Backlog debe contener las       PB-01 a PB-46 definidos.
+completo            funcionalidades principales del sistema,
+                    organizadas y priorizadas.
+
+Historias      de   Cada historia de usuario debe estar        HU-01 a HU-46
+                    relacionada con un elemento del Product    asociadas a PB y Sprint.
+usuario trazables   Backlog y con un Sprint de desarrollo.
+
+Planificación  de   La división de Sprints debe responder a    Sprint 1, Sprint 2   y
+Sprints             prioridad, dependencia funcional y         Sprint 3 definidos.
+                    complejidad técnica.
+
+                                                                                    144
+                     Deben existir modelos iniciales de contexto, Diagramas o espacios
+
+Modelos iniciales casos de uso, datos, arquitectura e definidos para cada
+
+                     interfaces principales.                      modelo.
+
+Infraestructura      Las tecnologías del sistema deben estar      Backend, frontend,
+tecnológica          identificadas de acuerdo con los             desktop y base de datos
+                     repositorios y componentes reales.           documentados.
+Control          de  El proyecto debe contar con repositorios
+                     separados para backend, frontend y           Repositorios GitHub
+versiones            desktop.                                     definidos.
+                     La documentación debe mantener
+Coherencia           consistencia entre requerimientos, backlog,  Sin contradicciones
+documental           historias, casos de uso, arquitectura y
+                     Sprints.                                     principales    entre
+
+                                                                  secciones.
+
+12.2. Criterios de calidad del producto
+
+Los criterios de calidad del producto definen las condiciones esperadas para la plataforma
+como solución tecnológica. Aunque en el Sprint 0 todavía no se desarrolla la totalidad del
+sistema, estos criterios permiten establecer la base de evaluación para los Sprints posteriores.
+
+   CRITERIO          DESCRIPCIÓN                                  INDICADOR
+Funcionalidad
+                 El sistema debe cubrir las funciones             Funciones relacionadas
+Modularidad      principales de autenticación, jornada,           con PB-01 a PB-46.
+Integración      monitoreo, supervisión, reportes, alertas y
+Seguridad        comunicación operativa.
+
+                 La plataforma debe estar dividida en Componentes
+                 componentes independientes: backend/API,
+                 panel web, aplicación de escritorio y base de    separados      y
+                 datos.                                           documentados.
+
+                 Los módulos deben comunicarse mediante           Integración mediante
+                 servicios definidos, evitando acceso directo de  API REST y JSON.
+                 los clientes a la base de datos.
+
+                 El acceso al sistema debe estar controlado Uso de JWT y roles de
+                 mediante autenticación y permisos por rol. usuario.
+
+                                                                                 145
+                 El sistema debe registrar información de Registros asociados a
+
+Fiabilidad       forma consistente y evitar pérdida de datos usuario, fecha, hora y
+
+                 durante la jornada laboral.                  jornada.
+
+Mantenibilidad   El código y la documentación deben           Repositorios         y
+                 organizarse de forma clara para facilitar    estructura modular.
+                 correcciones y ampliaciones.
+
+Privacidad       Las funciones de monitoreo deben respetar    Políticas y    reglas
+                 criterios de autorización, consentimiento y  documentadas.
+                 uso proporcional de la información.
+
+    12.3. Criterios de aceptación de historias de usuario
+Los criterios de aceptación permiten determinar cuándo una historia de usuario puede
+considerarse correctamente definida y lista para ser desarrollada o validada dentro de un
+Sprint.
+
+CRITERIO                                      DESCRIPCIÓN
+
+Claridad            La historia debe expresar de forma comprensible el rol, la
+                    necesidad y el beneficio esperado.
+
+Relación con el Cada historia debe estar vinculada con un elemento del Product
+
+Product Backlog     Backlog.
+
+Prioridad definida  Toda historia debe tener una prioridad asignada: alta, media o
+                    baja.
+
+Sprint asignado     Cada historia debe estar ubicada dentro del Sprint
+                    correspondiente.
+
+Plataforma          Se debe indicar si la historia pertenece al backend, frontend web,
+
+identificada        desktop o integración entre módulos.
+
+Criterios           de La historia debe poder probarse mediante entradas, acciones y
+aceptación               resultados esperados.
+verificables
+
+Coherencia con casos La historia debe estar relacionada con uno o más casos de uso del
+
+de uso              sistema.
+
+Aprobación          del La historia debe ser revisada y aceptada por el Product Owner
+
+Product Owner       antes de considerarse cerrada.
+
+                                                                                   146
+    12.4. Criterios de seguridad
+La seguridad es un aspecto fundamental del sistema, debido a que la plataforma maneja
+información relacionada con trabajadores, jornadas, aplicaciones utilizadas, navegación,
+inactividad, evidencias, notificaciones y reportes.
+
+CRITERIO                                            DESCRIPCIÓN
+                    Ningún usuario debe acceder a funcionalidades del sistema sin
+Autenticación       iniciar sesión.
+                    El sistema debe restringir las funcionalidades según el rol asignado:
+obligatoria         owner, administrador, supervisor o trabajador.
+                    Las contraseñas deben almacenarse mediante mecanismos de hash
+Control de acceso   seguro.
+                    Las sesiones deben gestionarse mediante tokens de autenticación,
+por rol             como JWT.
+
+Protección      de  Los datos de monitoreo, navegación, inactividad y evidencias deben
+                    estar protegidos contra accesos no autorizados.
+contraseñas
+                    Las acciones relevantes realizadas por administradores o usuarios
+Uso de tokens       con permisos deben quedar registradas.
+                    Las funciones de cámara, capturas, ubicación o registros sensibles
+Protección      de  deben ejecutarse únicamente bajo autorización y políticas
+                    definidas.
+información         El panel web y la aplicación de escritorio no deben acceder
+                    directamente a la base de datos; toda operación debe pasar por el
+sensible            backend/API.
+
+Bitácora
+
+administrativa
+
+Consentimiento y
+autorización
+
+Separación      de
+
+responsabilidades
+
+12.5. Criterios de usabilidad
+
+La usabilidad permite asegurar que el sistema pueda ser utilizado de forma comprensible por
+trabajadores, supervisores y administradores.
+
+      CRITERIO                   DESCRIPCIÓN                  MÉTRICA ESPERADA
+Login simple                                              Correo, contraseña y botón
+                    El inicio de sesión debe ser claro y  de acceso.
+Navegación por rol
+                    solicitar únicamente los datos        0 módulos no autorizados
+                                                          visibles.
+                    necesarios.
+
+                    Cada usuario debe visualizar
+
+                    solamente    las            opciones
+
+                    correspondientes a su rol.
+
+                                                          147
+Mensajes             Los errores y confirmaciones deben     Mensajes en español y
+comprensibles                                               fáciles de entender.
+                     mostrarse en lenguaje claro.
+                                                            Ventana clara, widget o
+                     La aplicación de escritorio debe       estado visible.
+
+Interfaz       no    permitir registrar jornada y           Interfaz uniforme entre
+                                                            módulos.
+intrusiva            monitoreo      sin     interrumpir
+                                                            100% de acciones
+                     innecesariamente al trabajador.        importantes con respuesta
+                                                            visual.
+                     Las pantallas del panel web deben
+
+Consistencia visual  mantener diseño, colores, botones y
+
+                     estructura similares.
+
+                     Operaciones como crear usuario,
+
+Confirmación de      registrar jornada o guardar
+acciones
+                     configuración deben mostrar
+
+                     confirmación.
+
+12.6. Criterios de rendimiento
+
+Los criterios de rendimiento definen el comportamiento esperado del sistema en cuanto a
+tiempos de respuesta, consumo de recursos y actualización de información.
+
+       CRITERIO                   DESCRIPCIÓN                     VALOR ESPERADO
+Tiempo de login      El proceso de autenticación debe       Menor o igual a 2 segundos
+                     completarse sin demoras excesivas.     en condiciones normales.
+Registro de jornada  Las acciones de inicio, pausa,         Menor o igual a 1 segundo
+                     reanudación y cierre deben             en condiciones normales.
+Carga del panel web  confirmarse rápidamente.
+                     Las vistas principales del panel       Menor o igual a 3 segundos.
+Actualización de     administrativo deben cargar de
+estado               forma fluida.                          Menor o igual a 10
+                     Los cambios de estado del              segundos.
+Monitoreo      de    trabajador deben reflejarse en el
+                     panel en un tiempo razonable.          Consumo moderado de CPU
+escritorio           La aplicación de escritorio debe       y memoria.
+                     operar sin afectar significativamente
+Sincronización de    el rendimiento del equipo.             Sin pérdida de información
+eventos              Los eventos registrados por el         registrada.
+                     agente de escritorio deben enviarse
+                     al backend de forma periódica o al
+                     restablecer conexión.
+
+                                                            148
+                Las notificaciones operativas deben Menor o igual a 5 segundos
+Notificaciones  llegar al usuario correspondiente en
+                tiempo oportuno.                      en condiciones normales.
+
+Estos criterios permitirán evaluar la calidad del Sprint 0 y servirán como referencia para
+validar los incrementos funcionales desarrollados durante los Sprints posteriores.
+
+    13. Conclusión del Sprint 0
+El Sprint 0 permitió establecer la base inicial del proyecto "Plataforma Inteligente de
+Seguimiento Operativo y Productividad en Trabajo Remoto". Durante esta etapa se realizó la
+definición del alcance del sistema, la identificación de actores, la organización de
+requerimientos, la elaboración del Product Backlog, la planificación de Sprints, la selección de
+tecnologías, la definición del patrón de desarrollo, la elaboración de modelos iniciales y la
+formulación de criterios de calidad.
+
+Como resultado de este Sprint, el equipo logró comprender con mayor claridad el problema
+que se busca resolver y la solución tecnológica propuesta. Se identificó la necesidad de contar
+con una plataforma que permita registrar jornadas laborales, monitorear actividad del
+trabajador remoto, detectar inactividad, consultar aplicaciones utilizadas, registrar
+navegación autorizada, generar reportes, gestionar alertas y facilitar la comunicación
+operativa entre supervisores y trabajadores.
+
+También se definieron los componentes principales del sistema: una aplicación de escritorio
+para el trabajador, un panel administrativo web para supervisores y administradores, un
+backend/API encargado de centralizar la lógica del sistema y una base de datos PostgreSQL
+para almacenar la información operativa. Esta división permite organizar el desarrollo de
+manera modular y facilita la integración progresiva de funcionalidades durante los siguientes
+Sprints.
+
+El Product Backlog quedó estructurado con 46 elementos, distribuidos de forma incremental
+en tres Sprints principales. El Sprint 1 se orienta a la base administrativa, autenticación,
+usuarios, roles y control de jornada. El Sprint 2 se enfoca en el monitoreo de actividad,
+navegación, inactividad y productividad. El Sprint 3 agrupa reportes, alertas, evidencias,
+
+                                                                                                             149
+comunicación operativa y funciones avanzadas como ubicación referencial o cámara, siempre
+considerando criterios de autorización, privacidad y consentimiento.
+Asimismo, se definieron modelos iniciales que sirven como guía para el desarrollo del sistema,
+entre ellos el modelo de contexto, modelo de casos de uso por paquetes funcionales, modelo
+inicial de datos, modelo de arquitectura y esbozos de interfaces principales. Estos modelos
+permiten visualizar la estructura general de la solución y facilitan la comunicación entre los
+integrantes del equipo.
+En conclusión, el Sprint 0 cumplió su propósito de preparar el proyecto antes de iniciar la
+implementación. La documentación generada en esta etapa proporciona una base clara,
+ordenada y coherente para comenzar el Sprint 1, reduciendo ambigüedades y estableciendo
+una guía de trabajo para el análisis, diseño, desarrollo, pruebas e integración de la plataforma.
+
+                                                                                                             150
+
