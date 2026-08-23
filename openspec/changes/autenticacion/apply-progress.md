@@ -69,3 +69,22 @@
 
 - T1: `feat/autenticacion/t1-core`, commit `5d2a94d feat(auth): add JWT token core`.
 - T2 actual: `feat/autenticacion/t2-sesion`; commit pendiente después de la verificación acumulada.
+
+## T3 completado
+
+- Checkbox persistido: `openspec/changes/autenticacion/tasks.md` T3 marcado `[x]`.
+- TDD RED: `pytest -q tests/test_session_repository.py` falló en colección porque aún no existía `FakeSessionRepository`.
+- TDD GREEN: implementados el protocolo, adaptador SQLAlchemy y fake; `pytest -q tests/test_session_repository.py` → `5 passed`.
+- Implementado en `backend/app/modules/identity/repository.py`:
+  - `UserRepository.buscar_por_id` para el vínculo de identidad.
+  - `SessionRepositoryProtocol` y `SessionRepository` con búsqueda por hash/ID, `SELECT ... FOR UPDATE`, rotación atómica, rollback ante `IntegrityError`, validación de expiración/inactividad y revocación idempotente.
+  - `FakeSessionRepository` con `RLock`, hash-only storage, rotación single-writer observable y revocación lazy por inactividad.
+  - `sesion_valida` como regla de dominio compartida.
+- Verificación acumulada: `pytest tests -q` → `17 passed`; `ruff check app tests` → verde; `pyright app tests` → `0 errors`.
+- Ajuste TDD: el caso de actividad se hizo temporalmente coherente (29 minutos actualiza la marca y la comprobación posterior de inactividad usa 61 minutos desde el origen).
+
+## Ramas y commits
+
+- T1: `feat/autenticacion/t1-core`, commit `5d2a94d feat(auth): add JWT token core`.
+- T2: `feat/autenticacion/t2-sesion`, commit `fc71daf feat(auth): add session persistence migration`.
+- T3 actual: `feat/autenticacion/t3-repository`; commit pendiente después del cierre de la unidad.
