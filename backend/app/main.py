@@ -26,6 +26,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
     app = FastAPI(title="RoomForge API")
     app.state.settings = resolved_settings
+    if settings is not None:
+        app.dependency_overrides[get_settings] = lambda: resolved_settings
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_exception_handler(

@@ -19,3 +19,27 @@ class RegistroResponse(BaseModel):
     estado: str
     correo_verificado: bool
     creado_en: datetime
+
+
+class LoginRequest(BaseModel):
+    correo: EmailStr = Field(max_length=255)
+    password: SecretStr = Field(min_length=8)
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: SecretStr = Field(min_length=1)
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: SecretStr = Field(min_length=1)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    expira_en: datetime
+
+
+class MeResponse(BaseModel):
+    id: UUID
+    correo: str
