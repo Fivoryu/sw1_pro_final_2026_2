@@ -1,4 +1,5 @@
-from collections.abc import Generator
+from collections.abc import Callable, Generator
+from typing import Any, cast
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -25,9 +26,27 @@ def _get_session_factory() -> sessionmaker[Session]:
     return SessionLocal
 
 
+class _LazySession:
+    def __init__(self, factory: Callable[[], Session]):
+        self._factory = factory
+        self._session: Session | None = None
+
+    def _get_session(self) -> Session:
+        if self._session is None:
+            self._session = self._factory()
+        return self._session
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._get_session(), name)
+
+    def close(self) -> None:
+        if self._session is not None:
+            self._session.close()
+
+
 def get_db() -> Generator[Session, None, None]:
-    db = _get_session_factory()()
+    db = _LazySession(lambda: _get_session_factory()())
     try:
-        yield db
+        yield cast(Session, db)
     finally:
         db.close()
