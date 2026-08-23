@@ -174,6 +174,8 @@ La implementación prevista mantiene módulos separados dentro del monolito Fast
 
 Como slice backend-first de PB-001/HU-001, se implementó el módulo `identity` con `POST /api/v1/auth/registro`, normalización del correo a minúsculas, hash Argon2id y la migración inicial de `usuario_global`. El GAP-092 queda parcialmente cubierto: solo se entrega esta tabla y el resto de las migraciones del Sprint 1 sigue pendiente. La trazabilidad del cambio se conserva en la [spec](../../../openspec/changes/registro-cliente/spec.md) y las [tareas](../../../openspec/changes/registro-cliente/tasks.md); los casos CP de §2.1.5 no se declaran ejecutados y se mantienen GAP-087 y GAP-073.
 
+Como slice backend-first de PB-002/HU-002, se implementó la autenticación y sesión del cliente sobre el mismo módulo `identity`: `POST /api/v1/auth/login` (emite access JWT de 15 minutos y refresh opaco hasheado), `POST /api/v1/auth/refresh` (rotación atómica con revocación de la fila anterior), `POST /api/v1/auth/logout` (idempotente) y `GET /api/v1/auth/me` (sesión validada server-side contra la tabla `sesion`, con inactividad deslizante de 30 minutos según RNF-006). La migración `0002_crear_sesion` agrega la tabla `sesion` (`refresh_token_hash` CHAR(64) único, `expira_en`, `ultima_actividad`, `revocado`) y se añadió la dependencia PyJWT para el access token. La trazabilidad del cambio se conserva en la [spec](../../../openspec/changes/autenticacion/spec.md) y las [tareas](../../../openspec/changes/autenticacion/tasks.md); los casos CP de §2.1.5 (CP-002 incluido) no se declaran ejecutados y se mantienen GAP-087 y GAP-073.
+
 ### 2.1.4.1. Diagrama de Componentes
 
 | Diagrama | Tipo | Referencia | Estado de creación |
