@@ -87,4 +87,43 @@
 
 - T1: `feat/autenticacion/t1-core`, commit `5d2a94d feat(auth): add JWT token core`.
 - T2: `feat/autenticacion/t2-sesion`, commit `fc71daf feat(auth): add session persistence migration`.
-- T3 actual: `feat/autenticacion/t3-repository`; commit pendiente después del cierre de la unidad.
+- T3: `feat/autenticacion/t3-repository`, commit `e6a6ecd feat(auth): add session repositories`.
+
+## Corrective rerun — T4/T5 blocked by contract conflict
+
+- Structured status consumed from native `gentle-ai sdd-status autenticacion --cwd . --json --instructions`: `artifactStore: openspec`, `applyState: ready`, `nextRecommended: apply`, `blockedReasons: []`, `actionContext.mode: repo-local`, and `allowedEditRoots` contains the workspace root. The status also reported the active native attempt token, which was continued with `sdd-attempt acquire` before runtime work.
+- Current branch verified as `feat/autenticacion/t4-endpoints`; no checkout, push, PR, or commit was performed in this rerun. T1/T2/T3 remain complete at commits `5d2a94d`, `fc71daf`, and `e6a6ecd`. The unrelated pre-existing modification to `docs/diagramas/Diagrama1.eapx` was left untouched.
+- Safety-net/full-suite evidence: `.venv/Scripts/python.exe -m pytest backend/tests -q` → `25 passed, 1 failed`; the only failure is `test_me_returns_minimal_identity_and_updates_activity` (`401 == 200`). Focused execution produced the same result (`8 passed, 1 failed`).
+- Proven diagnosis: login emits an access JWT with the configured 900-second (15-minute) expiration. The test advances the injected clock by 29 minutes and then reuses that same access token. `AuthenticationService.me` correctly passes the injected time to `decodificar_access`, so the token is expired before server-side session validation and the route correctly returns `401`. This is not a dependency or route-wiring failure.
+- T4/T5 were not marked complete because making this test return `200` would require either accepting an expired access JWT, extending the access TTL beyond the spec/design's 15 minutes, or changing the test flow to refresh/use a new access token before `/auth/me`. The first two options violate REQ-03/REQ-08 and T5's required expired-access case; the last option changes the explicitly protected test. A maintainer/product decision is required before implementation can continue.
+- Additional checks on the preserved partial work: Ruff currently reports three E501 violations in `backend/tests/test_autenticacion.py`; the root-invoked pyright reports missing `argon2` imports (the prescribed backend working-directory invocation remains to be run after the decision). No task checkbox was changed in this blocked rerun; persisted tasks remain T1/T2/T3 `[x]` and T4/T5 `[ ]`, with parent-owned rows deferred unchanged.
+
+### Remaining implementation tasks
+
+- [ ] T4 Implement the authentication endpoints and `get_current_user` semantics after resolving the 15-minute access-token versus 29-minute `/me` scenario.
+- [ ] T5 Complete the contract suite and §2.1.4 implementation paragraph after T4 is resolved.
+
+### Workload / PR boundary
+
+- Parent-resolved delivery path: `auto-chain`, `stacked-to-main`; assigned work-unit boundary is T4/T5 on the existing `feat/autenticacion/t4-endpoints` branch. No parent-owned bounded review, delivery gate, branch creation, push, or PR action was started.
+
+### TDD Cycle Evidence — corrective rerun
+
+| Task | Test file | Layer | Safety net | RED | GREEN | TRIANGULATE | REFACTOR |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| T4 corrective diagnosis | `backend/tests/test_autenticacion.py` | Integration/API | `25 passed, 1 failed` (known preserved failure) | Existing 29-minute `/me` scenario fails with 401 | Not reached: acceptance conflicts with 15-minute JWT contract | Not reached | Not reached |
+| T5 | `backend/tests/test_autenticacion.py` | Integration/API | Blocked by T4 | Not started | Not started | Not started | Not started |
+
+## Phase result
+
+- Status: `blocked` pending resolution of the contradictory acceptance scenario.
+- Action-context warning: none; all intended edit targets are under the authorized workspace root. Review and delivery lifecycle actions remain parent-owned and were not started.
+
+## RESOLVED — conflicto del test de actividad (decisión del orquestador)
+
+- **Decisión:** se preserva el contrato de access JWT de 15 minutos (REQ-03/REQ-08) y la ventana de inactividad deslizante de 30 min (RNF-006). El escenario de CP-002 paso 3 ("actividad autenticada antes de 30 min mantiene la sesión") se modela como lo hace un cliente real: renovación por `refresh` dentro de la ventana y luego `/me` con el access nuevo (20 min → refresh → +9 min → /me 200). La alternativa de subir el TTL del access o aceptar un access expirado viola la spec y fue descartada.
+- **Fix aplicado:** `backend/tests/test_autenticacion.py::test_me_returns_minimal_identity_and_updates_activity` — reutilizaba un access de 15 min a los 29 min (401 legítimo por expiración); ahora refresca a los 20 min y valida `/me` a los 29 min (sesión activa, `ultima_actividad` actualizada en la fila no revocada).
+- **Evidencia final:** `pytest tests -q` → **26 passed**; `ruff check app tests` → **All checks passed!**; `pyright app tests` → **0 errors** (rápidos del LSP stale descartados; pyright CLI autoritativo).
+- **Commits T4/T5 (rama `feat/autenticacion/t4-endpoints`):** `2df56f2 feat(auth): add login refresh logout me endpoints`; `e6c3b4b docs(scrum): note PB-002 backend implementation`.
+- **Archivos T4/T5:** backend/app/main.py, backend/app/modules/identity/ (router/schemas/service), backend/tests/test_autenticacion.py (9 casos), docs/scrum/sprint-1/02-proceso-por-hu.md §2.1.4 (párrafo PB-002).
+- **Pendiente parent-owned:** revisión bounded del slice (row 90) y gate de entrega chain stacked-to-main (row 91).
