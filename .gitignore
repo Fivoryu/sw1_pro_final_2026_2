@@ -36,3 +36,8 @@ cache/
 .idea/
 .vscode/
 .DS_Store
+
+# Python packaging y caches
+*.egg-info/
+.ruff_cache/
+.codegraph/

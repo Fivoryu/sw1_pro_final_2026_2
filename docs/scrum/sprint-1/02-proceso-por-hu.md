@@ -172,6 +172,8 @@ No se embebe ninguna imagen.
 
 La implementación prevista mantiene módulos separados dentro del monolito FastAPI, con PostgreSQL para persistencia transaccional y los adaptadores S3/SQS para objetos y trabajos asíncronos. Las migraciones Alembic del esquema del Sprint 1 están pendientes (GAP-092). El worker 3D se incorpora en SP-02 y no se presenta como implementado en SP-01.
 
+Como slice backend-first de PB-001/HU-001, se implementó el módulo `identity` con `POST /api/v1/auth/registro`, normalización del correo a minúsculas, hash Argon2id y la migración inicial de `usuario_global`. El GAP-092 queda parcialmente cubierto: solo se entrega esta tabla y el resto de las migraciones del Sprint 1 sigue pendiente. La trazabilidad del cambio se conserva en la [spec](../../../openspec/changes/registro-cliente/spec.md) y las [tareas](../../../openspec/changes/registro-cliente/tasks.md); los casos CP de §2.1.5 no se declaran ejecutados y se mantienen GAP-087 y GAP-073.
+
 ### 2.1.4.1. Diagrama de Componentes
 
 | Diagrama | Tipo | Referencia | Estado de creación |

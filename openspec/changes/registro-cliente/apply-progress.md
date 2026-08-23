@@ -94,8 +94,8 @@
 ## Workload and PR boundary
 
 - Approved delivery path: four stacked-to-main slices, strategy `stacked-to-main`; no merge to `main`.
-- Current boundary: slice 3 of 4, T3 identity API only, on child branch `feat/registro-cliente/t3-identity` based on the T2 slice. Parent prompt explicitly authorizes branch commits and pushes for this change, overriding the older task note that prohibited them until notice.
-- T4+T5 remains a separate child slice and will not be mixed into this commit.
+- Current boundary: slice 4 of 4, T4 tests + T5 documentation, on child branch `feat/registro-cliente/t4-tests` based on the fixed T3 slice. Parent prompt explicitly authorizes branch commits and pushes for this change, overriding the older task note that prohibited them until notice.
+- The T3 integrity fix is committed separately as `71b0d1b` on `feat/registro-cliente/t3-identity`; T4+T5 remains isolated in the final child slice.
 
 ## Gaps
 
@@ -106,4 +106,67 @@
 
 ## Structured status produced
 
-- After T3: implementation tasks T1, T2, and T3 are complete; T4–T5 remain unchecked; parent-owned lifecycle rows remain unchanged; apply remains in progress and routes to the next implementation slice, not verify or parent lifecycle yet.
+- After T4+T5: implementation tasks T1–T5 are complete; parent-owned lifecycle rows remain unchanged; apply routes to `parent-lifecycle` after delivery bookkeeping, not to verify or review from this executor.
+
+## Resume continuation — T3 fix, T4 tests, T5 documentation
+
+### T3 integrity and LSP fix
+
+- Updated `backend/app/db/session.py` and committed it separately on `feat/registro-cliente/t3-identity` as `71b0d1b` (`fix(identity): resolve lint and integrity issues`).
+- RED: the session dependency returned `_LazySession` instead of a real SQLAlchemy `Session` (`AssertionError: _LazySession`).
+- GREEN: with `DATABASE_URL=sqlite://`, `get_db()` yielded a real `Session` and closed it; `ruff check backend` and the OpenAPI import smoke passed.
+- The session annotations now use compatible `Engine`, `Callable`, and `Iterator` forms; no `itertools` import exists anywhere under `backend/`.
+
+### T4 tests
+
+- Created `backend/tests/test_registro.py` on `feat/registro-cliente/t4-tests` with seven focused unit cases: the six requested registration/security cases plus the required `23505` race/rollback case.
+- The tests use FastAPI `TestClient`, dependency overrides, an in-memory repository double, a real Argon2id hasher for verification, and a fake SQLAlchemy session for the race case; no PostgreSQL service is required.
+- RED: the new focused suite initially ran 6 passed / 1 failed because the test used Argon2 `verify()` argument order incorrectly.
+- GREEN: corrected the test to use `verify(hash, password)` and the focused suite passed 7/7.
+- TRIANGULATE: coverage includes valid, invalid email, short password, case-insensitive duplicate, Argon2id verification, public response sanitization, and concurrent uniqueness failure.
+- REFACTOR: `ruff check backend` passed after the test correction; no production behavior changed for T4.
+
+### T5 documentation
+
+- Added one paragraph to `docs/scrum/sprint-1/02-proceso-por-hu.md` §2.1.4 marking PB-001/HU-001 backend-first identity implementation, endpoint, normalization, Argon2id, and the initial `usuario_global` migration.
+- The paragraph preserves GAP-092 as partial and keeps CP execution, GAP-087, GAP-073, and GAP-088 unresolved as required; it links to the OpenSpec spec/tasks.
+
+### Verification commands in this continuation
+
+- `backend/.venv/Scripts/pip install -e backend`: passed; dependencies remained inside `backend/.venv`.
+- `backend/.venv/Scripts/python -m pytest backend/tests/test_registro.py -v`: passed, 7 tests, 1 Starlette/httpx deprecation warning.
+- `backend/.venv/Scripts/python -m ruff check backend`: passed.
+- `backend/.venv/Scripts/python -m pytest backend/tests -v`: initial pre-T4 baseline collected 0 tests and exited 5; final run passed 7 tests in 1.87s with 1 Starlette/httpx deprecation warning.
+
+### Commit boundary
+
+- T3 fix commit: `71b0d1b` on `feat/registro-cliente/t3-identity`.
+- T4+T5 single final-slice commit on `feat/registro-cliente/t4-tests` (`test(identity): cover client registration`); the current branch HEAD is the final commit for this slice.
+
+### Files changed in this continuation
+
+- `backend/app/db/session.py` (committed on T3 fix branch)
+- `backend/tests/test_registro.py`
+- `docs/scrum/sprint-1/02-proceso-por-hu.md`
+- `openspec/changes/registro-cliente/tasks.md`
+- `openspec/changes/registro-cliente/apply-progress.md`
+- `openspec/changes/registro-cliente/proposal.md`
+- `openspec/changes/registro-cliente/spec.md`
+- `openspec/changes/registro-cliente/design.md`
+- `.gitignore`
+
+    ### Remaining unchecked rows (parent-owned lifecycle only)
+
+    - [ ] Start or reuse bounded review del slice implementado (contraste con spec REQ-01..07 y design: criterios de terminado de T1..T5, ausencia de datos sensibles en respuestas, cobertura REQ-07). <!-- sdd-owner: parent -->
+    - [ ] Gate de entrega: consultar al usuario la estrategia de commits/PRs (hoy prohibidos hasta aviso) y resolver la chain strategy pendiente antes de cualquier operación git. <!-- sdd-owner: parent -->
+
+    ### Delivery attempt outcome
+
+    - Native runtime settle recorded the T4+T5 run as passed but returned `blocked: maintainer_decision` because the work unit was acquired with a 950-line budget and the final candidate measured 1007 changed lines. No automatic reset was performed.
+    - Pushes: not completed. The first direct `git push -u origin feat/registro-cliente/t1-bootstrap` was blocked by the harness with `Gentle AI safety policy requires interactive confirmation before this command.` No authentication retry was made.
+    - PRs: not created because `gh` is unavailable as verified by the parent. Compare URLs remain:
+      - `https://github.com/Fivoryu/sw1_pro_final_2026_2/compare/main...feat/registro-cliente/t1-bootstrap`
+      - `https://github.com/Fivoryu/sw1_pro_final_2026_2/compare/main...feat/registro-cliente/t2-migracion`
+      - `https://github.com/Fivoryu/sw1_pro_final_2026_2/compare/main...feat/registro-cliente/t3-identity`
+      - `https://github.com/Fivoryu/sw1_pro_final_2026_2/compare/main...feat/registro-cliente/t4-tests`
+    - Remaining gaps: GAP-073 remains open; GAP-087 remains open with CP-001..CP-013 not executed; GAP-092 remains open overall because only `usuario_global` is covered and the remaining Sprint 1 migrations plus live PostgreSQL integration are pending.
