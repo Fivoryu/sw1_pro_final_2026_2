@@ -51,3 +51,21 @@
 - El `sdd-status` nativo reportó `artifactStore: openspec` aunque el contexto de fase solicita `hybrid`; se usó OpenSpec como fuente autoritativa y se debe persistir también el espejo Engram al cierre si el backend vuelve a estar disponible.
 - El servidor Engram no respondió durante la lectura (`127.0.0.1:7437`); no se afirma persistencia Engram en este punto.
 - La migración real y PostgreSQL permanecen fuera de alcance; se verificará offline como exige GAP-092.
+
+## T2 completado
+
+- Checkbox persistido: `openspec/changes/autenticacion/tasks.md` T2 marcado `[x]`.
+- Implementado:
+  - `backend/app/modules/identity/models.py`: modelo `Sesion` con UUID PK, FK, CHAR(64), timestamps, revocación, UNIQUE e índice nombrados.
+  - `backend/alembic/versions/0002_crear_sesion.py`: revisión `0002`, `down_revision="0001"`, upgrade/downgrade únicamente de `sesion`.
+  - `backend/alembic/env.py`: imports explícitos de `UsuarioGlobal` y `Sesion` antes de `Base.metadata`.
+- Verificación de migración offline:
+  - `DATABASE_URL=postgresql+psycopg://user:pass@localhost/db python -m alembic upgrade head --sql` mostró `CREATE TABLE usuario_global`, `CREATE TABLE sesion`, FK, `uq_sesion_refresh_token_hash` e `ix_sesion_usuario_global_revocado`; no se ejecutó contra PostgreSQL.
+  - `python -m alembic downgrade 0002:0001 --sql` mostró `DROP INDEX ix_sesion_usuario_global_revocado` y `DROP TABLE sesion`; `usuario_global` no se elimina.
+  - La forma literal `downgrade 0001 --sql` no es aceptada por Alembic offline (requiere rango `0002:0001`); se usó la forma equivalente válida.
+- `ruff check app alembic` → verde.
+
+## Ramas y commits
+
+- T1: `feat/autenticacion/t1-core`, commit `5d2a94d feat(auth): add JWT token core`.
+- T2 actual: `feat/autenticacion/t2-sesion`; commit pendiente después de la verificación acumulada.
