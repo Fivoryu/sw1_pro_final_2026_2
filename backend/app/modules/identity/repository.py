@@ -45,14 +45,11 @@ class SessionRepositoryProtocol(Protocol):
         expira_en: datetime,
         ultima_actividad: datetime | None,
         session_id: UUID,
-    ) -> Sesion:
-        ...
+    ) -> Sesion: ...
 
-    def buscar_por_hash(self, refresh_token_hash: str) -> Sesion | None:
-        ...
+    def buscar_por_hash(self, refresh_token_hash: str) -> Sesion | None: ...
 
-    def buscar_por_id(self, session_id: UUID) -> Sesion | None:
-        ...
+    def buscar_por_id(self, session_id: UUID) -> Sesion | None: ...
 
     def rotar_por_hash(
         self,
@@ -60,8 +57,7 @@ class SessionRepositoryProtocol(Protocol):
         nueva_sesion: Sesion,
         ahora: datetime,
         ventana: timedelta,
-    ) -> Sesion | None:
-        ...
+    ) -> Sesion | None: ...
 
     def validar_y_actualizar_actividad(
         self,
@@ -69,22 +65,18 @@ class SessionRepositoryProtocol(Protocol):
         usuario_id: UUID,
         ahora: datetime,
         ventana: timedelta,
-    ) -> Sesion | None:
-        ...
+    ) -> Sesion | None: ...
 
-    def revocar_por_hash(self, refresh_token_hash: str) -> None:
-        ...
+    def revocar_por_hash(self, refresh_token_hash: str) -> None: ...
 
-    def revocar(self, sesion: Sesion) -> None:
-        ...
+    def revocar(self, sesion: Sesion) -> None: ...
 
     def sesion_valida(
         self,
         sesion: Sesion,
         ahora: datetime,
         ventana: timedelta,
-    ) -> bool:
-        ...
+    ) -> bool: ...
 
 
 class UserRepository:
@@ -173,6 +165,7 @@ class SessionRepository:
                     anterior.revocado = True
                     return None
 
+                nueva_sesion.usuario_global_id = anterior.usuario_global_id
                 anterior.revocado = True
                 self.session.add(nueva_sesion)
                 self.session.flush()
@@ -280,6 +273,7 @@ class FakeSessionRepository:
             if nueva_sesion.refresh_token_hash in self._sessions_by_hash:
                 raise SessionRepositoryError("refresh token hash already exists")
 
+            nueva_sesion.usuario_global_id = anterior.usuario_global_id
             anterior.revocado = True
             self._sessions_by_hash[nueva_sesion.refresh_token_hash] = nueva_sesion
             self._sessions_by_id[nueva_sesion.id] = nueva_sesion

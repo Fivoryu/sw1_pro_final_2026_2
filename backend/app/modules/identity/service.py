@@ -132,10 +132,6 @@ class AuthenticationService:
             revocado=False,
         )
 
-        previous = self.session_repository.buscar_por_hash(old_hash)
-        if previous is None:
-            raise InvalidSessionError
-        replacement.usuario_global_id = previous.usuario_global_id
         try:
             rotated = self.session_repository.rotar_por_hash(
                 old_hash,
@@ -149,7 +145,7 @@ class AuthenticationService:
             raise InvalidSessionError
 
         access_token = self.token_service.emitir_access(
-            usuario_id=previous.usuario_global_id,
+            usuario_id=rotated.usuario_global_id,
             sesion_id=new_session_id,
             emitido_en=now,
             expira_en=now + timedelta(seconds=self.settings.access_token_ttl_seconds),

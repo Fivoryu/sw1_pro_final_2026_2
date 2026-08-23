@@ -30,11 +30,9 @@ class AccessClaims:
 
 
 class TokenServiceProtocol(Protocol):
-    def generar_refresh(self) -> str:
-        ...
+    def generar_refresh(self) -> str: ...
 
-    def hash_refresh(self, refresh_token: str) -> str:
-        ...
+    def hash_refresh(self, refresh_token: str) -> str: ...
 
     def emitir_access(
         self,
@@ -43,11 +41,9 @@ class TokenServiceProtocol(Protocol):
         sesion_id: UUID,
         emitido_en: datetime,
         expira_en: datetime,
-    ) -> str:
-        ...
+    ) -> str: ...
 
-    def decodificar_access(self, *, token: str, ahora: datetime) -> AccessClaims:
-        ...
+    def decodificar_access(self, *, token: str, ahora: datetime) -> AccessClaims: ...
 
 
 class PyJWTTokenService:

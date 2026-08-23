@@ -86,7 +86,7 @@ def make_client(
     repository: FakeRepository,
     password_hasher: object,
 ) -> TestClient:
-    app = create_app(Settings())
+    app = create_app(Settings(jwt_secret="test-secret-for-authentication-32-bytes-long"))
     service = IdentityService(repository, password_hasher)  # type: ignore[arg-type]
     app.dependency_overrides[get_identity_service] = lambda: service
     return TestClient(app)
@@ -217,7 +217,7 @@ def test_carrera_de_unicidad_hace_rollback_y_responde_409() -> None:
     session = IntegrityErrorSession()
     repository = UserRepository(session)  # type: ignore[arg-type]
     service = IdentityService(repository, RecordingHasher())
-    app = create_app(Settings())
+    app = create_app(Settings(jwt_secret="test-secret-for-authentication-32-bytes-long"))
     app.dependency_overrides[get_identity_service] = lambda: service
 
     with TestClient(app) as client:

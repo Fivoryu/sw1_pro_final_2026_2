@@ -121,12 +121,15 @@ def test_activity_is_valid_at_29_minutes_and_invalid_at_31_minutes() -> None:
     assert refreshed is session
     assert session.ultima_actividad == NOW + timedelta(minutes=29)
 
-    assert repository.validar_y_actualizar_actividad(
-        session.id,
-        user_id,
-        NOW + timedelta(minutes=61),
-        WINDOW,
-    ) is None
+    assert (
+        repository.validar_y_actualizar_actividad(
+            session.id,
+            user_id,
+            NOW + timedelta(minutes=61),
+            WINDOW,
+        )
+        is None
+    )
     assert session.revocado is True
 
 
