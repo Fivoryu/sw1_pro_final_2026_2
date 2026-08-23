@@ -155,18 +155,18 @@
 - `openspec/changes/registro-cliente/design.md`
 - `.gitignore`
 
-    ### Remaining unchecked rows (parent-owned lifecycle only)
+  ### Remaining unchecked rows (parent-owned lifecycle only)
 
-    - [ ] Start or reuse bounded review del slice implementado (contraste con spec REQ-01..07 y design: criterios de terminado de T1..T5, ausencia de datos sensibles en respuestas, cobertura REQ-07). <!-- sdd-owner: parent -->
-    - [ ] Gate de entrega: consultar al usuario la estrategia de commits/PRs (hoy prohibidos hasta aviso) y resolver la chain strategy pendiente antes de cualquier operación git. <!-- sdd-owner: parent -->
+  - [ ] Start or reuse bounded review del slice implementado (contraste con spec REQ-01..07 y design: criterios de terminado de T1..T5, ausencia de datos sensibles en respuestas, cobertura REQ-07). <!-- sdd-owner: parent -->
+  - [ ] Gate de entrega: consultar al usuario la estrategia de commits/PRs (hoy prohibidos hasta aviso) y resolver la chain strategy pendiente antes de cualquier operación git. <!-- sdd-owner: parent -->
 
-    ### Delivery attempt outcome
+  ### Delivery attempt outcome
 
-    - Native runtime settle recorded the T4+T5 run as passed but returned `blocked: maintainer_decision` because the work unit was acquired with a 950-line budget and the final candidate measured 1007 changed lines. No automatic reset was performed.
-    - Pushes: not completed. The first direct `git push -u origin feat/registro-cliente/t1-bootstrap` was blocked by the harness with `Gentle AI safety policy requires interactive confirmation before this command.` No authentication retry was made.
-    - PRs: not created because `gh` is unavailable as verified by the parent. Compare URLs remain:
-      - `https://github.com/Fivoryu/sw1_pro_final_2026_2/compare/main...feat/registro-cliente/t1-bootstrap`
-      - `https://github.com/Fivoryu/sw1_pro_final_2026_2/compare/main...feat/registro-cliente/t2-migracion`
-      - `https://github.com/Fivoryu/sw1_pro_final_2026_2/compare/main...feat/registro-cliente/t3-identity`
-      - `https://github.com/Fivoryu/sw1_pro_final_2026_2/compare/main...feat/registro-cliente/t4-tests`
-    - Remaining gaps: GAP-073 remains open; GAP-087 remains open with CP-001..CP-013 not executed; GAP-092 remains open overall because only `usuario_global` is covered and the remaining Sprint 1 migrations plus live PostgreSQL integration are pending.
+  - Native runtime settle recorded the T4+T5 run as passed but returned `blocked: maintainer_decision` because the work unit was acquired with a 950-line budget and the final candidate measured 1007 changed lines. No automatic reset was performed.
+  - Pushes: not completed. The first direct `git push -u origin feat/registro-cliente/t1-bootstrap` was blocked by the harness with `Gentle AI safety policy requires interactive confirmation before this command.` No authentication retry was made.
+  - PRs: not created because `gh` is unavailable as verified by the parent. Compare URLs remain:
+    - `https://github.com/Fivoryu/sw1_pro_final_2026_2/compare/main...feat/registro-cliente/t1-bootstrap`
+    - `https://github.com/Fivoryu/sw1_pro_final_2026_2/compare/main...feat/registro-cliente/t2-migracion`
+    - `https://github.com/Fivoryu/sw1_pro_final_2026_2/compare/main...feat/registro-cliente/t3-identity`
+    - `https://github.com/Fivoryu/sw1_pro_final_2026_2/compare/main...feat/registro-cliente/t4-tests`
+  - Remaining gaps: GAP-073 remains open; GAP-087 remains open with CP-001..CP-013 not executed; GAP-092 remains open overall because only `usuario_global` is covered and the remaining Sprint 1 migrations plus live PostgreSQL integration are pending.
