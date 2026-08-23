@@ -1,16 +1,16 @@
-from collections.abc import Callable, Generator
-from typing import Any, cast
+from collections.abc import Callable, Iterator
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
 
 engine: Engine | None = None
-SessionLocal: sessionmaker[Session] | None = None
+SessionLocal: Callable[[], Session] | None = None
 
 
-def _get_session_factory() -> sessionmaker[Session]:
+def _get_session_factory() -> Callable[[], Session]:
     global SessionLocal, engine
 
     if SessionLocal is None:
@@ -26,27 +26,9 @@ def _get_session_factory() -> sessionmaker[Session]:
     return SessionLocal
 
 
-class _LazySession:
-    def __init__(self, factory: Callable[[], Session]):
-        self._factory = factory
-        self._session: Session | None = None
-
-    def _get_session(self) -> Session:
-        if self._session is None:
-            self._session = self._factory()
-        return self._session
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._get_session(), name)
-
-    def close(self) -> None:
-        if self._session is not None:
-            self._session.close()
-
-
-def get_db() -> Generator[Session, None, None]:
-    db = _LazySession(lambda: _get_session_factory()())
+def get_db() -> Iterator[Session]:
+    db = _get_session_factory()()
     try:
-        yield cast(Session, db)
+        yield db
     finally:
         db.close()
