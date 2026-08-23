@@ -51,4 +51,4 @@ def _is_duplicate_email_error(error: IntegrityError) -> bool:
 
     diagnostics = getattr(original, "diag", None)
     constraint_name = getattr(diagnostics, "constraint_name", None)
-    return constraint_name in (None, "uq_usuario_global_correo", "usuario_global_correo_correo_key")
+    return constraint_name in ("uq_usuario_global_correo", "usuario_global_correo_correo_key")
