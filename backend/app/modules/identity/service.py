@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol
-
+from app.core.security import PasswordHasherProtocol
 from app.modules.identity.models import UsuarioGlobal
 from app.modules.identity.repository import (
     DUPLICATE_EMAIL_MESSAGE,
@@ -9,14 +8,6 @@ from app.modules.identity.repository import (
     UserRepositoryProtocol,
 )
 from app.modules.identity.schemas import RegistroRequest
-
-
-class PasswordHasherProtocol(Protocol):
-    def hash(self, password: str) -> str:
-        """Hash a plaintext password."""
-
-    def verify(self, password: str, encoded_hash: str) -> bool:
-        """Verify a plaintext password against an encoded hash."""
 
 
 class IdentityService:

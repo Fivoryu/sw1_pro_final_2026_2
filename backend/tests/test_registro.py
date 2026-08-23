@@ -48,6 +48,13 @@ class RecordingHasher:
         return encoded_hash == f"recorded:{password}"
 
 
+class _PgUniqueError(Exception):
+    """Fake psycopg-style unique violation for repository tests."""
+
+    sqlstate = "23505"
+    diag = SimpleNamespace(constraint_name="uq_usuario_global_correo")
+
+
 class IntegrityErrorSession:
     def __init__(self, constraint: str = "uq_usuario_global_correo") -> None:
         self.constraint = constraint
@@ -60,11 +67,10 @@ class IntegrityErrorSession:
         del usuario
 
     def flush(self) -> None:
-        original = SimpleNamespace(
-            sqlstate="23505",
-            diag=SimpleNamespace(constraint_name=self.constraint),
-        )
-        raise IntegrityError("INSERT usuario_global", {}, original)
+        error = _PgUniqueError()
+        error.sqlstate = "23505"
+        error.diag = SimpleNamespace(constraint_name=self.constraint)
+        raise IntegrityError("INSERT usuario_global", {}, error)
 
     def commit(self) -> None:
         raise AssertionError("commit must not run after a failed flush")

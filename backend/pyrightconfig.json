@@ -1,7 +1,7 @@
 {
-  "venvPath": ".",
+  "venvPath": "..",
   "venv": ".venv",
-  "pythonVersion": "3.11",
+  "pythonVersion": "3.12",
   "pythonPlatform": "Linux",
   "exclude": ["**/.venv", "**/.ruff_cache", "**/__pycache__", "**/.git"]
 }

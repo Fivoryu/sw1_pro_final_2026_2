@@ -18,9 +18,11 @@ class DuplicateEmailError(Exception):
 class UserRepositoryProtocol(Protocol):
     def buscar_por_correo(self, correo: str) -> UsuarioGlobal | None:
         """Find a user by its normalized email."""
+        ...
 
     def guardar(self, usuario: UsuarioGlobal) -> UsuarioGlobal:
         """Persist a user and return the refreshed entity."""
+        ...
 
 
 class UserRepository:
