@@ -11,9 +11,23 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     database_url: str | None = Field(default=None, validation_alias="DATABASE_URL")
+    jwt_secret: str | None = Field(default=None, validation_alias="JWT_SECRET")
+    access_token_ttl_seconds: int = Field(
+        default=900,
+        validation_alias="ACCESS_TOKEN_TTL_SECONDS",
+    )
+    refresh_token_ttl_days: int = Field(
+        default=7,
+        validation_alias="REFRESH_TOKEN_TTL_DAYS",
+    )
+    session_inactivity_minutes: int = Field(
+        default=30,
+        validation_alias="SESSION_INACTIVITY_MINUTES",
+    )
     argon2_time_cost: int | None = Field(default=None, validation_alias="ARGON2_TIME_COST")
     argon2_memory_cost: int | None = Field(default=None, validation_alias="ARGON2_MEMORY_COST")
     argon2_parallelism: int | None = Field(default=None, validation_alias="ARGON2_PARALLELISM")

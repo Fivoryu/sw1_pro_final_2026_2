@@ -3,8 +3,14 @@ from __future__ import annotations
 from typing import Protocol
 
 from argon2 import PasswordHasher, Type
+from argon2.exceptions import VerificationError
 
 from app.core.config import Settings, get_settings
+
+DUMMY_PASSWORD_HASH = (
+    "$argon2id$v=19$m=65536,t=3,p=4$uqJf/ClU+3IPUFf6NEc4RQ$"
+    "BY96MWrJX4netX/cxR+rZg7ZpXNdj0eOl0ww+yb7ZFs"
+)
 
 
 class PasswordHasherProtocol(Protocol):
@@ -37,6 +43,18 @@ class Argon2PasswordHasher:
 
     def verify(self, password: str, encoded_hash: str) -> bool:
         return self._hasher.verify(encoded_hash, password)
+
+
+def verify_password_uniform(
+    password: str,
+    encoded_hash: str | None,
+    password_hasher: PasswordHasherProtocol,
+) -> bool:
+    """Verify an account or dummy Argon2id hash without an existence branch."""
+    try:
+        return password_hasher.verify(password, encoded_hash or DUMMY_PASSWORD_HASH)
+    except VerificationError:
+        return False
 
 
 def create_password_hasher(settings: Settings | None = None) -> Argon2PasswordHasher:
