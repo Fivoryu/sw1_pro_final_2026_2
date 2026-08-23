@@ -47,7 +47,8 @@ class RecordingHasher:
 
 
 class IntegrityErrorSession:
-    def __init__(self) -> None:
+    def __init__(self, constraint: str = "uq_usuario_global_correo") -> None:
+        self.constraint = constraint
         self.rollback_calls = 0
 
     def scalar(self, statement: object) -> None:
@@ -59,7 +60,7 @@ class IntegrityErrorSession:
     def flush(self) -> None:
         original = SimpleNamespace(
             sqlstate="23505",
-            diag=SimpleNamespace(constraint_name="uq_usuario_global_correo"),
+            diag=SimpleNamespace(constraint_name=self.constraint),
         )
         raise IntegrityError("INSERT usuario_global", {}, original)
 
@@ -217,6 +218,16 @@ def test_carrera_de_unicidad_hace_rollback_y_responde_409() -> None:
             json={"correo": "race@example.com", "password": "password"},
         )
 
-    assert response.status_code == 409
-    assert response.json() == {"detail": "Ya existe una cuenta con este correo"}
+        assert response.status_code == 409
+        assert response.json() == {"detail": "Ya existe una cuenta con este correo"}
+        assert session.rollback_calls == 1
+
+
+def test_violacion_unica_ajena_no_se_clasifica_como_duplicado() -> None:
+    session = IntegrityErrorSession(constraint="otra_restriccion_unica")
+    repository = UserRepository(session)  # type: ignore[arg-type]
+
+    with pytest.raises(IntegrityError):
+        repository.guardar(UsuarioGlobal(correo="race@example.com", hash_password="x"))
+
     assert session.rollback_calls == 1
