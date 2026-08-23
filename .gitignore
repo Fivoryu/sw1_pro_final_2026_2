@@ -6,3 +6,33 @@
 
 # Pi lens runtime cache
 .pi-lens/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Node / Web
+node_modules/
+dist/
+.vite/
+
+# Flutter / Dart
+.dart_tool/
+build/
+*.iml
+
+# Hardhat / Solidity
+artifacts/
+cache/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
