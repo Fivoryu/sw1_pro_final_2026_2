@@ -57,6 +57,27 @@ Verificado contra el PDF oficial con extracción pdfplumber (págs. 1–150). Us
 
 Regla de prioridad: usar **Alta/Media/Baja** del modelo (mapear Must → Alta, Should → Media).
 
+## CAPITULO 2 — formatos verificados por sprint (referencia: `docs/modelo_doc/guia-capitulo2-modelo.md`)
+
+| Pieza | Formato |
+| --- | --- |
+| Equipo Scrum (§1) | `INTEGRANTE \| ROL SCRUM` (una fila por persona) |
+| Ficha de HU (§1) | `HU-XX Título`; `Descripción: Como <rol>, quiero <capacidad>, para <valor>.`; `Prioridad: Alta/Media/Baja — Estimación: N PHU`; `Criterios de Aceptación` (lista observable); `Desarrollador a cargo`; rótulo `Prototipo` (no habilita imágenes) |
+| Sprint Backlog (§1) | Encabezado `SPRINT BACKLOG / Objetivo / Sprint: N — Tiempo programado: 3 semanas / Fecha inicio+finalización` + tabla `ID \| TAREA \| ESTIMACIÓN \| RESPONSABLE \| ESTADO \| PLATAFORMA` (ej.: `PB-01 \| Login escritorio \| 3 HRS \| Nelson Chumacero Miranda \| Hecho \| Desktop`) |
+| Plan de pruebas (2.1.5.1) | `ID Prueba \| PB \| HU \| Funcionalidad evaluada \| Plataforma \| Responsable \| Estado` (casos `CP-XX`; el contador se reinicia en cada sprint; **no** usar numeración global) |
+| Caso de caja negra (2.1.5.2) | Metadatos `CAMPO \| DESCRIPCIÓN` (Caso de prueba / PB relacionado / Descripción / Precondiciones) + pasos `PASO \| ACCIÓN \| RESULTADO ESPERADO \| ESTADO` + `Responsable: <integrante>` + `Resultado de la prueba: Satisfactorio` + `Adjunto` solo con evidencia |
+| Reporte de prueba (2.1.5.3) | `RESULTADO GENERAL \| VALOR`: Total HU probadas / Total casos ejecutados / Satisfactorios / Fallidos / % cumplimiento / Estado general del Sprint N |
+
+### Gaps del modelo a conservar como advertencia (GAP-CH2-00x)
+
+- §1/§3/§4/§5 del CAPITULO 2 **no tienen diagramas**: no agregar UML por analogía; el **Gantt** pertenece al Sprint 0 §8.1, no al §1 de cada sprint (GAP-CH2-001).
+- Burndown/BurnUp (§6): artefactos gráficos; series y ejes no recuperables del modelo (GAP-CH2-002).
+- §7 se titula también "Gráfica de esfuerzo": solo la tabla de esfuerzo es verificable (GAP-CH2-003).
+- §8 Taskboard: snapshot visual, columnas no recuperables del texto (GAP-CH2-004).
+- En el modelo, el Sprint 3 agrega "2.1.1.3 Diagrama de arquitectura general" sin tipo UML definido: conservar el rótulo literal, no mapearlo a Deployment/Package/Component (GAP-CH2-005).
+- Sprint 3 del modelo planifica CP-31..CP-38 y el reporte declara 6 casos: registrar la discrepancia, no copiarla (GAP-CH2-006).
+- En el modelo "Estado general del Sprint 1" aparece por error en el reporte del Sprint 3: no corregirlo silenciosamente al copiar evidencia (GAP-CH2-007).
+
 ## Diagramas: solo tipo, nunca imagen embebida
 
 - Los diagramas se referencian por **tipo** (y nombre cuando aplique); **no se embeben imágenes**.

@@ -163,6 +163,12 @@ Create the same eight files/headings under each of `docs/scrum/sprint-1/`, `spri
 
 Keep planned, in-progress, blocked, done, deferred, not executed, and unknown states distinct. A sprint can link to shared design, test, or metric material, but it must retain enough local references to remain auditable.
 
+### Verified CAPITULO 2 formats (Grupo#12, via `docs/modelo_doc/guia-capitulo2-modelo.md`)
+
+- **Sprint Planning §1**: narrative structure with objective general/específicos; then `INTEGRANTE \| ROL SCRUM`, per-HU cards (`HU-XX Título`; `Descripción: Como <rol>, quiero <capacidad>, para <valor>.`; `Prioridad: Alta/Media/Baja — Estimación: N PHU`; `Criterios de Aceptación`; `Desarrollador a cargo`; `Prototipo` label — no images), and Sprint Backlog header (`SPRINT BACKLOG / Objetivo / Sprint: N — Tiempo programado: 3 semanas / Fechas`) + table `ID \| TAREA \| ESTIMACIÓN \| RESPONSABLE \| ESTADO \| PLATAFORMA` (effort in HRS, e.g. `PB-01 \| Login escritorio \| 3 HRS \| <nombre> \| Hecho \| Desktop`).
+- **Per-HU process §2**: 2.1.1 Architecture (2.1.1.1 Deployment, 2.1.1.2 Package; Sprint 3 adds the literal label "2.1.1.3 Diagrama de arquitectura general" with no UML type — GAP-CH2-005), 2.1.2 Data (Conceptual/Logical/Physical), 2.1.3 Business Logic (2.1.3.1 Communication, 2.1.3.2 Sequence), 2.1.4 Implementation (2.1.4.1 Component), 2.1.5 Tests: plan table `ID Prueba \| PB \| HU \| Funcionalidad evaluada \| Plataforma \| Responsable \| Estado` (`CP-XX`, counter resets per sprint); per-case metadata `CAMPO \| DESCRIPCIÓN` + steps `PASO \| ACCIÓN \| RESULTADO ESPERADO \| ESTADO` + `Responsable` + `Resultado de la prueba` + `Adjunto` only with evidence; report table `RESULTADO GENERAL \| VALOR` (totals, satisfactories, failures, %, Estado general del Sprint N).
+- **Sections §3–§5, §7–§8**: no UML diagrams (GAP-CH2-001); Burndown/BurnUp are chart artifacts (GAP-CH2-002); §7 has both effort table and a "Gráfica de esfuerzo" label (GAP-CH2-003); §8 Taskboard is a visual snapshot (GAP-CH2-004). Model inconsistencies to note, never silently copy: GAP-CH2-006 (Sprint 3 plans CP-31..38, reports 6) and GAP-CH2-007 ("Estado general del Sprint 1" appears in Sprint 3's report).
+
 ## Black-box testing pattern
 
 Test externally observable behavior without depending on internal implementation. For each `TC-###`, record:
