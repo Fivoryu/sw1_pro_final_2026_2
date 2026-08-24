@@ -1,0 +1,24 @@
+name: roomforge
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_DB: roomforge
+      POSTGRES_USER: roomforge
+      POSTGRES_PASSWORD: valor-dev-local
+    volumes:
+      - roomforge_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U roomforge -d roomforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  roomforge_pgdata:
+    name: roomforge_pgdata

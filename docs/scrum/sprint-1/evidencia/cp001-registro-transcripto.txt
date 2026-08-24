@@ -1,0 +1,214 @@
+# Transcripto de ejecución CP-001 — HU-001
+
+- Fecha de ejecución: 2026-08-23T20:20:34-04:00
+- CWD operativo de Alembic y API: `backend/`
+- Docker Engine: `29.6.2`
+- PostgreSQL del contenedor: `16.14` (`postgres:16-alpine`)
+- Proyecto Compose: `roomforge`
+- Puerto inicialmente previsto: `5433`
+- Incidencia de entorno: `5433` estaba ocupado por un proceso PostgreSQL del host (PID 6624); se aplicó el fallback autorizado a `5434`.
+- Puerto efectivo: `5434` host → `5432` contenedor
+- Configuración local: URL comprobada con credenciales redactadas; no se copia ningún valor sensible.
+
+## 1. Infraestructura PostgreSQL
+
+Archivo: `infra/docker/compose.postgres.yml`.
+
+Comprobaciones relevantes de la configuración:
+
+```text
+name: roomforge
+image: postgres:16-alpine
+ports: 5434:5432
+volume: roomforge_pgdata:/var/lib/postgresql/data
+healthcheck: pg_isready -U roomforge -d roomforge
+restart: unless-stopped
+```
+
+Salida de `docker compose -f infra/docker/compose.postgres.yml ps`:
+
+```text
+NAME                   IMAGE                COMMAND                  SERVICE    CREATED         STATUS                   PORTS
+roomforge-postgres-1   postgres:16-alpine   "docker-entrypoint.s…"   postgres   2 minutes ago   Up 2 minutes (healthy)   0.0.0.0:5434->5432/tcp, [::]:5434->5432/tcp
+```
+
+Salida de `docker volume ls` (volumen requerido presente):
+
+```text
+roomforge_pgdata
+```
+
+Salida de `docker exec roomforge-postgres-1 pg_isready -U roomforge -d roomforge`:
+
+```text
+/var/run/postgresql:5432 - accepting connections
+```
+
+## 2. Migraciones y esquema real
+
+Todos los comandos siguientes se ejecutaron desde `backend/`.
+
+Comando: `python -m alembic upgrade head` (primera ejecución)
+
+```text
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, Create the global user table.
+INFO  [alembic.runtime.migration] Running upgrade 0001 -> 0002, Create the session table.
+```
+
+Comando: `python -m alembic current`
+
+```text
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+0002 (head)
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+```
+
+Consulta de tablas públicas:
+
+```text
+    tablename
+-----------------
+ alembic_version
+ sesion
+ usuario_global
+(3 rows)
+```
+
+Consulta de `alembic_version`:
+
+```text
+ version_num
+-------------
+ 0002
+(1 row)
+```
+
+Comando: `python -m alembic upgrade head` (segunda ejecución, idempotencia)
+
+```text
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+```
+
+## 3. CP-001 — requests y responses HTTP reales
+
+API arrancada desde `backend/` con `python -m uvicorn app.main:app --port 8000` y requests contra `http://127.0.0.1:8000/api/v1/auth/registro`.
+
+Línea base antes del primer request para `prueba@ejemplo.inv`:
+
+```text
+0
+```
+
+### P1 — registro válido
+
+```text
+REQUEST: {"correo": "prueba@ejemplo.inv", "password": "[REDACTED]"}
+STATUS: 201
+BODY: {"id":"b1d08814-f9ca-44e3-a9bf-162085dd6b05","correo":"prueba@ejemplo.inv","estado":"activo","correo_verificado":false,"creado_en":"2026-08-24T00:19:52.076185Z"}
+```
+
+### P2 — duplicado con variante de mayúsculas
+
+```text
+REQUEST: {"correo": "Prueba@Ejemplo.INV", "password": "[REDACTED]"}
+STATUS: 409
+BODY: {"detail":"Ya existe una cuenta con este correo"}
+```
+
+### P3 — correo inválido
+
+```text
+REQUEST: {"correo": "no-es-correo", "password": "[REDACTED]"}
+STATUS: 422
+BODY: {"detail":[{"loc":["body","correo"],"msg":"value is not a valid email address: An email address must have an @-sign.","type":"value_error"}]}
+BODY_CONTAINS_PASSWORD: False
+```
+
+### P4 — contraseña corta
+
+```text
+REQUEST: {"correo": "corta@ejemplo.inv", "password": "[REDACTED]"}
+STATUS: 422
+BODY: {"detail":[{"loc":["body"],"msg":"Value should have at least 8 items after validation, not 7","type":"too_short"}]}
+BODY_CONTAINS_PASSWORD: False
+```
+
+## 4. Verificación SQL posterior
+
+Consulta de conteo final del correo controlado:
+
+```text
+ final_count
+-------------
+           1
+(1 row)
+```
+
+Consulta del correo persistido:
+
+```text
+      correo
+--------------------
+ prueba@ejemplo.inv
+(1 row)
+```
+
+Consulta de estado y verificación:
+
+```text
+ estado | correo_verificado
+--------+-------------------
+ activo | f
+(1 row)
+```
+
+Consulta del hash persistido:
+
+```text
+                                           hash_password
+---------------------------------------------------------------------------------------------------
+$argon2id$v=19$m=65536,t=3,p=1$j4rdTmrZSFeEXpL2L71rlw$japnfABxvIqZBqnXKUDwGqe5lbcptomT5UosJwt3E8Y
+(1 row)
+```
+
+Predicado de formato Argon2id:
+
+```text
+ argon2id_rows
+---------------
+             1
+(1 row)
+```
+
+Conteo del correo usado en P4 (no se creó fila):
+
+```text
+ corta_email_rows
+------------------
+                0
+(1 row)
+```
+
+Conteo final repetido después de P2, P3 y P4:
+
+```text
+ final_total_for_controlled_email
+----------------------------------
+                                1
+(1 row)
+```
+
+## 5. Auditoría de redacción
+
+La auditoría se ejecutó sobre este archivo después de escribirlo:
+
+```text
+Valor plaintext de la contraseña de prueba: 0 coincidencias.
+Marcador de secreto de configuración local: 0 coincidencias.
+Prefijo $argon2id$: 2 coincidencias.
+```
+
+No se registran contraseñas plaintext, secretos de firma ni credenciales completas de conexión. El hash Argon2id completo se conserva porque es el valor observado en PostgreSQL y no es reversible.
