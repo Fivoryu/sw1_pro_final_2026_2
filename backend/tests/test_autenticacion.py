@@ -334,8 +334,7 @@ def test_me_invalid_token_variants_are_401_not_403() -> None:
     assert len(responses) == 5
     assert all(response.status_code == 401 for response in responses)
     assert all(
-        response.json() == {"detail": "Sesión inválida o expirada"}
-        for response in responses
+        response.json() == {"detail": "Sesión inválida o expirada"} for response in responses
     )
     assert user.id == sessions.sessions()[0].usuario_global_id
 
@@ -365,8 +364,12 @@ def test_create_app_fails_closed_without_jwt_secret() -> None:
 
 def test_create_app_fails_closed_when_environment_lacks_jwt_secret(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     monkeypatch.delenv("JWT_SECRET", raising=False)
+    # Aislar del .env local (gitignored, creado por la ejecución real contra
+    # PostgreSQL): get_settings() lee env_file=".env" del cwd.
+    monkeypatch.chdir(tmp_path)
     get_settings.cache_clear()  # type: ignore[attr-defined]
     try:
         with pytest.raises(SecurityConfigurationError):
