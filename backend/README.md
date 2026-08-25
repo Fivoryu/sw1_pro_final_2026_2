@@ -1,7 +1,8 @@
 # Backend (FastAPI)
 
-Propósito: pendiente de detalle (estructura inicial).
+API monolítica modular de RoomForge: identidad/autenticación, tenancy SaaS, publicaciones y catálogo.
 
-- Stack: ver docs/scrum/sprint-0-requerimientos/09-infraestructura.md
-- Repo destino futuro: <pendiente de separación>
-- Estado: estructura inicial, sin código.
+- Stack: FastAPI · SQLAlchemy 2.x (psycopg) · Alembic · PostgreSQL · Argon2id · PyJWT · pytest
+- Repositorio: [sw1_pro_final_backend_2026_2](https://github.com/Fivoryu/sw1_pro_final_backend_2026_2)
+- Docs de arquitectura: [docs/scrum](../docs/scrum/sprint-0-requerimientos/09-infraestructura.md)
+- Estado: identidad + autenticación (PB-001/PB-002) implementados y verificados; postgres local vía `infra/docker/compose.postgres.yml`
