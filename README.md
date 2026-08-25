@@ -20,7 +20,16 @@ proyecto_final/
 ```
 
 ## Convenciones
-
-- **Repos futuros**: cada carpeta de producto (`apps/*_mobile`, `panel`, `backend`, `worker3d`, `contracts`) se separará a su propio repositorio; la estructura ya respeta ese límite.
+    
+- **Repos individuales**: cada carpeta de producto tiene su repositorio propio (ver [Repositorios](#repositorios)); el monorepo conserva la documentación e integración del proyecto.
 - **Entornos**: todo se ejecuta con Docker Compose + Floci en local (endpoints/credenciales por configuración, nunca hardcodeados).
 - **Commits**: conventional commits; una unidad de trabajo por commit.
+    
+## Repositorios
+    
+| Producto | Carpeta | Repositorio |
+| --- | --- | --- |
+| Backend (FastAPI) | `backend/` | [sw1_pro_final_backend_2026_2](https://github.com/Fivoryu/sw1_pro_final_backend_2026_2) |
+| Panel web (React/Vite) | `panel/` | [sw1_pro_final_frontend_2026_2](https://github.com/Fivoryu/sw1_pro_final_frontend_2026_2) |
+| App captura (Flutter) | `apps/captura_mobile/` | [sw1_pro_final_captura_mobile_2026_2](https://github.com/Fivoryu/sw1_pro_final_captura_mobile_2026_2) |
+| App cliente (Flutter) | `apps/cliente_mobile/` | [sw1_pro_final_cliente_mobile_2026_2](https://github.com/Fivoryu/sw1_pro_final_cliente_mobile_2026_2) |
