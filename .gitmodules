@@ -1,0 +1,12 @@
+[submodule "backend"]
+	path = backend
+	url = https://github.com/Fivoryu/sw1_pro_final_backend_2026_2.git
+[submodule "panel"]
+	path = panel
+	url = https://github.com/Fivoryu/sw1_pro_final_frontend_2026_2.git
+[submodule "apps/captura_mobile"]
+	path = apps/captura_mobile
+	url = https://github.com/Fivoryu/sw1_pro_final_captura_mobile_2026_2.git
+[submodule "apps/cliente_mobile"]
+	path = apps/cliente_mobile
+	url = https://github.com/Fivoryu/sw1_pro_final_cliente_mobile_2026_2.git
