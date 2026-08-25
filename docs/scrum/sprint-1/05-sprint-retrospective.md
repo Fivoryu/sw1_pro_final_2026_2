@@ -10,12 +10,12 @@
 
 | Nombres | Rol |
 | --- | --- |
-| Jimenez Peña Marcelo | Product Owner |
-| Letizia Mendieta Albán | Scrum Master |
-| Nathalia Ardaya Campos | Developer |
-| Trevor Félix Calero Suyo | Developer |
-| Nelson Chumacero Miranda | Developer |
-| Guzmán Rojas Luis David | Developer |
+| Buceta Pesoa Luis Fernando | Developer |
+| Calero Suyo Trevor Félix | Product Owner |
+| Cervantes Arancibia Roberto Carlos | Scrum Master |
+| Ortiz Montero Luis Enrique | Developer |
+| Rebollo Condori Renato | Developer |
+| Vedia Barrios Sebastian | Developer |
 
 **Temas Para Tratar:** Validación de la capacidad y carga del Sprint 1; dependencias funcionales del incremento; estado de las pruebas CP-001 a CP-013; diagramas referenciados por tipo; y migraciones del diseño físico. Estos temas son agenda propuesta y no constituyen conclusiones.
 

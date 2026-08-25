@@ -2,7 +2,7 @@
 
 ## 2.1. Diseño
 
-El proceso del Sprint 1 se documenta con los artefactos agrupados del incremento y con la trazabilidad de las 14 historias de usuario reales: HU-001, HU-002, HU-004..HU-009, HU-022..HU-026 y HU-028. HU-003 pertenece al Sprint 3 y no forma parte de este módulo. Las pruebas CP-002..CP-013 no se declaran ejecutadas (GAP-087); CP-001 cuenta con evidencia de ejecución de la superficie backend; la asignación de responsables permanece pendiente (GAP-073).
+El proceso del Sprint 1 se documenta con los artefactos agrupados del incremento y con la trazabilidad de las 14 historias de usuario reales: HU-001, HU-002, HU-004..HU-009, HU-022..HU-026 y HU-028. HU-003 pertenece al Sprint 3 y no forma parte de este módulo. Las pruebas CP-002..CP-013 no se declaran ejecutadas (GAP-087); CP-001 cuenta con evidencia de ejecución de la superficie backend. La asignación de responsables por PB/HU quedó documentada en este módulo (sorteo aleatorio del equipo, 2026-08-24); queda pendiente la consolidación de ceremonias (GAP-073).
 
 ### 2.1.1. Diseño de la Arquitectura
 
@@ -317,29 +317,29 @@ No se embebe ninguna imagen.
 
 ### 2.1.5.1. Plan de pruebas
 
-El plan relaciona cada caso con el Product Backlog, la Historia de Usuario, la funcionalidad, la plataforma, el responsable y el estado. CP-002..CP-013 permanecen `not executed` y sin evidencia adjunta (GAP-087); CP-001 cuenta con evidencia real de la superficie backend. La asignación del responsable permanece pendiente (GAP-073).
+El plan relaciona cada caso con el Product Backlog, la Historia de Usuario, la funcionalidad, la plataforma, el responsable y el estado. CP-002..CP-013 permanecen `not executed` y sin evidencia adjunta (GAP-087); CP-001 cuenta con evidencia real de la superficie backend. Los responsables de los casos corresponden a la asignación por PB/HU documentada en §1.3 (GAP-073 cerrado para la asignación de desarrollo).
 
 | ID Prueba | PB | HU | Funcionalidad evaluada | Plataforma | Responsable | Estado |
 | --- | --- | --- | --- | --- | --- | --- |
-| CP-001 | PB-001 | HU-001 | Registro de cliente | App cliente / Backend (cobertura backend; GAP-073) | GAP-073 | executed |
-| CP-002 | PB-002 | HU-002 | Autenticación y sesión con inactividad de 30 minutos | Backend / Apps / Web | GAP-073 | not executed |
-| CP-003 | PB-004 | HU-004 | Alta de inmobiliaria con checkout simulado | Web / Backend | GAP-073 | not executed |
-| CP-004 | PB-005 | HU-005 | Activación de trial de 14 días y suscripción | Web / Backend | GAP-073 | not executed |
-| CP-005 | PB-006 | HU-006 | Ciclo de suscripción, cuotas, cambios y cancelación | Web / Backend | GAP-073 | not executed |
-| CP-006 | PB-007 | HU-007 | Invitación de agentes con enlace seguro | Web / Backend | GAP-073 | not executed |
-| CP-007 | PB-007 | HU-008 | Activación y desactivación de membresías | Web / Backend | GAP-073 | not executed |
-| CP-008 | PB-008 | HU-009 | Permisos RBAC por alcance | Web / Backend | GAP-073 | not executed |
-| CP-009 | PB-028 | HU-022 | Creación y edición del borrador de publicación | Web / Backend | GAP-073 | not executed |
-| CP-010 | PB-029 | HU-023 | Envío de publicación a revisión | Web / Backend | GAP-073 | not executed |
-| CP-011 | PB-029 | HU-024 | Aprobación o rechazo y verificación del difuminado | Web / Backend | GAP-073 | not executed |
-| CP-012 | PB-030 | HU-025/HU-026 | Publicación, despublicación y catálogo global | Backend / App / Web | GAP-073 | not executed |
-| CP-013 | PB-032 | HU-028 | Favoritos y estado de publicación | Backend / App cliente | GAP-073 | not executed |
+| CP-001 | PB-001 | HU-001 | Registro de cliente | App cliente / Backend (cobertura backend) | Ortiz Montero Luis Enrique | executed |
+| CP-002 | PB-002 | HU-002 | Autenticación y sesión con inactividad de 30 minutos | Backend / Apps / Web | Ortiz Montero Luis Enrique | not executed |
+| CP-003 | PB-004 | HU-004 | Alta de inmobiliaria con checkout simulado | Web / Backend | Buceta Pesoa Luis Fernando | not executed |
+| CP-004 | PB-005 | HU-005 | Activación de trial de 14 días y suscripción | Web / Backend | Vedia Barrios Sebastian | not executed |
+| CP-005 | PB-006 | HU-006 | Ciclo de suscripción, cuotas, cambios y cancelación | Web / Backend | Cervantes Arancibia Roberto Carlos | not executed |
+| CP-006 | PB-007 | HU-007 | Invitación de agentes con enlace seguro | Web / Backend | Cervantes Arancibia Roberto Carlos | not executed |
+| CP-007 | PB-007 | HU-008 | Activación y desactivación de membresías | Web / Backend | Cervantes Arancibia Roberto Carlos | not executed |
+| CP-008 | PB-008 | HU-009 | Permisos RBAC por alcance | Web / Backend | Rebollo Condori Renato | not executed |
+| CP-009 | PB-028 | HU-022 | Creación y edición del borrador de publicación | Web / Backend | Vedia Barrios Sebastian | not executed |
+| CP-010 | PB-029 | HU-023 | Envío de publicación a revisión | Web / Backend | Buceta Pesoa Luis Fernando | not executed |
+| CP-011 | PB-029 | HU-024 | Aprobación o rechazo y verificación del difuminado | Web / Backend | Buceta Pesoa Luis Fernando | not executed |
+| CP-012 | PB-030 | HU-025/HU-026 | Publicación, despublicación y catálogo global | Backend / App / Web | Rebollo Condori Renato | not executed |
+| CP-013 | PB-032 | HU-028 | Favoritos y estado de publicación | Backend / App cliente | Calero Suyo Trevor Félix | not executed |
 
 ### 2.1.5.2. Casos de prueba funcionales de caja negra
 
 Cada caso conserva el patrón del modelo: tabla de metadatos `CAMPO | DESCRIPCIÓN`, tabla de pasos `PASO | ACCIÓN | RESULTADO ESPERADO | ESTADO`, responsable y resultado. CP-002..CP-013 permanecen `not executed` (GAP-087); CP-001 registra los cuatro outcomes observados con evidencia adjunta.
 
-#### Prueba de Historia de Usuario HU-001: Registro con correo
+HU-001: Registro con correo
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -357,11 +357,11 @@ Cada caso conserva el patrón del modelo: tabla de metadatos `CAMPO | DESCRIPCI�
 
 Nota: los pasos 3 y 4 desdoblan el paso 3 original del modelo, conservando la numeración de CP-001.
 
-Responsable: GAP-073
+Responsable: Ortiz Montero Luis Enrique
 Resultado de la prueba: Satisfactorio
 Adjunto: evidencia/cp001-registro-transcripto.txt
 
-#### Prueba de Historia de Usuario HU-002: Autenticación y sesión
+HU-002: Autenticación y sesión
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -378,11 +378,11 @@ Adjunto: evidencia/cp001-registro-transcripto.txt
 | 4 | Dejar la sesión inactiva durante 30 minutos y ejecutar una acción. | La sesión se invalida y se solicita autenticación. | not executed |
 | 5 | Ejecutar `logout` y reutilizar el refresh token. | El token revocado es rechazado. | not executed |
 
-Responsable: GAP-073
+Responsable: Ortiz Montero Luis Enrique
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-004: Alta de inmobiliaria
+HU-004: Alta de inmobiliaria
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -398,11 +398,11 @@ Adjunto: —
 | 3 | Reprocesar el mismo evento firmado. | No se duplica el tenant. | not executed |
 | 4 | Intentar finalizar sin evento firmado válido. | No se aprovisiona el tenant. | not executed |
 
-Responsable: GAP-073
+Responsable: Buceta Pesoa Luis Fernando
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-005: Activar prueba y suscribirse
+HU-005: Activar prueba y suscribirse
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -417,11 +417,11 @@ Adjunto: —
 | 2 | Enviar el evento firmado de suscripción. | La suscripción cambia a `active`. | not executed |
 | 3 | Reprocesar el evento. | El estado no se duplica ni se crean registros repetidos. | not executed |
 
-Responsable: GAP-073
+Responsable: Vedia Barrios Sebastian
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-006: Gestionar suscripción
+HU-006: Gestionar suscripción
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -438,11 +438,11 @@ Adjunto: —
 | 4 | Cancelar la suscripción. | Pasa a `canceled_read_only` durante 30 días. | not executed |
 | 5 | Cumplir el período de retención. | Pasa a `purged` y conserva transacciones anonimizadas. | not executed |
 
-Responsable: GAP-073
+Responsable: Cervantes Arancibia Roberto Carlos
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-007: Invitar agentes
+HU-007: Invitar agentes
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -457,11 +457,11 @@ Adjunto: —
 | 2 | Aceptar el enlace una vez. | Se crea la membresía sin duplicar la cuenta global. | not executed |
 | 3 | Reutilizar el enlace o usarlo después de expirar. | La operación es rechazada. | not executed |
 
-Responsable: GAP-073
+Responsable: Cervantes Arancibia Roberto Carlos
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-008: Activar o desactivar membresías
+HU-008: Activar o desactivar membresías
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -476,11 +476,11 @@ Adjunto: —
 | 2 | Activar otra membresía del mismo agente. | La anterior queda inactiva y solo una permanece activa. | not executed |
 | 3 | Desactivar o revocar una membresía. | Se niega el acceso y se conserva la autoría histórica. | not executed |
 
-Responsable: GAP-073
+Responsable: Cervantes Arancibia Roberto Carlos
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-009: Asignar permisos
+HU-009: Asignar permisos
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -495,11 +495,11 @@ Adjunto: —
 | 2 | Asignar un permiso con alcance inmueble. | El agente accede solo al inmueble autorizado. | not executed |
 | 3 | Solicitar una función sin asignación válida. | El acceso se deniega por defecto. | not executed |
 
-Responsable: GAP-073
+Responsable: Rebollo Condori Renato
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-022: Crear y editar borrador
+HU-022: Crear y editar borrador
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -514,11 +514,11 @@ Adjunto: —
 | 2 | Editar los datos del borrador y guardar. | Se guardan los cambios sin alterar otras publicaciones. | not executed |
 | 3 | Consultar desde un tenant diferente. | El borrador no es visible. | not executed |
 
-Responsable: GAP-073
+Responsable: Vedia Barrios Sebastian
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-023: Enviar a revisión
+HU-023: Enviar a revisión
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -533,11 +533,11 @@ Adjunto: —
 | 2 | Intentar autoaprobar como agente. | La aprobación es rechazada. | not executed |
 | 3 | Enviar sin permiso requerido. | La transición es rechazada y el estado no cambia. | not executed |
 
-Responsable: GAP-073
+Responsable: Buceta Pesoa Luis Fernando
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-024: Aprobar o rechazar publicaciones
+HU-024: Aprobar o rechazar publicaciones
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -552,11 +552,11 @@ Adjunto: —
 | 2 | Rechazar una publicación. | Pasa a `rechazado` y exige observaciones. | not executed |
 | 3 | Intentar aprobar sin verificar el difuminado. | La aprobación es rechazada. | not executed |
 
-Responsable: GAP-073
+Responsable: Buceta Pesoa Luis Fernando
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-025/HU-026: Publicación y catálogo global
+HU-025/HU-026: Publicación y catálogo global
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -571,11 +571,11 @@ Adjunto: —
 | 2 | Despublicar un inmueble. | Desaparece inmediatamente del catálogo y se registra la auditoría. | not executed |
 | 3 | Consultar enviando un `tenant_id` como autorización. | El servidor no concede acceso por ese valor. | not executed |
 
-Responsable: GAP-073
+Responsable: Rebollo Condori Renato
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-028: Guardar favoritos
+HU-028: Guardar favoritos
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -590,7 +590,7 @@ Adjunto: —
 | 2 | Quitar el favorito. | El favorito deja de estar activo. | not executed |
 | 3 | Despublicar la publicación favorita. | El favorito queda `no_disponible` sin exponer contenido privado. | not executed |
 
-Responsable: GAP-073
+Responsable: Calero Suyo Trevor Félix
 Resultado de la prueba: not executed
 Adjunto: —
 

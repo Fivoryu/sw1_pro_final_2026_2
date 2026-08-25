@@ -12,12 +12,12 @@ La nómina del equipo se conoce; la asistencia y participación efectiva en la c
 
 | Nombre | Rol |
 | --- | --- |
-| Jimenez Peña Marcelo | Product Owner |
-| Letizia Mendieta Albán | Scrum Master |
-| Nathalia Ardaya Campos | Developer |
-| Trevor Félix Calero Suyo | Developer |
-| Nelson Chumacero Miranda | Developer |
-| Guzmán Rojas Luis David | Developer |
+| Buceta Pesoa Luis Fernando | Developer |
+| Calero Suyo Trevor Félix | Product Owner |
+| Cervantes Arancibia Roberto Carlos | Scrum Master |
+| Ortiz Montero Luis Enrique | Developer |
+| Rebollo Condori Renato | Developer |
+| Vedia Barrios Sebastian | Developer |
 
 ### PRESENTACIÓN DEL INCREMENTO
 
