@@ -1,26 +1,25 @@
-# Sprint 1 — Gráfica de esfuerzo y datos de esfuerzo
+# 7. Grafica de esfuerzo y Datos de esfuerzo
 
-| Campo | Valor |
-| --- | --- |
-| Módulo | S1-07 |
-| Estado | pending / not executed (GAP-087) |
-| Referencia del modelo | CAPITULO 2, sección 7 — Gráfica de esfuerzo y datos de esfuerzo |
-| IDs | SP-01; PB-001, PB-002, PB-004..PB-008, PB-028..PB-030, PB-032, PB-048, PB-049; HU-001, HU-002, HU-004..HU-009, HU-022..HU-026, HU-028 |
-| Evidencia | GAP-087 — esfuerzo actual no ejecutado; GAP-CH2-003 — gráfica no verificable |
+## ESFUERZO
 
-## 7.1. Datos de esfuerzo
+El esfuerzo previsto corresponde a la planificación del Sprint Backlog en HRS. El desglose por PB suma 104 HRS orientativas; la cifra consolidada canónica del Sprint 1 es de aproximadamente 107 horas (GAP-072, repartición por valor esperado 13/22/14 en `08-planificacion-de-sprints.md`), pendiente de validación del equipo. El esfuerzo real no se ejecutó ni cuenta con registros observados (GAP-087).
 
-El esfuerzo planificado se toma del Sprint Planning: **107 HRS** para los 13 PB del SP-01. El esfuerzo actual se completará con registros de trabajo observados; no se infiere a partir de la planificación.
+| CÓDIGO | TAREA | PREVISTO DE HORAS | REAL DE HORAS |
+| --- | --- | ---: | ---: |
+| PB-001 | Registro cliente | 4 HRS | not executed |
+| PB-002 | Autenticación y sesión | 8 HRS | not executed |
+| PB-004 | Alta de inmobiliaria | 8 HRS | not executed |
+| PB-005 | Trial y suscripción | 8 HRS | not executed |
+| PB-006 | Ciclo de suscripción | 16 HRS | not executed |
+| PB-007 | Invitación y membresías | 8 HRS | not executed |
+| PB-008 | Permisos RBAC | 8 HRS | not executed |
+| PB-028 | Editor de publicación | 8 HRS | not executed |
+| PB-029 | Revisión y aprobación | 8 HRS | not executed |
+| PB-030 | Publicación y catálogo | 8 HRS | not executed |
+| PB-032 | Favoritos | 4 HRS | not executed |
+| PB-048 | Entorno local (Docker + Floci) | 8 HRS | not executed |
+| PB-049 | CI básica | 8 HRS | not executed |
+| **Total del desglose** | **Desglose orientativo por PB** | **104 HRS** | **not executed** |
+| **Total consolidado** | **Esfuerzo total del Sprint 1** | **≈107 HRS (GAP-072)** | **not executed** |
 
-| CONCEPTO | PLANEADO | ACTUAL |
-| --- | ---: | ---: |
-| Esfuerzo total del Sprint 1 | 107 HRS | — (not executed) |
-
-## 7.2. Método y evidencia
-
-- **Planeado:** suma de las estimaciones en horas del Sprint Backlog de SP-01.
-- **Actual:** suma de horas registradas durante la ejecución del sprint, pendiente de evidencia.
-- **Estado del dato actual:** not executed (GAP-087).
-- **Responsable de consolidación:** GAP-073.
-
-El modelo menciona una gráfica de esfuerzo, pero su tipo y sus series no son verificables. Se conserva la tabla `PLANEADO | ACTUAL` sin embebir una imagen ni inventar una gráfica (GAP-CH2-003).
+La gráfica de esfuerzo mencionada por el modelo no tiene tipo ni series recuperables. Se conserva la tabla de esfuerzo y se aplica GAP-CH2-003: no se inventa una gráfica ni se embebe una imagen.

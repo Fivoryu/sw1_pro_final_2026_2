@@ -1,41 +1,80 @@
-# Sprint 1 — Daily Scrum
+# 3. Daily Scrum
 
-| Campo | Valor |
-| --- | --- |
-| Módulo | S1-03 |
-| Estado | pending / not executed (GAP-087) |
-| Referencia del modelo | CAPITULO 2, sección 3 — Daily Scrum |
-| IDs | SP-01; PB-001, PB-002, PB-004..PB-008, PB-028..PB-030, PB-032, PB-048, PB-049; HU-001, HU-002, HU-004..HU-009, HU-022..HU-026, HU-028 |
-| Evidencia | GAP-087 — ceremonia no ejecutada |
+La ceremonia Daily Scrum del Sprint 1 no se ejecutó. Se conserva la estructura semanal del modelo y se dejan las respuestas, fechas y obstáculos como `not executed`, sin inventar actividad (GAP-087). Las fechas exactas del sprint tampoco están confirmadas (GAP-084).
 
-## 3.1. Objetivo del registro
+## SEMANA 1
 
-El Daily Scrum registrará, por integrante y por jornada, el avance del Sprint 1, el trabajo siguiente y los obstáculos. El foco de SP-01 es entregar la base administrativa y comercial: autenticación, onboarding SaaS, agentes y permisos, publicaciones, catálogo y favoritos. El seguimiento también verificará el acuerdo de capacidad variable para sostener los **13 PB / 14 HU** y la carga planificada de **107 HRS**.
+Periodo: not executed (GAP-084/GAP-087)
 
-No se inventan fechas, asistentes, respuestas ni bloqueos. Hasta que se ejecute la ceremonia, el registro permanece `not executed` (GAP-087).
+| Pregunta | Integrante | Sábado | Domingo | Lunes | Martes | Miércoles | Jueves | Viernes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ¿Qué hiciste? | Jimenez Peña Marcelo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Jimenez Peña Marcelo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Jimenez Peña Marcelo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué hiciste? | Letizia Mendieta Albán | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Letizia Mendieta Albán | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Letizia Mendieta Albán | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué hiciste? | Nathalia Ardaya Campos | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Nathalia Ardaya Campos | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Nathalia Ardaya Campos | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué hiciste? | Trevor Félix Calero Suyo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Trevor Félix Calero Suyo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Trevor Félix Calero Suyo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué hiciste? | Nelson Chumacero Miranda | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Nelson Chumacero Miranda | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Nelson Chumacero Miranda | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué hiciste? | Guzmán Rojas Luis David | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Guzmán Rojas Luis David | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Guzmán Rojas Luis David | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
 
-## 3.2. Registro por integrante
+## SEMANA 2
 
-La nómina y la asignación de responsables del Sprint 1 todavía no están evidenciadas (GAP-073). Por esa razón no se inventan nombres ni se agregan filas atribuidas a personas concretas.
+Periodo: not executed (GAP-084/GAP-087)
 
-| INTEGRANTE | ¿Qué hice? | ¿Qué haré? | ¿Qué obstáculos? |
-| --- | --- | --- | --- |
-| Nómina SP-01 pendiente de confirmar (GAP-073) | not executed | not executed | not executed |
+| Pregunta | Integrante | Sábado | Domingo | Lunes | Martes | Miércoles | Jueves | Viernes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ¿Qué hiciste? | Jimenez Peña Marcelo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Jimenez Peña Marcelo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Jimenez Peña Marcelo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué hiciste? | Letizia Mendieta Albán | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Letizia Mendieta Albán | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Letizia Mendieta Albán | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué hiciste? | Nathalia Ardaya Campos | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Nathalia Ardaya Campos | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Nathalia Ardaya Campos | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué hiciste? | Trevor Félix Calero Suyo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Trevor Félix Calero Suyo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Trevor Félix Calero Suyo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué hiciste? | Nelson Chumacero Miranda | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Nelson Chumacero Miranda | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Nelson Chumacero Miranda | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué hiciste? | Guzmán Rojas Luis David | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Guzmán Rojas Luis David | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Guzmán Rojas Luis David | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
 
-Al ejecutar cada Daily Scrum, se reemplazará la fila provisional por una fila por integrante y se conservarán las respuestas observadas.
+## SEMANA 3
 
-## 3.3. Acuerdos de capacidad y foco
+Periodo: not executed (GAP-084/GAP-087)
 
-| Acuerdo a verificar | Referencia SP-01 | Estado |
-| --- | --- | --- |
-| Trabajar con capacidad variable para atender los 13 PB y aproximadamente 107 HRS. | `01-sprint-planning.md`, §1.4 | not executed |
-| Priorizar autenticación antes del onboarding, membresías y permisos. | `01-sprint-planning.md`, §1.5 | not executed |
-| Mantener el foco en publicaciones, aprobación, catálogo global y favoritos después de resolver auth y tenancy. | `01-sprint-planning.md`, §1.5 | not executed |
-| Reagendar primero PB-032 si el consumo real supera la holgura disponible. | `01-sprint-planning.md`, §1.4 | not executed |
+| Pregunta | Integrante | Sábado | Domingo | Lunes | Martes | Miércoles | Jueves | Viernes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ¿Qué hiciste? | Jimenez Peña Marcelo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Jimenez Peña Marcelo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Jimenez Peña Marcelo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué hiciste? | Letizia Mendieta Albán | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Letizia Mendieta Albán | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Letizia Mendieta Albán | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué hiciste? | Nathalia Ardaya Campos | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Nathalia Ardaya Campos | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Nathalia Ardaya Campos | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué hiciste? | Trevor Félix Calero Suyo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Trevor Félix Calero Suyo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Trevor Félix Calero Suyo | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué hiciste? | Nelson Chumacero Miranda | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Nelson Chumacero Miranda | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Nelson Chumacero Miranda | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué hiciste? | Guzmán Rojas Luis David | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué harás? | Guzmán Rojas Luis David | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
+| ¿Qué obstáculos encontraste? | Guzmán Rojas Luis David | not executed | not executed | not executed | not executed | not executed | not executed | not executed |
 
-## 3.4. Evidencia pendiente
-
-- Fecha y rango de cada reunión: `not executed` (GAP-087).
-- Respuestas de cada integrante: `not executed` (GAP-087).
-- Obstáculos y acuerdos de seguimiento: `not executed` (GAP-087).
-- Responsable de consolidación: GAP-073.
+La ceremonia completa, sus fechas, respuestas y obstáculos quedan pendientes de ejecución y consolidación (GAP-087). No se agrega un tipo de diagrama porque el modelo no lo especifica (GAP-CH2-001).

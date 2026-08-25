@@ -1,57 +1,59 @@
-# Sprint 1 — Sprint Review
+# 4. Sprint Review
 
-| Campo | Valor |
-| --- | --- |
-| Módulo | S1-04 |
-| Estado | pending / not executed (GAP-087) |
-| Referencia del modelo | CAPITULO 2, sección 4 — Sprint Review |
-| IDs | SP-01; PB-001, PB-002, PB-004..PB-008, PB-028..PB-030, PB-032, PB-048, PB-049; HU-001, HU-002, HU-004..HU-009, HU-022..HU-026, HU-028 |
-| Evidencia | GAP-087 — revisión no ejecutada |
+## SPRINT REVIEW
 
-## 4.1. Objetivo de la revisión
+### Objetivo de la revisión
 
-Demostrar el incremento comprometido en SP-01 y contrastarlo con los criterios de aceptación de las 14 HU. La revisión debe cubrir la base administrativa y comercial, el entorno local y la CI básica, sin declarar aceptación hasta que exista una demostración observada.
+Evaluar el incremento comprometido del Sprint 1 de RoomForge mediante la demostración de las 14 historias de usuario del alcance, sin declarar aceptación porque la revisión no se ejecutó (GAP-087).
 
-## 4.2. Participantes
+### PARTICIPANTES
+
+La nómina del equipo se conoce; la asistencia y participación efectiva en la ceremonia no fueron registradas (GAP-087).
 
 | Nombre | Rol |
 | --- | --- |
-| Participantes pendientes de confirmar (GAP-073) | not executed |
+| Jimenez Peña Marcelo | Product Owner |
+| Letizia Mendieta Albán | Scrum Master |
+| Nathalia Ardaya Campos | Developer |
+| Trevor Félix Calero Suyo | Developer |
+| Nelson Chumacero Miranda | Developer |
+| Guzmán Rojas Luis David | Developer |
 
-## 4.3. Incremento demostrado y aceptación
+### PRESENTACIÓN DEL INCREMENTO
 
-La siguiente matriz identifica el alcance que deberá demostrarse. El estado no representa una demostración realizada: todos los resultados permanecen `not executed`.
+| FUNCIÓN PRESENTADA | RETROALIMENTACIÓN |
+| --- | --- |
+| HU-001 — Registro con correo | not executed (GAP-087) |
+| HU-002 — Autenticación y sesión | not executed (GAP-087) |
+| HU-004 — Alta de inmobiliaria | not executed (GAP-087) |
+| HU-005 — Trial y suscripción | not executed (GAP-087) |
+| HU-006 — Ciclo de suscripción | not executed (GAP-087) |
+| HU-007 — Invitación de agentes | not executed (GAP-087) |
+| HU-008 — Activación y desactivación de membresías | not executed (GAP-087) |
+| HU-009 — Permisos RBAC | not executed (GAP-087) |
+| HU-022 — Editor de publicación | not executed (GAP-087) |
+| HU-023 — Envío a revisión | not executed (GAP-087) |
+| HU-024 — Aprobación o rechazo de publicaciones | not executed (GAP-087) |
+| HU-025 — Publicación y despublicación | not executed (GAP-087) |
+| HU-026 — Catálogo global | not executed (GAP-087) |
+| HU-028 — Favoritos | not executed (GAP-087) |
 
-| PB / HU | Incremento a demostrar | Aceptación | Estado |
-| --- | --- | --- | --- |
-| PB-001 / HU-001 | Registro de cliente | Criterios de aceptación de la ficha HU-001 | not executed |
-| PB-002 / HU-002 | Autenticación y sesión | Criterios de aceptación de la ficha HU-002 | not executed |
-| PB-004 / HU-004 | Alta de inmobiliaria | Criterios de aceptación de la ficha HU-004 | not executed |
-| PB-005 / HU-005 | Trial y suscripción | Criterios de aceptación de la ficha HU-005 | not executed |
-| PB-006 / HU-006 | Ciclo de suscripción | Criterios de aceptación de la ficha HU-006 | not executed |
-| PB-007 / HU-007, HU-008 | Invitaciones y membresías | Criterios de aceptación de las fichas HU-007 y HU-008 | not executed |
-| PB-008 / HU-009 | Permisos RBAC | Criterios de aceptación de la ficha HU-009 | not executed |
-| PB-028 / HU-022 | Editor de publicación | Criterios de aceptación de la ficha HU-022 | not executed |
-| PB-029 / HU-023, HU-024 | Revisión y aprobación | Criterios de aceptación de las fichas HU-023 y HU-024 | not executed |
-| PB-030 / HU-025, HU-026 | Publicación y catálogo | Criterios de aceptación de las fichas HU-025 y HU-026 | not executed |
-| PB-032 / HU-028 | Favoritos | Criterios de aceptación de la ficha HU-028 | not executed |
-| PB-048 | Entorno local Docker + Floci | Smoke test del entorno | not executed |
-| PB-049 | CI básica | Tests y smoke test en cada merge | not executed |
-
-## 4.4. Feedback
-
-| FUNCIÓN PRESENTADA | RETROALIMENTACIÓN | ESTADO |
-| --- | --- | --- |
-| Incremento de SP-01 | Pendiente de observar durante la revisión; no hay feedback registrado. | not executed |
-
-## 4.5. Tareas y decisión de aceptación
+### TAREAS COMPLETADAS
 
 | Tarea | Estado |
 | --- | --- |
-| Demostrar el incremento del alcance SP-01 | not executed |
-| Registrar feedback del Product Owner y del equipo | not executed |
-| Decidir aceptación, ajustes o trabajo pendiente | not executed |
+| PB-001 — Registro cliente | not executed (GAP-087) |
+| PB-002 — Autenticación y sesión | not executed (GAP-087) |
+| PB-004 — Alta de inmobiliaria | not executed (GAP-087) |
+| PB-005 — Trial y suscripción | not executed (GAP-087) |
+| PB-006 — Ciclo de suscripción | not executed (GAP-087) |
+| PB-007 — Invitación y membresías | not executed (GAP-087) |
+| PB-008 — Permisos RBAC | not executed (GAP-087) |
+| PB-028 — Editor de publicación | not executed (GAP-087) |
+| PB-029 — Revisión y aprobación | not executed (GAP-087) |
+| PB-030 — Publicación y catálogo | not executed (GAP-087) |
+| PB-032 — Favoritos | not executed (GAP-087) |
+| PB-048 — Entorno local (Docker + Floci) | not executed (GAP-087) |
+| PB-049 — CI básica | not executed (GAP-087) |
 
-**Resultado de la Sprint Review:** not executed.
-**Responsable de consolidación:** GAP-073.
-**Evidencia:** GAP-087.
+**Resultado de la Sprint Review:** not executed. No se registró feedback ni decisión de aceptación (GAP-087; asignación de consolidación GAP-073). No se agrega un tipo de diagrama porque el modelo no lo especifica (GAP-CH2-001).

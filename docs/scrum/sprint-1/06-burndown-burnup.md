@@ -1,46 +1,19 @@
-# Sprint 1 — Burndown y BurnUp
+# 6. Burndown y BurnUp
 
-| Campo | Valor |
-| --- | --- |
-| Módulo | S1-06 |
-| Estado | pending / not executed (GAP-087) |
-| Referencia del modelo | CAPITULO 2, sección 6 — Burndown y BurnUp |
-| IDs | SP-01; PB-001, PB-002, PB-004..PB-008, PB-028..PB-030, PB-032, PB-048, PB-049; HU-001, HU-002, HU-004..HU-009, HU-022..HU-026, HU-028 |
-| Evidencia | GAP-087 — series no ejecutadas; GAP-CH2-002 — series no recuperables del modelo |
+## 6.1. Grafica Burndown
 
-## 6.1. Cálculo de la Gráfica Burndown
+**Tipo de referencia:** Burndown chart
+**Referencia del artefacto:** CAPITULO 2, sección 6.1
+**Alcance planificado:** 107 PHU como equivalencia de la estimación en horas del Sprint 1.
+**Serie y fechas:** not executed (GAP-087); las series del modelo no son recuperables (GAP-CH2-002).
 
-El Burndown se calculará usando los puntos PHU comprometidos en el Sprint Backlog. SP-01 planifica **107 PHU totales** como equivalencia de la estimación en horas documentada en `01-sprint-planning.md` (§1.3). Para cada fecha de medición se registrará el trabajo pendiente:
+No se embebe ninguna imagen ni se inventan puntos, ejes, fechas o valores diarios. La gráfica queda pendiente de generarse con mediciones observadas.
 
-`PHU pendientes del día = 107 PHU − PHU completados observados`
+## 6.2. Grafica BurnUp
 
-| Elemento | Valor / estado |
-| --- | --- |
-| Puntos PHU iniciales | 107 PHU |
-| Unidad de medición | PHU completados y pendientes por fecha de seguimiento |
-| Serie planificada | Pendiente de fechas y mediciones; not executed |
-| Serie real | not executed |
-| Estado del artefacto | not executed |
+**Tipo de referencia:** BurnUp chart
+**Referencia del artefacto:** CAPITULO 2, sección 6.2
+**Alcance planificado:** 107 PHU como equivalencia de la estimación en horas del Sprint 1.
+**Serie y fechas:** not executed (GAP-087); las series del modelo no son recuperables (GAP-CH2-002).
 
-**Tipo de referencia:** **Gráfica Burndown**. No se embebe una imagen ni se inventan series, fechas, ejes o valores (GAP-CH2-002).
-
-## 6.2. Cálculo de la Gráfica BurnUp
-
-El BurnUp se calculará acumulando los PHU completados y comparándolos con el alcance total de 107 PHU del Sprint Backlog. La serie observada solo se incorporará después de registrar ejecuciones reales y fechas verificables.
-
-| Elemento | Valor / estado |
-| --- | --- |
-| Alcance total | 107 PHU |
-| Unidad de medición | PHU completados acumulados por fecha de seguimiento |
-| Serie planificada | Pendiente de fechas y mediciones; not executed |
-| Serie real | not executed |
-| Estado del artefacto | not executed |
-
-**Tipo de referencia:** **Gráfica BurnUp**. No se embebe una imagen ni se inventan series, fechas, ejes o valores (GAP-CH2-002).
-
-## 6.3. Evidencia pendiente
-
-- Fechas de medición y valores diarios: `not executed` (GAP-087).
-- Puntos PHU realmente completados: `not executed` (GAP-087).
-- Gráficas Burndown y BurnUp: pendientes de generación con datos observados.
-- Responsable de consolidación: GAP-073.
+No se embebe ninguna imagen ni se inventan puntos, ejes, fechas o valores acumulados. La gráfica queda pendiente de generarse con mediciones observadas.

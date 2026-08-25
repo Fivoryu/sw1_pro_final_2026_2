@@ -1,54 +1,28 @@
-# Sprint 1 — Sprint Retrospective
+# 5. Sprint Retrospective
 
-| Campo | Valor |
-| --- | --- |
-| Módulo | S1-05 |
-| Estado | pending / not executed (GAP-087) |
-| Referencia del modelo | CAPITULO 2, sección 5 — Sprint Retrospective |
-| IDs | SP-01; PB-001, PB-002, PB-004..PB-008, PB-028..PB-030, PB-032, PB-048, PB-049; HU-001, HU-002, HU-004..HU-009, HU-022..HU-026, HU-028 |
-| Evidencia | GAP-087 — retrospectiva no ejecutada |
+## SPRINT RETROSPECTIVE
 
-## 5.1. Objetivos de la retrospectiva
+**Fecha:** not executed (GAP-084/GAP-087)
 
-La retrospectiva deberá revisar el cumplimiento del foco de SP-01, la decisión de trabajar con capacidad variable para una carga planificada de 107 HRS, la secuencia de dependencias entre autenticación, tenancy, membresías, publicaciones y catálogo, y la calidad de la documentación y las pruebas.
+**Objetivos de la retrospectiva:** Analizar la ejecución del Sprint 1, la carga planificada de aproximadamente 107 HRS, las dependencias entre autenticación, tenancy, membresías, publicaciones y catálogo, y las oportunidades de mejora para el siguiente sprint. La retrospectiva no se ejecutó, por lo que no se presentan conclusiones.
 
-**Fecha:** not executed (GAP-087)
-**Responsable de consolidación:** GAP-073.
-
-## 5.2. Participantes
+### PARTICIPANTES
 
 | Nombres | Rol |
 | --- | --- |
-| Participantes pendientes de confirmar (GAP-073) | not executed |
+| Jimenez Peña Marcelo | Product Owner |
+| Letizia Mendieta Albán | Scrum Master |
+| Nathalia Ardaya Campos | Developer |
+| Trevor Félix Calero Suyo | Developer |
+| Nelson Chumacero Miranda | Developer |
+| Guzmán Rojas Luis David | Developer |
 
-## 5.3. Qué funcionó
+**Temas Para Tratar:** Validación de la capacidad y carga del Sprint 1; dependencias funcionales del incremento; estado de las pruebas CP-001 a CP-013; diagramas referenciados por tipo; y migraciones del diseño físico. Estos temas son agenda propuesta y no constituyen conclusiones.
 
-| Observación | Evidencia | Estado |
+### DISCUSIÓN
+
+| ¿Qué hicimos bien? | ¿Qué debemos dejar de hacer? | ¿Qué podemos mejorar? |
 | --- | --- | --- |
-| No hay observaciones de retrospectiva ejecutada disponibles. | GAP-087 | not executed |
+| not executed (GAP-087) | not executed (GAP-087) | not executed (GAP-087) |
 
-## 5.4. Qué no funcionó
-
-| Observación | Evidencia | Estado |
-| --- | --- | --- |
-| No hay observaciones de retrospectiva ejecutada disponibles. | GAP-087 | not executed |
-
-## 5.5. Temas para tratar
-
-- Validación de la capacidad variable y de la carga de 107 HRS del SP-01.
-- Seguimiento de las dependencias entre autenticación, onboarding, membresías, RBAC, publicaciones y catálogo.
-- Estado de la ejecución de CP-001..CP-013 y disponibilidad de evidencias.
-- Estado de los diagramas referenciados por tipo y de las migraciones Alembic (GAP-088/GAP-092).
-
-Estos temas son agenda propuesta; no constituyen conclusiones de la retrospectiva.
-
-## 5.6. Acciones de mejora
-
-| Acción propuesta | Responsable | Estado | Evidencia |
-| --- | --- | --- | --- |
-| Ejecutar la retrospectiva y registrar qué funcionó y qué no. | GAP-073 | not executed | GAP-087 |
-| Confirmar responsables y capacidad real del SP-01. | GAP-073 | not executed | GAP-072/GAP-073 |
-| Ejecutar CP-001..CP-013 y adjuntar evidencia verificable. | GAP-073 | not executed | GAP-087 |
-| Actualizar el diseño físico con migraciones Alembic. | GAP-073 | pending | GAP-092 |
-
-**Resultado de la retrospectiva:** not executed. No se inventan conclusiones ni compromisos cerrados.
+**Resultado de la retrospectiva:** not executed. No se inventan observaciones, decisiones ni acciones cerradas (GAP-087; responsable de consolidación GAP-073). No se agrega un tipo de diagrama porque el modelo no lo especifica (GAP-CH2-001).
