@@ -114,6 +114,8 @@ docker compose -f infra/docker/compose.postgres.yml up -d
 
 - [documentacion-software](skills/documentacion-software/SKILL.md): usar para generar documentación modular y verificable de Ingeniería de Software en este proyecto.
 - [diagramas-uml-ea](skills/diagramas-uml-ea/SKILL.md): usar para crear diagramas UML en Enterprise Architect vía MCP, empezando por el patrón validado de diagrama de comunicación con business objects.
+- [github-invitations](skills/github-invitations/SKILL.md): usar para invitar colaboradores a repositorios de GitHub con permisos explícitos y verificación de estado.
+- [university-repositories](skills/university-repositories/SKILL.md): usar para crear y nombrar repositorios de GitHub de proyectos universitarios, incluidos monorepos y submódulos.
 
 ## 9. SDD / OpenSpec
 
