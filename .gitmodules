@@ -2,3 +2,15 @@
 	path = apps/cliente_mobile
 	url = https://github.com/Fivoryu/sw1_pro_final_cliente_mobile_2026_2.git
 	branch = feat/pruebas/cp001-postgres
+[submodule "backend"]
+	path = backend
+	url = https://github.com/Fivoryu/sw1_pro_final_backend_2026_2.git
+	branch = main
+[submodule "panel"]
+	path = panel
+	url = https://github.com/Fivoryu/sw1_pro_final_frontend_2026_2.git
+	branch = main
+[submodule "apps/captura_mobile"]
+	path = apps/captura_mobile
+	url = https://github.com/Fivoryu/sw1_pro_final_captura_mobile_2026_2.git
+	branch = main
