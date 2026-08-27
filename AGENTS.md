@@ -7,7 +7,7 @@
 **RoomForge** es un SaaS inmobiliario académico con recorridos 3D, desarrollado como trabajo final de la materia **Ingeniería de Software 1 (SW1)**, ciclo **2026-2**, **Grupo #12**. El monorepo actual es el repositorio de coordinación; el código de producto vive en 4 repositorios individuales conectados como submódulos (ver §3).
 
 - **Escenario**: inmobiliarias publican inmuebles; agentes capturan videos/fotos para reconstrucción 3D (Meshroom); clientes recorren los inmuebles en 3D, consultan precios, reservan y pagan con token de prueba.
-- **Fase actual**: backend implementado para **PB-001 (registro de cliente)** y **PB-002 (autenticación y sesión)**; el resto de superficies (panel web, apps móviles, worker 3D, contratos) está en estructura inicial.
+- **Fase actual**: backend implementado para **PB-001 (registro de cliente)** y **PB-002 (autenticación y sesión)**; la app cliente ya integra registro, login y sesión; el resto de superficies (panel web, app de captura, worker 3D y contratos) está en estructura inicial.
 - **Documentación maestra**: `docs/` — PAPS, Sprint 0–3, trazabilidad de IDs (PB/HU/CP/GAP) siguiendo el formato del documento modelo (Grupo #12).
 
 ## 2. Cómo trabajar acá (primero leé esto)
@@ -98,7 +98,7 @@ docker compose -f infra/docker/compose.postgres.yml up -d
 | `backend/` | ✅ Registro (PB-001) + autenticación/sesión (PB-002) implementados y verificados; pruebas CP-001 ejecutadas contra PostgreSQL real |
 | `panel/` | 🔲 Estructura inicial (React + TypeScript + Vite), sin código |
 | `apps/captura_mobile/` | 🔲 Estructura inicial (Flutter), sin código |
-| `apps/cliente_mobile/` | 🔲 Estructura inicial (Flutter), sin código |
+| `apps/cliente_mobile/` | ✅ Registro, login y sesión integrados; catálogo y reservas pendientes |
 | `worker3d/`, `contracts/` | 🔲 Sin trabajo aún |
 
 ## 7. Documentación y trazabilidad (convenciones)
@@ -132,7 +132,7 @@ Para un cambio nuevo: seguir el pipeline SDD completo y persistir ambos backends
 ## 10. Gaps abiertos relevantes
 
 - **GAP-092**: migraciones del Sprint 1 pendientes contra PostgreSQL real — solo `0001`/`0002` ejecutadas; quedan 12 tablas.
-- **GAP-087**: CP-002..CP-013 sin ejecutar (solo CP-001 tiene evidencia).
+- **GAP-087**: CP-003..CP-013 sin ejecutar; CP-001 y CP-002 cuentan con evidencia.
 - **GAP-073**: asignación de responsables de pruebas/documentación pendiente.
 - **GAP-088**: diagramas UML del Sprint 1 pendientes de creación en Enterprise Architect.
 - **GAP-084**: fechas exactas del Sprint 1 no confirmadas.

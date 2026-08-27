@@ -1,0 +1,102 @@
+# Transcripto de ejecución CP-002 — HU-002
+
+- Fecha de ejecución: 2026-08-27.
+- Alcance principal: ejecución real de CP-002 sobre la API y la base de datos locales; la sección 5 agrega la validación manual complementaria desde un dispositivo Android, sin implicar aprobación global del Sprint 1.
+- API: Uvicorn local en `http://127.0.0.1:8000`.
+- Base de datos: PostgreSQL real en Docker, imagen `postgres:16-alpine`, versión observada `16.14`; contenedor `healthy`.
+- Migraciones: Alembic en `0002 (head)`.
+- Sanitización: el correo de prueba fue aleatorio y se omite; la contraseña nunca se escribió en esta evidencia. No se registran valores de access token, refresh token, secretos de firma, hashes, credenciales ni paths absolutos.
+
+## 1. Preparación de datos
+
+Se levantaron PostgreSQL real y Uvicorn local antes de ejecutar el caso. Se preparó una cuenta de prueba con un correo aleatorio y credenciales válidas, sin copiar sus valores a este archivo.
+
+```text
+SETUP_REGISTRATION status=201 account_created=True password_exposed=False
+```
+
+Para verificar los límites de inactividad sin esperar el tiempo transcurrido en tiempo real, se ajustó únicamente `sesion.ultima_actividad` mediante SQL sobre PostgreSQL real:
+
+- Antes de `CP002_P3_ACTIVITY_29_MIN`, se preparó el valor como `now() - interval '29 minutes'`.
+- Antes de `CP002_P4_ACTIVITY_31_MIN`, se preparó el valor como `now() - interval '31 minutes'`.
+
+Estos desplazamientos de 29 y 31 minutos fueron una preparación determinista mediante SQL sobre PostgreSQL real; no representan una espera real del reloj ni el transcurso efectivo de esos minutos.
+
+## 2. Requests y responses sanitizados
+
+Los cuerpos que contenían correo, contraseña o tokens se transcriben solo con sus resultados y marcadores sanitizados. No se copian valores secretos ni identificadores de la cuenta.
+
+### P1 — login con credenciales válidas
+
+```text
+REQUEST: POST /api/v1/auth/login
+REQUEST_BODY: correo=[CORREO_ALEATORIO_OMITIDO], password=[OMITIDA]
+CP002_P1_LOGIN_VALID status=200 access_present=True refresh_present=True response_exposes_password=False
+```
+
+### P2 — credenciales inválidas
+
+```text
+REQUEST: POST /api/v1/auth/login
+REQUEST_BODY: credenciales inválidas [VALORES OMITIDOS]
+CP002_P2_INVALID_CREDENTIALS status=401 generic_detail=True session_created=False
+detail: "Correo o contraseña inválidos"
+```
+
+### P3 — actividad autenticada dentro del límite
+
+Primero se comprobó la identidad con la sesión recién iniciada y luego se ejecutó la misma comprobación con la actividad preparada a 29 minutos:
+
+```text
+CP002_P3_ACTIVITY_BASELINE status=200 identity_present=True
+CP002_P3_ACTIVITY_29_MIN status=200 session_valid=True sliding_activity_updated=True
+```
+
+### P4 — actividad fuera del límite
+
+Después de preparar la actividad a 31 minutos, se ejecutó una acción autenticada:
+
+```text
+CP002_P4_ACTIVITY_31_MIN status=401 generic_detail=True lazy_revocation=True
+detail: "Sesión inválida o expirada"
+```
+
+### P5 — logout y reutilización del refresh
+
+Se realizó un login nuevo para aislar el paso de logout del estado invalidado por inactividad:
+
+```text
+CP002_P5_LOGOUT status=204 idempotent_status=True session_revoked=True
+CP002_P5_REFRESH_REUSE status=401 generic_detail=True
+detail: "Sesión inválida o expirada"
+```
+
+## 3. Verificación SQL y limpieza
+
+- Se confirmó la ejecución contra PostgreSQL real `16.14`, con el contenedor en estado `healthy` y Alembic en `0002 (head)`.
+- La preparación de actividad modificó únicamente el campo `ultima_actividad` de la sesión de prueba para reproducir de forma determinista los bordes de 29 y 31 minutos.
+- La consulta de la sesión después de la comprobación de 29 minutos confirmó la continuidad de la sesión y la actualización deslizante de actividad, consistente con `CP002_P3_ACTIVITY_29_MIN`.
+- La comprobación posterior al umbral de 31 minutos confirmó la invalidación diferida de la sesión, consistente con `CP002_P4_ACTIVITY_31_MIN`.
+- La verificación de logout confirmó la revocación de la sesión; la reutilización del refresh revocado fue rechazada con HTTP 401.
+- Al finalizar se eliminó la cuenta de prueba:
+
+```text
+CLEANUP test_account_removed=true
+```
+
+## 4. Resultado y limitaciones
+
+**Resultado de la prueba: Satisfactorio.** Los cinco pasos de CP-002 fueron ejecutados y sus resultados coincidieron con los resultados esperados: emisión de credenciales sin exponer la contraseña, rechazo genérico de credenciales inválidas sin crear sesión, continuidad a los 29 minutos, invalidación a los 31 minutos y revocación efectiva mediante logout con rechazo del refresh reutilizado.
+
+La ejecución automatizada de requests verifica la superficie API y su persistencia en la base de datos. La sección 5 documenta adicionalmente el flujo visible ejecutado desde un dispositivo Android, pero no implica que se hayan probado todas las superficies Flutter o Web ni que el Sprint 1 esté aprobado globalmente. CP-003..CP-013 permanecen pendientes en el documento de pruebas.
+
+La simulación de los límites temporales mediante SQL es determinista y reproducible, pero no sustituye una espera real de 29 o 31 minutos. La auditoría de este archivo confirmó que no contiene secretos, contraseñas, tokens, hashes, credenciales ni paths absolutos.
+
+## 5. Validación manual complementaria desde dispositivo físico
+
+- Fecha: 2026-08-27.
+- Dispositivo: Samsung SM-S711B, Android 16 (API 36), conectado por USB.
+- Transporte hacia la API local: `adb reverse tcp:8000 tcp:8000`; la app se compiló en variante `debug` con una URL local sin registrar credenciales ni tokens.
+- Resultado reportado por Trevor y correlacionado con los registros de Uvicorn: registro `201 Created`, login válido `200 OK`, consulta de sesión `/auth/me` `200 OK`, logout `204 No Content` y rechazo de credenciales inválidas `401 Unauthorized`.
+- Alcance: se validó manualmente desde la UI el flujo visible de creación de cuenta, inicio de sesión, sesión autenticada, cierre de sesión y manejo de credenciales inválidas. La rotación del refresh y los límites temporales de 29/31 minutos permanecen respaldados por la ejecución API/DB de las secciones anteriores; no se atribuyen a esta sesión manual.
+- No se transcriben correos, contraseñas, tokens, hashes, secretos ni identificadores de sesión. Esta validación complementa CP-002 y no constituye aprobación global del Sprint 1.
