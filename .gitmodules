@@ -1,0 +1,4 @@
+[submodule "apps/cliente_mobile"]
+	path = apps/cliente_mobile
+	url = https://github.com/Fivoryu/sw1_pro_final_cliente_mobile_2026_2.git
+	branch = feat/pruebas/cp001-postgres
