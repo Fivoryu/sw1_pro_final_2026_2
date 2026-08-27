@@ -2,7 +2,7 @@
 
 ## 2.1. Diseño
 
-El proceso del Sprint 1 se documenta con los artefactos agrupados del incremento y con la trazabilidad de las 14 historias de usuario reales: HU-001, HU-002, HU-004..HU-009, HU-022..HU-026 y HU-028. HU-003 pertenece al Sprint 3 y no forma parte de este módulo. Las pruebas CP-002..CP-013 no se declaran ejecutadas (GAP-087); CP-001 cuenta con evidencia de ejecución de la superficie backend. La asignación de responsables por PB/HU quedó documentada en este módulo (sorteo aleatorio del equipo, 2026-08-24); queda pendiente la consolidación de ceremonias (GAP-073).
+El proceso del Sprint 1 se documenta con los artefactos agrupados del incremento y con la trazabilidad de las 14 historias de usuario reales: HU-001, HU-002, HU-004..HU-009, HU-022..HU-026 y HU-028. HU-003 pertenece al Sprint 3 y no forma parte de este módulo. Las pruebas CP-002..CP-013 no se declaran ejecutadas (GAP-087); CP-001 cuenta con evidencia de ejecución de la superficie backend. La asignación de responsables por PB/HU queda documentada en este módulo: HU-001 y HU-002 permanecen con Calero Suyo Trevor Félix por su responsabilidad de implementación confirmada; las demás HUs se distribuyen por bloques funcionales entre Buceta Pesoa Luis Fernando, Ortiz Montero Luis Enrique, Rebollo Condori Renato y Vedia Barrios Sebastian. La asignación confirmada por el usuario y el equipo queda documentada, mientras que cualquier brecha aún abierta de responsabilidad de pruebas/documentación se mantiene explícitamente como GAP-073.
 
 ### 2.1.1. Diseño de la Arquitectura
 
@@ -321,19 +321,19 @@ El plan relaciona cada caso con el Product Backlog, la Historia de Usuario, la f
 
 | ID Prueba | PB | HU | Funcionalidad evaluada | Plataforma | Responsable | Estado |
 | --- | --- | --- | --- | --- | --- | --- |
-| CP-001 | PB-001 | HU-001 | Registro de cliente | App cliente / Backend (cobertura backend) | Ortiz Montero Luis Enrique | executed |
-| CP-002 | PB-002 | HU-002 | Autenticación y sesión con inactividad de 30 minutos | Backend / Apps / Web | Ortiz Montero Luis Enrique | not executed |
+| CP-001 | PB-001 | HU-001 | Registro de cliente | App cliente / Backend (cobertura backend) | Calero Suyo Trevor Félix | executed |
+| CP-002 | PB-002 | HU-002 | Autenticación y sesión con inactividad de 30 minutos | Backend / Apps / Web | Calero Suyo Trevor Félix | not executed |
 | CP-003 | PB-004 | HU-004 | Alta de inmobiliaria con checkout simulado | Web / Backend | Buceta Pesoa Luis Fernando | not executed |
-| CP-004 | PB-005 | HU-005 | Activación de trial de 14 días y suscripción | Web / Backend | Vedia Barrios Sebastian | not executed |
-| CP-005 | PB-006 | HU-006 | Ciclo de suscripción, cuotas, cambios y cancelación | Web / Backend | Cervantes Arancibia Roberto Carlos | not executed |
-| CP-006 | PB-007 | HU-007 | Invitación de agentes con enlace seguro | Web / Backend | Cervantes Arancibia Roberto Carlos | not executed |
-| CP-007 | PB-007 | HU-008 | Activación y desactivación de membresías | Web / Backend | Cervantes Arancibia Roberto Carlos | not executed |
-| CP-008 | PB-008 | HU-009 | Permisos RBAC por alcance | Web / Backend | Rebollo Condori Renato | not executed |
-| CP-009 | PB-028 | HU-022 | Creación y edición del borrador de publicación | Web / Backend | Vedia Barrios Sebastian | not executed |
-| CP-010 | PB-029 | HU-023 | Envío de publicación a revisión | Web / Backend | Buceta Pesoa Luis Fernando | not executed |
-| CP-011 | PB-029 | HU-024 | Aprobación o rechazo y verificación del difuminado | Web / Backend | Buceta Pesoa Luis Fernando | not executed |
-| CP-012 | PB-030 | HU-025/HU-026 | Publicación, despublicación y catálogo global | Backend / App / Web | Rebollo Condori Renato | not executed |
-| CP-013 | PB-032 | HU-028 | Favoritos y estado de publicación | Backend / App cliente | Calero Suyo Trevor Félix | not executed |
+| CP-004 | PB-005 | HU-005 | Activación de trial de 14 días y suscripción | Web / Backend | Buceta Pesoa Luis Fernando | not executed |
+| CP-005 | PB-006 | HU-006 | Ciclo de suscripción, cuotas, cambios y cancelación | Web / Backend | Buceta Pesoa Luis Fernando | not executed |
+| CP-006 | PB-007 | HU-007 | Invitación de agentes con enlace seguro | Web / Backend | Ortiz Montero Luis Enrique | not executed |
+| CP-007 | PB-007 | HU-008 | Activación y desactivación de membresías | Web / Backend | Ortiz Montero Luis Enrique | not executed |
+| CP-008 | PB-008 | HU-009 | Permisos RBAC por alcance | Web / Backend | Ortiz Montero Luis Enrique | not executed |
+| CP-009 | PB-028 | HU-022 | Creación y edición del borrador de publicación | Web / Backend | Rebollo Condori Renato | not executed |
+| CP-010 | PB-029 | HU-023 | Envío de publicación a revisión | Web / Backend | Rebollo Condori Renato | not executed |
+| CP-011 | PB-029 | HU-024 | Aprobación o rechazo y verificación del difuminado | Web / Backend | Rebollo Condori Renato | not executed |
+| CP-012 | PB-030 | HU-025/HU-026 | Publicación, despublicación y catálogo global | Backend / App / Web | Vedia Barrios Sebastian | not executed |
+| CP-013 | PB-032 | HU-028 | Favoritos y estado de publicación | Backend / App cliente | Vedia Barrios Sebastian | not executed |
 
 ### 2.1.5.2. Casos de prueba funcionales de caja negra
 
@@ -357,7 +357,7 @@ HU-001: Registro con correo
 
 Nota: los pasos 3 y 4 desdoblan el paso 3 original del modelo, conservando la numeración de CP-001.
 
-Responsable: Ortiz Montero Luis Enrique
+Responsable: Calero Suyo Trevor Félix
 Resultado de la prueba: Satisfactorio
 Adjunto: evidencia/cp001-registro-transcripto.txt
 
@@ -378,7 +378,7 @@ HU-002: Autenticación y sesión
 | 4 | Dejar la sesión inactiva durante 30 minutos y ejecutar una acción. | La sesión se invalida y se solicita autenticación. | not executed |
 | 5 | Ejecutar `logout` y reutilizar el refresh token. | El token revocado es rechazado. | not executed |
 
-Responsable: Ortiz Montero Luis Enrique
+Responsable: Calero Suyo Trevor Félix
 Resultado de la prueba: not executed
 Adjunto: —
 
@@ -417,7 +417,7 @@ HU-005: Activar prueba y suscribirse
 | 2 | Enviar el evento firmado de suscripción. | La suscripción cambia a `active`. | not executed |
 | 3 | Reprocesar el evento. | El estado no se duplica ni se crean registros repetidos. | not executed |
 
-Responsable: Vedia Barrios Sebastian
+Responsable: Buceta Pesoa Luis Fernando
 Resultado de la prueba: not executed
 Adjunto: —
 
@@ -438,7 +438,7 @@ HU-006: Gestionar suscripción
 | 4 | Cancelar la suscripción. | Pasa a `canceled_read_only` durante 30 días. | not executed |
 | 5 | Cumplir el período de retención. | Pasa a `purged` y conserva transacciones anonimizadas. | not executed |
 
-Responsable: Cervantes Arancibia Roberto Carlos
+Responsable: Buceta Pesoa Luis Fernando
 Resultado de la prueba: not executed
 Adjunto: —
 
@@ -457,7 +457,7 @@ HU-007: Invitar agentes
 | 2 | Aceptar el enlace una vez. | Se crea la membresía sin duplicar la cuenta global. | not executed |
 | 3 | Reutilizar el enlace o usarlo después de expirar. | La operación es rechazada. | not executed |
 
-Responsable: Cervantes Arancibia Roberto Carlos
+Responsable: Ortiz Montero Luis Enrique
 Resultado de la prueba: not executed
 Adjunto: —
 
@@ -476,7 +476,7 @@ HU-008: Activar o desactivar membresías
 | 2 | Activar otra membresía del mismo agente. | La anterior queda inactiva y solo una permanece activa. | not executed |
 | 3 | Desactivar o revocar una membresía. | Se niega el acceso y se conserva la autoría histórica. | not executed |
 
-Responsable: Cervantes Arancibia Roberto Carlos
+Responsable: Ortiz Montero Luis Enrique
 Resultado de la prueba: not executed
 Adjunto: —
 
@@ -495,7 +495,7 @@ HU-009: Asignar permisos
 | 2 | Asignar un permiso con alcance inmueble. | El agente accede solo al inmueble autorizado. | not executed |
 | 3 | Solicitar una función sin asignación válida. | El acceso se deniega por defecto. | not executed |
 
-Responsable: Rebollo Condori Renato
+Responsable: Ortiz Montero Luis Enrique
 Resultado de la prueba: not executed
 Adjunto: —
 
@@ -514,7 +514,7 @@ HU-022: Crear y editar borrador
 | 2 | Editar los datos del borrador y guardar. | Se guardan los cambios sin alterar otras publicaciones. | not executed |
 | 3 | Consultar desde un tenant diferente. | El borrador no es visible. | not executed |
 
-Responsable: Vedia Barrios Sebastian
+Responsable: Rebollo Condori Renato
 Resultado de la prueba: not executed
 Adjunto: —
 
@@ -533,7 +533,7 @@ HU-023: Enviar a revisión
 | 2 | Intentar autoaprobar como agente. | La aprobación es rechazada. | not executed |
 | 3 | Enviar sin permiso requerido. | La transición es rechazada y el estado no cambia. | not executed |
 
-Responsable: Buceta Pesoa Luis Fernando
+Responsable: Rebollo Condori Renato
 Resultado de la prueba: not executed
 Adjunto: —
 
@@ -552,7 +552,7 @@ HU-024: Aprobar o rechazar publicaciones
 | 2 | Rechazar una publicación. | Pasa a `rechazado` y exige observaciones. | not executed |
 | 3 | Intentar aprobar sin verificar el difuminado. | La aprobación es rechazada. | not executed |
 
-Responsable: Buceta Pesoa Luis Fernando
+Responsable: Rebollo Condori Renato
 Resultado de la prueba: not executed
 Adjunto: —
 
@@ -571,7 +571,7 @@ HU-025/HU-026: Publicación y catálogo global
 | 2 | Despublicar un inmueble. | Desaparece inmediatamente del catálogo y se registra la auditoría. | not executed |
 | 3 | Consultar enviando un `tenant_id` como autorización. | El servidor no concede acceso por ese valor. | not executed |
 
-Responsable: Rebollo Condori Renato
+Responsable: Vedia Barrios Sebastian
 Resultado de la prueba: not executed
 Adjunto: —
 
@@ -590,7 +590,7 @@ HU-028: Guardar favoritos
 | 2 | Quitar el favorito. | El favorito deja de estar activo. | not executed |
 | 3 | Despublicar la publicación favorita. | El favorito queda `no_disponible` sin exponer contenido privado. | not executed |
 
-Responsable: Calero Suyo Trevor Félix
+Responsable: Vedia Barrios Sebastian
 Resultado de la prueba: not executed
 Adjunto: —
 
