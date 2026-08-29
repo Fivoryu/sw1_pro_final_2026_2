@@ -1,12 +1,14 @@
 # Propuesta 2: RoomForge
 
-Reconstrucción automática del plano y el modelo 3D de un espacio interior a partir de un video capturado con el teléfono.
+RoomForge propone generar el plano y el modelo 3D de un espacio interior a partir de capturas del teléfono, con asistencia inteligente durante la captura y reconstrucción final asíncrona fuera del dispositivo.
+
+> **Enfoque propuesto — pendiente de confirmación/formalización:** la app Flutter de captura podría incorporar un modelo externo/open-source, ajustado o entrenado localmente, exportado a ONNX/TFLite y ejecutado offline en el teléfono. Esta IA asistiría la calidad y cobertura de la captura; no ejecutaría Meshroom ni la reconstrucción 3D completa en el móvil.
 
 ## 1. Identificar las funcionalidades principales de la aplicación
 
-RoomForge será una aplicación Android orientada a reconstruir automáticamente el plano y la geometría tridimensional de un espacio interior mediante un video capturado con la cámara del teléfono.
+RoomForge será una aplicación móvil orientada a capturar un espacio interior y a coordinar su reconstrucción posterior. La app de captura ofrecerá asistencia local durante el recorrido, mientras que el procesamiento 3D final se ejecutará de forma asíncrona en el worker3d.
 
-El usuario podrá recorrer una habitación, sala, cocina, oficina o aula mientras graba el entorno. La aplicación procesará las diferentes vistas y generará progresivamente una representación estructurada del espacio.
+El usuario podrá recorrer una habitación, sala, cocina, oficina o aula mientras graba el entorno. La aplicación registrará las vistas y, cuando exista conectividad, sincronizará las capturas para solicitar la reconstrucción.
 
 Sus funcionalidades principales serán:
 
@@ -18,36 +20,33 @@ Sus funcionalidades principales serán:
   * Acelerómetro.
   * Giroscopio.
   * ARCore cuando el dispositivo sea compatible.
-* Estimar la posición y orientación de la cámara.
-* Calcular profundidad aproximada a partir de múltiples vistas.
-* Reconstruir progresivamente la geometría del ambiente.
-* Detectar automáticamente:
 
-  * Paredes.
-  * Suelo.
-  * Techo.
-  * Puertas.
-  * Ventanas.
-* Identificar esquinas y límites de la habitación.
-* Generar automáticamente un plano 2D.
-* Generar un modelo 3D navegable.
-* Estimar:
+La asistencia de IA en la app de captura tendrá un alcance acotado y podrá ejecutarse sin conexión:
 
-  * Largo.
-  * Ancho.
-  * Altura.
-  * Superficie.
-* Permitir introducir una medida real como referencia para mejorar la escala.
-* Mostrar qué partes del ambiente ya fueron capturadas.
-* Detectar zonas con información insuficiente.
+* Evaluar la calidad básica de los fotogramas y advertir movimiento excesivo, desenfoque o iluminación insuficiente.
+* Estimar la cobertura observada y señalar zonas que requieran una nueva toma.
+* Proporcionar señales sobre puertas, ventanas, paredes, suelo, techo y superficies visibles.
 * Guiar al usuario durante la grabación con mensajes como:
 
   * "Gira hacia la derecha".
   * "Falta capturar esta esquina".
   * "Acércate a la pared".
   * "Muévete más lentamente".
-* Mostrar un nivel de confianza de las superficies reconstruidas.
-* Permitir volver a escanear únicamente las zonas deficientes.
+* Mostrar el progreso de la captura y una confianza orientativa para la asistencia.
+* Continuar funcionando offline y sincronizar el resultado al recuperar conectividad.
+
+El pipeline de reconstrucción 3D, fuera del teléfono, podrá:
+
+* Estimar la posición y orientación de la cámara.
+* Calcular profundidad aproximada a partir de múltiples vistas.
+* Reconstruir progresivamente la geometría del ambiente.
+* Detectar y modelar paredes, suelo, techo, puertas y ventanas.
+* Identificar esquinas y límites de la habitación.
+* Generar automáticamente un plano 2D y un modelo 3D navegable.
+* Estimar largo, ancho, altura y superficie.
+* Permitir introducir una medida real como referencia para mejorar la escala.
+* Mostrar qué partes del ambiente fueron capturadas y permitir volver a escanear zonas deficientes.
+* Mostrar un nivel de confianza de las superficies reconstruidas, diferenciando lo observado de lo inferido.
 * Generar un modelo paramétrico donde paredes, puertas y ventanas sean elementos editables.
 * Permitir corregir manualmente dimensiones.
 * Visualizar el ambiente vacío, ocultando muebles cuando sea posible.
@@ -56,19 +55,19 @@ Sus funcionalidades principales serán:
 El flujo principal será:
 
 ```text
-Grabar habitación
+Capturar ambiente
        ↓
-Seguimiento de cámara
+Asistencia IA offline
        ↓
-Estimación de profundidad
+Sincronizar al reconectar
        ↓
-Reconstrucción 3D
+API persiste el job
        ↓
-Detección estructural
+SQS
        ↓
-Plano 2D
-       +
-Modelo 3D
+Worker 3D / Meshroom
+       ↓
+Plano 2D + modelo 3D
 ```
 
 Para el MVP se trabajará con **un único ambiente interior por escaneo**, utilizando teléfonos Android y priorizando habitaciones de geometría relativamente sencilla.
@@ -84,14 +83,14 @@ El flujo será:
 1. Seleccionar "Escanear ambiente".
 2. Comenzar la grabación.
 3. Recorrer lentamente la habitación.
-4. Recibir indicaciones durante la captura.
+4. Recibir indicaciones de asistencia local durante la captura.
 5. Completar las zonas faltantes.
-6. Finalizar el escaneo.
-7. Procesar la reconstrucción.
-8. Revisar el plano y el modelo 3D.
+6. Finalizar el escaneo y guardar la captura localmente.
+7. Sincronizar al recuperar conectividad y solicitar la reconstrucción asíncrona.
+8. Revisar el plano y el modelo 3D generados fuera del teléfono.
 9. Corregir dimensiones si es necesario.
 
-Durante el proceso será necesario manejar:
+Durante el proceso será necesario manejar los siguientes casos. La asistencia local podrá advertir algunos de ellos, pero no sustituye la validación de la reconstrucción final:
 
 * Movimiento demasiado rápido.
 * Imágenes borrosas.
@@ -138,7 +137,7 @@ en lugar de presentar una falsa precisión.
 
 La innovación de RoomForge no consistirá simplemente en producir una malla 3D a partir de un video.
 
-La propuesta combinará **reconstrucción geométrica, comprensión semántica y guiado inteligente de captura** utilizando principalmente un teléfono Android sin requerir obligatoriamente sensores LiDAR.
+La propuesta combinará **reconstrucción geométrica, comprensión semántica y guiado inteligente de captura** utilizando principalmente un teléfono Android sin requerir obligatoriamente sensores LiDAR. La asistencia inteligente se apoyará en un modelo externo/open-source, pero su selección, licencia, ajuste y métricas todavía deben confirmarse y formalizarse.
 
 El sistema tendrá como entrada:
 
@@ -147,7 +146,14 @@ El sistema tendrá como entrada:
 * Datos de acelerómetro y giroscopio.
 * Profundidad mediante ARCore cuando esté disponible.
 
-El procesamiento incluirá:
+La asistencia de IA en el teléfono podrá incluir:
+
+* Evaluación de calidad de imagen y movimiento.
+* Estimación de cobertura durante el recorrido.
+* Señales sobre puertas, ventanas y superficies relevantes.
+* Indicaciones para completar zonas faltantes.
+
+El pipeline de reconstrucción, ejecutado fuera del teléfono por el worker3d, incluirá:
 
 * Estimación de movimiento.
 * Visual Odometry o SLAM.
@@ -168,9 +174,21 @@ La salida será:
 * Elementos estructurales editables.
 * Mapa de confianza.
 
+### Modelo externo, ajuste local e inferencia offline
+
+> **Enfoque propuesto — pendiente de confirmación/formalización.**
+
+El desarrollo partirá de un modelo externo/open-source apropiado para asistir la captura. El equipo deberá revisar su licencia y compatibilidad antes de incorporarlo. El ajuste o entrenamiento se realizará localmente en una PC propia, sin depender de una API cloud paga. Luego el modelo se exportará a ONNX o TFLite y se empaquetará en la app Flutter para ejecutar inferencia offline.
+
+La app podrá sincronizar capturas, resultados de asistencia y metadatos cuando vuelva la conectividad. La inferencia local no implica que el teléfono ejecute Meshroom, reconstrucción SfM/MVS completa, generación final de GLB ni derivación final del plano 2D.
+
+| En la app móvil, offline | Fuera del teléfono, de forma asíncrona |
+| --- | --- |
+| Calidad de captura, cobertura, señales de puertas/ventanas/superficies y guía al usuario | Reconstrucción 3D con Meshroom, fusión de vistas, artefactos GLB, plano 2D y procesamiento geométrico final |
+
 ### Escaneo guiado inteligente
 
-Una de las principales características diferenciadoras será que RoomForge analizará en tiempo cercano al real qué partes del ambiente todavía necesitan información.
+Una de las principales características diferenciadoras será que RoomForge analizará en tiempo cercano al real qué partes del ambiente todavía necesitan información, utilizando la asistencia local propuesta.
 
 En lugar de:
 
@@ -226,7 +244,7 @@ Estas regiones deberán marcarse como **inferidas**, no como superficies observa
 
 Cada superficie podrá recibir un indicador de confianza utilizando factores como:
 
-* Cantidad de frames que la observaron.
+* Cantidad de fotogramas que la observaron.
 * Diferentes ángulos capturados.
 * Calidad del tracking.
 * Consistencia de profundidad.
@@ -238,9 +256,11 @@ Por tanto, RoomForge buscará diferenciarse mediante:
 
 > **Android convencional + reconstrucción 3D + comprensión estructural + guiado inteligente + confianza geométrica.**
 
-## 4. La forma de como monetizar la aplicación
+## 4. Forma de monetizar la aplicación
 
-RoomForge podría utilizar un modelo **freemium**, acompañado de planes profesionales.
+La implementación académica tendrá como objetivo un **coste monetario cero**: entrenamiento o ajuste en hardware propio, inferencia local, Floci y Hardhat en local y sin depender de una API cloud paga. La revisión de la licencia del modelo externo sigue siendo necesaria antes de incorporarlo.
+
+Como hipótesis posterior de producto, RoomForge podría utilizar un modelo **freemium**, acompañado de planes profesionales. Esta hipótesis no constituye una dependencia de infraestructura para el MVP.
 
 ### Versión gratuita
 
@@ -297,7 +317,7 @@ Una inmobiliaria podría utilizar RoomForge para digitalizar rápidamente ambien
 
 ### Servicios adicionales
 
-También podrían comercializarse:
+También podrían comercializarse posteriormente:
 
 * Procesamiento avanzado en la nube.
 * Exportación a formatos profesionales.
@@ -305,29 +325,36 @@ También podrían comercializarse:
 * Almacenamiento en nube.
 * Colaboración entre profesionales.
 
+Estos servicios son hipótesis de monetización y no forman parte de la ruta local de coste monetario cero propuesta para el MVP.
+
 ## 5. Explicar brevemente el stack tecnológico propuesto
 
-### Aplicación Android
+### Aplicación móvil de captura
 
-Se recomienda desarrollar de forma nativa debido al uso intensivo de cámara, sensores y ARCore.
+La aplicación existente se plantea con Flutter y Dart. La app de captura utilizará las APIs de cámara y sensores, con ARCore cuando el dispositivo sea compatible, y almacenará localmente las capturas pendientes de sincronización.
 
-* **Kotlin:** lenguaje principal.
-* **Jetpack Compose:** interfaz.
-* **CameraX:** captura de video.
+* **Flutter/Dart:** interfaz y lógica de la app.
+* **Cámara RGB:** captura de video y fotos.
 * **ARCore:** seguimiento espacial y profundidad cuando esté disponible.
-* **Android Sensor API:** acceso a acelerómetro y giroscopio.
-* **Room Database:** almacenamiento local de proyectos.
+* **Sensores del dispositivo:** acelerómetro y giroscopio.
+* **Almacenamiento local:** proyectos y capturas pendientes.
 
-### Reconstrucción y visión artificial
+### IA de asistencia de captura
 
-* **OpenCV:** procesamiento de frames.
+* **Modelo externo/open-source:** selección y revisión de licencia pendientes.
+* **PyTorch u otra herramienta compatible:** ajuste o entrenamiento local.
+* **ONNX o TFLite:** formatos de exportación para distribución.
+* **ONNX Runtime Mobile o runtime TFLite:** inferencia offline en Android.
+
+Esta capa asiste la calidad, cobertura y señales de puertas, ventanas y superficies. No ejecuta Meshroom ni genera por sí sola el GLB o el plano 2D final.
+
+### Reconstrucción y visión artificial fuera del teléfono
+
+* **OpenCV:** procesamiento de fotogramas.
 * **Open3D:** nubes de puntos, mallas y procesamiento geométrico.
 * **Visual SLAM / Visual Odometry:** estimación del movimiento de cámara.
 * **Monocular Depth Estimation:** cálculo de profundidad utilizando video RGB.
-* **PyTorch:** entrenamiento o adaptación de modelos.
-* **YOLO:** detección de puertas, ventanas y objetos.
-* **Modelos de segmentación:** identificación de paredes, suelo y techo.
-* **ONNX Runtime Mobile:** ejecución optimizada de modelos en Android.
+* **Modelos de detección o segmentación:** apoyo a la identificación estructural.
 
 ### Procesamiento geométrico
 
@@ -351,18 +378,20 @@ La visualización permitirá rotar, ampliar y recorrer el ambiente reconstruido.
 
 ### Backend
 
-El MVP podrá realizar gran parte del procesamiento localmente o utilizar un servicio para operaciones más pesadas.
+El backend coordinará la sincronización y el procesamiento asíncrono; no sustituye la inferencia offline empaquetada en la app ni convierte a Floci en un ejecutor de Meshroom.
 
-Cuando sea necesario:
-
-* **FastAPI:** procesamiento remoto.
-* **PostgreSQL:** usuarios y proyectos.
-* **MinIO o S3:** almacenamiento de videos o modelos autorizados.
+* **FastAPI:** API y orquestación de jobs.
+* **PostgreSQL:** usuarios, proyectos, estados y metadatos.
+* **S3 compatible:** almacenamiento de videos o modelos autorizados.
+* **SQS:** cola para trabajos asíncronos.
+* **Worker3d:** ejecución de Meshroom en una PC/GPU o proceso separado.
 
 ### Infraestructura
 
-* **Docker:** servicios de procesamiento.
+* **Docker:** servicios de procesamiento local.
+* **Floci:** emulación local de S3/SQS; no ejecuta Meshroom ni blockchain.
+* **Hardhat:** red local para el escrow de token de prueba, independiente de Floci.
 * **GitHub:** repositorio.
 * **GitHub Actions:** pruebas e integración continua.
-* **Servidor con GPU:** opcional para reconstrucciones de mayor complejidad.
-* **ONNX:** distribución optimizada de modelos.
+* **PC con GPU:** ejecución prevista del worker3d para reconstrucciones.
+* **ONNX/TFLite:** distribución de la asistencia IA en la app.

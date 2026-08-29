@@ -7,6 +7,8 @@
 | IDs | RF-001..041 · RNF-001..018 · BR-001..076 |
 | Fuentes | `docs/sprint-0/ids-trazabilidad.md` §3–5; `docs/sprint-0/auditoria-br.md` |
 
+> **Nota de trazabilidad — enfoque propuesto, pendiente de confirmación/formalización:** se evalúa incorporar en la app Flutter de captura un modelo externo/open-source, ajustado o entrenado localmente, exportado a ONNX/TFLite y ejecutado offline. La IA asistiría calidad, cobertura y señales de puertas, ventanas y superficies; no reemplazaría al worker3d ni ejecutaría Meshroom en el teléfono. Esta nota no crea ni modifica IDs de RF, RNF, PB, HU o GAP.
+
 ## 4.1. Necesidades identificadas
 
 1. **Recorrido inmobiliario sin visitas**: los clientes necesitan conocer el interior de un inmueble a distancia, mediante recorridos 3D navegables generados con capturas de celular.
@@ -20,8 +22,9 @@
 - **Aplicaciones móviles (Flutter)**: app de cliente (catálogo, recorridos, reservas) y app de captura (agente), en Android 10+.
 - **Panel web (React/Vite)**: administración de tenant, agentes, publicaciones, catálogo maestro, reservas y auditoría.
 - **Backend/API (FastAPI)**: recibe, valida y procesa la información; autoridad de estados con PostgreSQL; orquesta el pipeline 3D (S3/SQS) y el escrow de prueba.
-- **Worker 3D (Python/Meshroom)**: reconstruye ambientes y genera GLB y plano 2D.
-- **Blockchain (escrow de prueba)**: valida movimientos del token de prueba en red local Hardhat.
+- **Asistencia IA de captura — enfoque propuesto, pendiente de confirmación/formalización**: modelo externo/open-source ajustado o entrenado localmente, exportado a ONNX/TFLite y ejecutado offline en la app Flutter para apoyar calidad, cobertura y señales de elementos visibles.
+- **Worker 3D (Python/Meshroom)**: reconstruye ambientes y genera GLB y plano 2D de forma asíncrona fuera del teléfono.
+- **Blockchain (escrow de prueba)**: valida movimientos del token de prueba en red local Hardhat, independiente de Floci.
 
 ## 4.3. Requisitos funcionales
 

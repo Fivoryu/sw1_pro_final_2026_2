@@ -16,7 +16,7 @@
 - Identidad global de clientes (registro con correo, sin verificación hasta RF-033) y autenticación segura.
 - Tenants, agentes, invitaciones, permisos RBAC y una membresía activa por agente.
 - Onboarding SaaS con checkout simulado y suscripción mensual (3 planes, cuotas).
-- Captura híbrida (video + fotos), difuminado automático, reconstrucción asíncrona por ambiente (worker Meshroom), GLB y plano 2D.
+- Captura híbrida (video + fotos), difuminado automático, reconstrucción asíncrona por ambiente (worker Meshroom), GLB y plano 2D. La asistencia IA offline en la captura es un enfoque propuesto, pendiente de confirmación/formalización.
 - Composición espacial 2D, recorrido 3D, medidas `estimadas`/`calibradas`, configuración visual low-poly.
 - Publicaciones con aprobación administrativa y versionado; catálogo global solo de publicados.
 - Acceso temporal al detalle (7 días, aprobación con auditoría).
@@ -30,7 +30,7 @@
 - Visitas presenciales agendadas (BR-058).
 - Propietario como actor del sistema.
 - Pagos reales y moneda real (todo simulado: facturación y escrow).
-- CAD/BIM completo, IA generativa de paredes y detección automática obligatoria de contenido.
+- CAD/BIM completo, IA generativa de paredes y detección automática obligatoria de contenido como condición para completar la captura. La asistencia IA offline propuesta no implica reconstrucción generativa ni constituye todavía un requisito aprobado.
 - Elementos fijos configurables (cocinas, closets) como catálogo extenso; catálogo low-poly acotado.
 - Publicación en Google Play/App Store y build iOS verificada (iOS queda como compatibilidad de código no probada — RNF-013).
 
@@ -49,7 +49,7 @@
 
 1. El **cliente** se registra (correo cualquiera en fases tempranas), consulta el catálogo global, solicita acceso detallado a un inmueble y, una vez aprobado (7 días), recorre el 3D, revisa medidas y simula precios; puede reservar con depósito de prueba.
 2. La **inmobiliaria** se da de alta con checkout simulado; su **administrador** activa el plan, invita agentes, asigna permisos, aprueba publicaciones y gestiona el catálogo maestro.
-3. El **agente** captura ambientes con la app, solicita reconstrucciones, las aprueba tras un preview, compone el inmueble en 2D y publica con configuración de precios.
+3. El **agente** captura ambientes con la app, puede recibir la asistencia IA offline propuesta durante el recorrido, solicita reconstrucciones, las aprueba tras un preview, compone el inmueble en 2D y publica con configuración de precios.
 4. El **sistema/worker** reconstruye los ambientes de forma asíncrona (SQS + Meshroom), genera GLB y plano 2D, y mantiene los estados del dominio con PostgreSQL como autoridad.
 
 ## Actores y superficies

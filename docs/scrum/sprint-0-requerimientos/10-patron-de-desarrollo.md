@@ -13,8 +13,9 @@
 - **Fronteras de persistencia** (obs-2395):
   - PostgreSQL: entidades transaccionales, estados, versiones, referencias, metadatos semánticos y transformaciones locales TRS de escenas (obs-2406).
   - S3: binarios (capturas, nubes PLY/LAZ, GLB, texturas, planos); las referencias/versiones viven en PostgreSQL.
-- **Flujo 3D**: la API persiste el job antes de encolarlo (SQS); el worker (idempotente, con heartbeat) descarga inputs, ejecuta Meshroom y sube artefactos; PostgreSQL es la autoridad de estados.
-- **Flujo blockchain**: la API es la autoridad de la reserva; el contrato de escrow valida y registra movimientos de token de prueba; un listener actualiza PostgreSQL idempotentemente; fallback simulado si el contrato no está listo. Detalle: [`blockchain-enfoque.md`](../../sprint-0/blockchain-enfoque.md).
+- **Asistencia IA de captura — enfoque propuesto, pendiente de confirmación/formalización**: la app Flutter empaqueta un modelo externo/open-source ajustado o entrenado localmente, exportado a ONNX/TFLite, para inferencia offline de calidad, cobertura y señales de elementos visibles. No ejecuta Meshroom ni la reconstrucción 3D completa.
+- **Flujo 3D**: la API persiste el job antes de encolarlo (SQS); el worker (idempotente, con heartbeat) descarga inputs, ejecuta Meshroom y sube artefactos; PostgreSQL es la autoridad de estados. El worker puede ser real o simulado en local y la reconstrucción completa es asíncrona.
+- **Flujo blockchain**: la API es la autoridad de la reserva; el contrato de escrow valida y registra movimientos de token de prueba en la red local Hardhat, independiente de Floci; un listener actualiza PostgreSQL idempotentemente; fallback simulado si el contrato no está listo. Detalle: [`blockchain-enfoque.md`](../../sprint-0/blockchain-enfoque.md).
 
 ## Patrón por HU (aplica en cada sprint)
 
@@ -34,7 +35,7 @@ Para cada HU, el módulo `02-proceso-por-hu.md` del sprint documenta:
 - **Cliente API**: las apps consumen FastAPI mediante un cliente **OpenAPI generado**; el panel no actúa como segundo backend.
 - **Configuración**: entornos (local/cloud) solo por configuración (`.env`/endpoints), nunca hardcodeada.
 - **Privacidad**: difuminado automático + revisión humana antes de publicar (RNF-008); retención según BR-066/067.
-- **IA como herramienta**: soporte al equipo generalista; el criterio de diseño y las decisiones son del equipo.
+- **IA como herramienta**: soporte al equipo generalista; el criterio de diseño y las decisiones son del equipo. La selección y licencia del modelo externo, junto con su ajuste local y compatibilidad móvil, deben formalizarse antes de adoptarlo.
 
 ## Estados de dominio (máquinas de estado base)
 
