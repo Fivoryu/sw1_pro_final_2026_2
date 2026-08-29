@@ -2,7 +2,7 @@
 
 ## 2.1. Diseño
 
-El proceso del Sprint 1 se documenta con los artefactos agrupados del incremento y con la trazabilidad de las 14 historias de usuario reales: HU-001, HU-002, HU-004..HU-009, HU-022..HU-026 y HU-028. HU-003 pertenece al Sprint 3 y no forma parte de este módulo. Las pruebas CP-002..CP-013 no se declaran ejecutadas (GAP-087); CP-001 cuenta con evidencia de ejecución de la superficie backend; la asignación de responsables permanece pendiente (GAP-073).
+El proceso del Sprint 1 se documenta con los artefactos agrupados del incremento y con la trazabilidad de las 14 historias de usuario reales: HU-001, HU-002, HU-004..HU-009, HU-022..HU-026 y HU-028. HU-003 pertenece al Sprint 3 y no forma parte de este módulo. Las pruebas CP-003..CP-013 no se declaran ejecutadas (GAP-087); CP-001 y CP-002 cuentan con evidencia de ejecución de la superficie backend. La asignación de responsables por PB/HU queda documentada en este módulo: HU-001 y HU-002 permanecen con Calero Suyo Trevor Félix por su responsabilidad de implementación confirmada; las demás HUs se distribuyen por bloques funcionales entre Buceta Pesoa Luis Fernando, Ortiz Montero Luis Enrique, Rebollo Condori Renato y Vedia Barrios Sebastian. La asignación confirmada por el usuario y el equipo queda documentada, mientras que cualquier brecha aún abierta de responsabilidad de pruebas/documentación se mantiene explícitamente como GAP-073.
 
 ### 2.1.1. Diseño de la Arquitectura
 
@@ -302,9 +302,9 @@ No se embebe ninguna imagen.
 
 La implementación prevista mantiene módulos separados dentro del monolito FastAPI, con PostgreSQL para persistencia transaccional y los adaptadores S3/SQS para objetos y trabajos asíncronos. Las migraciones Alembic del esquema del Sprint 1 tienen cobertura parcial: `0001` y `0002` fueron ejecutadas contra PostgreSQL real y quedan 12 tablas/migraciones pendientes (GAP-092). El worker 3D se incorpora en SP-02 y no se presenta como implementado en SP-01.
 
-Como slice backend-first de PB-001/HU-001, se implementó el módulo `identity` con `POST /api/v1/auth/registro`, normalización del correo a minúsculas y hash Argon2id. Las migraciones `0001` (`usuario_global`) y `0002` (`sesion`) fueron ejecutadas contra PostgreSQL real; el GAP-092 queda parcialmente cubierto y restan 12 tablas/migraciones del Sprint 1 pendientes. La trazabilidad del cambio se conserva en la [spec](../../../openspec/changes/registro-cliente/spec.md) y las [tareas](../../../openspec/changes/registro-cliente/tasks.md); CP-002..CP-013 no se declaran ejecutados y se mantienen GAP-087 y GAP-073.
+Como slice backend-first de PB-001/HU-001, se implementó el módulo `identity` con `POST /api/v1/auth/registro`, normalización del correo a minúsculas y hash Argon2id. Las migraciones `0001` (`usuario_global`) y `0002` (`sesion`) fueron ejecutadas contra PostgreSQL real; el GAP-092 queda parcialmente cubierto y restan 12 tablas/migraciones del Sprint 1 pendientes. La trazabilidad del cambio se conserva en la [spec](../../../openspec/changes/registro-cliente/spec.md) y las [tareas](../../../openspec/changes/registro-cliente/tasks.md); CP-003..CP-013 no se declaran ejecutados y se mantienen GAP-087 y GAP-073.
 
-Como slice backend-first de PB-002/HU-002, se implementó la autenticación y sesión del cliente sobre el mismo módulo `identity`: `POST /api/v1/auth/login` (emite access JWT de 15 minutos y refresh opaco hasheado), `POST /api/v1/auth/refresh` (rotación atómica con revocación de la fila anterior), `POST /api/v1/auth/logout` (idempotente) y `GET /api/v1/auth/me` (sesión validada server-side contra la tabla `sesion`, con inactividad deslizante de 30 minutos según RNF-006). La migración `0002_crear_sesion` agrega la tabla `sesion` (`refresh_token_hash` CHAR(64) único, `expira_en`, `ultima_actividad`, `revocado`) y se añadió la dependencia PyJWT para el access token. La trazabilidad del cambio se conserva en la [spec](../../../openspec/changes/autenticacion/spec.md) y las [tareas](../../../openspec/changes/autenticacion/tasks.md); los casos CP de §2.1.5 (CP-002 incluido) no se declaran ejecutados y se mantienen GAP-087 y GAP-073.
+Como slice backend-first de PB-002/HU-002, se implementó la autenticación y sesión del cliente sobre el mismo módulo `identity`: `POST /api/v1/auth/login` (emite access JWT de 15 minutos y refresh opaco hasheado), `POST /api/v1/auth/refresh` (rotación atómica con revocación de la fila anterior), `POST /api/v1/auth/logout` (idempotente) y `GET /api/v1/auth/me` (sesión validada server-side contra la tabla `sesion`, con inactividad deslizante de 30 minutos según RNF-006). La migración `0002_crear_sesion` agrega la tabla `sesion` (`refresh_token_hash` CHAR(64) único, `expira_en`, `ultima_actividad`, `revocado`) y se añadió la dependencia PyJWT para el access token. La trazabilidad del cambio se conserva en la [spec](../../../openspec/changes/autenticacion/spec.md) y las [tareas](../../../openspec/changes/autenticacion/tasks.md); CP-002 cuenta con evidencia ejecutada y CP-003..CP-013 permanecen `not executed`, manteniéndose GAP-087 y GAP-073. La verificación complementaria del locking concurrente de sesiones para REQ-05 se documenta en [esta evidencia](evidencia/req05-refresh-concurrency-postgres.txt), sin modificar los contadores ni implicar aprobación global.
 
 ### 2.1.4.1. Diagrama de Componentes
 
@@ -317,29 +317,29 @@ No se embebe ninguna imagen.
 
 ### 2.1.5.1. Plan de pruebas
 
-El plan relaciona cada caso con el Product Backlog, la Historia de Usuario, la funcionalidad, la plataforma, el responsable y el estado. CP-002..CP-013 permanecen `not executed` y sin evidencia adjunta (GAP-087); CP-001 cuenta con evidencia real de la superficie backend. La asignación del responsable permanece pendiente (GAP-073).
+El plan relaciona cada caso con el Product Backlog, la Historia de Usuario, la funcionalidad, la plataforma, el responsable y el estado. CP-003..CP-013 permanecen `not executed` y sin evidencia adjunta (GAP-087); CP-001 y CP-002 cuentan con evidencia real de la superficie backend. Los responsables de los casos corresponden a la asignación por PB/HU documentada en §1.3 (GAP-073 cerrado para la asignación de desarrollo).
 
 | ID Prueba | PB | HU | Funcionalidad evaluada | Plataforma | Responsable | Estado |
 | --- | --- | --- | --- | --- | --- | --- |
-| CP-001 | PB-001 | HU-001 | Registro de cliente | App cliente / Backend (cobertura backend; GAP-073) | GAP-073 | executed |
-| CP-002 | PB-002 | HU-002 | Autenticación y sesión con inactividad de 30 minutos | Backend / Apps / Web | GAP-073 | not executed |
-| CP-003 | PB-004 | HU-004 | Alta de inmobiliaria con checkout simulado | Web / Backend | GAP-073 | not executed |
-| CP-004 | PB-005 | HU-005 | Activación de trial de 14 días y suscripción | Web / Backend | GAP-073 | not executed |
-| CP-005 | PB-006 | HU-006 | Ciclo de suscripción, cuotas, cambios y cancelación | Web / Backend | GAP-073 | not executed |
-| CP-006 | PB-007 | HU-007 | Invitación de agentes con enlace seguro | Web / Backend | GAP-073 | not executed |
-| CP-007 | PB-007 | HU-008 | Activación y desactivación de membresías | Web / Backend | GAP-073 | not executed |
-| CP-008 | PB-008 | HU-009 | Permisos RBAC por alcance | Web / Backend | GAP-073 | not executed |
-| CP-009 | PB-028 | HU-022 | Creación y edición del borrador de publicación | Web / Backend | GAP-073 | not executed |
-| CP-010 | PB-029 | HU-023 | Envío de publicación a revisión | Web / Backend | GAP-073 | not executed |
-| CP-011 | PB-029 | HU-024 | Aprobación o rechazo y verificación del difuminado | Web / Backend | GAP-073 | not executed |
-| CP-012 | PB-030 | HU-025/HU-026 | Publicación, despublicación y catálogo global | Backend / App / Web | GAP-073 | not executed |
-| CP-013 | PB-032 | HU-028 | Favoritos y estado de publicación | Backend / App cliente | GAP-073 | not executed |
+| CP-001 | PB-001 | HU-001 | Registro de cliente | App cliente / Backend (cobertura backend) | Calero Suyo Trevor Félix | executed |
+| CP-002 | PB-002 | HU-002 | Autenticación y sesión con inactividad de 30 minutos | Backend / Apps / Web | Calero Suyo Trevor Félix | executed |
+| CP-003 | PB-004 | HU-004 | Alta de inmobiliaria con checkout simulado | Web / Backend | Buceta Pesoa Luis Fernando | not executed |
+| CP-004 | PB-005 | HU-005 | Activación de trial de 14 días y suscripción | Web / Backend | Buceta Pesoa Luis Fernando | not executed |
+| CP-005 | PB-006 | HU-006 | Ciclo de suscripción, cuotas, cambios y cancelación | Web / Backend | Buceta Pesoa Luis Fernando | not executed |
+| CP-006 | PB-007 | HU-007 | Invitación de agentes con enlace seguro | Web / Backend | Ortiz Montero Luis Enrique | not executed |
+| CP-007 | PB-007 | HU-008 | Activación y desactivación de membresías | Web / Backend | Ortiz Montero Luis Enrique | not executed |
+| CP-008 | PB-008 | HU-009 | Permisos RBAC por alcance | Web / Backend | Ortiz Montero Luis Enrique | not executed |
+| CP-009 | PB-028 | HU-022 | Creación y edición del borrador de publicación | Web / Backend | Rebollo Condori Renato | not executed |
+| CP-010 | PB-029 | HU-023 | Envío de publicación a revisión | Web / Backend | Rebollo Condori Renato | not executed |
+| CP-011 | PB-029 | HU-024 | Aprobación o rechazo y verificación del difuminado | Web / Backend | Rebollo Condori Renato | not executed |
+| CP-012 | PB-030 | HU-025/HU-026 | Publicación, despublicación y catálogo global | Backend / App / Web | Vedia Barrios Sebastian | not executed |
+| CP-013 | PB-032 | HU-028 | Favoritos y estado de publicación | Backend / App cliente | Vedia Barrios Sebastian | not executed |
 
 ### 2.1.5.2. Casos de prueba funcionales de caja negra
 
-Cada caso conserva el patrón del modelo: tabla de metadatos `CAMPO | DESCRIPCIÓN`, tabla de pasos `PASO | ACCIÓN | RESULTADO ESPERADO | ESTADO`, responsable y resultado. CP-002..CP-013 permanecen `not executed` (GAP-087); CP-001 registra los cuatro outcomes observados con evidencia adjunta.
+Cada caso conserva el patrón del modelo: tabla de metadatos `CAMPO | DESCRIPCIÓN`, tabla de pasos `PASO | ACCIÓN | RESULTADO ESPERADO | ESTADO`, responsable y resultado. CP-003..CP-013 permanecen `not executed` (GAP-087); CP-001 y CP-002 registran sus outcomes observados con evidencia adjunta.
 
-#### Prueba de Historia de Usuario HU-001: Registro con correo
+HU-001: Registro con correo
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -357,11 +357,11 @@ Cada caso conserva el patrón del modelo: tabla de metadatos `CAMPO | DESCRIPCI�
 
 Nota: los pasos 3 y 4 desdoblan el paso 3 original del modelo, conservando la numeración de CP-001.
 
-Responsable: GAP-073
+Responsable: Calero Suyo Trevor Félix
 Resultado de la prueba: Satisfactorio
 Adjunto: evidencia/cp001-registro-transcripto.txt
 
-#### Prueba de Historia de Usuario HU-002: Autenticación y sesión
+HU-002: Autenticación y sesión
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -372,17 +372,19 @@ Adjunto: evidencia/cp001-registro-transcripto.txt
 
 | PASO | ACCIÓN | RESULTADO ESPERADO | ESTADO |
 | --- | --- | --- | --- |
-| 1 | Ingresar credenciales válidas. | Se inicia la sesión y se emiten credenciales de acceso y renovación. | not executed |
-| 2 | Ingresar credenciales inválidas. | Se muestra un error genérico y no se crea una sesión. | not executed |
-| 3 | Ejecutar una acción autenticada antes de 30 minutos de inactividad. | La sesión permanece activa. | not executed |
-| 4 | Dejar la sesión inactiva durante 30 minutos y ejecutar una acción. | La sesión se invalida y se solicita autenticación. | not executed |
-| 5 | Ejecutar `logout` y reutilizar el refresh token. | El token revocado es rechazado. | not executed |
+| 1 | Ingresar credenciales válidas. | Se inicia la sesión y se emiten credenciales de acceso y renovación. | executed |
+| 2 | Ingresar credenciales inválidas. | Se muestra un error genérico y no se crea una sesión. | executed |
+| 3 | Ejecutar una acción autenticada antes de 30 minutos de inactividad. | La sesión permanece activa. | executed |
+| 4 | Dejar la sesión inactiva durante 30 minutos y ejecutar una acción. | La sesión se invalida y se solicita autenticación. | executed |
+| 5 | Ejecutar `logout` y reutilizar el refresh token. | El token revocado es rechazado. | executed |
 
-Responsable: GAP-073
-Resultado de la prueba: not executed
-Adjunto: —
+Responsable: Calero Suyo Trevor Félix
+Resultado de la prueba: Satisfactorio
+Adjunto: evidencia/cp002-autenticacion-transcripto.txt
 
-#### Prueba de Historia de Usuario HU-004: Alta de inmobiliaria
+Nota de alcance: la ejecución automatizada de requests verifica la superficie API y la base de datos local, pero no equivale a una prueba de caja negra desde la UI Flutter ni implica aprobación global del Sprint 1.
+
+HU-004: Alta de inmobiliaria
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -398,11 +400,11 @@ Adjunto: —
 | 3 | Reprocesar el mismo evento firmado. | No se duplica el tenant. | not executed |
 | 4 | Intentar finalizar sin evento firmado válido. | No se aprovisiona el tenant. | not executed |
 
-Responsable: GAP-073
+Responsable: Buceta Pesoa Luis Fernando
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-005: Activar prueba y suscribirse
+HU-005: Activar prueba y suscribirse
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -417,11 +419,11 @@ Adjunto: —
 | 2 | Enviar el evento firmado de suscripción. | La suscripción cambia a `active`. | not executed |
 | 3 | Reprocesar el evento. | El estado no se duplica ni se crean registros repetidos. | not executed |
 
-Responsable: GAP-073
+Responsable: Buceta Pesoa Luis Fernando
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-006: Gestionar suscripción
+HU-006: Gestionar suscripción
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -438,11 +440,11 @@ Adjunto: —
 | 4 | Cancelar la suscripción. | Pasa a `canceled_read_only` durante 30 días. | not executed |
 | 5 | Cumplir el período de retención. | Pasa a `purged` y conserva transacciones anonimizadas. | not executed |
 
-Responsable: GAP-073
+Responsable: Buceta Pesoa Luis Fernando
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-007: Invitar agentes
+HU-007: Invitar agentes
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -457,11 +459,11 @@ Adjunto: —
 | 2 | Aceptar el enlace una vez. | Se crea la membresía sin duplicar la cuenta global. | not executed |
 | 3 | Reutilizar el enlace o usarlo después de expirar. | La operación es rechazada. | not executed |
 
-Responsable: GAP-073
+Responsable: Ortiz Montero Luis Enrique
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-008: Activar o desactivar membresías
+HU-008: Activar o desactivar membresías
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -476,11 +478,11 @@ Adjunto: —
 | 2 | Activar otra membresía del mismo agente. | La anterior queda inactiva y solo una permanece activa. | not executed |
 | 3 | Desactivar o revocar una membresía. | Se niega el acceso y se conserva la autoría histórica. | not executed |
 
-Responsable: GAP-073
+Responsable: Ortiz Montero Luis Enrique
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-009: Asignar permisos
+HU-009: Asignar permisos
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -495,11 +497,11 @@ Adjunto: —
 | 2 | Asignar un permiso con alcance inmueble. | El agente accede solo al inmueble autorizado. | not executed |
 | 3 | Solicitar una función sin asignación válida. | El acceso se deniega por defecto. | not executed |
 
-Responsable: GAP-073
+Responsable: Ortiz Montero Luis Enrique
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-022: Crear y editar borrador
+HU-022: Crear y editar borrador
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -514,11 +516,11 @@ Adjunto: —
 | 2 | Editar los datos del borrador y guardar. | Se guardan los cambios sin alterar otras publicaciones. | not executed |
 | 3 | Consultar desde un tenant diferente. | El borrador no es visible. | not executed |
 
-Responsable: GAP-073
+Responsable: Rebollo Condori Renato
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-023: Enviar a revisión
+HU-023: Enviar a revisión
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -533,11 +535,11 @@ Adjunto: —
 | 2 | Intentar autoaprobar como agente. | La aprobación es rechazada. | not executed |
 | 3 | Enviar sin permiso requerido. | La transición es rechazada y el estado no cambia. | not executed |
 
-Responsable: GAP-073
+Responsable: Rebollo Condori Renato
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-024: Aprobar o rechazar publicaciones
+HU-024: Aprobar o rechazar publicaciones
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -552,11 +554,11 @@ Adjunto: —
 | 2 | Rechazar una publicación. | Pasa a `rechazado` y exige observaciones. | not executed |
 | 3 | Intentar aprobar sin verificar el difuminado. | La aprobación es rechazada. | not executed |
 
-Responsable: GAP-073
+Responsable: Rebollo Condori Renato
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-025/HU-026: Publicación y catálogo global
+HU-025/HU-026: Publicación y catálogo global
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -571,11 +573,11 @@ Adjunto: —
 | 2 | Despublicar un inmueble. | Desaparece inmediatamente del catálogo y se registra la auditoría. | not executed |
 | 3 | Consultar enviando un `tenant_id` como autorización. | El servidor no concede acceso por ese valor. | not executed |
 
-Responsable: GAP-073
+Responsable: Vedia Barrios Sebastian
 Resultado de la prueba: not executed
 Adjunto: —
 
-#### Prueba de Historia de Usuario HU-028: Guardar favoritos
+HU-028: Guardar favoritos
 
 | CAMPO | DESCRIPCIÓN |
 | --- | --- |
@@ -590,23 +592,23 @@ Adjunto: —
 | 2 | Quitar el favorito. | El favorito deja de estar activo. | not executed |
 | 3 | Despublicar la publicación favorita. | El favorito queda `no_disponible` sin exponer contenido privado. | not executed |
 
-Responsable: GAP-073
+Responsable: Vedia Barrios Sebastian
 Resultado de la prueba: not executed
 Adjunto: —
 
 ### 2.1.5.3. Reporte de prueba
 
-El reporte refleja el avance parcial observado de CP-001 y no constituye el cierre ni la aprobación global del Sprint 1.
+El reporte refleja el avance parcial observado de CP-001 y CP-002 y no constituye el cierre ni la aprobación global del Sprint 1.
 
 | RESULTADO GENERAL | VALOR |
 | --- | --- |
-| Total de historias de usuario probadas | 1 |
-| Total de casos de prueba ejecutados | 1 |
-| Casos satisfactorios | 1 |
+| Total de historias de usuario probadas | 2 |
+| Total de casos de prueba ejecutados | 2 |
+| Casos satisfactorios | 2 |
 | Casos fallidos | 0 |
-| Porcentaje de cumplimiento | ≈7,7 % |
+| Porcentaje de cumplimiento | ≈15,4 % |
 | Estado general del Sprint 1 | en ejecución |
 
-CP-002..CP-013 siguen pendientes (`not executed`); el porcentaje y el estado son parciales y no declaran aprobación global del sprint.
+CP-003..CP-013 siguen pendientes (`not executed`); el porcentaje y el estado son parciales y no declaran aprobación global del sprint.
 
 **Gaps del modelo aplicables y no trasladados:** GAP-CH2-001 se respeta al no agregar diagramas en las secciones narrativas; GAP-CH2-002, GAP-CH2-003 y GAP-CH2-004 se conservan en sus módulos respectivos. GAP-CH2-005, GAP-CH2-006 y GAP-CH2-007 corresponden a variaciones e inconsistencias de Sprint 3 y no se inventan ni se trasladan al Sprint 1.

@@ -1,0 +1,55 @@
+# Verificación complementaria de REQ-05 — concurrencia de refresh en PostgreSQL
+
+- **Requisito:** REQ-05 — rotación de sesiones con protección ante uso concurrente del refresh.
+- **Trazabilidad:** PB-002 / HU-002, como complemento de la evidencia de [CP-002](cp002-autenticacion-transcripto.txt).
+- **Alcance:** verificación backend contra PostgreSQL real del comportamiento de dos solicitudes concurrentes que intentan rotar una misma sesión. No es una prueba desde la UI ni una aprobación global del Sprint 1.
+
+## 1. Entorno y preparación
+
+- PostgreSQL real en Docker, imagen `postgres:16-alpine`, versión observada `16.14`, contenedor `healthy`.
+- Alembic en `0002 (head)`.
+- API real Uvicorn local en `http://127.0.0.1:8000`.
+- Se creó una cuenta temporal con correo aleatorio y credenciales válidas. El correo, la contraseña y cualquier identificador sensible se omiten.
+- Se realizó un login para obtener un único refresh token. El token no se transcribe ni se almacena en esta evidencia.
+
+## 2. Operaciones y resultados sanitizados
+
+Las operaciones que contienen credenciales o tokens se expresan solo por su forma y por los resultados observados. No se incluyen valores secretos, hashes ni paths absolutos.
+
+```text
+VERIFICAR_POSTGRESQL image=postgres:16-alpine version=16.14 container_healthy=True
+ALEMBIC_CURRENT revision=0002 status=head
+
+POST /api/v1/auth/login [credenciales temporales omitidas]
+LOGIN refresh_token_obtained=True refresh_token_transcribed=False
+
+POST /api/v1/auth/refresh [mismo refresh token omitido] x2 concurrentes
+REQ05_CONCURRENT_REFRESH statuses=[200, 401] one_success_one_rejected=True
+
+SELECT [invariante de sesiones de la cuenta temporal, identificadores omitidos]
+REQ05_SESSION_INVARIANT total_sessions=2 active_sessions=1 at_most_one_active=True
+
+CLEANUP test_account_removed=true
+```
+
+## 3. Interpretación
+
+Las dos solicitudes usaron exactamente el mismo refresh token. El resultado `statuses=[200, 401]` demuestra que una sola solicitud pudo completar la rotación y que la reutilización concurrente del token original fue rechazada.
+
+La consulta posterior encontró dos sesiones en total y una sola activa. Esto es consistente con una sesión original revocada y una sesión de reemplazo activa, sin dejar dos sesiones activas para la misma rotación.
+
+El comportamiento observado verifica funcionalmente el efecto single-writer esperado de la rotación en PostgreSQL: la fila de sesión se serializa mediante `SELECT ... FOR UPDATE`; la primera transacción rota y revoca el registro original, y la segunda valida el estado posterior al bloqueo y resulta rechazada. Esta evidencia verifica el efecto observable de la concurrencia, no constituye un trace de bajo nivel del plan o de cada lock interno de PostgreSQL.
+
+## 4. Relación con GAP-092 y alcance de Sprint 1
+
+Esta ejecución verifica el locking de sesiones para este escenario de REQ-05 contra PostgreSQL real. No verifica ni cierra las 12 migraciones restantes de Sprint 1: `GAP-092` continúa abierto globalmente. El resultado tampoco implica aprobación global del requisito, de CP-002 ni del Sprint 1.
+
+## 5. Limitaciones
+
+- Se ejercitaron únicamente dos solicitudes concurrentes.
+- Se utilizó un único refresh token y una cuenta temporal.
+- No es una prueba de carga, estrés, rendimiento sostenido ni de múltiples instancias de la API.
+- La ejecución cubre la superficie API y la persistencia local; no cubre UI Flutter/Web ni otros escenarios de recuperación o fallas de red.
+- La cuenta temporal fue eliminada al finalizar (`test_account_removed=true`).
+
+**Resultado de la verificación complementaria:** comportamiento single-writer observado y consistente con la rotación protegida por `SELECT ... FOR UPDATE` para el escenario ejecutado; sin afirmación de aprobación global.

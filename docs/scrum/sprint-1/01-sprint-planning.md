@@ -22,12 +22,14 @@ Implementar la base administrativa y comercial de RoomForge para que clientes, i
 
 | INTEGRANTE | ROL SCRUM |
 | --- | --- |
-| Jimenez Peña Marcelo | Product Owner |
-| Letizia Mendieta Albán | Scrum Master |
-| Nathalia Ardaya Campos | Developer |
-| Trevor Félix Calero Suyo | Developer |
-| Nelson Chumacero Miranda | Developer |
-| Guzmán Rojas Luis David | Developer |
+| Buceta Pesoa Luis Fernando | Developer |
+| Calero Suyo Trevor Félix | Product Owner |
+| Cervantes Arancibia Roberto Carlos | Scrum Master |
+| Ortiz Montero Luis Enrique | Developer |
+| Rebollo Condori Renato | Developer |
+| Vedia Barrios Sebastian | Developer |
+
+El Product Owner conserva su rol PO; la responsabilidad de implementación confirmada de HU-001 y HU-002 queda registrada para Calero Suyo Trevor Félix.
 
 ## 1.3. Historias de Usuario
 
@@ -44,7 +46,7 @@ Criterios de Aceptación
 - Un correo duplicado se rechaza con un mensaje claro.
 - La contraseña se almacena con Argon2id y nunca en texto plano.
 
-Desarrollador a cargo: GAP-073 (asignación pendiente)
+Desarrollador a cargo: Calero Suyo Trevor Félix
 
 Prototipo
 
@@ -62,7 +64,7 @@ Criterios de Aceptación
 - Las credenciales inválidas producen un error genérico sin revelar la existencia de la cuenta.
 - `logout` revoca el refresh token activo.
 
-Desarrollador a cargo: GAP-073 (asignación pendiente)
+Desarrollador a cargo: Calero Suyo Trevor Félix
 
 Prototipo
 
@@ -79,7 +81,7 @@ Criterios de Aceptación
 - Reprocesar el mismo evento no duplica el tenant.
 - El primer administrador recibe un enlace de un solo uso.
 
-Desarrollador a cargo: GAP-073 (asignación pendiente)
+Desarrollador a cargo: Buceta Pesoa Luis Fernando
 
 Prototipo
 
@@ -95,7 +97,7 @@ Criterios de Aceptación
 - La suscripción mensual queda en estado `active` después del evento firmado del simulador.
 - Los estados transicionan en el orden definido para la suscripción.
 
-Desarrollador a cargo: GAP-073 (asignación pendiente)
+Desarrollador a cargo: Buceta Pesoa Luis Fernando
 
 Prototipo
 
@@ -112,7 +114,7 @@ Criterios de Aceptación
 - El exceso de cuota conserva los datos y bloquea nuevas altas o reconstrucciones.
 - La cancelación pasa por `canceled_read_only` durante 30 días y luego por `purged`, conservando las transacciones anonimizadas.
 
-Desarrollador a cargo: GAP-073 (asignación pendiente)
+Desarrollador a cargo: Buceta Pesoa Luis Fernando
 
 Prototipo
 
@@ -128,7 +130,7 @@ Criterios de Aceptación
 - El administrador no define ni envía la contraseña del agente.
 - Aceptar la invitación crea la membresía sin duplicar la cuenta global.
 
-Desarrollador a cargo: GAP-073 (asignación pendiente)
+Desarrollador a cargo: Ortiz Montero Luis Enrique
 
 Prototipo
 
@@ -144,7 +146,7 @@ Criterios de Aceptación
 - Una membresía `inactiva` o `revocada` niega el acceso.
 - La autoría histórica se conserva sin borrar la cuenta ni los registros asociados.
 
-Desarrollador a cargo: GAP-073 (asignación pendiente)
+Desarrollador a cargo: Ortiz Montero Luis Enrique
 
 Prototipo
 
@@ -161,7 +163,7 @@ Criterios de Aceptación
 - Sin una asignación válida, el acceso se deniega por defecto.
 - Los permisos por defecto provienen de la configuración del rol.
 
-Desarrollador a cargo: GAP-073 (asignación pendiente)
+Desarrollador a cargo: Ortiz Montero Luis Enrique
 
 Prototipo
 
@@ -177,7 +179,7 @@ Criterios de Aceptación
 - Los cambios se guardan sin alterar publicaciones existentes.
 - El borrador es visible únicamente para el tenant propietario.
 
-Desarrollador a cargo: GAP-073 (asignación pendiente)
+Desarrollador a cargo: Rebollo Condori Renato
 
 Prototipo
 
@@ -193,7 +195,7 @@ Criterios de Aceptación
 - La operación requiere los permisos correspondientes.
 - El agente no puede autoaprobar la publicación.
 
-Desarrollador a cargo: GAP-073 (asignación pendiente)
+Desarrollador a cargo: Rebollo Condori Renato
 
 Prototipo
 
@@ -209,7 +211,7 @@ Criterios de Aceptación
 - Rechazar cambia el estado a `rechazado` y exige observaciones.
 - La revisión incluye la verificación de redacción y difuminado.
 
-Desarrollador a cargo: GAP-073 (asignación pendiente)
+Desarrollador a cargo: Rebollo Condori Renato
 
 Prototipo
 
@@ -225,7 +227,7 @@ Criterios de Aceptación
 - Una publicación despublicada desaparece inmediatamente del catálogo.
 - La despublicación queda registrada en auditoría.
 
-Desarrollador a cargo: GAP-073 (asignación pendiente)
+Desarrollador a cargo: Vedia Barrios Sebastian
 
 Prototipo
 
@@ -241,7 +243,7 @@ Criterios de Aceptación
 - La consulta no expone contenido interno del tenant.
 - El cliente no puede utilizar un `tenant_id` como mecanismo de autorización.
 
-Desarrollador a cargo: GAP-073 (asignación pendiente)
+Desarrollador a cargo: Vedia Barrios Sebastian
 
 Prototipo
 
@@ -257,7 +259,7 @@ Criterios de Aceptación
 - Solo existe un favorito por publicación y cliente.
 - Si la publicación se despublica, el favorito queda `no_disponible` sin exponer contenido privado.
 
-Desarrollador a cargo: GAP-073 (asignación pendiente)
+Desarrollador a cargo: Vedia Barrios Sebastian
 
 Prototipo
 
@@ -291,7 +293,7 @@ Fecha inicio: GAP-084                 Fecha finalización: GAP-084
 | PB-048 | Entorno local (Docker + Floci) | 8 HRS |
 | PB-049 | CI básica | 8 HRS |
 
-**Carga planificada consolidada:** aproximadamente 107 HRS. La cifra corresponde a la planificación por valor esperado; las fechas exactas, la validación de la estimación y la asignación por integrante permanecen pendientes (GAP-072, GAP-073 y GAP-084).
+**Carga planificada consolidada:** aproximadamente 107 HRS. La cifra corresponde a la planificación por valor esperado; las fechas exactas y la validación de la estimación permanecen pendientes (GAP-072 y GAP-084). HU-001 y HU-002 permanecen con Calero Suyo Trevor Félix por su responsabilidad de implementación confirmada; las demás HUs se distribuyen por bloques funcionales entre los cuatro desarrolladores restantes. La asignación confirmada por el usuario y el equipo queda documentada, mientras que cualquier brecha aún abierta de responsabilidad de pruebas/documentación se mantiene explícitamente como GAP-073.
 
 La organización del Sprint Backlog sigue la dependencia funcional del producto: autenticación antes de onboarding, suscripciones, membresías y permisos; publicaciones después de disponer de autenticación y tenancy; y catálogo global después de la publicación. PB-049 depende del entorno local de PB-048.
 
