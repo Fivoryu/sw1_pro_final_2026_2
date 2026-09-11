@@ -70,7 +70,7 @@ backend/
 └── tests/                 # test_registro.py, test_autenticacion.py, test_session_repository.py, test_tokens_core.py
 ```
 
-- **Implementado y verificado (VERIFY PASS, 2026-08-24)**: `POST /api/v1/auth/registro` (201/409/422), `POST /api/v1/auth/login` (access JWT 15 min + refresh opaco), `POST /api/v1/auth/refresh` (rotación atómica), `POST /api/v1/auth/logout` (204 idempotente), `GET /api/v1/auth/me` (sesión validada server-side, inactividad sliding 30 min). **33 tests verdes**, ruff limpio, pyright CLI 0 errores. Migraciones `0001`+`0002` ejecutadas contra PostgreSQL real (Docker).
+- **Implementado y verificado (VERIFY PASS, 2026-08-24)**: `POST /api/v1/auth/register` (201/409/422), `POST /api/v1/auth/login` (access JWT 15 min + refresh opaco), `POST /api/v1/auth/refresh` (rotación atómica), `POST /api/v1/auth/logout` (204 idempotente), `GET /api/v1/auth/me` (sesión validada server-side, inactividad sliding 30 min). **33 tests verdes**, ruff limpio, pyright CLI 0 errores. Migraciones `0001`+`0002` ejecutadas contra PostgreSQL real (Docker).
 - **Entorno local**: `.venv/` en la raíz del monorepo (no commiteado); `backend/.env` local gitignored (DATABASE_URL, JWT_SECRET); PostgreSQL vía `infra/docker/compose.postgres.yml` (puerto 5434).
 
 ### Comandos útiles (desde `backend/`)
@@ -108,6 +108,7 @@ docker compose -f infra/docker/compose.postgres.yml up -d
 - **Regla de diagramas**: solo se referencia el **tipo** de diagrama y su ubicación; **no se embeben imágenes** ni se inventa un tipo que el modelo no especifique (GAP-CH2-001..007).
 - **Regla de gaps**: un GAP no se "arregla silenciosamente" ni se inventa el dato faltante; se documenta y se deja la marca.
 - **Idioma**: toda la documentación de Ingeniería de Software se escribe en **español profesional y neutral**; el código y sus identificadores en **inglés** (convención del proyecto).
+- **Rutas HTTP públicas**: los paths y endpoints siempre usan nombres en **inglés**; el endpoint de registro vigente es `POST /api/v1/auth/register`.
 - **Commits**: conventional commits (`feat|fix|test|docs|chore|refactor(scope): ...`), una unidad de trabajo por commit, **sin atribución de IA**.
 
 ## 8. Skills del proyecto

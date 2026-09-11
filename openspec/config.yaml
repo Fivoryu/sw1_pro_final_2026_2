@@ -1,0 +1,55 @@
+project:
+  name: RoomForge
+  slug: sw1_pro_final_2026_2
+  description: SaaS inmobiliario académico con recorridos 3D
+  repository_root: .
+  code_repository: backend/
+  planned_change: hu004-alta-inmobiliaria
+  planned_scope: HU-004; excluye HU-005 y HU-006
+
+sdd:
+  artifact_store: hybrid
+  execution: interactive
+  delivery_strategy: ask-on-risk
+  review_budget_changed_lines: 600
+  artifact_language: es
+  code_language: en
+  phases:
+    - explore
+    - proposal
+    - spec
+    - design
+    - tasks
+    - apply
+    - verify
+    - archive
+
+quality:
+  strict_tdd: true
+  test_runner: ".venv/Scripts/python.exe -m pytest backend/tests -q"
+  lint_runner: >-
+    .venv/Scripts/python.exe -m ruff check backend/app backend/tests
+  typecheck_runner: ".venv/Scripts/pyright.exe backend/app backend/tests"
+  migration_runner: >-
+    .venv/Scripts/python.exe -m alembic -c backend/alembic.ini upgrade head
+  conventions:
+    commits: conventional-commits
+    no_commits_or_pushes_during_sdd: true
+    documentation: Spanish profesional y neutral
+    code_identifiers: English
+
+repository:
+  architecture: monorepo con submódulos multi-repo
+  backend_stack:
+    - FastAPI
+    - SQLAlchemy 2.x
+    - PostgreSQL
+    - Alembic
+    - Argon2id
+    - PyJWT
+    - pytest
+  frontend_stack: React, TypeScript, Vite
+  mobile_stack: Flutter
+  do_not_modify: docs/diagramas/Diagrama1.eapx
+  target_submodule_branch_note: >-
+    backend remoto feature/tenant-hu04-06; no cambiar la rama local durante init
