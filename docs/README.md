@@ -23,6 +23,7 @@ Registro canónico: [`docs/sprint-0/ids-trazabilidad.md`](sprint-0/ids-trazabili
 | PAPS-09 | [Organización interna](paps/09-organizacion-interna.md) | planned | S0-03 (GAP-086) |
 | PAPS-10 | [Seguimiento/control](paps/10-seguimiento-control.md) | planned | ceremonias (GAP-087) |
 | SCRUM | [Proceso de desarrollo Scrum](scrum/README.md) | in progress | ids §10 |
+| AVANCE | [Avance por historias de usuario](avance/README.md) | in progress | evidencia CP-001/CP-002 |
 | S0-01 | [Sprint 0 — Propósito](scrum/sprint-0-requerimientos/01-proposito.md) | done | ids |
 | S0-02 | [Sprint 0 — Ámbito, objetivos y descripción](scrum/sprint-0-requerimientos/02-ambito-objetivos-descripcion.md) | done | ids, línea base |
 | S0-03 | [Sprint 0 — Equipo Scrum](scrum/sprint-0-requerimientos/03-equipo-scrum.md) | done | obs-2287/2347 |
