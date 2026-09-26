@@ -1,0 +1,48 @@
+name: Solicitud de funcionalidad
+description: Registrar una funcionalidad trazable y lista para revisión en RoomForge
+title: "[HU] "
+labels:
+  - enhancement
+body:
+  - type: input
+    id: trazabilidad
+    attributes:
+      label: Trazabilidad
+      description: Indique los IDs PB, HU, CU y CP relacionados.
+      placeholder: PB-XXX / HU-XXX / CU-XXX / CP-XXX
+    validations:
+      required: true
+  - type: textarea
+    id: objetivo
+    attributes:
+      label: Objetivo
+      description: Describa el problema y el resultado esperado.
+      placeholder: Explique qué comportamiento debe habilitarse y para quién.
+    validations:
+      required: true
+  - type: textarea
+    id: criterios
+    attributes:
+      label: Criterios de aceptación
+      description: Enumere los criterios verificables y los límites de alcance.
+      placeholder: |-
+        - Criterio verificable 1
+        - Criterio verificable 2
+        - Fuera de alcance
+    validations:
+      required: true
+  - type: textarea
+    id: evidencia
+    attributes:
+      label: Evidencia y pruebas
+      description: Registre pruebas, migraciones, riesgos o dependencias conocidas.
+      placeholder: Incluya comandos y resultados, sin secretos ni datos privados.
+    validations:
+      required: false
+  - type: checkboxes
+    id: preparacion
+    attributes:
+      label: Preparación
+      options:
+        - label: Confirmo que la propuesta tiene alcance, criterios de aceptación y trazabilidad suficientes para revisión.
+          required: true

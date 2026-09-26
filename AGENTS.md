@@ -1,10 +1,10 @@
 # RoomForge — Guía de contexto para agentes
 
-> Este archivo le permite a un agente (de cualquier persona/equipo) entender el proyecto, su arquitectura multi-repo, las convenciones y el estado actual antes de tocar nada.
+> Este archivo le permite a un agente (de cualquier persona/equipo) entender el proyecto, su arquitectura de repositorio único, las convenciones y el estado actual antes de tocar nada.
 
 ## 1. Qué es el proyecto
 
-**RoomForge** es un SaaS inmobiliario académico con recorridos 3D, desarrollado como trabajo final de la materia **Ingeniería de Software 1 (SW1)**, ciclo **2026-2**, **Grupo #12**. El monorepo actual es el repositorio de coordinación; el código de producto vive en 4 repositorios individuales conectados como submódulos (ver §3).
+**RoomForge** es un SaaS inmobiliario académico con recorridos 3D, desarrollado como trabajo final de la materia **Ingeniería de Software 1 (SW1)**, ciclo **2026-2**, **Grupo #12**. El proyecto se mantiene en un repositorio único: el código de producto vive en `backend/`, `panel/` y `apps/*_mobile/`, junto con la documentación e integración.
 
 - **Escenario**: inmobiliarias publican inmuebles; agentes capturan videos/fotos para reconstrucción 3D (Meshroom); clientes recorren los inmuebles en 3D, consultan precios, reservan y pagan con token de prueba.
 - **Fase actual**: backend implementado para **PB-001 (registro de cliente)** y **PB-002 (autenticación y sesión)**; la app cliente ya integra registro, login y sesión; el resto de superficies (panel web, app de captura, worker 3D y contratos) está en estructura inicial.
@@ -13,24 +13,23 @@
 ## 2. Cómo trabajar acá (primero leé esto)
 
 1. **Siempre verificá el estado antes de editar**: `git status`, `git branch --show-current` y, si vas a tocar backend, corré la suite (`pytest`). El working tree puede tener cambios en curso de otra sesión.
-2. **Después de clonar**: `git clone --recurse-submodules <url>` — las carpetas de producto son submódulos y sin `--recurse-submodules` quedan vacías.
+2. **Después de clonar**: `git clone <url>` — el código de producto está versionado directamente en las carpetas de este repositorio; no se requieren submódulos.
 3. **No commitees ni pushees sin que el humano lo pida explícitamente.** El dueño del repo decide cuándo y cómo se agrupan los commits.
 4. **El archivo `docs/diagramas/Diagrama1.eapx` es binario de Enterprise Architect**: está excluido de la mayoría de los cambios (EA suele tenerlo abierto y lo re-modifica).
 5. **Uso de SDD/OpenSpec**: los cambios sustanciales se planifican con el flujo SDD (proposal → spec → design → tasks → apply → verify → archive) bajo `openspec/changes/<cambio>/`, con artefactos en español y trazabilidad a los IDs del sprint.
 
-## 3. Arquitectura multi-repo (importante)
+## 3. Repositorio único (importante)
 
-El monorepo (`Fivoryu/sw1_pro_final_2026_2`) contiene **submódulos git** para el código de producto:
+El repositorio `Fivoryu/sw1_pro_final_2026_2` contiene tanto la documentación como el código de producto. Estas carpetas son directorios normales del repositorio, no submódulos:
 
-| Carpeta en el monorepo | Repositorio individual | Superficie |
+| Carpeta | Superficie | Stack |
 | --- | --- | --- |
-| `backend/` | [`sw1_pro_final_backend_2026_2`](https://github.com/Fivoryu/sw1_pro_final_backend_2026_2) | API FastAPI monolítica modular |
-| `panel/` | [`sw1_pro_final_frontend_2026_2`](https://github.com/Fivoryu/sw1_pro_final_frontend_2026_2) | Panel web admin/agente (React) |
-| `apps/captura_mobile/` | [`sw1_pro_final_captura_mobile_2026_2`](https://github.com/Fivoryu/sw1_pro_final_captura_mobile_2026_2) | App de captura del agente (Flutter) |
-| `apps/cliente_mobile/` | [`sw1_pro_final_cliente_mobile_2026_2`](https://github.com/Fivoryu/sw1_pro_final_cliente_mobile_2026_2) | App del cliente (Flutter) |
+| `backend/` | API FastAPI monolítica modular | FastAPI · SQLAlchemy · Alembic · PostgreSQL |
+| `panel/` | Panel web admin/agente | React · TypeScript · Vite |
+| `apps/captura_mobile/` | App de captura del agente | Flutter |
+| `apps/cliente_mobile/` | App del cliente | Flutter |
 
-- **Regla**: los cambios de código de producto se trabajan **dentro del repositorio individual** correspondiente (o en la carpeta vía submódulo) y se pushean allí. El monorepo conserva documentación, OpenSpec e integración.
-- Para actualizar el submódulo del monorepo tras un push externo: `git submodule update --remote <carpeta>` (o entrar a la carpeta y `git pull`), luego commit del gitlink en el monorepo.
+- **Regla**: los cambios de código de producto se realizan directamente en la carpeta correspondiente de este repositorio. La documentación, OpenSpec y el resto de la integración también se mantienen aquí; no hay repositorios hijos que sincronizar.
 
 ## 4. Estructura del monorepo
 
@@ -44,9 +43,9 @@ proyecto_final/
 │   ├── modelo_doc/   # Documento modelo Grupo #12 (PDF) + guía estructural del CAPITULO 2 + extractos
 │   ├── sprint-0/     # Análisis: trazabilidad de IDs, tipos de diagramas, PAPS
 │   └── diagramas/    # Modelos Enterprise Architect (.eapx)
-├── backend/         # 🔗 submódulo — API FastAPI (ver §5)
-├── panel/           # 🔗 submódulo — panel web React (estructura inicial)
-├── apps/            # 🔗 submódulos — apps Flutter (estructura inicial)
+├── backend/         # API FastAPI (ver §5)
+├── panel/           # Panel web React (estructura inicial)
+├── apps/            # Apps Flutter (estructura inicial)
 ├── openspec/        # Cambios SDD: openspec/changes/{registro-cliente, autenticacion, prueba-hu001}
 ├── infra/           # Docker Compose local (compose.postgres.yml: postgres:16-alpine, puerto 5434)
 ├── contracts/       # Contratos Solidity/Hardhat (escrow de token de prueba) — pendiente

@@ -1,0 +1,9 @@
+# Local Pi runtime state
+.atl/
+
+# Generated and session-local files
+node_modules/
+dist/
+.codegraph/
+.pi/
+nul

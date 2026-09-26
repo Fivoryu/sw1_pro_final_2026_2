@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "roomforge-backend"
+version = "0.1.0"
+description = "RoomForge staff identity API"
+requires-python = ">=3.11"
+dependencies = [
+  "alembic>=1.13",
+  "argon2-cffi>=23.1",
+  "cryptography>=42.0",
+  "fastapi>=0.110",
+  "PyJWT>=2.8",
+  "psycopg[binary]>=3.1",
+  "sqlalchemy>=2.0",
+  "uvicorn>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27",
+  "pyright>=1.1",
+  "pytest>=8.0",
+  "ruff>=0.5",
+]
+
+[tool.setuptools.packages.find]
+include = ["app", "app.*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+cache-dir = "app/.ruff_cache"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.pyright]
+include = ["app", "tests"]
+typeCheckingMode = "basic"
+pythonVersion = "3.11"
+reportMissingImports = "error"
