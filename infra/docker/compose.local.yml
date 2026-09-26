@@ -1,0 +1,116 @@
+name: roomforge-local-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-roomforge_local}
+      POSTGRES_USER: ${POSTGRES_USER:-roomforge_local}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-postgres-only}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  floci:
+    image: floci/floci:2.1.0-compat
+    environment:
+      FLOCI_STORAGE_MODE: ${FLOCI_STORAGE_MODE:-persistent}
+      FLOCI_STORAGE_PERSISTENT_PATH: ${FLOCI_STORAGE_PERSISTENT_PATH:-/app/data}
+      FLOCI_ENDPOINT_URL: ${FLOCI_ENDPOINT_URL:-http://127.0.0.1:4566}
+      AWS_ACCESS_KEY_ID: local-test-key
+      AWS_SECRET_ACCESS_KEY: local-test-secret
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-roomforge-local-assets}
+      SQS_QUEUE_NAME: ${SQS_QUEUE_NAME:-roomforge-local-events}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://floci:4566}
+      SQS_ENDPOINT_URL: ${SQS_ENDPOINT_URL:-http://floci:4566}
+    ports:
+      - "127.0.0.1:${FLOCI_PORT:-4566}:4566"
+    volumes:
+      - floci_data:${FLOCI_STORAGE_PERSISTENT_PATH:-/app/data}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "aws",
+          "--endpoint-url",
+          "${FLOCI_ENDPOINT_URL:-http://127.0.0.1:4566}",
+          "s3api",
+          "list-buckets",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 15s
+
+  api:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-roomforge_local}:${POSTGRES_PASSWORD:-local-postgres-only}@postgres:5432/${POSTGRES_DB:-roomforge_local}
+      JWT_SECRET: ${JWT_SECRET:-roomforge-local-only-jwt-secret-do-not-use-outside-development}
+      STAFF_TOTP_ENCRYPTION_KEY: ${STAFF_TOTP_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+      STAFF_WEB_ORIGIN: "http://127.0.0.1:${PANEL_PORT:-5173}"
+      STAFF_SECURE_COOKIES: "false"
+      AWS_ACCESS_KEY_ID: local-test-key
+      AWS_SECRET_ACCESS_KEY: local-test-secret
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-roomforge-local-assets}
+      SQS_QUEUE_NAME: ${SQS_QUEUE_NAME:-roomforge-local-events}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://floci:4566}
+      SQS_ENDPOINT_URL: ${SQS_ENDPOINT_URL:-http://floci:4566}
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      floci:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os, socket, urllib.request; from sqlalchemy import create_engine; engine = create_engine(os.environ['DATABASE_URL']); connection = engine.connect(); connection.exec_driver_sql('SELECT 1').close(); connection.close(); engine.dispose(); socket.create_connection(('floci', 4566), timeout=2).close(); urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=2).close()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  panel:
+    build:
+      context: ../../panel/staff-shell
+      dockerfile: Dockerfile
+    environment:
+      VITE_API_TARGET: http://api:8000
+    ports:
+      - "127.0.0.1:${PANEL_PORT:-5173}:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:5173/').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  postgres_data:
+  floci_data:

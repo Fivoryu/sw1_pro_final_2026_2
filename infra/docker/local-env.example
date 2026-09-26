@@ -1,0 +1,22 @@
+# Valores ficticios para desarrollo local; no usar credenciales reales.
+POSTGRES_DB=roomforge_local
+POSTGRES_USER=roomforge_local
+POSTGRES_PASSWORD=local-postgres-only
+POSTGRES_PORT=5434
+FLOCI_PORT=4566
+API_PORT=8000
+PANEL_PORT=5173
+
+# Development-only application secrets; replace before any non-local use.
+JWT_SECRET=roomforge-local-only-jwt-secret-do-not-use-outside-development
+STAFF_TOTP_ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+FLOCI_STORAGE_MODE=persistent
+FLOCI_STORAGE_PERSISTENT_PATH=/app/data
+FLOCI_ENDPOINT_URL=http://127.0.0.1:4566
+AWS_DEFAULT_REGION=us-east-1
+
+# Local-only resources and endpoints for applications on the Compose network.
+S3_BUCKET_NAME=roomforge-local-assets
+SQS_QUEUE_NAME=roomforge-local-events
+S3_ENDPOINT_URL=http://floci:4566
+SQS_ENDPOINT_URL=http://floci:4566
