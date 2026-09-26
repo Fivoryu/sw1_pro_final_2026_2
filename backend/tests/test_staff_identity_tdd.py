@@ -961,6 +961,121 @@ def test_expired_enrollment_challenge_recovers_with_a_fresh_invitation(
         }
 
 
+def test_totp_lockout_keeps_email_reserved_until_challenge_expiry(
+    staff_identity_context: StaffIdentityContext,
+) -> None:
+    from app.core.security import totp_code
+
+    context = staff_identity_context
+    invitation_token = "lockout-platform-admin-invitation-token"
+    _seed_invitation(
+        context,
+        invitation_id="lockout-platform-admin-invitation",
+        email="owner@example.test",
+        token=invitation_token,
+        issued_at=context.clock(),
+        expires_at=context.clock() + timedelta(hours=context.settings.invitation_ttl_hours),
+    )
+    acceptance = context.client.post(
+        "/api/v1/auth/invitations/accept",
+        json={
+            "token": invitation_token,
+            "password": "Initial-Password-42!",
+            "password_confirmation": "Initial-Password-42!",
+        },
+    )
+    assert acceptance.status_code == 200
+    enrollment = acceptance.json()
+    valid_code = totp_code(enrollment["totp_secret"], context.clock())
+    invalid_code = f"{(int(valid_code) + 1) % 1_000_000:06d}"
+
+    for _ in range(5):
+        rejected = context.client.post(
+            "/api/v1/auth/totp/enroll/verify",
+            json={
+                "enrollment_token": enrollment["enrollment_token"],
+                "code": invalid_code,
+            },
+        )
+        assert rejected.status_code == 401
+
+    with context.session_factory() as session:
+        challenge = session.query(StaffEnrollmentChallenge).one()
+        assert challenge.attempts == 5
+        assert challenge.consumed_at is not None
+
+    with pytest.raises(RuntimeError, match="active invitation"):
+        issue_platform_admin_invitation(
+            session_factory=context.session_factory,
+            email_sender=context.email_sender,
+            email="owner@example.test",
+            settings=context.settings,
+            clock=context.clock,
+        )
+
+    context.clock.advance(
+        timedelta(minutes=context.settings.enrollment_ttl_minutes, seconds=1)
+    )
+    issue_platform_admin_invitation(
+        session_factory=context.session_factory,
+        email_sender=context.email_sender,
+        email="owner@example.test",
+        settings=context.settings,
+        clock=context.clock,
+    )
+    assert len(context.email_sender.messages) == 1
+    with context.session_factory() as session:
+        pending = session.query(StaffInvitation).filter_by(status="pending").one()
+        assert pending.email == "owner@example.test"
+
+
+def test_legacy_mixed_case_invitation_creates_canonical_login_email(
+    staff_identity_context: StaffIdentityContext,
+) -> None:
+    from app.core.security import totp_code
+
+    context = staff_identity_context
+    invitation_token = "legacy-mixed-case-invitation-token"
+    password = "Initial-Password-42!"
+    _seed_invitation(
+        context,
+        invitation_id="legacy-mixed-case-invitation",
+        email="  LEGACY@Example.Test  ",
+        token=invitation_token,
+        issued_at=context.clock(),
+        expires_at=context.clock() + timedelta(hours=context.settings.invitation_ttl_hours),
+    )
+    acceptance = context.client.post(
+        "/api/v1/auth/invitations/accept",
+        json={
+            "token": invitation_token,
+            "password": password,
+            "password_confirmation": password,
+        },
+    )
+    assert acceptance.status_code == 200
+    enrollment = acceptance.json()
+    verified = context.client.post(
+        "/api/v1/auth/totp/enroll/verify",
+        json={
+            "enrollment_token": enrollment["enrollment_token"],
+            "code": totp_code(enrollment["totp_secret"], context.clock()),
+        },
+    )
+    assert verified.status_code == 200
+
+    with context.session_factory() as session:
+        account = session.query(StaffAccount).one()
+        assert account.email == "legacy@example.test"
+
+    login = context.client.post(
+        "/api/v1/auth/login",
+        json={"email": "legacy@example.test", "password": password},
+    )
+    assert login.status_code == 200
+    assert login.json().get("challenge_token")
+
+
 def test_totp_enrollment_rejects_invalid_code_without_creating_account(
     staff_identity_context: StaffIdentityContext,
 ) -> None:
