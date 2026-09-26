@@ -158,8 +158,8 @@ F01-T1–T4 están completas en la worktree local `feat/f01-infrastructure-compl
 ### Tareas de entrega
 
 - [x] **F01-D1 — Reconciliar alcance y base.** Confirmar autorización, branch/remote tip y archivos exactos; identificar que la rama F01 requiere sincronizarse con los nueve commits de `origin/main`.
-- [ ] **F01-D2 — Crear commit de trabajo F01.** Stage solo los diez paths autorizados; Conventional Commit; no incluir otros documentos o recursos ajenos.
-- [ ] **F01-D3 — Rebasar y revalidar.** Obtener el último `origin/main`, rebasar el commit de F01 y repetir validaciones proporcionales (Compose/build); resolver conflictos únicamente dentro del scope autorizado. No usar force push.
+- [x] **F01-D2 — Crear commit de trabajo F01.** Se creó `e10d4ec79e848648bd40b4e19319a52b0b38b5d1` (`feat(infra): complete local Docker and Floci stack`) con los diez paths autorizados; no se incluyeron otros documentos o recursos.
+- [ ] **F01-D3 — Rebasar y revalidar.** Obtener nuevamente el último `origin/main`, rebasar el commit de F01 y repetir validaciones proporcionales (Compose/build); resolver conflictos únicamente dentro del scope autorizado. No usar force push. El hash puede cambiar al reescribirse; registrar el hash final al terminar.
 - [ ] **F01-D4 — Integrar en `main`.** Verificar que no haya otra integración en curso, empujar el branch F01 a `origin/main` solo si es fast-forward y confirmar el hash remoto. No mover la rama local `main` ni alterar su worktree con cambios preexistentes.
 - [ ] **F01-D5 — Cerrar evidencia de entrega.** Actualizar el plan maestro y este registro para mostrar la integración posterior al corte §1.4 con los hashes observados; registrar que se incluyeron los dos documentos de apoyo autorizados; crear/push el commit documental de cierre si hace falta y sincronizar el espejo Engram.
 
