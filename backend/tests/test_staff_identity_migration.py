@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import importlib.util
 import ipaddress
 import os
 import re
@@ -12,9 +13,22 @@ from unittest.mock import patch
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import Column, Engine, Table, create_engine, inspect
-from sqlalchemy.engine import URL, make_url
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
+from sqlalchemy import (
+    Column,
+    Engine,
+    MetaData,
+    String,
+    Table,
+    create_engine,
+    inspect,
+    insert,
+    text,
+)
+from sqlalchemy.engine import Connection, URL, make_url
 from sqlalchemy.engine.reflection import Inspector
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.schema import CheckConstraint, UniqueConstraint
 
 from app.db.base import Base
@@ -229,6 +243,204 @@ def _metadata_checks(table: Table) -> dict[str, str]:
             raise AssertionError("metadata check constraints must be named")
         checks[constraint.name] = _normalize_sql(str(constraint.sqltext)) or ""
     return checks
+
+
+def _create_pre_agency_schema(connection: Connection) -> None:
+    metadata = MetaData()
+    role_tenant_check = (
+        "(role = 'platform_admin' AND tenant_id IS NULL) "
+        "OR (role IN ('agency_admin', 'agent') AND tenant_id IS NOT NULL)"
+    )
+    account = Table(
+        "staff_account",
+        metadata,
+        Column("id", String(36), primary_key=True),
+        Column("role", String(32), nullable=False),
+        Column("tenant_id", String(36), nullable=True),
+        CheckConstraint(
+            "role IN ('platform_admin', 'agency_admin', 'agent')",
+            name="ck_staff_account_role",
+        ),
+        CheckConstraint(role_tenant_check, name="ck_staff_account_role_tenant"),
+    )
+    invitation = Table(
+        "staff_invitation",
+        metadata,
+        Column("id", String(36), primary_key=True),
+        Column("role", String(32), nullable=False),
+        Column("tenant_id", String(36), nullable=True),
+        Column("status", String(16), nullable=False),
+        CheckConstraint(
+            "role IN ('platform_admin', 'agency_admin', 'agent')",
+            name="ck_staff_invitation_role",
+        ),
+        CheckConstraint(role_tenant_check, name="ck_staff_invitation_role_tenant"),
+    )
+    metadata.create_all(connection)
+    connection.execute(
+        insert(account),
+        [
+            {"id": "account-admin", "role": "platform_admin", "tenant_id": None},
+            {"id": "account-shared", "role": "agency_admin", "tenant_id": "agency-shared"},
+            {"id": "account-only", "role": "agent", "tenant_id": "agency-account-only"},
+        ],
+    )
+    connection.execute(
+        insert(invitation),
+        [
+            {
+                "id": "invitation-admin",
+                "role": "platform_admin",
+                "tenant_id": None,
+                "status": "pending",
+            },
+            {
+                "id": "invitation-shared",
+                "role": "agency_admin",
+                "tenant_id": "agency-shared",
+                "status": "accepted",
+            },
+            {
+                "id": "invitation-only",
+                "role": "agent",
+                "tenant_id": "agency-invitation-only",
+                "status": "revoked",
+            },
+        ],
+    )
+
+
+def _apply_agency_registry_migration(connection: Connection) -> None:
+    migration_path = _BACKEND_ROOT / "alembic" / "versions" / "0003_agency_registry.py"
+    assert migration_path.is_file(), "agency registry migration 0003 is missing"
+    spec = importlib.util.spec_from_file_location(
+        "agency_registry_migration", migration_path
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    migration.op = Operations(MigrationContext.configure(connection))
+    migration.upgrade()
+
+
+@pytest.fixture
+def upgraded_agency_connection() -> Iterator[Connection]:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    try:
+        with engine.connect() as connection:
+            connection.exec_driver_sql("PRAGMA foreign_keys = ON")
+            connection.commit()
+            with connection.begin():
+                _create_pre_agency_schema(connection)
+                _apply_agency_registry_migration(connection)
+                yield connection
+    finally:
+        engine.dispose()
+
+
+def test_agency_migration_backfills_all_distinct_tenant_ids_before_foreign_keys(
+    upgraded_agency_connection: Connection,
+) -> None:
+    connection = upgraded_agency_connection
+
+    agency_ids = set(connection.execute(text("SELECT id FROM agency")).scalars())
+    assert agency_ids == {
+        "agency-shared",
+        "agency-account-only",
+        "agency-invitation-only",
+    }
+
+    for table_name in ("staff_account", "staff_invitation"):
+        foreign_keys = inspect(connection).get_foreign_keys(table_name)
+        assert any(
+            foreign_key["constrained_columns"] == ["tenant_id"]
+            and foreign_key["referred_table"] == "agency"
+            and foreign_key["referred_columns"] == ["id"]
+            for foreign_key in foreign_keys
+        ), f"{table_name}.tenant_id must reference agency.id"
+
+
+def test_agency_migration_preserves_role_tenant_rules_and_enforces_references(
+    upgraded_agency_connection: Connection,
+) -> None:
+    connection = upgraded_agency_connection
+    inspector = inspect(connection)
+    account = Table("staff_account", MetaData(), autoload_with=connection)
+    invitation = Table("staff_invitation", MetaData(), autoload_with=connection)
+
+    for table_name in ("staff_account", "staff_invitation"):
+        checks = {
+            constraint["name"]
+            for constraint in inspector.get_check_constraints(table_name)
+        }
+        assert f"ck_{table_name}_role_tenant" in checks
+
+    connection.execute(
+        insert(account),
+        {"id": "valid-admin", "role": "platform_admin", "tenant_id": None},
+    )
+    connection.execute(
+        insert(invitation),
+        {
+            "id": "valid-admin-invitation",
+            "role": "platform_admin",
+            "tenant_id": None,
+            "status": "pending",
+        },
+    )
+
+    invalid_rows = (
+        (
+            account,
+            {
+                "id": "admin-with-tenant",
+                "role": "platform_admin",
+                "tenant_id": "agency-shared",
+            },
+        ),
+        (
+            account,
+            {"id": "agency-without-tenant", "role": "agent", "tenant_id": None},
+        ),
+        (
+            account,
+            {
+                "id": "unknown-agency",
+                "role": "agent",
+                "tenant_id": "agency-missing",
+            },
+        ),
+        (
+            invitation,
+            {
+                "id": "admin-invitation-with-tenant",
+                "role": "platform_admin",
+                "tenant_id": "agency-shared",
+                "status": "pending",
+            },
+        ),
+        (
+            invitation,
+            {
+                "id": "agency-invitation-without-tenant",
+                "role": "agency_admin",
+                "tenant_id": None,
+                "status": "pending",
+            },
+        ),
+        (
+            invitation,
+            {
+                "id": "unknown-agency-invitation",
+                "role": "agent",
+                "tenant_id": "agency-missing",
+                "status": "pending",
+            },
+        ),
+    )
+    for table, values in invalid_rows:
+        with pytest.raises(IntegrityError):
+            connection.execute(insert(table), values)
 
 
 def test_blank_database_upgrade_matches_identity_metadata(r6_database: R6Database) -> None:

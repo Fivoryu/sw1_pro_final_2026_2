@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import String, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool, StaticPool
 
@@ -289,6 +289,7 @@ def test_bootstrap_is_not_exposed_as_a_public_api_route(
 
 
 _STAFF_SCHEMA_REQUIRED_COLUMNS = {
+    "agency": {"id"},
     "staff_account": {
         "id",
         "email",
@@ -404,10 +405,22 @@ def test_staff_identity_schema_tables_contain_required_columns() -> None:
         )
 
 
+def test_agency_schema_persists_only_a_unique_string_identifier() -> None:
+    table = _staff_schema_table("agency")
+
+    assert set(table.columns.keys()) == {"id"}
+    assert table.primary_key.columns.keys() == ["id"]
+    assert isinstance(table.columns["id"].type, String)
+    assert table.columns["id"].type.length == 36
+
+
 def test_staff_account_schema_enforces_identity_and_platform_admin_rules() -> None:
     table = _staff_schema_table("staff_account")
     checks = _staff_schema_checks(table)
 
+    assert ("tenant_id", "agency.id", None) in _staff_schema_foreign_key_targets(table), (
+        "staff_account.tenant_id must reference agency.id"
+    )
     assert ("email",) in _staff_schema_unique_keys(table), (
         "staff_account.email must be unique"
     )
@@ -446,6 +459,9 @@ def test_staff_invitation_schema_limits_roles_statuses_and_pending_admins() -> N
     table = _staff_schema_table("staff_invitation")
     checks = _staff_schema_checks(table)
 
+    assert ("tenant_id", "agency.id", None) in _staff_schema_foreign_key_targets(table), (
+        "staff_invitation.tenant_id must reference agency.id"
+    )
     assert any(
         "role in ('platform_admin', 'agency_admin', 'agent')" in check
         for check in checks
