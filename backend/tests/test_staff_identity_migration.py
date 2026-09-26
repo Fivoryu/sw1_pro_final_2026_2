@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 import importlib.util
 import ipaddress
 import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 from unittest.mock import patch
 
 import pytest
@@ -130,6 +130,30 @@ def _required_names(names: Iterable[str | None], context: str) -> tuple[str, ...
     return tuple(name for name in resolved_names if name is not None)
 
 
+def _metadata_index_terms(index: Any, engine: Engine) -> tuple[str, ...]:
+    terms: list[str] = []
+    for expression in index.expressions:
+        if isinstance(expression, Column):
+            terms.append(expression.name)
+            continue
+        compiled = expression.compile(
+            dialect=engine.dialect, compile_kwargs={"literal_binds": True}
+        )
+        terms.append(_normalize_sql(str(compiled)) or str(compiled))
+    return tuple(terms)
+
+
+def _database_index_terms(index: Mapping[str, Any], table_name: str) -> tuple[str, ...]:
+    column_names = index.get("column_names")
+    if column_names is not None and all(name is not None for name in column_names):
+        return _required_names(column_names, f"database index {index.get('name')!r}")
+
+    expressions = index.get("expressions")
+    if expressions is None:
+        raise AssertionError(f"database index on {table_name} has no expressions")
+    return tuple(_normalize_sql(expression) or expression for expression in expressions)
+
+
 def _metadata_unique_keys(table: Table, engine: Engine) -> set[tuple[tuple[str, ...], str | None]]:
     keys: set[tuple[tuple[str, ...], str | None]] = set()
     for constraint in getattr(table, "constraints"):
@@ -154,10 +178,7 @@ def _metadata_unique_keys(table: Table, engine: Engine) -> set[tuple[tuple[str, 
         )
         keys.add(
             (
-                _required_names(
-                    (expression.name for expression in index.expressions),
-                    f"metadata index {index.name!r}",
-                ),
+                _metadata_index_terms(index, engine),
                 _normalize_sql(compiled_where),
             )
         )
@@ -175,12 +196,9 @@ def _database_unique_keys(inspector: Inspector, table_name: str) -> set[tuple[tu
             continue
         dialect_options = index.get("dialect_options", {})
         where = dialect_options.get("postgresql_where", index.get("where"))
-        column_names = index.get("column_names")
-        if column_names is None:
-            raise AssertionError(f"database index on {table_name} must use named columns")
         keys.add(
             (
-                _required_names(column_names, f"database index {index.get('name')!r}"),
+                _database_index_terms(index, table_name),
                 _normalize_sql(where),
             )
         )
@@ -201,10 +219,7 @@ def _metadata_indexes(table: Table, engine: Engine) -> set[tuple[str, tuple[str,
         indexes.add(
             (
                 index.name,
-                _required_names(
-                    (expression.name for expression in index.expressions),
-                    f"metadata index {index.name!r}",
-                ),
+                _metadata_index_terms(index, engine),
                 index.unique,
                 _normalize_sql(compiled_where),
             )
@@ -220,13 +235,12 @@ def _database_indexes(inspector: Inspector, table_name: str) -> set[tuple[str, t
         dialect_options = index.get("dialect_options", {})
         where = dialect_options.get("postgresql_where", index.get("where"))
         name = index.get("name")
-        column_names = index.get("column_names")
-        if name is None or column_names is None:
-            raise AssertionError(f"database indexes on {table_name} must use named columns")
+        if name is None:
+            raise AssertionError(f"database indexes on {table_name} must be named")
         indexes.add(
             (
                 name,
-                _required_names(column_names, f"database index {name!r}"),
+                _database_index_terms(index, table_name),
                 bool(index["unique"]),
                 _normalize_sql(where),
             )
@@ -267,6 +281,7 @@ def _create_pre_agency_schema(connection: Connection) -> None:
         "staff_invitation",
         metadata,
         Column("id", String(36), primary_key=True),
+        Column("email", String(320), nullable=False),
         Column("role", String(32), nullable=False),
         Column("tenant_id", String(36), nullable=True),
         Column("status", String(16), nullable=False),
@@ -290,18 +305,21 @@ def _create_pre_agency_schema(connection: Connection) -> None:
         [
             {
                 "id": "invitation-admin",
+                "email": "migration-owner@example.test",
                 "role": "platform_admin",
                 "tenant_id": None,
                 "status": "pending",
             },
             {
                 "id": "invitation-shared",
+                "email": "migration-shared@example.test",
                 "role": "agency_admin",
                 "tenant_id": "agency-shared",
                 "status": "accepted",
             },
             {
                 "id": "invitation-only",
+                "email": "migration-agent@example.test",
                 "role": "agent",
                 "tenant_id": "agency-invitation-only",
                 "status": "revoked",
@@ -310,16 +328,30 @@ def _create_pre_agency_schema(connection: Connection) -> None:
     )
 
 
-def _apply_agency_registry_migration(connection: Connection) -> None:
-    migration_path = _BACKEND_ROOT / "alembic" / "versions" / "0003_agency_registry.py"
-    assert migration_path.is_file(), "agency registry migration 0003 is missing"
-    spec = importlib.util.spec_from_file_location(
-        "agency_registry_migration", migration_path
-    )
+def _load_migration(connection: Connection, filename: str, module_name: str) -> Any:
+    migration_path = _BACKEND_ROOT / "alembic" / "versions" / filename
+    assert migration_path.is_file(), f"migration {filename} is missing"
+    spec = importlib.util.spec_from_file_location(module_name, migration_path)
     assert spec is not None and spec.loader is not None
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
-    migration.op = Operations(MigrationContext.configure(connection))
+    setattr(migration, "op", Operations(MigrationContext.configure(connection)))
+    return migration
+
+
+def _apply_agency_registry_migration(connection: Connection) -> None:
+    migration = _load_migration(
+        connection, "0003_agency_registry.py", "agency_registry_migration"
+    )
+    migration.upgrade()
+
+
+def _apply_pending_invitation_email_migration(connection: Connection) -> None:
+    migration = _load_migration(
+        connection,
+        "0004_staff_invitation_pending_email_unique.py",
+        "staff_invitation_pending_email_migration",
+    )
     migration.upgrade()
 
 
@@ -333,6 +365,7 @@ def upgraded_agency_connection() -> Iterator[Connection]:
             with connection.begin():
                 _create_pre_agency_schema(connection)
                 _apply_agency_registry_migration(connection)
+                _apply_pending_invitation_email_migration(connection)
                 yield connection
     finally:
         engine.dispose()
@@ -383,6 +416,7 @@ def test_agency_migration_preserves_role_tenant_rules_and_enforces_references(
         insert(invitation),
         {
             "id": "valid-admin-invitation",
+            "email": "valid-admin@example.test",
             "role": "platform_admin",
             "tenant_id": None,
             "status": "pending",
@@ -414,6 +448,7 @@ def test_agency_migration_preserves_role_tenant_rules_and_enforces_references(
             invitation,
             {
                 "id": "admin-invitation-with-tenant",
+                "email": "invalid-admin-tenant@example.test",
                 "role": "platform_admin",
                 "tenant_id": "agency-shared",
                 "status": "pending",
@@ -423,6 +458,7 @@ def test_agency_migration_preserves_role_tenant_rules_and_enforces_references(
             invitation,
             {
                 "id": "agency-invitation-without-tenant",
+                "email": "invalid-agency-tenant@example.test",
                 "role": "agency_admin",
                 "tenant_id": None,
                 "status": "pending",
@@ -432,6 +468,7 @@ def test_agency_migration_preserves_role_tenant_rules_and_enforces_references(
             invitation,
             {
                 "id": "unknown-agency-invitation",
+                "email": "invalid-unknown-agency@example.test",
                 "role": "agent",
                 "tenant_id": "agency-missing",
                 "status": "pending",
@@ -441,6 +478,116 @@ def test_agency_migration_preserves_role_tenant_rules_and_enforces_references(
     for table, values in invalid_rows:
         with pytest.raises(IntegrityError):
             connection.execute(insert(table), values)
+
+
+def test_pending_invitation_migration_enforces_normalized_global_uniqueness(
+    upgraded_agency_connection: Connection,
+) -> None:
+    connection = upgraded_agency_connection
+    invitation = Table("staff_invitation", MetaData(), autoload_with=connection)
+    metadata_invitation = Base.metadata.tables["staff_invitation"]
+    metadata_index = next(
+        index
+        for index in metadata_invitation.indexes
+        if index.name == "uq_staff_invitation_pending_normalized_email"
+    )
+    assert metadata_index.unique
+    metadata_expression = _metadata_index_terms(metadata_index, connection.engine)
+    assert metadata_expression == ("lower trim email",)
+    sqlite_index_sql = connection.execute(
+        text(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'index' "
+            "AND name = 'uq_staff_invitation_pending_normalized_email'"
+        )
+    ).scalar_one()
+    normalized_index_sql = _normalize_sql(sqlite_index_sql) or ""
+    assert "lower trim email" in normalized_index_sql
+    assert "where status = 'pending'" in normalized_index_sql
+
+    expired_duplicate = {
+        "id": "expired-email-row",
+        "email": " MIGRATION-OWNER@example.test ",
+        "role": "agency_admin",
+        "tenant_id": "agency-shared",
+        "status": "expired",
+    }
+    connection.execute(insert(invitation), expired_duplicate)
+
+    with pytest.raises(IntegrityError):
+        connection.execute(
+            insert(invitation),
+            {
+                "id": "duplicate-cross-role-row",
+                "email": " MIGRATION-OWNER@EXAMPLE.TEST ",
+                "role": "agency_admin",
+                "tenant_id": "agency-shared",
+                "status": "pending",
+            },
+        )
+
+    connection.execute(
+        insert(invitation),
+        {
+            "id": "first-agency-row",
+            "email": "cross-agency@example.test",
+            "role": "agency_admin",
+            "tenant_id": "agency-shared",
+            "status": "pending",
+        },
+    )
+    with pytest.raises(IntegrityError):
+        connection.execute(
+            insert(invitation),
+            {
+                "id": "second-agency-row",
+                "email": " CROSS-AGENCY@EXAMPLE.TEST ",
+                "role": "agent",
+                "tenant_id": "agency-account-only",
+                "status": "pending",
+            },
+        )
+
+
+def test_pending_invitation_migration_refuses_legacy_duplicates_without_cleanup() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            _create_pre_agency_schema(connection)
+            connection.execute(
+                text(
+                    "INSERT INTO staff_invitation "
+                    "(id, email, role, tenant_id, status) VALUES "
+                    "('legacy-agency-duplicate', ' MIGRATION-OWNER@EXAMPLE.TEST ', "
+                    "'agency_admin', 'agency-shared', 'pending')"
+                )
+            )
+            _apply_agency_registry_migration(connection)
+
+            with pytest.raises(RuntimeError, match="duplicate normalized pending-email"):
+                _apply_pending_invitation_email_migration(connection)
+
+            rows = connection.execute(
+                text(
+                    "SELECT id, email, status FROM staff_invitation "
+                    "WHERE id IN ('invitation-admin', 'legacy-agency-duplicate') "
+                    "ORDER BY id"
+                )
+            ).all()
+            assert rows == [
+                (
+                    "invitation-admin",
+                    "migration-owner@example.test",
+                    "pending",
+                ),
+                (
+                    "legacy-agency-duplicate",
+                    " MIGRATION-OWNER@EXAMPLE.TEST ",
+                    "pending",
+                ),
+            ]
+    finally:
+        engine.dispose()
 
 
 def test_blank_database_upgrade_matches_identity_metadata(r6_database: R6Database) -> None:

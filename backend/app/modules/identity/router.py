@@ -4,7 +4,6 @@ import hmac
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-import jwt
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -13,7 +12,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import Settings
 from app.core.security import (
     create_access_token,
-    decode_access_token,
     decrypt_totp_secret,
     encrypt_totp_secret,
     hash_password,
@@ -25,7 +23,13 @@ from app.core.security import (
     verify_password,
     verify_totp,
 )
+from app.modules.identity.invitations import (
+    has_email_claim_conflict,
+    lock_normalized_email,
+    normalize_email,
+)
 from app.modules.identity.models import (
+    Agency,
     StaffAccount,
     StaffEnrollmentChallenge,
     StaffInvitation,
@@ -33,6 +37,7 @@ from app.modules.identity.models import (
     StaffRecoveryCode,
     StaffSession,
 )
+from app.modules.identity.session import get_active_staff
 
 router = APIRouter(prefix="/api/v1/auth", tags=["staff-auth"])
 _MAX_ENROLLMENT_ATTEMPTS = 5
@@ -64,6 +69,18 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _invitation_supports_onboarding(
+    session: Session, invitation: StaffInvitation
+) -> bool:
+    if invitation.role == "platform_admin":
+        return invitation.tenant_id is None
+    return (
+        invitation.role == "agency_admin"
+        and invitation.tenant_id is not None
+        and session.get(Agency, invitation.tenant_id) is not None
+    )
 
 
 def _is_concurrent_conflict(error: IntegrityError | OperationalError) -> bool:
@@ -126,63 +143,82 @@ def accept_invitation(
 
     try:
         with session_factory.begin() as session:
-            invitation = (
-                session.query(StaffInvitation)
-                .filter(StaffInvitation.token_hash == hash_secret(acceptance.token))
-                .with_for_update()
-                .one_or_none()
+            token_hash = hash_secret(acceptance.token)
+            invitation_hint = (
+                session.query(StaffInvitation.email)
+                .filter(StaffInvitation.token_hash == token_hash)
+                .scalar()
             )
-            if (
-                invitation is None
-                or invitation.status != "pending"
-                or invitation.role != "platform_admin"
-                or invitation.tenant_id is not None
-            ):
-                invalid_invitation = True
-            elif _as_utc(invitation.expires_at) <= now:
-                invitation.status = "expired"
+            if invitation_hint is None:
                 invalid_invitation = True
             else:
-                enrollment_token = random_token()
-                totp_secret = new_totp_secret()
-                challenge = StaffEnrollmentChallenge(
-                    invitation_id=invitation.id,
-                    token_hash=hash_secret(enrollment_token),
-                    password_hash=hash_password(acceptance.password),
-                    totp_secret_encrypted=encrypt_totp_secret(
-                        totp_secret, settings.totp_encryption_key
-                    ),
-                    created_at=now,
-                    expires_at=now + timedelta(minutes=settings.enrollment_ttl_minutes),
-                )
-                claimed = (
+                normalized_email = normalize_email(invitation_hint)
+                lock_normalized_email(session, normalized_email)
+                invitation = (
                     session.query(StaffInvitation)
-                    .filter(
-                        StaffInvitation.id == invitation.id,
-                        StaffInvitation.status == "pending",
-                        StaffInvitation.role == "platform_admin",
-                        StaffInvitation.tenant_id.is_(None),
-                        StaffInvitation.expires_at > now,
-                    )
-                    .update(
-                        {
-                            StaffInvitation.status: "accepted",
-                            StaffInvitation.accepted_at: now,
-                        },
-                        synchronize_session=False,
-                    )
+                    .filter(StaffInvitation.token_hash == token_hash)
+                    .with_for_update()
+                    .one_or_none()
                 )
-                if claimed != 1:
+                if (
+                    invitation is None
+                    or invitation.status != "pending"
+                    or normalize_email(invitation.email) != normalized_email
+                    or not _invitation_supports_onboarding(session, invitation)
+                ):
+                    invalid_invitation = True
+                elif _as_utc(invitation.expires_at) <= now:
+                    invitation.status = "expired"
+                    invalid_invitation = True
+                elif has_email_claim_conflict(
+                    session,
+                    normalized_email,
+                    now,
+                    exclude_invitation_id=invitation.id,
+                ):
                     invalid_invitation = True
                 else:
-                    session.add(challenge)
-                    enrollment_response = {
-                        "enrollment_token": enrollment_token,
-                        "totp_secret": totp_secret,
-                        "provisioning_uri": make_totp_uri(
-                            totp_secret, invitation.email
+                    enrollment_token = random_token()
+                    totp_secret = new_totp_secret()
+                    challenge = StaffEnrollmentChallenge(
+                        invitation_id=invitation.id,
+                        token_hash=hash_secret(enrollment_token),
+                        password_hash=hash_password(acceptance.password),
+                        totp_secret_encrypted=encrypt_totp_secret(
+                            totp_secret, settings.totp_encryption_key
                         ),
-                    }
+                        created_at=now,
+                        expires_at=now
+                        + timedelta(minutes=settings.enrollment_ttl_minutes),
+                    )
+                    claimed = (
+                        session.query(StaffInvitation)
+                        .filter(
+                            StaffInvitation.id == invitation.id,
+                            StaffInvitation.status == "pending",
+                            StaffInvitation.role == invitation.role,
+                            StaffInvitation.tenant_id == invitation.tenant_id,
+                            StaffInvitation.expires_at > now,
+                        )
+                        .update(
+                            {
+                                StaffInvitation.status: "accepted",
+                                StaffInvitation.accepted_at: now,
+                            },
+                            synchronize_session=False,
+                        )
+                    )
+                    if claimed != 1:
+                        invalid_invitation = True
+                    else:
+                        session.add(challenge)
+                        enrollment_response = {
+                            "enrollment_token": enrollment_token,
+                            "totp_secret": totp_secret,
+                            "provisioning_uri": make_totp_uri(
+                                totp_secret, invitation.email
+                            ),
+                        }
     except (IntegrityError, OperationalError) as error:
         if not _is_concurrent_conflict(error):
             raise
@@ -207,84 +243,112 @@ def verify_totp_enrollment(
     recovery_codes: list[str] = []
 
     with session_factory.begin() as session:
-        challenge = (
-            session.query(StaffEnrollmentChallenge)
-            .filter(
-                StaffEnrollmentChallenge.token_hash
-                == hash_secret(verification.enrollment_token)
-            )
-            .with_for_update()
-            .one_or_none()
+        token_hash = hash_secret(verification.enrollment_token)
+        invitation_id_hint = (
+            session.query(StaffEnrollmentChallenge.invitation_id)
+            .filter(StaffEnrollmentChallenge.token_hash == token_hash)
+            .scalar()
         )
-        if challenge is None:
-            unauthorized = True
-        elif challenge.consumed_at is not None:
-            unauthorized = True
-        elif challenge.attempts >= _MAX_ENROLLMENT_ATTEMPTS:
-            challenge.consumed_at = now
-            unauthorized = True
-        elif _as_utc(challenge.expires_at) <= now:
-            challenge.consumed_at = now
+        if invitation_id_hint is None:
             unauthorized = True
         else:
-            invitation = (
-                session.query(StaffInvitation)
-                .filter(StaffInvitation.id == challenge.invitation_id)
-                .with_for_update()
-                .one_or_none()
+            email_hint = (
+                session.query(StaffInvitation.email)
+                .filter(StaffInvitation.id == invitation_id_hint)
+                .scalar()
             )
-            if (
-                invitation is None
-                or invitation.status != "accepted"
-                or invitation.role != "platform_admin"
-                or invitation.tenant_id is not None
-            ):
-                challenge.consumed_at = now
+            if email_hint is None:
                 unauthorized = True
             else:
-                try:
-                    totp_secret = decrypt_totp_secret(
-                        challenge.totp_secret_encrypted,
-                        settings.totp_encryption_key,
-                    )
-                    valid_code = verify_totp(totp_secret, verification.code, now)
-                except ValueError:
-                    valid_code = False
-
-                if not valid_code:
-                    challenge.attempts += 1
-                    if challenge.attempts >= _MAX_ENROLLMENT_ATTEMPTS:
-                        challenge.consumed_at = now
+                normalized_email = normalize_email(email_hint)
+                lock_normalized_email(session, normalized_email)
+                challenge = (
+                    session.query(StaffEnrollmentChallenge)
+                    .filter(StaffEnrollmentChallenge.token_hash == token_hash)
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if challenge is None or challenge.invitation_id != invitation_id_hint:
+                    unauthorized = True
+                elif challenge.consumed_at is not None:
+                    unauthorized = True
+                elif challenge.attempts >= _MAX_ENROLLMENT_ATTEMPTS:
+                    challenge.consumed_at = now
+                    unauthorized = True
+                elif _as_utc(challenge.expires_at) <= now:
+                    challenge.consumed_at = now
                     unauthorized = True
                 else:
-                    account = StaffAccount(
-                        email=invitation.email,
-                        password_hash=challenge.password_hash,
-                        role=invitation.role,
-                        tenant_id=invitation.tenant_id,
-                        active=True,
-                        totp_secret_encrypted=challenge.totp_secret_encrypted,
-                        totp_enabled=True,
-                        created_at=now,
+                    invitation = (
+                        session.query(StaffInvitation)
+                        .filter(StaffInvitation.id == challenge.invitation_id)
+                        .with_for_update()
+                        .one_or_none()
                     )
-                    session.add(account)
-                    session.flush()
-                    challenge.consumed_at = now
-                    recovery_codes = new_recovery_codes(settings.recovery_code_count)
-                    session.add_all(
-                        StaffRecoveryCode(
-                            user_id=account.id,
-                            code_hash=hash_secret(code),
-                            created_at=now,
-                        )
-                        for code in recovery_codes
-                    )
-                    account_identity = {
-                        "id": account.id,
-                        "email": account.email,
-                        "role": account.role,
-                        "tenant_id": account.tenant_id,
-                    }
+                    if (
+                        invitation is None
+                        or invitation.status != "accepted"
+                        or normalize_email(invitation.email) != normalized_email
+                        or not _invitation_supports_onboarding(session, invitation)
+                    ):
+                        challenge.consumed_at = now
+                        unauthorized = True
+                    elif has_email_claim_conflict(
+                        session,
+                        normalized_email,
+                        now,
+                        exclude_invitation_id=invitation.id,
+                    ):
+                        challenge.consumed_at = now
+                        unauthorized = True
+                    else:
+                        try:
+                            totp_secret = decrypt_totp_secret(
+                                challenge.totp_secret_encrypted,
+                                settings.totp_encryption_key,
+                            )
+                            valid_code = verify_totp(
+                                totp_secret, verification.code, now
+                            )
+                        except ValueError:
+                            valid_code = False
+
+                        if not valid_code:
+                            challenge.attempts += 1
+                            if challenge.attempts >= _MAX_ENROLLMENT_ATTEMPTS:
+                                challenge.consumed_at = now
+                            unauthorized = True
+                        else:
+                            account = StaffAccount(
+                                email=normalize_email(invitation.email),
+                                password_hash=challenge.password_hash,
+                                role=invitation.role,
+                                tenant_id=invitation.tenant_id,
+                                active=True,
+                                totp_secret_encrypted=challenge.totp_secret_encrypted,
+                                totp_enabled=True,
+                                created_at=now,
+                            )
+                            session.add(account)
+                            session.flush()
+                            challenge.consumed_at = now
+                            recovery_codes = new_recovery_codes(
+                                settings.recovery_code_count
+                            )
+                            session.add_all(
+                                StaffRecoveryCode(
+                                    user_id=account.id,
+                                    code_hash=hash_secret(code),
+                                    created_at=now,
+                                )
+                                for code in recovery_codes
+                            )
+                            account_identity = {
+                                "id": account.id,
+                                "email": account.email,
+                                "role": account.role,
+                                "tenant_id": account.tenant_id,
+                            }
 
     if unauthorized or account_identity is None:
         raise HTTPException(status_code=401, detail="Enrollment is invalid or expired")
@@ -602,72 +666,4 @@ def logout(request: Request, response: Response) -> Response:
 
 @router.get("/me", response_model=None)
 def me(request: Request) -> dict[str, object]:
-    settings: Settings = request.app.state.settings
-    authorization = request.headers.get("authorization")
-    credentials = authorization.split() if authorization is not None else []
-    if len(credentials) != 2 or credentials[0].lower() != "bearer":
-        raise HTTPException(status_code=401, detail="Session is invalid or expired")
-
-    try:
-        claims = decode_access_token(credentials[1], settings.jwt_secret)
-    except jwt.PyJWTError:
-        raise HTTPException(
-            status_code=401, detail="Session is invalid or expired"
-        ) from None
-
-    user_id = claims.get("sub")
-    session_id = claims.get("sid")
-    if (
-        not isinstance(user_id, str)
-        or not user_id.strip()
-        or not isinstance(session_id, str)
-        or not session_id.strip()
-    ):
-        raise HTTPException(status_code=401, detail="Session is invalid or expired")
-
-    session_factory: sessionmaker[Session] = request.app.state.session_factory
-    now = _as_utc(request.app.state.clock())
-    unauthorized = False
-    user: dict[str, str | None] | None = None
-
-    with session_factory.begin() as session:
-        staff_session = (
-            session.query(StaffSession)
-            .filter(
-                StaffSession.id == session_id,
-                StaffSession.user_id == user_id,
-            )
-            .with_for_update()
-            .one_or_none()
-        )
-        if staff_session is None or staff_session.revoked_at is not None:
-            unauthorized = True
-        elif (
-            _as_utc(staff_session.expires_at) <= now
-            or now - _as_utc(staff_session.last_activity_at)
-            >= timedelta(minutes=settings.admin_idle_minutes)
-        ):
-            staff_session.revoked_at = now
-            unauthorized = True
-        else:
-            account = (
-                session.query(StaffAccount)
-                .filter(StaffAccount.id == staff_session.user_id)
-                .with_for_update()
-                .one_or_none()
-            )
-            if account is None or not account.active or not account.totp_enabled:
-                staff_session.revoked_at = now
-                unauthorized = True
-            else:
-                staff_session.last_activity_at = now
-                user = {
-                    "id": account.id,
-                    "email": account.email,
-                    "role": account.role,
-                    "tenant_id": account.tenant_id,
-                }
-
-    if unauthorized or user is None:
-        raise HTTPException(status_code=401, detail="Session is invalid or expired")
-    return {"user": user}
+    return {"user": get_active_staff(request)}
