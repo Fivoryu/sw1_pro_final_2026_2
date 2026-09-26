@@ -116,6 +116,14 @@ Index(
     ),
 )
 
+Index(
+    "uq_staff_invitation_pending_normalized_email",
+    func.lower(func.trim(StaffInvitation.email)),
+    unique=True,
+    sqlite_where=StaffInvitation.status == "pending",
+    postgresql_where=StaffInvitation.status == "pending",
+)
+
 
 class StaffSession(Base):
     __tablename__ = "staff_session"

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
 from app.db.session import create_session_factory
+from app.modules.agencies.router import router as agencies_router
 from app.modules.identity.router import router as identity_router
 
 
@@ -44,6 +45,7 @@ def create_app(
         allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
     )
     app.include_router(identity_router)
+    app.include_router(agencies_router)
 
     @app.exception_handler(RequestValidationError)
     async def safe_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
