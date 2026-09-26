@@ -21,6 +21,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
 
+class Agency(Base):
+    __tablename__ = "agency"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+
 class StaffAccount(Base):
     __tablename__ = "staff_account"
     __table_args__ = (
@@ -39,7 +45,9 @@ class StaffAccount(Base):
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False)
-    tenant_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    tenant_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("agency.id"), nullable=True
+    )
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     totp_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -78,7 +86,9 @@ class StaffInvitation(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False)
-    tenant_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    tenant_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("agency.id"), nullable=True
+    )
     token_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     issued_at: Mapped[datetime] = mapped_column(
