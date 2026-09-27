@@ -50,13 +50,22 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 3. Deadlines configurables por dependencia: DB conexión/adquisición de pool `5s`, sentencia `10s`, proveedor de correo `10s`. No añadir timeout global de request que no cancele trabajo síncrono. El usuario autorizó ampliar el Protocol del plugin para que reciba/exija el límite nativo; no existe un proveedor concreto en este repositorio, por lo que su enforcement real quedará externo y sin verificar.
 4. Disponibilidad: `GET /health/live` para proceso y `GET /health/ready` para DB+Floci; respuestas seguras sin detalle interno y Compose usa readiness. El probe Compose actual de 5s es menor que el presupuesto secuencial DB (5+10s)+Floci (2s); el timeout externo deberá superar los límites internos y ser validado. La lectura de Floci es TCP (no certifica una operación S3).
 
+## Hallazgos base F02.2 (exploración de solo lectura)
+
+- El grafo estático es lineal: `0001_staff_identity → 0002_staff_identity_align → 0003_agency_registry → 0004_staff_invitation_pending_email_unique` (head de código; no se consultó una base conectada).
+- Hay pruebas PostgreSQL de base vacía a head que requieren `ROOMFORGE_R6_DATABASE_URL` dedicado y completamente vacío. No se encontró un upgrade Alembic completo desde revisión previa.
+- Las pruebas SQLite existentes cubren directamente `0003`/`0004` sobre esquema pre-agencia; no validan `0001`/`0002` ni sustituyen PostgreSQL. `0002` tiene operaciones específicas del dialecto PostgreSQL.
+- Se observó posible inconsistencia en test de concurrencia PostgreSQL: inserta agente con `tenant_id` sin sembrar `Agency`, pese a FK declarada; no está probado si bloquea la suite.
+- El responsable F01 confirmó que no puede autorizar base ni Docker; pidió autorización al usuario. Mantener Docker y tests PostgreSQL pausados hasta recibir límites explícitos.
+
 ## Tareas
 
 - [x] **F02-T1 — Proponer mapa UX y contratos de estado.** **CERRADA.** Entregable aprobado: `docs/ux/f02-surface-map.md`; commit `a156a53`. La aprobación precede al detalle visual.
 - [x] **F02-T2a — Errores y paginación.** **CERRADA.** Errores homogéneos, 5xx sanitizados, OpenAPI y paginación de agencias; commit `5d0cc8a` (393 líneas).
 - [x] **F02-T2b — Deadlines DB y proveedor de correo.** **CERRADA.** Timeouts PostgreSQL-only y EmailSender nativo; provider externo no disponible; commit `eeda6e7` (395 líneas).
 - [x] **F02-T2c — Salud API y Compose.** **CERRADA.** `/health/live` y `/health/ready` DB+Floci TCP, Compose usa readiness; commit `447c8ec` (276 líneas). Tests 132 PASS/2 SKIP, Ruff PASS, Pyright 0; Docker no ejecutado por coordinación.
-- [ ] **F02-T3 — Verificar el esquema y el ciclo de migraciones.** **EN CURSO; primero mapear migraciones y pruebas existentes.** Basarse en el head real; probar creación desde cero y actualización desde la versión anterior cuando exista; documentar datos ficticios, rollback/recovery y comandos reproducibles. No iniciar Docker/DB PostgreSQL hasta coordinar con el dueño F01/usuario; no añadir tablas de dominios posteriores.
+- [ ] **F02-T3a — Verificación SQLite y evidencia de migración.** **EN CURSO; revisión de doc PASS, commit pendiente.** `docs/migrations/f02-migration-verification.md` registra 4 pruebas SQLite, head estático, fixtures sintéticos, limitaciones y recovery sin prometer reversibilidad.
+- [ ] **F02-T3b — Verificación real PostgreSQL.** **PENDIENTE DE AUTORIZACIÓN.** La prueba de base vacía a head requiere DB desechable `roomforge_r6_*`; no crearla ni ejecutar Docker/PostgreSQL hasta autorización explícita del usuario y límites acordados.
 - [ ] **F02-T4 — Entregar prototipos UX de las tres superficies.** Implementar los recorridos aprobados en el mapa, con carga/vacío/error/offline/permisos, diseño web adaptable, controles táctiles y accesibilidad. Usar el handoff móvil solo tras verificar commit y límites; mantener lo no ejecutable como prototipo honesto.
 - [ ] **F02-T5 — Añadir CI inicial y paridad local.** Configurar checks separados para las superficies presentes, versiones basadas en manifiestos, protección de secretos y fallos visibles; no desplegar infraestructura desde código no confiable.
 - [ ] **F02-T6 — Integrar, verificar y preparar revisión.** Ejecutar los runners disponibles, reportar todo PASS/FAIL/SKIP/BLOCKED, medir cada slice y registrar commits/evidencia. Resolver o declarar explícitamente cada verificación PostgreSQL/móvil no disponible. Detenerse antes de publicar.
@@ -69,7 +78,8 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 | F02-T2a | `5d0cc8a` | 98 backend PASS; 9 Vitest PASS; OpenAPI/whitespace PASS; 393 líneas | Hecho |
 | F02-T2b | `eeda6e7` | 125 PASS/2 SKIP; Ruff PASS; Pyright 0; guard/README corregidos; 395 líneas | Hecho |
 | F02-T2c | `447c8ec` | 132 PASS/2 SKIP; Ruff PASS; Pyright 0; 276 líneas; Compose runtime no ejecutado | Hecho |
-| F02-T3 | Pendiente | Mapeo read-only pendiente; Docker requiere coordinación | En curso |
+| F02-T3a | Pendiente | 4 SQLite PASS; Alembic head observado; enlaces/whitespace PASS; PG no ejecutado | Commit pendiente |
+| F02-T3b | Pendiente | PostgreSQL/Docker requieren autorización explícita; ninguna DB tocada | Pendiente |
 | F02-T4 | Pendiente | Pendiente | Pendiente |
 | F02-T5 | Pendiente | Pendiente | Pendiente |
 | F02-T6 | Pendiente | Pendiente | Pendiente |
