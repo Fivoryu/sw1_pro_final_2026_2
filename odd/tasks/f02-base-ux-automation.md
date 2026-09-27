@@ -54,7 +54,7 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 
 - [x] **F02-T1 — Proponer mapa UX y contratos de estado.** **CERRADA.** Entregable aprobado: `docs/ux/f02-surface-map.md`; commit `a156a53`. La aprobación precede al detalle visual.
 - [x] **F02-T2a — Errores y paginación.** **CERRADA.** Errores homogéneos, 5xx sanitizados, OpenAPI y paginación de agencias; commit `5d0cc8a` (393 líneas).
-- [ ] **F02-T2b — Deadlines DB y proveedor de correo.** **EN CURSO.** Implementar settings PostgreSQL-only (connect/pool 5s, statement 10s) y exigir timeout nativo de 10s en el Protocol `EmailSender`; actualizar fakes/CLI y documentar limitación del plugin externo. No usar timeout de thread.
+- [ ] **F02-T2b — Deadlines DB y proveedor de correo.** **EN CURSO; worker verificó pytest/Ruff/Pyright; revisión independiente pendiente.** Guard psycopg-only y lint corregidos; diff total reportado: 395 líneas.
 - [ ] **F02-T2c — Salud API y Compose.** Implementar `/health/live` y `/health/ready` (SELECT 1 vía session factory inyectada + Floci TCP mediante S3_ENDPOINT_URL); usar probe inyectable en tests y alinear timeout HTTP/Compose al presupuesto real. No afirmar que TCP prueba operación S3.
 - [ ] **F02-T3 — Verificar el esquema y el ciclo de migraciones.** Basarse en el head real; probar creación desde cero y actualización desde la versión anterior cuando exista; documentar datos ficticios, rollback/recovery y comandos reproducibles. No añadir tablas de dominios posteriores sin autorización.
 - [ ] **F02-T4 — Entregar prototipos UX de las tres superficies.** Implementar los recorridos aprobados en el mapa, con carga/vacío/error/offline/permisos, diseño web adaptable, controles táctiles y accesibilidad. Usar el handoff móvil solo tras verificar commit y límites; mantener lo no ejecutable como prototipo honesto.
@@ -67,7 +67,7 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 |---|---|---|---|
 | F02-T1 | `a156a53` | `git diff --cached --check` PASS; referencias relativas 2/2 PASS; N/A runtime (documentación sin límite de ejecución) | Hecho |
 | F02-T2a | `5d0cc8a` | 98 backend PASS; 9 Vitest PASS; OpenAPI/whitespace PASS; 393 líneas | Hecho |
-| F02-T2b | Pendiente | RED y contrato pendientes | En curso |
+| F02-T2b | Pendiente | 125 PASS/2 SKIP; Ruff PASS; Pyright 0; guard/README corregidos; diff 395; verificador pendiente | En curso |
 | F02-T2c | Pendiente | Pendiente | Pendiente |
 | F02-T3 | Pendiente | Pendiente | Pendiente |
 | F02-T4 | Pendiente | Pendiente | Pendiente |

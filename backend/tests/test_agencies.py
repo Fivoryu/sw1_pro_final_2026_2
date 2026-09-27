@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -39,9 +39,13 @@ class AgencyApiContext:
 class FakeEmailSender:
     def __init__(self, *, fail: bool = False) -> None:
         self.messages: list[tuple[str, str, datetime]] = []
+        self.timeouts: list[int] = []
         self.fail = fail
 
-    def send_invitation(self, email: str, link: str, expires_at: datetime) -> None:
+    def send_invitation(
+        self, email: str, link: str, expires_at: datetime, *, timeout_seconds: int
+    ) -> None:
+        self.timeouts.append(timeout_seconds)
         if self.fail:
             raise RuntimeError("mail transport unavailable")
         self.messages.append((email, link, expires_at))
@@ -563,6 +567,9 @@ def test_admin_invitation_is_tenant_scoped_and_raw_token_is_only_delivered_by_em
 ) -> None:
     context = agency_api_context
     token = _platform_admin_token(context)
+    context.client.app.state.settings = replace(
+        context.settings, email_send_timeout_seconds=13
+    )
     with context.session_factory.begin() as session:
         session.add(Agency(id="agency-one"))
 
@@ -575,6 +582,7 @@ def test_admin_invitation_is_tenant_scoped_and_raw_token_is_only_delivered_by_em
     assert response.status_code == 201
     assert response.json() == {"status": "sent"}
     assert len(context.email_sender.messages) == 1
+    assert context.email_sender.timeouts == [13]
     sent_email, invite_link, _ = context.email_sender.messages[0]
     raw_token = urlsplit(invite_link).path.rsplit("/", 1)[-1]
     assert sent_email == "admin@example.test"

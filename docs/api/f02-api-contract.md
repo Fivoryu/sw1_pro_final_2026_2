@@ -13,3 +13,8 @@ Todos los detalles de errores HTTP 5xx se redactan y sustituyen por mensajes gen
 Parámetros: `limit` predeterminado 20, entero entre 1 y 100 inclusive; `offset` predeterminado 0, entero mayor o igual a 0.
 Respuesta: conserva `agencies` y agrega `pagination`: `{"agencies":[{"id":"agency-a"},{"id":"agency-b"}],"pagination":{"limit":20,"offset":0,"total":2}}`.
 Valores fuera de rango producen 422 con el formato común y `validation_error`; un `offset` posterior al último elemento devuelve `agencies: []` y mantiene el `total` real.
+
+## Límites de dependencias
+Los valores predeterminados de F02 son: conexión PostgreSQL 5 s, espera de adquisición del pool SQLAlchemy 5 s y `statement_timeout` PostgreSQL 10 s; el protocolo externo `EmailSender.send_invitation` recibe un plazo nativo de 10 s. Se configuran mediante `DATABASE_CONNECT_TIMEOUT_SECONDS`, `DATABASE_POOL_TIMEOUT_SECONDS`, `DATABASE_STATEMENT_TIMEOUT_SECONDS` y `STAFF_EMAIL_SEND_TIMEOUT_SECONDS`; todos deben ser enteros positivos. Los argumentos propios de psycopg y los límites de pool se aplican únicamente al motor PostgreSQL; las fábricas de sesión inyectadas, incluidas las de SQLite en pruebas, no reciben esos argumentos.
+
+Cada proveedor implementa `EmailSender.send_invitation(..., *, timeout_seconds)` y aplica el plazo obligatorio en su transporte nativo. La aplicación no convierte el envío síncrono en una operación limitada por hilo o `Future`. No hay un proveedor concreto implementado, por lo que la aplicación del plazo en tiempo de ejecución queda externamente sin verificar.

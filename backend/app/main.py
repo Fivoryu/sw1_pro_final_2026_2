@@ -31,7 +31,12 @@ def create_app(
     Fernet(resolved_settings.totp_encryption_key.encode("ascii"))
     engine = None
     if session_factory is None:
-        engine, session_factory = create_session_factory(resolved_settings.database_url)
+        engine, session_factory = create_session_factory(
+            resolved_settings.database_url,
+            connect_timeout_seconds=resolved_settings.database_connect_timeout_seconds,
+            pool_timeout_seconds=resolved_settings.database_pool_timeout_seconds,
+            statement_timeout_seconds=resolved_settings.database_statement_timeout_seconds,
+        )
 
     app = FastAPI(title="RoomForge Staff API", version="1.0.0")
     app.state.settings = resolved_settings

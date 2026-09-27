@@ -217,7 +217,12 @@ def issue_agency_admin_invitation(
 
     try:
         sender = email_sender if email_sender is not None else configured_email_sender()
-        sender.send_invitation(normalized_email, invitation_link, expires_at)
+        sender.send_invitation(
+            normalized_email,
+            invitation_link,
+            expires_at,
+            timeout_seconds=settings.email_send_timeout_seconds,
+        )
     except Exception:
         with session_factory.begin() as session:
             persisted_invitation = session.get(StaffInvitation, invitation_id)

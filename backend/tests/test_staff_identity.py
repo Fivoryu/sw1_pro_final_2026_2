@@ -39,8 +39,12 @@ class FrozenClock:
 class FakeEmailSender:
     def __init__(self) -> None:
         self.messages: list[tuple[str, str, datetime]] = []
+        self.timeouts: list[int] = []
 
-    def send_invitation(self, email: str, link: str, expires_at: datetime) -> None:
+    def send_invitation(
+        self, email: str, link: str, expires_at: datetime, *, timeout_seconds: int
+    ) -> None:
+        self.timeouts.append(timeout_seconds)
         self.messages.append((email, link, expires_at))
 
 

@@ -13,8 +13,9 @@ from test_agencies import (
     _headers,
     _platform_admin_token,
     _seed_account,
-    agency_api_context,
 )
+
+pytest_plugins = ("test_agencies",)
 
 
 def _assert_error(response: Response, *, status: int, code: str) -> dict[str, str]:

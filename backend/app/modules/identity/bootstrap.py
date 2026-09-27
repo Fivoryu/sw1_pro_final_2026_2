@@ -126,7 +126,12 @@ def issue_platform_admin_invitation(
         )
 
     try:
-        email_sender.send_invitation(normalized_email, invitation_link, expires_at)
+        email_sender.send_invitation(
+            normalized_email,
+            invitation_link,
+            expires_at,
+            timeout_seconds=settings.email_send_timeout_seconds,
+        )
     except Exception:
         with session_factory.begin() as session:
             persisted_invitation = session.get(StaffInvitation, invitation_id)
@@ -156,7 +161,12 @@ def main() -> int:
     try:
         settings = Settings.from_env()
         email_sender = configured_email_sender()
-        engine, session_factory = create_session_factory(settings.database_url)
+        engine, session_factory = create_session_factory(
+            settings.database_url,
+            connect_timeout_seconds=settings.database_connect_timeout_seconds,
+            pool_timeout_seconds=settings.database_pool_timeout_seconds,
+            statement_timeout_seconds=settings.database_statement_timeout_seconds,
+        )
         issue_platform_admin_invitation(
             session_factory=session_factory,
             email_sender=email_sender,

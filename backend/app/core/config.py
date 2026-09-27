@@ -4,6 +4,19 @@ import os
 from dataclasses import dataclass
 
 
+def _positive_timeout_from_env(environment_name: str, default: int) -> int:
+    value = os.environ.get(environment_name)
+    if value is None:
+        return default
+    try:
+        timeout = int(value)
+    except ValueError:
+        raise RuntimeError(f"{environment_name} must be a positive integer") from None
+    if timeout < 1:
+        raise RuntimeError(f"{environment_name} must be a positive integer")
+    return timeout
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str
@@ -18,6 +31,10 @@ class Settings:
     login_challenge_minutes: int = 5
     admin_idle_minutes: int = 30
     recovery_code_count: int = 10
+    database_connect_timeout_seconds: int = 5
+    database_pool_timeout_seconds: int = 5
+    database_statement_timeout_seconds: int = 10
+    email_send_timeout_seconds: int = 10
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -44,6 +61,18 @@ class Settings:
             totp_encryption_key=values["totp_encryption_key"],
             web_origin=origin,
             secure_cookies=os.environ.get("STAFF_SECURE_COOKIES", "true").lower() != "false",
+            database_connect_timeout_seconds=_positive_timeout_from_env(
+                "DATABASE_CONNECT_TIMEOUT_SECONDS", 5
+            ),
+            database_pool_timeout_seconds=_positive_timeout_from_env(
+                "DATABASE_POOL_TIMEOUT_SECONDS", 5
+            ),
+            database_statement_timeout_seconds=_positive_timeout_from_env(
+                "DATABASE_STATEMENT_TIMEOUT_SECONDS", 10
+            ),
+            email_send_timeout_seconds=_positive_timeout_from_env(
+                "STAFF_EMAIL_SEND_TIMEOUT_SECONDS", 10
+            ),
         )
 
     def validate(self) -> None:
@@ -59,5 +88,9 @@ class Settings:
             self.login_challenge_minutes,
             self.admin_idle_minutes,
             self.recovery_code_count,
+            self.database_connect_timeout_seconds,
+            self.database_pool_timeout_seconds,
+            self.database_statement_timeout_seconds,
+            self.email_send_timeout_seconds,
         ) < 1:
-            raise ValueError("Authentication timeouts and recovery-code count must be positive")
+            raise ValueError("Timeouts and recovery-code count must be positive")

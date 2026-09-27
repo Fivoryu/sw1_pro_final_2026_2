@@ -6,6 +6,10 @@ POSTGRES_PORT=5434
 FLOCI_PORT=4566
 API_PORT=8000
 PANEL_PORT=5173
+DATABASE_CONNECT_TIMEOUT_SECONDS=5
+DATABASE_POOL_TIMEOUT_SECONDS=5
+DATABASE_STATEMENT_TIMEOUT_SECONDS=10
+STAFF_EMAIL_SEND_TIMEOUT_SECONDS=10
 
 # Development-only application secrets; replace before any non-local use.
 JWT_SECRET=roomforge-local-only-jwt-secret-do-not-use-outside-development
