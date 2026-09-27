@@ -1,19 +1,33 @@
-"""Read-only public listing queries and opaque cursor handling."""
+"""Public catalog queries, quote snapshots, rate limiting, and cursor handling."""
 
 from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
+import hmac
 import json
+import math
 import re
+import sqlite3
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from decimal import Decimal
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal, ROUND_HALF_UP
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, delete, or_, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.modules.catalog.models import Listing, ListingExtra
+from app.modules.catalog.errors import (
+    InvalidQuoteExtrasError,
+    QuoteExpiredError,
+    QuoteNotFoundError,
+    QuoteOfferVersionMismatchError,
+    UnsupportedRateLimitDialectError,
+)
+from app.modules.catalog.models import Listing, ListingExtra, QuoteRateLimitEvent, QuoteSnapshot
 
 
 _CURSOR_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,512}\Z")
@@ -141,3 +155,171 @@ def list_listing_extras(session: Session, listing_id: str) -> list[ListingExtra]
         .order_by(ListingExtra.id.asc())
         .all()
     )
+
+
+def _quote_money(amount: Decimal) -> Decimal:
+    return amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _begin_sqlite_immediate(session: Session) -> None:
+    """Acquire SQLite's write reservation before reading or writing quote state."""
+    connection = session.connection()
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            return
+        except OperationalError as error:
+            error_code = getattr(error.orig, "sqlite_errorcode", None)
+            is_lock_error = error_code is not None and error_code & 0xFF in {
+                sqlite3.SQLITE_BUSY,
+                sqlite3.SQLITE_LOCKED,
+            }
+            if not is_lock_error and "locked" not in str(error.orig).casefold():
+                raise
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
+
+def create_quote_snapshot(
+    session: Session,
+    *,
+    listing_id: str,
+    expected_offer_version: int,
+    selected_extra_ids: list[str],
+    clock: Callable[[], datetime],
+) -> QuoteSnapshot:
+    """Calculate and persist a new quote from the current public offer."""
+    if session.get_bind().dialect.name == "sqlite":
+        _begin_sqlite_immediate(session)
+    query = session.query(Listing).filter(
+        Listing.id == listing_id,
+        Listing.approval_status == "approved",
+        Listing.is_published.is_(True),
+    )
+    if session.get_bind().dialect.name == "postgresql":
+        query = query.with_for_update()
+    listing = query.one_or_none()
+    if listing is None:
+        raise QuoteNotFoundError
+    if listing.offer_version != expected_offer_version:
+        raise QuoteOfferVersionMismatchError
+    if len(set(selected_extra_ids)) != len(selected_extra_ids):
+        raise InvalidQuoteExtrasError
+
+    sorted_extra_ids = sorted(selected_extra_ids)
+    extras: list[ListingExtra] = []
+    if sorted_extra_ids:
+        extras = (
+            session.query(ListingExtra)
+            .filter(
+                ListingExtra.listing_id == listing.id,
+                ListingExtra.id.in_(sorted_extra_ids),
+            )
+            .order_by(ListingExtra.id.asc())
+            .all()
+        )
+        if len(extras) != len(sorted_extra_ids):
+            raise InvalidQuoteExtrasError
+
+    period = "one_time" if listing.operation == "sale" else "monthly"
+    lines: list[dict[str, str | None]] = [
+        {
+            "kind": "base",
+            "extra_id": None,
+            "amount": format(_quote_money(listing.base_price), ".2f"),
+            "currency": "COP",
+            "charge_period": period,
+        }
+    ]
+    lines.extend(
+        {
+            "kind": "extra",
+            "extra_id": extra.id,
+            "amount": format(_quote_money(extra.price), ".2f"),
+            "currency": "COP",
+            "charge_period": period,
+        }
+        for extra in extras
+    )
+    total = _quote_money(
+        listing.base_price + sum((extra.price for extra in extras), start=Decimal("0.00"))
+    )
+    one_time_total = total if listing.operation == "sale" else Decimal("0.00")
+    monthly_total = total if listing.operation == "rent" else Decimal("0.00")
+    created_at = _as_utc(clock())
+    quote = QuoteSnapshot(
+        listing_id=listing.id,
+        offer_version=listing.offer_version,
+        operation=listing.operation,
+        lines=lines,
+        one_time_total=one_time_total,
+        monthly_total=monthly_total,
+        created_at=created_at,
+        expires_at=created_at + timedelta(minutes=15),
+    )
+    session.add(quote)
+    session.flush()
+    return quote
+
+
+def _quote_client_key(client_ip: str, hmac_secret: str) -> str:
+    message = b"roomforge.quote.rate-limit.v1\0" + client_ip.encode("utf-8")
+    return hmac.new(hmac_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def consume_quote_rate_limit(
+    session: Session,
+    *,
+    client_ip: str,
+    now: datetime,
+    hmac_secret: str,
+) -> int | None:
+    """Persist an allowed attempt or return the integer Retry-After for a denied one."""
+    dialect_name = session.get_bind().dialect.name
+    client_key = _quote_client_key(client_ip, hmac_secret)
+    lock_id = int.from_bytes(bytes.fromhex(client_key[:16]), byteorder="big", signed=True)
+    if dialect_name == "postgresql":
+        session.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
+    elif dialect_name == "sqlite":
+        _begin_sqlite_immediate(session)
+    else:
+        raise UnsupportedRateLimitDialectError
+
+    current_time = _as_utc(now)
+    cutoff = current_time - timedelta(seconds=60)
+    session.execute(
+        delete(QuoteRateLimitEvent).where(QuoteRateLimitEvent.occurred_at <= cutoff)
+    )
+    recent_events = (
+        session.query(QuoteRateLimitEvent)
+        .filter(
+            QuoteRateLimitEvent.client_key == client_key,
+            QuoteRateLimitEvent.occurred_at > cutoff,
+            QuoteRateLimitEvent.occurred_at <= current_time,
+        )
+        .order_by(QuoteRateLimitEvent.occurred_at.asc(), QuoteRateLimitEvent.id.asc())
+        .all()
+    )
+    if len(recent_events) >= 10:
+        oldest_event = _as_utc(recent_events[0].occurred_at)
+        seconds_until_available = (oldest_event + timedelta(seconds=60) - current_time).total_seconds()
+        return max(1, math.ceil(seconds_until_available))
+
+    session.add(QuoteRateLimitEvent(client_key=client_key, occurred_at=current_time))
+    session.flush()
+    return None
+
+
+def validate_quote_for_use(session: Session, quote_id: str, *, now: datetime) -> QuoteSnapshot:
+    """Validate persisted quote TTL and its current catalog offer version for CC-05 use."""
+    quote = session.get(QuoteSnapshot, quote_id)
+    if quote is None:
+        raise QuoteNotFoundError
+    if _as_utc(now) >= _as_utc(quote.expires_at):
+        raise QuoteExpiredError
+    listing = session.get(Listing, quote.listing_id)
+    if listing is None or listing.offer_version != quote.offer_version:
+        raise QuoteOfferVersionMismatchError
+    return quote

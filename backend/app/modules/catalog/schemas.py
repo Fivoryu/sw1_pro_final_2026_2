@@ -1,10 +1,11 @@
-"""Public catalog response schemas."""
+"""Public catalog and quote schemas."""
 
 from __future__ import annotations
 
-from typing import Literal
+from datetime import datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 
 class CatalogMoney(BaseModel):
@@ -44,3 +45,53 @@ class CatalogListingPage(BaseModel):
 
     items: list[CatalogListingItem]
     next_cursor: str | None
+
+
+class QuoteCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    listing_id: Annotated[str, Field(min_length=1, max_length=36)]
+    offer_version: Annotated[StrictInt, Field(ge=1)]
+    selected_extra_ids: list[Annotated[str, Field(min_length=1, max_length=36)]] = Field(
+        default_factory=list
+    )
+
+
+class QuoteLine(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["base", "extra"]
+    extra_id: str | None
+    amount: str
+    currency: Literal["COP"]
+    charge_period: Literal["one_time", "monthly"]
+
+
+class QuoteSnapshotResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    quote_id: str
+    listing_id: str
+    offer_version: int
+    operation: Literal["sale", "rent"]
+    lines: list[QuoteLine]
+    one_time_total: CatalogMoney
+    monthly_total: CatalogMoney
+    created_at: datetime
+    expires_at: datetime
+
+
+class QuoteErrorField(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    field: str
+    message: str
+
+
+class QuoteErrorResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    message: str
+    request_id: str
+    field_errors: list[QuoteErrorField] = Field(default_factory=list)

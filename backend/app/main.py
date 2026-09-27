@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from cryptography.fernet import Fernet
 from fastapi import FastAPI, Request
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import Settings
 from app.db.session import create_session_factory, protect_session_factory
 from app.modules.agencies.router import router as agencies_router
+from app.modules.catalog.errors import QuoteApiError
 from app.modules.catalog.router import router as catalog_router
 from app.modules.customer_identity.errors import CustomerApiError
 from app.modules.customer_identity.router import router as customer_identity_router
@@ -55,6 +57,20 @@ def create_app(
     app.include_router(agencies_router)
     app.include_router(catalog_router)
 
+    @app.exception_handler(QuoteApiError)
+    async def quote_api_error(request: Request, exc: QuoteApiError) -> JSONResponse:
+        del request
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "code": exc.code,
+                "message": exc.message,
+                "request_id": str(uuid4()),
+                "field_errors": exc.field_errors,
+            },
+            headers=exc.headers,
+        )
+
     @app.exception_handler(CustomerApiError)
     async def customer_api_error(request: Request, exc: CustomerApiError) -> JSONResponse:
         del request
@@ -65,6 +81,23 @@ def create_app(
 
     @app.exception_handler(RequestValidationError)
     async def safe_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        if request.url.path == "/api/v1/quotes":
+            field_errors = [
+                {
+                    "field": ".".join(str(part) for part in error.get("loc", ())),
+                    "message": str(error.get("msg", "Invalid value")),
+                }
+                for error in exc.errors()
+            ]
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "code": "validation_error",
+                    "message": "The quote request is invalid.",
+                    "request_id": str(uuid4()),
+                    "field_errors": field_errors,
+                },
+            )
         if request.url.path.startswith("/api/v1/customer/"):
             return JSONResponse(
                 status_code=422,

@@ -91,6 +91,44 @@ class ListingExtra(Base):
     listing: Mapped[Listing] = relationship(back_populates="extras")
 
 
+class QuoteSnapshot(Base):
+    """Immutable offer and price lines returned by public quote creation."""
+
+    __tablename__ = "quote_snapshot"
+    __table_args__ = (
+        CheckConstraint("offer_version >= 1", name="ck_quote_snapshot_offer_version_positive"),
+        CheckConstraint("operation IN ('sale', 'rent')", name="ck_quote_snapshot_operation"),
+        CheckConstraint("one_time_total >= 0", name="ck_quote_snapshot_one_time_nonnegative"),
+        CheckConstraint("monthly_total >= 0", name="ck_quote_snapshot_monthly_nonnegative"),
+        CheckConstraint("expires_at > created_at", name="ck_quote_snapshot_expiry_after_creation"),
+        Index("ix_quote_snapshot_listing_version", "listing_id", "offer_version"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    listing_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    offer_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    operation: Mapped[str] = mapped_column(String(8), nullable=False)
+    lines: Mapped[list[dict[str, str | None]]] = mapped_column(JSON, nullable=False)
+    one_time_total: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    monthly_total: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class QuoteRateLimitEvent(Base):
+    """A single accepted well-formed quote attempt, keyed by an HMAC IP digest."""
+
+    __tablename__ = "quote_rate_limit_event"
+    __table_args__ = (
+        Index("ix_quote_rate_limit_client_time", "client_key", "occurred_at"),
+        Index("ix_quote_rate_limit_occurred_at", "occurred_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    client_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 # Offer versions are authoritative in the database triggers installed by migration
 # 0007_catalog_offers. Keeping versioning out of ORM events avoids double increments
 # and covers raw SQL plus every SQLAlchemy write path consistently.

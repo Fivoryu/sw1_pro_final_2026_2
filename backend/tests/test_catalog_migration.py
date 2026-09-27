@@ -333,3 +333,86 @@ def test_catalog_migration_creates_constrained_listing_and_offer_tables() -> Non
             ) == 0
     finally:
         engine.dispose()
+
+
+def test_quote_snapshot_migration_upgrades_and_downgrades_sqlite() -> None:
+    previous = _load_migration(
+        _MIGRATIONS / "0007_catalog_offers.py", "catalog_offers_0007_for_quote_test"
+    )
+    migration_path = _MIGRATIONS / "0008_quote_snapshots.py"
+    assert migration_path.is_file(), "CC-04B must add the 0008 quote snapshot migration"
+    migration = _load_migration(migration_path, "quote_snapshots_0008_for_test")
+    assert migration.revision == "0008_quote_snapshots"
+    assert migration.down_revision == previous.revision
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+            connection.execute(text("CREATE TABLE agency (id VARCHAR(36) PRIMARY KEY)"))
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                previous.upgrade()
+                migration.upgrade()
+
+            inspector = inspect(connection)
+            assert {"quote_snapshot", "quote_rate_limit_event"}.issubset(
+                set(inspector.get_table_names())
+            )
+            snapshot_columns = {
+                column["name"]: column for column in inspector.get_columns("quote_snapshot")
+            }
+            assert {
+                "id",
+                "listing_id",
+                "offer_version",
+                "operation",
+                "lines",
+                "one_time_total",
+                "monthly_total",
+                "created_at",
+                "expires_at",
+            }.issubset(snapshot_columns)
+            assert snapshot_columns["one_time_total"]["type"].precision == 18
+            assert snapshot_columns["one_time_total"]["type"].scale == 2
+            rate_columns = {
+                column["name"]: column
+                for column in inspector.get_columns("quote_rate_limit_event")
+            }
+            assert {"id", "client_key", "occurred_at"}.issubset(rate_columns)
+            assert {"client_key", "occurred_at"}.issubset(
+                set(inspector.get_indexes("quote_rate_limit_event")[0]["column_names"])
+            )
+
+            connection.execute(
+                text(
+                    "INSERT INTO quote_snapshot "
+                    "(id, listing_id, offer_version, operation, lines, one_time_total, "
+                    "monthly_total, created_at, expires_at) VALUES "
+                    "('quote-one', 'listing-one', 1, 'sale', '[]', 10.00, 0.00, "
+                    "'2026-09-01 12:00:00', '2026-09-01 12:15:00')"
+                )
+            )
+            with pytest.raises(IntegrityError):
+                with connection.begin_nested():
+                    connection.execute(
+                        text("UPDATE quote_snapshot SET one_time_total = 99.00 WHERE id = 'quote-one'")
+                    )
+            with pytest.raises(IntegrityError):
+                with connection.begin_nested():
+                    connection.execute(text("DELETE FROM quote_snapshot WHERE id = 'quote-one'"))
+
+            with Operations.context(context):
+                migration.downgrade()
+            assert not {"quote_snapshot", "quote_rate_limit_event"}.intersection(
+                inspect(connection).get_table_names()
+            )
+            assert connection.scalar(
+                text(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' "
+                    "AND name LIKE 'trg_quote_snapshot_%'"
+                )
+            ) == 0
+            assert "listing" in inspect(connection).get_table_names()
+    finally:
+        engine.dispose()
