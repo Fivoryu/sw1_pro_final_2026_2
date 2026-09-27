@@ -16,6 +16,7 @@ from app.db.session import create_session_factory
 from app.modules.agencies.router import router as agencies_router
 from app.modules.customer_identity.errors import CustomerApiError
 from app.modules.customer_identity.router import router as customer_identity_router
+from app.modules.customer_identity.router import wallet_router as customer_wallet_router
 from app.modules.identity.router import router as identity_router
 
 
@@ -48,6 +49,7 @@ def create_app(
     )
     app.include_router(identity_router)
     app.include_router(customer_identity_router)
+    app.include_router(customer_wallet_router)
     app.include_router(agencies_router)
 
     @app.exception_handler(CustomerApiError)
@@ -60,7 +62,7 @@ def create_app(
 
     @app.exception_handler(RequestValidationError)
     async def safe_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
-        if request.url.path.startswith("/api/v1/customer/auth/"):
+        if request.url.path.startswith("/api/v1/customer/"):
             return JSONResponse(
                 status_code=422,
                 content={"error": {"code": "validation_error"}},

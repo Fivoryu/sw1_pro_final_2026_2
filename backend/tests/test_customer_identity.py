@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -8,14 +9,18 @@ from uuid import UUID
 
 import jwt
 import pytest
+from eth_account import Account
+from eth_account.messages import encode_defunct
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.config import Settings
 from app.core.security import create_access_token, hash_secret, verify_password
 from app.db.base import Base
+from app.modules.customer_identity import service as customer_identity_service
 from app.main import create_app
 
 
@@ -437,3 +442,531 @@ def test_customer_openapi_documents_error_envelopes_and_email_format(
         request_schema = paths[path]["post"]["requestBody"]["content"]["application/json"]["schema"]
         request_model_ref = request_schema["$ref"].rsplit("/", 1)[-1]
         assert schemas[request_model_ref]["properties"]["email"]["format"] == "email"
+
+
+_WALLET_PRIVATE_KEY = bytes.fromhex("01" * 32)
+_OTHER_WALLET_PRIVATE_KEY = bytes.fromhex("02" * 32)
+
+
+def _wallet_address(private_key: bytes = _WALLET_PRIVATE_KEY) -> str:
+    return Account.from_key(private_key).address
+
+
+def _wallet_signature(message: str, private_key: bytes = _WALLET_PRIVATE_KEY) -> str:
+    signed = Account.sign_message(encode_defunct(text=message), private_key=private_key)
+    return signed.signature.hex()
+
+
+def _customer_auth(
+    context: CustomerIdentityContext,
+    *,
+    email: str = "customer@example.test",
+) -> tuple[str, dict[str, str]]:
+    registered = _register(context, email=email)
+    assert registered.status_code == 201
+    login = context.client.post(
+        "/api/v1/customer/auth/login",
+        json={"email": email, "password": "password"},
+    )
+    assert login.status_code == 200
+    return registered.json()["id"], {
+        "Authorization": f"Bearer {login.json()['access_token']}"
+    }
+
+
+def _create_wallet_challenge(
+    context: CustomerIdentityContext,
+    auth: dict[str, str],
+    address: str,
+):
+    return context.client.post(
+        "/api/v1/customer/wallet-challenges",
+        headers=auth,
+        json={"address": address},
+    )
+
+
+def test_customer_wallet_link_race_for_same_account_maps_account_conflict(
+    customer_identity_context: CustomerIdentityContext,
+) -> None:
+    context = customer_identity_context
+    customer_id, auth = _customer_auth(context)
+    requested_address = _wallet_address()
+    challenge = _create_wallet_challenge(context, auth, requested_address).json()
+    competing_address = _wallet_address(_OTHER_WALLET_PRIVATE_KEY).lower()
+
+    # Model the competing transaction committing after the initial read but before insert.
+    with context.session_factory.begin() as session:
+        session.add(
+            customer_identity_service.CustomerWallet(
+                id="concurrent-wallet",
+                customer_id=customer_id,
+                address=competing_address,
+                linked_at=context.clock(),
+            )
+        )
+
+    class HiddenPreflightQuery:
+        def filter(self, *args: object, **kwargs: object) -> HiddenPreflightQuery:
+            return self
+
+        def one_or_none(self) -> None:
+            return None
+
+    class RacingSession:
+        def __init__(self, session: Session) -> None:
+            self._session = session
+
+        def query(self, entity: object, *args: object, **kwargs: object) -> object:
+            if entity is customer_identity_service.CustomerWallet:
+                return HiddenPreflightQuery()
+            return self._session.query(entity, *args, **kwargs)
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._session, name)
+
+    class RacingSessionFactory:
+        def __init__(self) -> None:
+            self._begin_count = 0
+
+        def __call__(self, *args: object, **kwargs: object) -> Session:
+            return context.session_factory(*args, **kwargs)
+
+        @contextmanager
+        def begin(self):
+            self._begin_count += 1
+            with context.session_factory.begin() as session:
+                yield RacingSession(session) if self._begin_count == 2 else session
+
+    with pytest.raises(customer_identity_service.CustomerWalletAlreadyLinkedError):
+        customer_identity_service.verify_and_link_customer_wallet(
+            session_factory=RacingSessionFactory(),
+            customer_id=customer_id,
+            challenge_id=challenge["challenge_id"],
+            signature=_wallet_signature(challenge["message"]),
+            now=context.clock(),
+        )
+
+
+def test_unrelated_wallet_integrity_error_is_not_mapped_to_address_conflict(
+    customer_identity_context: CustomerIdentityContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = customer_identity_context
+    customer_id, auth = _customer_auth(context)
+    challenge = _create_wallet_challenge(context, auth, _wallet_address()).json()
+    unrelated_error = IntegrityError(
+        "INSERT INTO customer_wallet (...) VALUES (...)",
+        {},
+        RuntimeError("NOT NULL constraint failed: customer_wallet.linked_at"),
+    )
+
+    flush_calls: list[bool] = []
+    original_flush = Session.flush
+
+    def fail_wallet_flush(self: Session, *args: object, **kwargs: object) -> None:
+        if any(
+            isinstance(instance, customer_identity_service.CustomerWallet)
+            for instance in self.new
+        ):
+            flush_calls.append(True)
+            raise unrelated_error
+        original_flush(self, *args, **kwargs)
+
+    monkeypatch.setattr(Session, "flush", fail_wallet_flush)
+
+    with pytest.raises(IntegrityError) as raised:
+        customer_identity_service.verify_and_link_customer_wallet(
+            session_factory=context.session_factory,
+            customer_id=customer_id,
+            challenge_id=challenge["challenge_id"],
+            signature=_wallet_signature(challenge["message"]),
+            now=context.clock(),
+        )
+
+    assert raised.value is unrelated_error
+    assert flush_calls == [True]
+
+
+def test_wallet_challenge_requires_customer_session_and_persists_exact_canonical_message(
+    customer_identity_context: CustomerIdentityContext,
+) -> None:
+    context = customer_identity_context
+    address = _wallet_address()
+
+    unauthorized = context.client.post(
+        "/api/v1/customer/wallet-challenges", json={"address": address}
+    )
+    assert unauthorized.status_code == 401
+    assert unauthorized.json() == {"error": {"code": "invalid_session"}}
+
+    customer_id, auth = _customer_auth(context)
+    response = _create_wallet_challenge(context, auth, address)
+
+    assert response.status_code == 201
+    body = response.json()
+    assert set(body) == {"challenge_id", "message", "expires_at"}
+    expires_at = datetime.fromisoformat(body["expires_at"].replace("Z", "+00:00"))
+    assert expires_at == context.clock() + timedelta(minutes=5)
+    assert customer_id in body["message"]
+    assert address.lower() in body["message"]
+    assert "link-customer-wallet" in body["message"]
+    assert "Nonce:" in body["message"]
+    assert "Issued at:" in body["message"]
+    assert "Expires at:" in body["message"]
+
+    with context.session_factory() as session:
+        stored = session.execute(
+            text(
+                "SELECT customer_id, address, purpose, nonce, message, issued_at, expires_at, consumed_at "
+                "FROM customer_wallet_challenge WHERE id = :id"
+            ),
+            {"id": body["challenge_id"]},
+        ).mappings().one()
+    assert stored["customer_id"] == customer_id
+    assert stored["address"] == address.lower()
+    assert stored["purpose"] == "link-customer-wallet"
+    assert len(stored["nonce"]) >= 32
+    assert stored["message"] == body["message"]
+    assert datetime.fromisoformat(stored["issued_at"]) == context.clock().replace(tzinfo=None)
+    assert datetime.fromisoformat(stored["expires_at"]) == expires_at.replace(tzinfo=None)
+    assert stored["consumed_at"] is None
+
+    empty_wallets = context.client.get("/api/v1/customer/wallets", headers=auth)
+    assert empty_wallets.status_code == 200
+    assert empty_wallets.json() == []
+
+
+@pytest.mark.parametrize("address", ["not-an-address", "0x1234", "0x" + "gg" * 20])
+def test_wallet_challenge_rejects_malformed_addresses_with_customer_validation_error(
+    customer_identity_context: CustomerIdentityContext,
+    address: str,
+) -> None:
+    _, auth = _customer_auth(customer_identity_context)
+
+    response = _create_wallet_challenge(customer_identity_context, auth, address)
+
+    assert response.status_code == 422
+    assert response.json() == {"error": {"code": "validation_error"}}
+
+
+def test_valid_wallet_signature_links_wallet_and_replay_fails_generically(
+    customer_identity_context: CustomerIdentityContext,
+) -> None:
+    context = customer_identity_context
+    _, auth = _customer_auth(context)
+    address = _wallet_address()
+    challenge = _create_wallet_challenge(context, auth, address)
+    assert challenge.status_code == 201
+    challenge_body = challenge.json()
+
+    linked = context.client.post(
+        "/api/v1/customer/wallets",
+        headers=auth,
+        json={
+            "challenge_id": challenge_body["challenge_id"],
+            "signature": _wallet_signature(challenge_body["message"]),
+            "message": "Client-controlled alternate text must be ignored",
+        },
+    )
+
+    assert linked.status_code == 201
+    assert linked.json()["address"] == address.lower()
+    assert set(linked.json()) == {"id", "address", "linked_at"}
+    listed = context.client.get("/api/v1/customer/wallets", headers=auth)
+    assert listed.status_code == 200
+    assert listed.json() == [linked.json()]
+
+    replay = context.client.post(
+        "/api/v1/customer/wallets",
+        headers=auth,
+        json={
+            "challenge_id": challenge_body["challenge_id"],
+            "signature": _wallet_signature(challenge_body["message"]),
+        },
+    )
+    assert replay.status_code == 401
+    assert replay.json() == {"error": {"code": "invalid_wallet_challenge"}}
+
+
+@pytest.mark.parametrize("invalid_signature", ["not-a-signature", "0x" + "00" * 65])
+def test_invalid_wallet_signature_durably_consumes_challenge_before_retry(
+    customer_identity_context: CustomerIdentityContext,
+    invalid_signature: str,
+) -> None:
+    context = customer_identity_context
+    _, auth = _customer_auth(context)
+    challenge = _create_wallet_challenge(context, auth, _wallet_address())
+    challenge_body = challenge.json()
+
+    failed = context.client.post(
+        "/api/v1/customer/wallets",
+        headers=auth,
+        json={"challenge_id": challenge_body["challenge_id"], "signature": invalid_signature},
+    )
+
+    assert failed.status_code == 401
+    assert failed.json() == {"error": {"code": "invalid_wallet_challenge"}}
+    with context.session_factory() as session:
+        consumed_at = session.execute(
+            text("SELECT consumed_at FROM customer_wallet_challenge WHERE id = :id"),
+            {"id": challenge_body["challenge_id"]},
+        ).scalar_one()
+    assert consumed_at is not None
+
+    valid_retry = context.client.post(
+        "/api/v1/customer/wallets",
+        headers=auth,
+        json={
+            "challenge_id": challenge_body["challenge_id"],
+            "signature": _wallet_signature(challenge_body["message"]),
+        },
+    )
+    assert valid_retry.status_code == 401
+    assert valid_retry.json() == {"error": {"code": "invalid_wallet_challenge"}}
+    assert context.client.get("/api/v1/customer/wallets", headers=auth).json() == []
+
+
+def test_signature_from_a_different_wallet_is_rejected_and_consumed(
+    customer_identity_context: CustomerIdentityContext,
+) -> None:
+    context = customer_identity_context
+    _, auth = _customer_auth(context)
+    challenge = _create_wallet_challenge(context, auth, _wallet_address()).json()
+
+    response = context.client.post(
+        "/api/v1/customer/wallets",
+        headers=auth,
+        json={
+            "challenge_id": challenge["challenge_id"],
+            "signature": _wallet_signature(
+                challenge["message"], _OTHER_WALLET_PRIVATE_KEY
+            ),
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"error": {"code": "invalid_wallet_challenge"}}
+    with context.session_factory() as session:
+        consumed_at = session.execute(
+            text("SELECT consumed_at FROM customer_wallet_challenge WHERE id = :id"),
+            {"id": challenge["challenge_id"]},
+        ).scalar_one()
+    assert consumed_at is not None
+    assert context.client.get("/api/v1/customer/wallets", headers=auth).json() == []
+
+
+def test_wallet_challenge_consumption_commits_before_signature_recovery(
+    customer_identity_context: CustomerIdentityContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = customer_identity_context
+    _, auth = _customer_auth(context)
+    challenge = _create_wallet_challenge(context, auth, _wallet_address()).json()
+    consumed_before_recovery: list[bool] = []
+
+    def inspect_consumption(message: object, signature: str) -> str:
+        assert message is not None
+        assert signature == "malformed"
+        with context.session_factory() as session:
+            consumed_at = session.execute(
+                text("SELECT consumed_at FROM customer_wallet_challenge WHERE id = :id"),
+                {"id": challenge["challenge_id"]},
+            ).scalar_one()
+        consumed_before_recovery.append(consumed_at is not None)
+        raise ValueError("Malformed test signature")
+
+    monkeypatch.setattr(
+        customer_identity_service.Account,
+        "recover_message",
+        staticmethod(inspect_consumption),
+    )
+    response = context.client.post(
+        "/api/v1/customer/wallets",
+        headers=auth,
+        json={"challenge_id": challenge["challenge_id"], "signature": "malformed"},
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"error": {"code": "invalid_wallet_challenge"}}
+    assert consumed_before_recovery == [True]
+
+
+def test_expired_wallet_challenge_fails_closed(
+    customer_identity_context: CustomerIdentityContext,
+) -> None:
+    context = customer_identity_context
+    _, auth = _customer_auth(context)
+    challenge = _create_wallet_challenge(context, auth, _wallet_address())
+    challenge_body = challenge.json()
+    context.clock.advance(timedelta(minutes=5, microseconds=1))
+
+    response = context.client.post(
+        "/api/v1/customer/wallets",
+        headers=auth,
+        json={
+            "challenge_id": challenge_body["challenge_id"],
+            "signature": _wallet_signature(challenge_body["message"]),
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"error": {"code": "invalid_wallet_challenge"}}
+    assert context.client.get("/api/v1/customer/wallets", headers=auth).json() == []
+
+
+def test_wallet_challenge_is_bound_to_customer_without_consuming_other_customers_challenge(
+    customer_identity_context: CustomerIdentityContext,
+) -> None:
+    context = customer_identity_context
+    alice_id, alice_auth = _customer_auth(context)
+    bob_id, bob_auth = _customer_auth(context, email="bob@example.test")
+    assert alice_id != bob_id
+    challenge = _create_wallet_challenge(context, alice_auth, _wallet_address())
+    challenge_body = challenge.json()
+    signature = _wallet_signature(challenge_body["message"])
+
+    cross_customer_attempt = context.client.post(
+        "/api/v1/customer/wallets",
+        headers=bob_auth,
+        json={"challenge_id": challenge_body["challenge_id"], "signature": signature},
+    )
+
+    assert cross_customer_attempt.status_code == 401
+    assert cross_customer_attempt.json() == {"error": {"code": "invalid_wallet_challenge"}}
+    with context.session_factory() as session:
+        assert session.execute(
+            text("SELECT consumed_at FROM customer_wallet_challenge WHERE id = :id"),
+            {"id": challenge_body["challenge_id"]},
+        ).scalar_one() is None
+
+    linked = context.client.post(
+        "/api/v1/customer/wallets",
+        headers=alice_auth,
+        json={"challenge_id": challenge_body["challenge_id"], "signature": signature},
+    )
+    assert linked.status_code == 201
+    assert context.client.get("/api/v1/customer/wallets", headers=bob_auth).json() == []
+
+
+def test_wallet_is_globally_unique_and_owner_is_never_disclosed(
+    customer_identity_context: CustomerIdentityContext,
+) -> None:
+    context = customer_identity_context
+    _, alice_auth = _customer_auth(context)
+    _, bob_auth = _customer_auth(context, email="bob@example.test")
+    address = _wallet_address()
+    first_challenge = _create_wallet_challenge(context, alice_auth, address).json()
+    first_link = context.client.post(
+        "/api/v1/customer/wallets",
+        headers=alice_auth,
+        json={
+            "challenge_id": first_challenge["challenge_id"],
+            "signature": _wallet_signature(first_challenge["message"]),
+        },
+    )
+    assert first_link.status_code == 201
+
+    second_challenge = _create_wallet_challenge(context, bob_auth, address)
+    assert second_challenge.status_code == 201
+    second_body = second_challenge.json()
+    conflict = context.client.post(
+        "/api/v1/customer/wallets",
+        headers=bob_auth,
+        json={
+            "challenge_id": second_body["challenge_id"],
+            "signature": _wallet_signature(second_body["message"]),
+        },
+    )
+
+    assert conflict.status_code == 409
+    assert conflict.json() == {"error": {"code": "wallet_conflict"}}
+    assert alice_auth["Authorization"] not in conflict.text
+    assert "alice@example.test" not in conflict.text
+    assert "customer_id" not in conflict.text
+    assert context.client.get("/api/v1/customer/wallets", headers=bob_auth).json() == []
+    assert len(context.client.get("/api/v1/customer/wallets", headers=alice_auth).json()) == 1
+
+
+def test_customer_wallet_has_cardinality_one_and_cannot_be_replaced(
+    customer_identity_context: CustomerIdentityContext,
+) -> None:
+    context = customer_identity_context
+    _, auth = _customer_auth(context)
+    first_address = _wallet_address()
+    replacement_address = _wallet_address(_OTHER_WALLET_PRIVATE_KEY)
+    first_challenge = _create_wallet_challenge(context, auth, first_address).json()
+    replacement_challenge = _create_wallet_challenge(context, auth, replacement_address).json()
+
+    first_link = context.client.post(
+        "/api/v1/customer/wallets",
+        headers=auth,
+        json={
+            "challenge_id": first_challenge["challenge_id"],
+            "signature": _wallet_signature(first_challenge["message"]),
+        },
+    )
+    assert first_link.status_code == 201
+
+    replacement = context.client.post(
+        "/api/v1/customer/wallets",
+        headers=auth,
+        json={
+            "challenge_id": replacement_challenge["challenge_id"],
+            "signature": _wallet_signature(
+                replacement_challenge["message"], _OTHER_WALLET_PRIVATE_KEY
+            ),
+        },
+    )
+    assert replacement.status_code == 409
+    assert replacement.json() == {"error": {"code": "wallet_already_linked"}}
+    assert _create_wallet_challenge(context, auth, replacement_address).json() == {
+        "error": {"code": "wallet_already_linked"}
+    }
+    listed = context.client.get("/api/v1/customer/wallets", headers=auth)
+    assert listed.status_code == 200
+    assert len(listed.json()) == 1
+    assert listed.json()[0]["address"] == first_address.lower()
+
+
+def test_customer_wallet_openapi_and_validation_scope_preserve_staff_errors(
+    customer_identity_context: CustomerIdentityContext,
+) -> None:
+    context = customer_identity_context
+    paths = context.client.get("/openapi.json").json()["paths"]
+
+    assert "/api/v1/customer/wallet-challenges" in paths
+    assert "/api/v1/customer/wallets" in paths
+    assert "/api/v1/customer/auth/wallets" not in paths
+    address_schema = paths["/api/v1/customer/wallet-challenges"]["post"]["requestBody"][
+        "content"
+    ]["application/json"]["schema"]
+    address_schema_name = address_schema["$ref"].rsplit("/", 1)[-1]
+    address_pattern = context.client.get("/openapi.json").json()["components"]["schemas"][
+        address_schema_name
+    ]["properties"]["address"]["pattern"]
+    assert address_pattern == "^0x[a-fA-F0-9]{40}$"
+    expected_responses = {
+        ("/api/v1/customer/wallet-challenges", "post"): {"401", "409", "422"},
+        ("/api/v1/customer/wallets", "post"): {"401", "409", "422"},
+        ("/api/v1/customer/wallets", "get"): {"401"},
+    }
+    for (path, method), status_codes in expected_responses.items():
+        responses = paths[path][method]["responses"]
+        for status_code in status_codes:
+            assert status_code in responses
+            assert responses[status_code]["content"]["application/json"]["schema"][
+                "$ref"
+            ].endswith("/CustomerErrorResponse")
+
+    _, auth = _customer_auth(context)
+    malformed = _create_wallet_challenge(context, auth, "invalid")
+    assert malformed.status_code == 422
+    assert malformed.json() == {"error": {"code": "validation_error"}}
+    staff_validation = context.client.post("/api/v1/auth/login", json={})
+    assert staff_validation.status_code == 422
+    assert staff_validation.json() == {"detail": "Request validation failed"}
+
+    unauthenticated_list = context.client.get("/api/v1/customer/wallets")
+    assert unauthenticated_list.status_code == 401
+    assert unauthenticated_list.json() == {"error": {"code": "invalid_session"}}

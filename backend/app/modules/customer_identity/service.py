@@ -1,21 +1,31 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import secrets
 from uuid import uuid4
 
 import jwt
+from eth_account import Account
+from eth_account.messages import encode_defunct
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
 from app.core.security import hash_password, hash_secret, random_token, verify_password
-from app.modules.customer_identity.models import CustomerAccount, CustomerSession
+from app.modules.customer_identity.models import (
+    CustomerAccount,
+    CustomerSession,
+    CustomerWallet,
+    CustomerWalletChallenge,
+)
 
 ACCESS_TOKEN_MINUTES = 15
 ACCESS_TOKEN_SECONDS = ACCESS_TOKEN_MINUTES * 60
 REFRESH_TOKEN_DAYS = 7
 IDLE_WINDOW = timedelta(minutes=30)
+WALLET_CHALLENGE_TTL = timedelta(minutes=5)
+WALLET_CHALLENGE_PURPOSE = "link-customer-wallet"
 
 
 class DuplicateCustomerEmailError(Exception):
@@ -27,6 +37,18 @@ class InvalidCustomerCredentialsError(Exception):
 
 
 class InvalidCustomerSessionError(Exception):
+    pass
+
+
+class CustomerWalletAlreadyLinkedError(Exception):
+    pass
+
+
+class CustomerWalletAddressConflictError(Exception):
+    pass
+
+
+class InvalidCustomerWalletChallengeError(Exception):
     pass
 
 
@@ -255,3 +277,184 @@ def logout_customer_session(
 
 
 _DUMMY_PASSWORD_HASH = hash_password("customer-login-dummy-password")
+
+
+def _wallet_message_timestamp(value: datetime) -> str:
+    return _as_utc(value).isoformat().replace("+00:00", "Z")
+
+
+def _customer_wallet_unique_violation(error: IntegrityError) -> str | None:
+    constraint_name = getattr(getattr(error.orig, "diag", None), "constraint_name", None)
+    if constraint_name == "uq_customer_wallet_customer_id":
+        return "customer"
+    if constraint_name == "uq_customer_wallet_address":
+        return "address"
+
+    # SQLite reports unique columns rather than the declared constraint name.
+    sqlite_message = str(error.orig)
+    if sqlite_message == "UNIQUE constraint failed: customer_wallet.customer_id":
+        return "customer"
+    if sqlite_message == "UNIQUE constraint failed: customer_wallet.address":
+        return "address"
+    return None
+
+
+def create_customer_wallet_challenge(
+    *,
+    session_factory: sessionmaker[Session],
+    customer_id: str,
+    address: str,
+    now: datetime,
+) -> dict[str, str | datetime]:
+    now_utc = _as_utc(now)
+    expires_at = now_utc + WALLET_CHALLENGE_TTL
+    challenge_id = str(uuid4())
+    nonce = secrets.token_hex(32)
+    message = (
+        "RoomForge customer wallet link\n"
+        f"Customer ID: {customer_id}\n"
+        f"Wallet address: {address}\n"
+        f"Purpose: {WALLET_CHALLENGE_PURPOSE}\n"
+        f"Nonce: {nonce}\n"
+        f"Issued at: {_wallet_message_timestamp(now_utc)}\n"
+        f"Expires at: {_wallet_message_timestamp(expires_at)}"
+    )
+
+    with session_factory.begin() as session:
+        existing_wallet = (
+            session.query(CustomerWallet)
+            .filter(CustomerWallet.customer_id == customer_id)
+            .one_or_none()
+        )
+        if existing_wallet is not None:
+            raise CustomerWalletAlreadyLinkedError
+        challenge = CustomerWalletChallenge(
+            id=challenge_id,
+            customer_id=customer_id,
+            address=address,
+            purpose=WALLET_CHALLENGE_PURPOSE,
+            nonce=nonce,
+            message=message,
+            issued_at=now_utc,
+            expires_at=expires_at,
+        )
+        session.add(challenge)
+        session.flush()
+
+    return {"challenge_id": challenge_id, "message": message, "expires_at": expires_at}
+
+
+def verify_and_link_customer_wallet(
+    *,
+    session_factory: sessionmaker[Session],
+    customer_id: str,
+    challenge_id: str,
+    signature: str,
+    now: datetime,
+) -> dict[str, str | datetime]:
+    now_utc = _as_utc(now)
+    claimed_challenge: tuple[str, str] | None = None
+
+    # Commit one-time consumption before parsing or recovering an untrusted signature.
+    with session_factory.begin() as session:
+        challenge = (
+            session.query(CustomerWalletChallenge)
+            .filter(
+                CustomerWalletChallenge.id == challenge_id,
+                CustomerWalletChallenge.customer_id == customer_id,
+                CustomerWalletChallenge.purpose == WALLET_CHALLENGE_PURPOSE,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        if (
+            challenge is not None
+            and challenge.consumed_at is None
+            and _as_utc(challenge.expires_at) > now_utc
+        ):
+            consumed = (
+                session.query(CustomerWalletChallenge)
+                .filter(
+                    CustomerWalletChallenge.id == challenge_id,
+                    CustomerWalletChallenge.customer_id == customer_id,
+                    CustomerWalletChallenge.consumed_at.is_(None),
+                    CustomerWalletChallenge.expires_at > now_utc,
+                )
+                .update(
+                    {CustomerWalletChallenge.consumed_at: now_utc},
+                    synchronize_session=False,
+                )
+            )
+            if consumed == 1:
+                claimed_challenge = (challenge.message, challenge.address)
+
+    if claimed_challenge is None:
+        raise InvalidCustomerWalletChallengeError
+
+    message, expected_address = claimed_challenge
+    try:
+        recovered_address = Account.recover_message(
+            encode_defunct(text=message), signature=signature
+        )
+    except Exception:
+        raise InvalidCustomerWalletChallengeError from None
+    if recovered_address.lower() != expected_address:
+        raise InvalidCustomerWalletChallengeError
+
+    wallet_id = str(uuid4())
+    try:
+        with session_factory.begin() as session:
+            existing_wallet = (
+                session.query(CustomerWallet)
+                .filter(CustomerWallet.customer_id == customer_id)
+                .one_or_none()
+            )
+            if existing_wallet is not None:
+                raise CustomerWalletAlreadyLinkedError
+
+            wallet = CustomerWallet(
+                id=wallet_id,
+                customer_id=customer_id,
+                address=expected_address,
+                linked_at=now_utc,
+            )
+            session.add(wallet)
+            session.flush()
+    except IntegrityError as error:
+        conflict = _customer_wallet_unique_violation(error)
+        if conflict == "customer":
+            # Re-read only after the failed transaction has rolled back. A competing
+            # transaction may have linked this account after the preflight query.
+            with session_factory() as session:
+                linked_wallet_id = (
+                    session.query(CustomerWallet.id)
+                    .filter(CustomerWallet.customer_id == customer_id)
+                    .scalar()
+                )
+            if linked_wallet_id is not None:
+                raise CustomerWalletAlreadyLinkedError from None
+        elif conflict == "address":
+            raise CustomerWalletAddressConflictError from None
+        raise
+
+    return {"id": wallet_id, "address": expected_address, "linked_at": now_utc}
+
+
+def list_customer_wallets(
+    *, session_factory: sessionmaker[Session], customer_id: str
+) -> list[dict[str, str | datetime]]:
+    with session_factory() as session:
+        wallets = (
+            session.query(CustomerWallet)
+            .filter(CustomerWallet.customer_id == customer_id)
+            .order_by(CustomerWallet.linked_at, CustomerWallet.id)
+            .all()
+        )
+        return [
+            {
+                "id": wallet.id,
+                "address": wallet.address,
+                "linked_at": _as_utc(wallet.linked_at),
+            }
+            for wallet in wallets
+        ]

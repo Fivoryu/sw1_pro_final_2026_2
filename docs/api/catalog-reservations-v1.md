@@ -1,13 +1,14 @@
 # Propuesta de contrato API v1: catálogo, cotizaciones y reservas
 
-**Estado: PROPUESTA para revisión; no implementada ni aprobada como contrato final.** CC-02 define el contrato para el flujo que se distribuirá entre CC-03 y CC-09, sin agregar rutas, esquemas ni comportamientos al backend actual. Los nombres de rutas, campos, enums y errores que siguen son decisiones técnicas propuestas, salvo donde se los identifica expresamente como reglas confirmadas o hechos actuales.
+**Estado: PROPUESTA para revisión; no es un contrato final ni acredita despliegue.** El contrato de catálogo, cotizaciones y reservas sigue propuesto. Las rutas de cuenta/sesión de cliente (CC-03A) y wallet (CC-03B) están implementadas en esta rama, sin que eso apruebe el contrato general ni implique despliegue. CC-02 define la propuesta para el flujo restante; los nombres de rutas, campos, enums y errores siguen siendo propuestas salvo donde se los identifica expresamente como reglas confirmadas, hechos actuales o comportamiento implementado en esta rama.
 
 ## Cómo leer esta propuesta
 
 | Etiqueta | Significado |
 |---|---|
 | **CONFIRMADA** | Regla de producto adoptada por el usuario en `odd/tasks/cliente-catalog.md`. |
-| **HECHO ACTUAL** | Comportamiento comprobado en el backend existente, con archivo fuente. |
+| **HECHO ACTUAL — BASE `b6a468a`** | Comportamiento comprobado en los archivos fuente de esa revisión exacta; no describe el worktree actual ni acredita despliegue. |
+| **IMPLEMENTADO EN ESTA RAMA** | Comportamiento presente en el worktree actual; no implica despliegue ni aprobación global del contrato. |
 | **PROPUESTA** | Opción de contrato para revisar; no implica aprobación ni implementación. |
 | **PENDIENTE** | Decisión que debe cerrarse antes de depender de ella en una implementación. |
 
@@ -19,7 +20,7 @@ Los valores `EXAMPLE_*`, `EXAMPLE-CURRENCY` y las direcciones entre corchetes so
 
 **Fuera de este documento:** implementación de backend, rutas, modelos, migraciones, contrato Solidity, SDK o UI Flutter; compra/alquiler legal, pagos completos, fondos reales y custodia de claves; definición de escena o renderer 3D. Las rutas de publicación para personal son opcionales, fuera de CC-02 y corresponden a CC-04.
 
-**Desglose de implementación adoptado:** CC-03 implementa cuenta/sesión de cliente y vinculación/verificación de su wallet, separado de autenticación de personal; CC-04 implementa catálogo/ofertas y, si se necesita, el workflow de publicación; CC-05 implementa reservas y permisos EIP-712; CC-06 implementa escrow Solidity solo en Hardhat local; CC-07 implementa Flutter; CC-08 integra el flujo vertical de wallet; CC-09 verifica el conjunto. Todo trabajo de cadena queda limitado a Hardhat local: sin testnet ni fondos reales salvo aprobación posterior.
+**Desglose de trabajo:** CC-03A (cuenta/sesión) y CC-03B (vinculación/verificación de wallet) están implementados en esta rama, separados de la autenticación de personal. CC-04 (catálogo/ofertas y posible workflow de publicación), CC-05 (reservas y permisos EIP-712), CC-06 (escrow Solidity en Hardhat local), CC-07 (Flutter), CC-08 (integración vertical de wallet) y CC-09 (verificación) siguen siendo trabajo propuesto. Todo trabajo de cadena queda limitado a Hardhat local: sin testnet ni fondos reales salvo aprobación posterior.
 
 ## 2. Reglas de producto confirmadas
 
@@ -28,6 +29,7 @@ Los valores `EXAMPLE_*`, `EXAMPLE-CURRENCY` y las direcciones entre corchetes so
 - **CONFIRMADA** El precio base no incluye muebles opcionales. Para venta, los extras son de pago único; para alquiler, el precio base y los extras son mensuales. El servidor calcula y devuelve el desglose; ocultar un mueble en la visita 3D no modifica la oferta.
 - **CONFIRMADA** La visita 3D prevista es sencilla, de un inmueble de una planta con ambientes conectados manualmente; no se promete reconstrucción fotorrealista.
 - **CONFIRMADA** El cliente debe tener una cuenta RoomForge y vincularle por separado una wallet externa verificada; la wallet no reemplaza la cuenta. Para reservar se requiere el cliente RoomForge autenticado y la wallet verificada vinculada a esa cuenta. No se acepta una dirección arbitraria enviada en el body como identidad o wallet de reserva.
+- **CONFIRMADA para CC-03B** Cada cuenta puede vincular como máximo una wallet externa y cada dirección canonicalizada puede pertenecer a una sola cuenta en todo el sistema. La verificación usa EIP-191 `personal_sign`; cualquier firma inválida, incluso malformada, consume el challenge antes de responder con un error genérico. Challenge expirado o repetido falla cerrado. No se incluyen endpoints para desvincular o reemplazar la wallet ni se revela qué otra cuenta pudiera poseer una dirección.
 - **CONFIRMADA** La reserva usa una wallet externa y un token de prueba. RoomForge no custodia claves de clientes ni de agencias.
 - **CONFIRMADA** El depósito es un monto fijo por inmueble, independiente del total de la oferta. La agencia dispone de 24 horas desde la creación de la solicitud en la API.
 - **CONFIRMADA** Solo puede haber una reserva pendiente por inmueble. El rechazo, la cancelación mientras la reserva siga pendiente y el vencimiento reembolsan el depósito; la aceptación lo libera a la agencia.
@@ -36,34 +38,42 @@ Los valores `EXAMPLE_*`, `EXAMPLE-CURRENCY` y las direcciones entre corchetes so
 
 Estas reglas no aprueban nombres de rutas, campos, estados de máquina ni códigos de error.
 
-## 3. Hechos actuales del backend
+## 3. Hechos del backend base y comportamiento de esta rama
 
-| Hecho verificado | Fuente |
+### HECHO ACTUAL — BASE `b6a468a`
+
+Los hechos de esta subsección se verificaron en los archivos versionados en el commit `b6a468a`. Describen esa revisión base, no el worktree actual, y no acreditan despliegue.
+
+| Hecho verificado en `b6a468a` | Fuente en esa revisión |
 |---|---|
-| `create_app()` construye FastAPI y registra actualmente solo los routers de identidad y agencias. La instancia se titula `RoomForge Staff API`, versión `1.0.0`. | `backend/app/main.py` |
+| `create_app()` construye FastAPI, con título `RoomForge Staff API` y versión `1.0.0`, y registra únicamente los routers de identidad de personal y agencias. | `backend/app/main.py` |
 | El router de identidad usa el prefijo `/api/v1/auth` y la etiqueta `staff-auth`; `get_active_staff` valida Bearer/JWT contra una sesión persistida y devuelve `id`, `email`, `role` y `tenant_id` del personal activo. No es autenticación de cliente. | `backend/app/modules/identity/router.py`; `backend/app/modules/identity/session.py` |
-| `StaffAccount` limita los roles actuales a `platform_admin`, `agency_admin` y `agent`; los dos últimos tienen `tenant_id`, mientras que `platform_admin` no. `Agency.id` es `String(36)`. | `backend/app/modules/identity/models.py` |
-| El router de agencias demuestra una autorización puntual para `platform_admin`; no establece una política genérica de autorización para catálogo o reservas. | `backend/app/modules/agencies/router.py` |
-| Los errores actuales no conforman todavía un sobre común: hay respuestas `detail` de FastAPI, un manejador genérico de validación `422`, y conflictos `409` en rutas existentes. | `backend/app/main.py`; `backend/app/modules/identity/session.py`; `backend/app/modules/agencies/router.py` |
-| La superficie actual de módulos Python del backend contiene `identity` y `agencies`; no hay router/módulo de catálogo, cotización, cliente o reserva en esa superficie. | `backend/app/modules/`; `backend/app/main.py` |
-| FastAPI genera el OpenAPI de la aplicación a partir de la instancia y sus rutas/esquemas; no se observó un esquema propio para catálogo o reservas. | `backend/app/main.py` |
+| `StaffAccount` limita los roles a `platform_admin`, `agency_admin` y `agent`; los dos últimos tienen `tenant_id`, mientras que `platform_admin` no. `Agency.id` es `String(36)`. | `backend/app/modules/identity/models.py` |
+| El router de agencias aplica una autorización puntual para `platform_admin`; no establece una política genérica de autorización para catálogo o reservas. | `backend/app/modules/agencies/router.py` |
+| Los errores no conforman un sobre común: hay respuestas `detail` de FastAPI, un manejador genérico de validación `422` y conflictos `409` en rutas existentes. | `backend/app/main.py`; `backend/app/modules/identity/session.py`; `backend/app/modules/agencies/router.py` |
+| El árbol ejecutable de módulos contiene `identity` y `agencies`; no contiene `customer_identity`, ni módulos de catálogo/listings, cotización o reservas. `create_app()` tampoco registra routers de esos recursos. Por lo tanto, en esta base no hay rutas de cuenta/wallet de clientes, catálogo, cotización ni reservas. | `backend/app/modules/`; `backend/app/main.py` |
+| La aplicación usa el OpenAPI generado por FastAPI a partir de sus rutas y esquemas; en esta base no hay rutas ni esquemas propios para catálogo o reservas ni una definición OpenAPI manual para esos recursos. | `backend/app/main.py` |
 
-**Consecuencia:** no existe autenticación de cliente en el backend actual. CC-03 debe implementar cuenta/sesión de cliente como superficie separada de `StaffAccount` y de la autenticación de personal; esta propuesta no trata una wallet como identidad de cliente. Tampoco existen todavía los endpoints aquí descritos. Las fuentes de arriba describen solo el estado actual y no autorizan las políticas futuras.
+### IMPLEMENTADO EN ESTA RAMA — CC-03A/CC-03B
+
+En el worktree actual, CC-03A implementa rutas y modelos de cuenta/sesión de cliente, y CC-03B implementa las rutas y modelos de vinculación de wallet, separados de `StaffAccount` y de la autenticación de personal. `create_app()` registra sus routers desde `backend/app/modules/customer_identity/`; las rutas se detallan en la sección 4. Este comportamiento de rama no estaba presente en `b6a468a` y no implica despliegue ni aprobación global del contrato.
+
+**Alcance restante:** catálogo/listings, cotizaciones y reservas siguen propuestos y no están implementados en esta rama. La implementación de CC-03A/CC-03B no convierte esta propuesta general en un contrato aprobado ni autoriza las políticas futuras que siguen pendientes.
 
 ## 4. Tabla de rutas propuesta
 
-Todos los nombres y métodos de esta tabla son **PROPUESTA**, no rutas ya existentes. Las decisiones de autorización están desarrolladas en la sección 5.
+Los nombres y métodos de esta tabla son **PROPUESTA** como contrato general. Las rutas de cuenta/sesión y wallet de CC-03 ya están implementadas, pero su presencia no cambia el estado de propuesta de este documento. Las decisiones de autorización están desarrolladas en la sección 5.
 
 | Método y ruta propuestos | Propósito | Acceso propuesto / pendiente |
 |---|---|---|
-| `POST /api/v1/customer/auth/register` | Registrar una cuenta de cliente RoomForge. | Namespace separado seleccionado por el usuario; path y schema siguen siendo **PROPUESTA** hasta implementación. |
-| `POST /api/v1/customer/auth/login` | Iniciar sesión de cliente. | **PROPUESTA**; sesión separada de staff. |
-| `POST /api/v1/customer/auth/refresh` | Renovar sesión de cliente. | **PROPUESTA**; access JWT de 15 min y refresh opaco rotatorio con expiración absoluta de 7 días, recuperados de PB-002 histórico. |
-| `POST /api/v1/customer/auth/logout` | Cerrar sesión de cliente. | **PROPUESTA**; revocación idempotente del refresh actual. |
-| `GET /api/v1/customer/auth/me` | Leer el perfil de la cuenta autenticada y validar su sesión server-side. | **PROPUESTA**; ventana de inactividad deslizante de 30 min según PB-002 histórico. |
-| `POST /api/v1/customer/wallet-challenges` | Emitir desafío de prueba de control para vincular una wallet externa. | **PROPUESTA técnica para CC-03**: EIP-191 `personal_sign`, mensaje ligado a cuenta, dirección y propósito, nonce de un solo uso y TTL de 5 minutos; no requiere chainId para probar posesión. |
-| `POST /api/v1/customer/wallets` | Verificar y vincular wallet a la cuenta. | **PROPUESTA**; requiere challenge EIP-191 válido; relación uno-a-varios sugerida, no regla de producto confirmada. |
-| `GET /api/v1/customer/wallets` | Listar wallets verificadas de la cuenta. | **PROPUESTA**; sesión de la cuenta titular. |
+| `POST /api/v1/customer/auth/register` | Registrar una cuenta de cliente RoomForge. | **IMPLEMENTADO EN ESTA RAMA, CC-03A**; path y schema existen aquí. El contrato general sigue en propuesta. |
+| `POST /api/v1/customer/auth/login` | Iniciar sesión de cliente. | **IMPLEMENTADO EN ESTA RAMA, CC-03A**; sesión separada de staff. |
+| `POST /api/v1/customer/auth/refresh` | Renovar sesión de cliente. | **IMPLEMENTADO EN ESTA RAMA, CC-03A**; access JWT de 15 min y refresh opaco rotatorio con expiración absoluta de 7 días. |
+| `POST /api/v1/customer/auth/logout` | Cerrar sesión de cliente. | **IMPLEMENTADO EN ESTA RAMA, CC-03A**; revocación idempotente del refresh actual. |
+| `GET /api/v1/customer/auth/me` | Leer el perfil de la cuenta autenticada y validar su sesión server-side. | **IMPLEMENTADO EN ESTA RAMA, CC-03A**; ventana de inactividad deslizante de 30 min. |
+| `POST /api/v1/customer/wallet-challenges` | Emitir desafío de prueba de control para vincular una wallet externa. | **IMPLEMENTADO EN ESTA RAMA, CC-03B**: EIP-191 `personal_sign`; mensaje exacto ligado a cuenta, dirección canonicalizada y propósito fijo; nonce criptográfico de un solo uso y TTL de 5 minutos. No requiere chainId para probar posesión. |
+| `POST /api/v1/customer/wallets` | Verificar y vincular wallet a la cuenta. | **IMPLEMENTADO EN ESTA RAMA, CC-03B**: como máximo una wallet por cuenta y dirección globalmente única (**CONFIRMADO**); firma inválida consume el challenge y falla genéricamente; no hay unlink ni reemplazo. |
+| `GET /api/v1/customer/wallets` | Listar wallets verificadas de la cuenta. | **IMPLEMENTADO EN ESTA RAMA, CC-03B**; requiere sesión de la cuenta titular y devuelve cero o una wallet. |
 | `POST /api/v1/staff/agencies/{agency_id}/wallet-challenges` | Emitir desafío para acreditar control de la wallet de agencia. | **PROPUESTA para CC-05**; `agency_admin` del tenant autenticado, rol/permisos exactos pendientes. |
 | `PUT /api/v1/staff/agencies/{agency_id}/wallet` | Verificar firma y vincular wallet a la agencia. | **PROPUESTA para CC-05**; `agency_admin` del tenant + challenge válido, rol/permisos exactos pendientes. |
 | `GET /api/v1/listings` | Buscar publicaciones públicas con filtros y cursor. | Público; solo publicaciones aprobadas y publicadas (**regla CONFIRMADA**). |
@@ -75,7 +85,7 @@ Todos los nombres y métodos de esta tabla son **PROPUESTA**, no rutas ya existe
 | `POST /api/v1/agency/reservations/{reservation_id}/decision` | Ruta propuesta para registrar o reconciliar la decisión ya ejecutada en cadena por la wallet externa de agencia. | **PROPUESTA**; no sustituye la ejecución on-chain de la wallet ni constituye autorización de agencia por sí sola. La wallet ejecuta aceptación y rechazo (**CONFIRMADO**); payload, nonce/replay, envío, timing y reconciliación de eventos **PENDIENTES**. |
 | `POST /api/v1/reservations/{reservation_id}/chain-transactions` | Informar un hash para reconciliar un depósito, reembolso o liberación. | Ruta opcional propuesta; el cliente no acredita el resultado. Acceso, reconciliación y confirmaciones **PENDIENTES**. |
 
-Todas las rutas de cliente, wallet, catálogo, cotización, reserva y agencia son propuestas, no endpoints existentes. El usuario decidió preservar `/api/v1/auth/*` para personal y separar los clientes bajo `/api/v1/customer/auth/*`; la guía histórica se actualizó para no presentar `POST /api/v1/auth/register` como ruta vigente de esta base. Los nombres/campos propuestos aún se verifican al implementar, sin cambiar el router actual de staff. La respuesta pública no debe exponer publicación no visible, dirección de wallet privada ni datos de reserva ajenos.
+Las rutas propuestas en esta tabla para catálogo/listings, cotización, reservas y vinculación de wallet de agencia siguen siendo propuestas y no existen todavía en esta rama. Las rutas y schemas de cuenta/sesión de cliente y las tres rutas de wallet están implementadas en esta rama; preservan `/api/v1/auth/*` para personal y usan `/api/v1/customer/*` para clientes. Su presencia no aprueba el contrato general ni cambia el router de staff. Los nombres/campos de las demás rutas se verificarán al implementarlas. La respuesta pública no debe exponer publicación no visible, dirección de wallet privada ni datos de reserva ajenos.
 
 ### Rutas de publicación para personal — opcionales, fuera de alcance de CC-02 y de CC-04
 
@@ -96,12 +106,12 @@ Toda futura escritura de personal deberá autenticar con `get_active_staff`, der
 | Actor/operación | Base comprobada o propuesta | Límite explícito |
 |---|---|---|
 | Lectura de catálogo/detalle | Público, según la regla confirmada de catálogo público (**PROPUESTA** de transporte sin sesión). | Solo contenido aprobado y publicado. |
-| Cuenta de cliente | **CONFIRMADA**: se requiere cuenta RoomForge; el usuario eligió separarla de staff bajo `/api/v1/customer/auth/*`. **PROPUESTA basada en PB-001/PB-002 históricos**: email minúsculo único, password mínimo 8 con Argon2id, correo no verificado en modo pruebas, access JWT 15 min, refresh opaco con rotación y TTL absoluto 7 días, inactividad deslizante 30 min, errores no enumerativos. | No existe autenticación de cliente en el backend actual. No reutilizar modelos/sesiones/TOTP de staff; la autenticación de cliente valida su propia audiencia y tabla de sesiones. Los paths históricos no se restauran. |
-| Vincular wallet de cliente | **CONFIRMADA**: wallet externa verificada y asociada a la cuenta; la wallet no reemplaza la cuenta. **PROPUESTA técnica para CC-03**: EIP-191 `personal_sign` con challenge de un solo uso, TTL de 5 minutos, ligado a cuenta, dirección, propósito y nonce. | El chainId no se usa para probar posesión de una dirección; SDK móvil y selección/multiplicidad de wallets siguen **PENDIENTES**. |
+| Cuenta de cliente | **CONFIRMADA**: se requiere cuenta RoomForge; el usuario eligió separarla de staff bajo `/api/v1/customer/auth/*`. **IMPLEMENTADO EN ESTA RAMA, CC-03A**: registro/login, email normalizado y único, Argon2id, access JWT de 15 min, refresh opaco con rotación y TTL absoluto de 7 días, inactividad deslizante de 30 min y errores no enumerativos. | Las rutas/schemas y la sesión de cliente existen en esta rama; esto no constituye aprobación global del contrato ni despliegue. No reutilizar modelos/sesiones/TOTP de staff; la autenticación de cliente valida su propia audiencia y tabla de sesiones. Los paths históricos no se restauran. |
+| Vincular wallet de cliente | **CONFIRMADA**: wallet externa verificada y asociada a la cuenta; una por cuenta y dirección globalmente única; la wallet no reemplaza la cuenta. **IMPLEMENTADO EN ESTA RAMA, CC-03B**: EIP-191 `personal_sign` con challenge de un solo uso ligado a cuenta, dirección canonicalizada, propósito fijo, nonce criptográfico y timestamps UTC; TTL de 5 minutos; firma inválida consume el challenge antes de responder genéricamente; sin unlink ni reemplazo. | El chainId no se usa para probar posesión de una dirección; el SDK móvil sigue **PENDIENTE**. |
 | Crear/usar cotización | **PROPUESTA**: acceso público con límites antiabuso/rate limit. | No es una cuestión pendiente de identidad de wallet; límites concretos **PENDIENTES**. |
 | Cliente crea reserva | **CONFIRMADA**: requiere cuenta RoomForge autenticada y wallet externa verificada vinculada. **PROPUESTA**: body referencia el ID de wallet vinculada. | Servidor resuelve su dirección verificada; transacción de depósito debe originarse desde esa dirección. No se acepta wallet arbitraria ni prueba cruda por solicitud. |
 | Cliente consulta/cancela | La consulta de una reserva propia se asocia a la cuenta autenticada; la autorización de cancelación y su actor quedan **PENDIENTES**. | No reutilizar `get_active_staff` ni JWT/TOTP de staff, ni usar la wallet como sustituto de la cuenta. |
-| Personal de una agencia | Hecho actual: Bearer de staff validado por `get_active_staff`, con rol y `tenant_id`. | La política exacta de acceso administrativo está **PENDIENTE**; no extrapolar el permiso puntual de `platform_admin` existente. |
+| Personal de una agencia | **HECHO ACTUAL — BASE `b6a468a`**: Bearer de staff validado por `get_active_staff`, con rol y `tenant_id`. | La política exacta de acceso administrativo está **PENDIENTE**; no extrapolar el permiso puntual de `platform_admin` existente. |
 | Vincular wallet de agencia | **PROPUESTA**: `agency_admin` acredita control mediante challenge y vincula la wallet con la agencia de su tenant. | La ruta nunca confía en una dirección del body sin firma; multiplicidad y chain siguen **PENDIENTES**. |
 | Decisión de agencia (aceptar o rechazar) | **CONFIRMADA**: la wallet externa de agencia ejecuta en cadena ambas decisiones; el backend firma solamente la autorización EIP-712 separada del deadline API antes del depósito. | La API de decisión, si se implementa, solo registra/reconcilia el resultado on-chain; no sustituye la wallet ni una autorización de staff. Payload, nonce/replay, envío a cadena, timing y reconciliación de eventos **PENDIENTES**. |
 | Servicio backend → escrow | **CONFIRMADA**: clave de servicio firma una autorización EIP-712 acotada; no es clave de cliente/agencia. | La clave debe configurarse fuera del repositorio y el servicio debe fallar cerrado si falta; mecanismo operativo exacto pendiente de implementación. |
@@ -220,7 +230,7 @@ Los enums `kind`, `operation` y `charge_period`, así como la forma exacta de to
 }
 ```
 
-El servidor autentica la cuenta, verifica que `customer_wallet_id` le pertenece y carga su dirección verificada desde almacenamiento. El depósito on-chain debe originarse desde esa dirección; el backend valida emisor y evento del escrow contra la wallet vinculada. La firma/challenge verifica control al vincular, no sustituye sesión de cliente ni se repite como identidad en cada request. La multiplicidad y selección de wallets quedan **PENDIENTES**. La autenticación de cliente todavía no está implementada; CC-03 debe construir cuenta/sesión separada de staff. La autorización técnica del depósito y su firma EIP-712 pertenecen a CC-05; el flujo Flutter/wallet a CC-07/CC-08.
+El servidor debe autenticar la cuenta, verificar que `customer_wallet_id` le pertenece y cargar su dirección verificada desde almacenamiento. El depósito on-chain debe originarse desde esa dirección; el backend deberá validar emisor y evento del escrow contra la wallet vinculada. La firma/challenge verifica control al vincular, no sustituye sesión de cliente ni se repite como identidad en cada request. **CONFIRMADO e IMPLEMENTADO EN ESTA RAMA, CC-03B:** como máximo una wallet por cuenta y dirección globalmente única; no hay selección, unlink ni reemplazo. CC-03A implementa cuenta/sesión separada de staff. La ruta de reserva y la autorización técnica de depósito/EIP-712 siguen propuestas para CC-05; el flujo Flutter/wallet, para CC-07/CC-08.
 
 **CONFIRMADA:** el depósito es fijo por inmueble, no se deriva del total cotizado; el plazo de decisión de agencia empieza cuando la API crea la solicitud, antes de que se deposite el token.
 
@@ -272,8 +282,8 @@ Los siguientes nombres son **PROPUESTA**, no estados ya implementados ni aprobad
 
 Hay cuatro responsabilidades distintas; no son intercambiables:
 
-1. **Cuenta del cliente:** requisito de identidad para iniciar sesión, crear reservas y acceder a las propias. La autenticación de cliente se implementa separada de staff; no reutiliza modelos ni sesiones/TOTP de staff y valida su propia audiencia de token. Se propone adaptar a `/api/v1/customer/auth/*` las invariantes históricas PB-001/PB-002: email normalizado/único, Argon2id, access JWT de 15 min, refresh opaco rotatorio con TTL absoluto de 7 días, inactividad deslizante de 30 min y errores no enumerativos. Estos valores son una propuesta recuperada, no rutas actuales.
-2. **Wallet externa del cliente:** se vincula y verifica contra la cuenta mediante challenge firmado. Para CC-03 se propone EIP-191 `personal_sign`; el mensaje de un solo uso liga cuenta, dirección, propósito y nonce, con TTL de 5 minutos. El chainId no es necesario para demostrar control de dirección. La reserva referencia el ID de wallet vinculada; el backend carga su dirección verificada y el depósito debe originarse desde ella. SDK móvil y multiplicidad/selección siguen pendientes. La wallet no reemplaza la cuenta.
+1. **Cuenta del cliente:** requisito de identidad para iniciar sesión, crear reservas y acceder a las propias. CC-03A implementa en esta rama las rutas `/api/v1/customer/auth/*`, separadas de staff; usa modelos/sesiones propios y valida su audiencia de token. El comportamiento de esta rama incluye email normalizado/único, Argon2id, access JWT de 15 min, refresh opaco rotatorio con TTL absoluto de 7 días, inactividad deslizante de 30 min y errores no enumerativos. Es comportamiento implementado en la rama, no aprobación global del contrato ni evidencia de despliegue.
+2. **Wallet externa del cliente:** se vincula y verifica contra la cuenta mediante challenge firmado. CC-03B implementa EIP-191 `personal_sign`; el servidor persiste y devuelve el mensaje exacto, ligado a cuenta, dirección canonicalizada, propósito fijo, nonce criptográfico y timestamps UTC, con TTL de 5 minutos. Toda firma inválida (también malformada) consume el challenge antes de la recuperación; replay y expiración fallan cerrados. El chainId no es necesario para demostrar control de dirección. Se permite como máximo una wallet por cuenta y cada dirección es globalmente única; no hay unlink ni reemplazo. La reserva referencia el ID de wallet vinculada; el backend carga su dirección verificada y el depósito debe originarse desde ella. El SDK móvil sigue pendiente. La wallet no reemplaza la cuenta.
 3. **Clave de servicio backend:** firma solamente la autorización EIP-712 separada que vincula el depósito con el deadline creado por la API antes del depósito. No representa a ninguna wallet de cliente/agencia y no custodia fondos.
 4. **Wallet externa de agencia:** ejecuta en cadena tanto la aceptación como el rechazo (**CONFIRMADO**); el backend no decide ni ejecuta esas decisiones en su nombre. Payloads, nonces/replay, envío a cadena, timing y reconciliación de eventos quedan **PENDIENTES**. La ruta API de decisión, si se conserva, solo registra/reconcilia el resultado on-chain y no sustituye la wallet ni una autorización de staff.
 
@@ -312,7 +322,7 @@ Los nombres y `request_id` son **PROPUESTA**; `field_errors` puede omitirse cuan
 | HTTP candidato | Ejemplos de código candidato | Motivo general |
 |---|---|---|
 | `400` | `invalid_cursor`, `invalid_request` | Sintaxis de cursor/solicitud inválida. |
-| `401` | `customer_authentication_required`, `customer_authentication_invalid` | Sesión de cuenta de cliente requerida o inválida; autenticación aún no implementada. |
+| `401` | `customer_authentication_required`, `customer_authentication_invalid` | Sesión de cuenta de cliente requerida o inválida. La sesión está implementada en esta rama; estos códigos y su uso en el contrato general siguen propuestos. |
 | `403` | `customer_wallet_not_verified` | La cuenta autenticada no tiene una wallet vinculada y verificada cuando la operación la requiere. |
 | `403` | `staff_role_required`, `tenant_access_denied` | Personal autenticado sin autorización. Política final pendiente. |
 | `404` | `listing_not_found`, `reservation_not_found` | Recurso inexistente o no visible para quien consulta. |
@@ -328,9 +338,9 @@ Usar `cursor` opaco y `next_cursor` nullable como mecanismo candidato para `GET 
 
 ## 11. OpenAPI reproducible desde FastAPI
 
-**HECHO ACTUAL:** `backend/app/main.py:create_app()` crea la instancia FastAPI e incluye routers; no configura un documento OpenAPI manual para estos recursos.
+**HECHO ACTUAL — BASE `b6a468a`:** `backend/app/main.py:create_app()` crea la instancia FastAPI e incluye los routers de personal y agencias; no define rutas ni esquemas de catálogo/ofertas, cotizaciones o reservas, ni configura un documento OpenAPI manual para esos recursos.
 
-**PROPUESTA para CC-03–CC-05:** definir rutas de cuenta/sesión (CC-03), catálogo/ofertas (CC-04) y reservas (CC-05) con modelos de request/response y estados de respuesta tipados en los módulos FastAPI; incluir esos routers desde `create_app()` y dejar que `app.openapi()` genere el documento, disponible en la ruta OpenAPI estándar de FastAPI salvo que una decisión explícita la cambie. Las rutas administrativas opcionales de publicación corresponden a CC-04. No editar a mano una copia JSON/YAML como fuente canónica.
+**IMPLEMENTADO EN ESTA RAMA — CC-03A/CC-03B:** las rutas y modelos tipados de cuenta/sesión y wallet están registrados desde `create_app()` y documentados por `app.openapi()`. **PROPUESTA para CC-04–CC-05:** definir del mismo modo las rutas/esquemas de catálogo/ofertas y reservas; las rutas administrativas opcionales de publicación corresponden a CC-04. Este avance no aprueba el contrato general ni acredita despliegue. No editar a mano una copia JSON/YAML como fuente canónica.
 
 **Reproducibilidad propuesta:** desde el entorno/backend fijado del proyecto, construir la misma `app` con la configuración de test segura, serializar su `app.openapi()` y verificar en pruebas posteriores los paths, métodos, schemas y respuestas documentados. Esa es una validación de implementación futura, no ejecutada por CC-02. No exponer secretos en schemas ni requerir wallet real para generar OpenAPI.
 
@@ -343,13 +353,13 @@ Usar `cursor` opaco y `next_cursor` nullable como mecanismo candidato para `GET 
 | D-03 | Monto fijo del depósito por inmueble. | Valor derivado del precio o un monto de ejemplo. |
 | D-04 | Token de prueba: símbolo, decimales, supply y direcciones; `chainId`, contrato y RPC local de Hardhat. | Testnet o fondos reales sin aprobación posterior; tokens, cadena o despliegues de producción. |
 | D-05 | SDK/proveedor de wallet móvil y configuración pública. | SDK o project ID. No guardar secretos/configuración privada en Git. |
-| D-06 | Para wallet de cliente, CC-03 propone EIP-191 `personal_sign` con nonce de un solo uso ligado a cuenta, dirección y propósito, con TTL de 5 minutos. Siguen pendientes el SDK móvil y la multiplicidad/selección; también el protocolo de prueba para vincular wallet de agencia. | Que la wallet reemplace la cuenta, que una dirección enviada en el body pruebe control o que la prueba de identidad requiera una cadena no elegida. |
+| D-06 | Para wallet de cliente, CC-03B implementa EIP-191 `personal_sign` con challenge de un solo uso ligado a cuenta, dirección canonicalizada y propósito, nonce criptográfico y timestamps UTC; TTL de 5 minutos. Se confirma una wallet por cuenta, dirección globalmente única, consumo ante firma inválida y ausencia de unlink/reemplazo. Siguen pendientes el SDK móvil y el protocolo de prueba de wallet de agencia. | Que la wallet reemplace la cuenta, que una dirección enviada en el body pruebe control o que la prueba de identidad requiera una cadena no elegida. |
 | D-07 | Exactos roles y autorizaciones para publicación opcional y operaciones administrativas no decisorias sobre reservas. | Que un rol actual tenga permisos nuevos por inferencia o que la staff API baste para aceptar. |
 | D-08 | Actor autorizado a cancelar una reserva pendiente y autorización requerida para esa cancelación. | Un actor o mecanismo de cancelación aprobado sin decisión explícita. |
 | D-09 | Semántica del filtro “habitaciones” frente a dormitorios y representación del conteo de baños. | Que habitación equivalga a dormitorio o que baños admitan fracciones/enteros concretos. |
 | D-10 | Schema de escena 3D, ambientes, conexiones y renderer. | Payload, geometría o formato de reconstrucción. |
-| D-11 | Campos de sesión de cliente, TTL, refresh y revocación; rate controls para la ruta pública de cotización propuesta; titularidad de cotizaciones si se necesita consultar historial. | Que la wallet sustituya a la cuenta. La cuenta para reservar y la wallet vinculada/verificada son reglas confirmadas; el acceso público a quote es una propuesta técnica. |
-| D-12 | Nombres y schemas finales de rutas, enums, errores, respuestas y versionado. | Que los nombres propuestos ya estén aprobados. |
+| D-11 | Rate controls para la ruta pública de cotización propuesta; titularidad de cotizaciones si se necesita consultar historial. La sesión de cliente está implementada en esta rama por CC-03A, pero su aceptación como contrato global sigue sujeta a revisión. | Que la wallet sustituya a la cuenta. La cuenta para reservar y la wallet vinculada/verificada son reglas confirmadas; el acceso público a quote es una propuesta técnica. |
+| D-12 | Revisión y aprobación global de nombres, schemas, enums, errores, respuestas y versionado; los schemas de identidad/wallet existentes en esta rama no aprueban el contrato general. | Que los nombres propuestos ya estén aprobados o que un schema de rama implique implementación de catálogo/reservas. |
 | D-13 | Cursor, orden, default/máximo de página y límites de filtros. | Cualquier límite numérico. |
 | D-14 | Idempotency-Key: scope, duración, digest y concurrencia entre dispositivos. | Una política temporal o de almacenamiento no acordada. |
 | D-15 | Qué instante determina aceptación antes del deadline cuando API y cadena difieren; expiración, transacciones en vuelo, confirmaciones, reorgs y reconciliación. | Que hora de envío, hora de bloque o primera confirmación sea el criterio acordado. |
@@ -357,11 +367,11 @@ Usar `cursor` opaco y `next_cursor` nullable como mecanismo candidato para `GET 
 | D-17 | Si CC-04 necesita rutas para publicación antes del panel y cuál será el workflow opcional de aprobación/publicación. | Que haya un workflow o rutas administrativas aprobadas. |
 | D-18 | Disponibilidad de un inmueble después de una reserva aceptada y si puede iniciar otra reserva pendiente. | Que salir del estado `pending` vuelva automáticamente disponible la publicación. |
 | D-19 | Identidad canónica del inmueble y su relación con el recurso público `listing_id` para aplicar unicidad. | Que cada publicación y cada inmueble sean necesariamente la misma entidad. |
-| D-20 | Campos, schemas, expiración/refresh y revocación de sesión de cliente; los paths quedan propuestos bajo `/api/v1/customer/auth/*` por decisión del usuario. | Que esas rutas propuestas ya existan o que `/api/v1/auth` actual deje de ser staff-only. |
+| D-20 | Revisar y aprobar globalmente el contrato de cuenta/sesión implementado en esta rama por CC-03A (paths `/api/v1/customer/auth/*`, schemas, expiración/refresh y revocación). | Confundir el comportamiento implementado en esta rama con aprobación global o despliegue; cambiar `/api/v1/auth/*`, que sigue siendo staff-only. |
 
 ## 13. Criterio de salida de CC-02
 
-Este artefacto entrega una propuesta para revisar; no afirma que la API esté implementada. La modalidad de identidad para reservar está **CONFIRMADA**: cuenta RoomForge autenticada más wallet externa vinculada y verificada; la wallet no la reemplaza. El namespace separado `/api/v1/customer/auth/*` fue elegido por el usuario; `/api/v1/auth/*` de personal se preserva. Antes de CC-03–CC-05, cerrar schemas/TTL/refresh de sesión, protocolo/multiplicidad de wallets, rate controls para quote público, permisos administrativos, versión/vigencia de quote, valores económicos/de red y carrera del deadline. CC-06 y CC-08 deben mantener el límite de Hardhat local: sin testnet ni fondos reales sin aprobación posterior. Las decisiones marcadas **PENDIENTE** no deben convertirse en defaults silenciosos; las etiquetas **PROPUESTA** requieren resolución por el trabajo antes de tratarlas como contrato.
+Este artefacto conserva el estado de propuesta para revisión y no afirma despliegue ni aprobación final. CC-03A/CC-03B están implementados en esta rama para cuenta/sesión y wallet; catálogo, cotizaciones y reservas siguen propuestos y no implementados. La modalidad de identidad para reservar está **CONFIRMADA**: cuenta RoomForge autenticada más wallet externa vinculada y verificada; la wallet no la reemplaza. También se confirma una wallet por cuenta, unicidad global de direcciones, consumo del challenge ante firma inválida y ausencia de unlink/reemplazo. Se preserva `/api/v1/auth/*` para personal y `/api/v1/customer/auth/*` para clientes. Para el trabajo restante, cerrar rate controls de quote público, permisos administrativos, versión/vigencia de quote, valores económicos/de red y carrera del deadline. CC-06 y CC-08 deben mantener el límite de Hardhat local: sin testnet ni fondos reales sin aprobación posterior. Las decisiones marcadas **PENDIENTE** no deben convertirse en defaults silenciosos; las etiquetas **PROPUESTA** requieren resolución antes de tratarlas como contrato.
 
 ## Key Learnings
 
