@@ -7,7 +7,7 @@
 **RoomForge** es un SaaS inmobiliario académico con recorridos 3D, desarrollado como trabajo final de la materia **Ingeniería de Software 1 (SW1)**, ciclo **2026-2**, **Grupo #12**. El proyecto se mantiene en un repositorio único: el código de producto vive en `backend/`, `panel/` y `apps/*_mobile/`, junto con la documentación e integración.
 
 - **Escenario**: inmobiliarias publican inmuebles; agentes capturan videos/fotos para reconstrucción 3D (Meshroom); clientes recorren los inmuebles en 3D, consultan precios, reservan y pagan con token de prueba.
-- **Fase actual**: backend implementado para **PB-001 (registro de cliente)** y **PB-002 (autenticación y sesión)**; la app cliente ya integra registro, login y sesión; el resto de superficies (panel web, app de captura, worker 3D y contratos) está en estructura inicial.
+- **Fase actual**: en la base `b6a468a` están AGENCY-2 (registro de agencias) y la autenticación de personal. PB-001/PB-002 (autenticación de clientes) y el registro, login y sesión de la app cliente son históricos y no están presentes en esta base. La app Flutter cliente tiene únicamente su shell inicial; cuenta/sesión, catálogo, cotizaciones, reservas y wallet siguen pendientes.
 - **Documentación maestra**: `docs/` — PAPS, Sprint 0–3, trazabilidad de IDs (PB/HU/CP/GAP) siguiendo el formato del documento modelo (Grupo #12).
 
 ## 2. Cómo trabajar acá (primero leé esto)
@@ -57,6 +57,8 @@ proyecto_final/
 
 Stack: **FastAPI · SQLAlchemy 2.x (sync, driver psycopg) · Alembic · PostgreSQL · Argon2id · PyJWT · pytest**.
 
+> **Vigencia de la base:** el árbol PB-001/PB-002 y las cifras de pruebas más abajo son un registro histórico anterior a AGENCY-2. La base `origin/main` usada por `feat/roomforge-mobile-3d` es `b6a468a`: hoy `/api/v1/auth/*` corresponde a autenticación de personal, y no hay autenticación de cliente, catálogo ni reservas. El contrato nuevo separa las rutas de clientes bajo `/api/v1/customer/auth/*`; aún no están implementadas.
+
 ```text
 backend/
 ├── app/
@@ -69,7 +71,7 @@ backend/
 └── tests/                 # test_registro.py, test_autenticacion.py, test_session_repository.py, test_tokens_core.py
 ```
 
-- **Implementado y verificado (VERIFY PASS, 2026-08-24)**: `POST /api/v1/auth/register` (201/409/422), `POST /api/v1/auth/login` (access JWT 15 min + refresh opaco), `POST /api/v1/auth/refresh` (rotación atómica), `POST /api/v1/auth/logout` (204 idempotente), `GET /api/v1/auth/me` (sesión validada server-side, inactividad sliding 30 min). **33 tests verdes**, ruff limpio, pyright CLI 0 errores. Migraciones `0001`+`0002` ejecutadas contra PostgreSQL real (Docker).
+- **Histórico de PB-001/PB-002 (base anterior a AGENCY-2, no verificar como comportamiento actual):** se reportaron `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, refresh/logout y `/me`, **33 tests verdes** y migraciones `0001`+`0002` contra PostgreSQL en 2026-08-24. Esos resultados no acreditan la base `b6a468a`; sus rutas actuales de `/api/v1/auth/*` son de personal.
 - **Entorno local**: `.venv/` en la raíz del monorepo (no commiteado); `backend/.env` local gitignored (DATABASE_URL, JWT_SECRET); PostgreSQL vía `infra/docker/compose.postgres.yml` (puerto 5434).
 
 ### Comandos útiles (desde `backend/`)
@@ -94,10 +96,10 @@ docker compose -f infra/docker/compose.postgres.yml up -d
 
 | Superficie | Estado |
 | --- | --- |
-| `backend/` | ✅ Registro (PB-001) + autenticación/sesión (PB-002) implementados y verificados; pruebas CP-001 ejecutadas contra PostgreSQL real |
+| `backend/` | AGENCY-2 (registro de agencias) y autenticación de personal presentes en `b6a468a`; autenticación de cliente, catálogo, cotizaciones y reservas aún ausentes en esta base. |
 | `panel/` | 🔲 Estructura inicial (React + TypeScript + Vite), sin código |
 | `apps/captura_mobile/` | 🔲 Estructura inicial (Flutter), sin código |
-| `apps/cliente_mobile/` | ✅ Registro, login y sesión integrados; catálogo y reservas pendientes |
+| `apps/cliente_mobile/` | Shell Flutter preparado en `feat/roomforge-mobile-3d`; sesión de cuenta, catálogo, cotizaciones y reservas integradas pendientes. |
 | `worker3d/`, `contracts/` | 🔲 Sin trabajo aún |
 
 ## 7. Documentación y trazabilidad (convenciones)
@@ -107,7 +109,7 @@ docker compose -f infra/docker/compose.postgres.yml up -d
 - **Regla de diagramas**: solo se referencia el **tipo** de diagrama y su ubicación; **no se embeben imágenes** ni se inventa un tipo que el modelo no especifique (GAP-CH2-001..007).
 - **Regla de gaps**: un GAP no se "arregla silenciosamente" ni se inventa el dato faltante; se documenta y se deja la marca.
 - **Idioma**: toda la documentación de Ingeniería de Software se escribe en **español profesional y neutral**; el código y sus identificadores en **inglés** (convención del proyecto).
-- **Rutas HTTP públicas**: los paths y endpoints siempre usan nombres en **inglés**; el endpoint de registro vigente es `POST /api/v1/auth/register`.
+- **Rutas HTTP públicas**: los paths y endpoints siempre usan nombres en **inglés**. En la base `b6a468a`, `/api/v1/auth/*` es de personal; el contrato propuesto separa el alta/sesión de cliente en `/api/v1/customer/auth/*`. La ruta histórica `POST /api/v1/auth/register` no debe tratarse como endpoint vigente de esta base.
 - **Commits**: conventional commits (`feat|fix|test|docs|chore|refactor(scope): ...`), una unidad de trabajo por commit, **sin atribución de IA**.
 
 ## 8. Skills del proyecto
