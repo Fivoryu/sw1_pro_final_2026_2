@@ -32,7 +32,7 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 - El checkout raíz conserva cambios ajenos y no se modifica. Rebasar F02 solo después de que el responsable F01 confirme el push final de sus documentos a `origin/main`.
 - F01-T3/T4 fueron reportadas completas; no se realizarán operaciones Docker hasta coordinar pruebas F02.
 - Handoff móvil recibido desde `feat/roomforge-mobile-3d`; commits locales, sin push: `64c59c02b51d3db3194a51c4e8fd54dbd5c63843` (shell Flutter; candidato F02), `f9d37842876cb0bbe1b7791b9796a73e7048bdf4` (propuesta/documentación API; fuera de autoridad F02), `de534c779ea723ba3eab7168ca45f5d2449dbb6b` (identidad cliente/migración/tests; fuera de F02) y `f762286` (registro de tarea). El dueño reportó 101 passed/2 skipped, Ruff y Pyright OK, SQLite 0004→0005 OK; PostgreSQL no verificado. Antes de integrar, revisar rutas del commit candidato y confirmar que no acopla el prototipo F02 a la implementación F03 de identidad. No copiar ni integrar los commits fuera de F02.
-- F02-T1 cerró con `a156a53`; F02-T2a con `5d0cc8a`; F02-T2b con `eeda6e7`; F02-T2c está en curso.
+- F02-T1 cerró con `a156a53`; F02-T2a con `5d0cc8a`; F02-T2b con `eeda6e7`; F02-T2c con `447c8ec`; F02-T3 está en curso.
 
 ## Hallazgos base F02.1 (exploración de solo lectura)
 
@@ -55,8 +55,8 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 - [x] **F02-T1 — Proponer mapa UX y contratos de estado.** **CERRADA.** Entregable aprobado: `docs/ux/f02-surface-map.md`; commit `a156a53`. La aprobación precede al detalle visual.
 - [x] **F02-T2a — Errores y paginación.** **CERRADA.** Errores homogéneos, 5xx sanitizados, OpenAPI y paginación de agencias; commit `5d0cc8a` (393 líneas).
 - [x] **F02-T2b — Deadlines DB y proveedor de correo.** **CERRADA.** Timeouts PostgreSQL-only y EmailSender nativo; provider externo no disponible; commit `eeda6e7` (395 líneas).
-- [ ] **F02-T2c — Salud API y Compose.** **EN CURSO; worker tests/lint/tipos PASS, revisión independiente pendiente.** `/health/live` process-only; `/health/ready` usa session factory inyectada + Floci TCP por S3_ENDPOINT_URL. HTTP `35s` / Compose `40s`; TCP no prueba S3. Diff reportado 276 líneas.
-- [ ] **F02-T3 — Verificar el esquema y el ciclo de migraciones.** Basarse en el head real; probar creación desde cero y actualización desde la versión anterior cuando exista; documentar datos ficticios, rollback/recovery y comandos reproducibles. No añadir tablas de dominios posteriores sin autorización.
+- [x] **F02-T2c — Salud API y Compose.** **CERRADA.** `/health/live` y `/health/ready` DB+Floci TCP, Compose usa readiness; commit `447c8ec` (276 líneas). Tests 132 PASS/2 SKIP, Ruff PASS, Pyright 0; Docker no ejecutado por coordinación.
+- [ ] **F02-T3 — Verificar el esquema y el ciclo de migraciones.** **EN CURSO; primero mapear migraciones y pruebas existentes.** Basarse en el head real; probar creación desde cero y actualización desde la versión anterior cuando exista; documentar datos ficticios, rollback/recovery y comandos reproducibles. No iniciar Docker/DB PostgreSQL hasta coordinar con el dueño F01/usuario; no añadir tablas de dominios posteriores.
 - [ ] **F02-T4 — Entregar prototipos UX de las tres superficies.** Implementar los recorridos aprobados en el mapa, con carga/vacío/error/offline/permisos, diseño web adaptable, controles táctiles y accesibilidad. Usar el handoff móvil solo tras verificar commit y límites; mantener lo no ejecutable como prototipo honesto.
 - [ ] **F02-T5 — Añadir CI inicial y paridad local.** Configurar checks separados para las superficies presentes, versiones basadas en manifiestos, protección de secretos y fallos visibles; no desplegar infraestructura desde código no confiable.
 - [ ] **F02-T6 — Integrar, verificar y preparar revisión.** Ejecutar los runners disponibles, reportar todo PASS/FAIL/SKIP/BLOCKED, medir cada slice y registrar commits/evidencia. Resolver o declarar explícitamente cada verificación PostgreSQL/móvil no disponible. Detenerse antes de publicar.
@@ -68,8 +68,8 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 | F02-T1 | `a156a53` | `git diff --cached --check` PASS; referencias relativas 2/2 PASS; N/A runtime (documentación sin límite de ejecución) | Hecho |
 | F02-T2a | `5d0cc8a` | 98 backend PASS; 9 Vitest PASS; OpenAPI/whitespace PASS; 393 líneas | Hecho |
 | F02-T2b | `eeda6e7` | 125 PASS/2 SKIP; Ruff PASS; Pyright 0; guard/README corregidos; 395 líneas | Hecho |
-| F02-T2c | Pendiente | 132 PASS/2 SKIP; Ruff PASS; Pyright 0; diff 276; verificador pendiente; Compose no ejecutado | En curso |
-| F02-T3 | Pendiente | Pendiente | Pendiente |
+| F02-T2c | `447c8ec` | 132 PASS/2 SKIP; Ruff PASS; Pyright 0; 276 líneas; Compose runtime no ejecutado | Hecho |
+| F02-T3 | Pendiente | Mapeo read-only pendiente; Docker requiere coordinación | En curso |
 | F02-T4 | Pendiente | Pendiente | Pendiente |
 | F02-T5 | Pendiente | Pendiente | Pendiente |
 | F02-T6 | Pendiente | Pendiente | Pendiente |
