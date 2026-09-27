@@ -65,8 +65,8 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 - [x] **F02-T2b — Deadlines DB y proveedor de correo.** **CERRADA.** Timeouts PostgreSQL-only y EmailSender nativo; provider externo no disponible; commit `eeda6e7` (395 líneas).
 - [x] **F02-T2c — Salud API y Compose.** **CERRADA.** `/health/live` y `/health/ready` DB+Floci TCP, Compose usa readiness; commit `447c8ec` (276 líneas). Tests 132 PASS/2 SKIP, Ruff PASS, Pyright 0; Docker no ejecutado por coordinación.
 - [x] **F02-T3a — Verificación SQLite y evidencia de migración.** **CERRADA.** Evidencia y límites de SQLite/head estático en `docs/migrations/f02-migration-verification.md`; commit `0952252` (78 líneas).
-- [ ] **F02-T3b — Verificación real PostgreSQL.** **PAUSADA; diagnóstico-only.** `docs/migrations/f02-migration-verification.md` registra 4 PASS y 2 errores de setup: el ID de `0004` tiene 42 caracteres y `alembic_version.version_num` es `VARCHAR(32)`. DB R6 vacía, contenedor detenido y volumen preservado. No fix, retest, Docker ni PostgreSQL sin nueva autorización.
-- [ ] **F02-T4 — Entregar prototipos UX de las tres superficies.** **EN CURSO.** Cliente T4a–T4c: starter, catálogo/filtros y accesibilidad implementados, verificados y con revisión nativa aprobada. T4d detalle/disponibilidad espera decisión sobre datos sintéticos. Android de captura y panel web siguen pendientes. Mantener cada slice <400 líneas; no implementar APIs ni negocio F03–F10.
+- [ ] **F02-T3b — Verificación real PostgreSQL.** **PAUSADA; diagnóstico-only.** `docs/migrations/f02-migration-verification.md` registra 4 PASS y 2 errores de setup: el ID de `0004` tiene 42 caracteres y `alembic_version.version_num` es `VARCHAR(32)`. Evidencia y estado en commit `c7849b3` (34 líneas). DB R6 vacía, contenedor detenido y volumen preservado. No fix, retest, Docker ni PostgreSQL sin nueva autorización.
+- [ ] **F02-T4 — Entregar prototipos UX de las tres superficies.** **EN CURSO.** Cliente T4a–T4c comprometidos por unidad: `b154888` (129), `49a853d` (352), `ce5028e` (336); accesibilidad verificada y revisión nativa aprobada. T4d detalle/disponibilidad espera decisión sobre datos sintéticos. Android de captura y panel web siguen pendientes. Mantener cada slice <400 líneas; no implementar APIs ni negocio F03–F10.
 - [ ] **F02-T5 — Añadir CI inicial y paridad local.** Configurar checks separados para las superficies presentes, versiones basadas en manifiestos, protección de secretos y fallos visibles; no desplegar infraestructura desde código no confiable.
 - [ ] **F02-T6 — Integrar, verificar y preparar revisión.** Ejecutar los runners disponibles, reportar todo PASS/FAIL/SKIP/BLOCKED, medir cada slice y registrar commits/evidencia. Resolver o declarar explícitamente cada verificación PostgreSQL/móvil no disponible. Detenerse antes de publicar.
 
@@ -79,7 +79,7 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 | F02-T2b | `eeda6e7` | 125 PASS/2 SKIP; Ruff PASS; Pyright 0; guard/README corregidos; 395 líneas | Hecho |
 | F02-T2c | `447c8ec` | 132 PASS/2 SKIP; Ruff PASS; Pyright 0; 276 líneas; Compose runtime no ejecutado | Hecho |
 | F02-T3a | `0952252` | 4 SQLite PASS; Alembic head; enlaces/whitespace PASS; PG no ejecutado | Hecho |
-| F02-T3b | Pendiente | 4 SQLite PASS; 2 errores PG en setup por revision ID de 42 caracteres vs `VARCHAR(32)`; diagnóstico-only, sin fix/retest; DB/volumen preservados | Pausada |
-| F02-T4 | Pendiente | T4a 129 líneas; T4b 352; T4c ≈360; 8 widget tests y analyze PASS; review lineage aprobado. T4d espera decisión; captura/panel pendientes | En curso |
+| F02-T3b | `c7849b3` | 4 SQLite PASS; 2 errores PG en setup por revision ID de 42 caracteres vs `VARCHAR(32)`; diagnóstico-only, sin fix/retest; DB/volumen preservados; 34 líneas | Pausada |
+| F02-T4 | `b154888`, `49a853d`, `ce5028e` | T4a 129, T4b 352, T4c 336 líneas; 8 widget tests y analyze PASS; review lineage aprobado. T4d espera decisión; captura/panel pendientes | En curso |
 | F02-T5 | Pendiente | Pendiente | Pendiente |
 | F02-T6 | Pendiente | Pendiente | Pendiente |
