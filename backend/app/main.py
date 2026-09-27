@@ -16,6 +16,7 @@ from app.core.config import Settings
 from app.core.errors import ErrorResponse, error_code_for_status
 from app.db.session import create_session_factory
 from app.modules.agencies.router import router as agencies_router
+from app.modules.health.router import router as health_router
 from app.modules.identity.router import router as identity_router
 
 
@@ -51,6 +52,7 @@ def create_app(
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
     )
+    app.include_router(health_router)
     app.include_router(identity_router)
     app.include_router(agencies_router)
 

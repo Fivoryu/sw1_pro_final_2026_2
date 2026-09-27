@@ -35,6 +35,7 @@ class Settings:
     database_pool_timeout_seconds: int = 5
     database_statement_timeout_seconds: int = 10
     email_send_timeout_seconds: int = 10
+    s3_endpoint_url: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -73,6 +74,7 @@ class Settings:
             email_send_timeout_seconds=_positive_timeout_from_env(
                 "STAFF_EMAIL_SEND_TIMEOUT_SECONDS", 10
             ),
+            s3_endpoint_url=os.environ.get("S3_ENDPOINT_URL"),
         )
 
     def validate(self) -> None:

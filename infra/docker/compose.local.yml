@@ -84,10 +84,10 @@ services:
           "CMD",
           "python",
           "-c",
-          "import os, socket, urllib.request; from sqlalchemy import create_engine; engine = create_engine(os.environ['DATABASE_URL']); connection = engine.connect(); connection.exec_driver_sql('SELECT 1').close(); connection.close(); engine.dispose(); socket.create_connection(('floci', 4566), timeout=2).close(); urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=2).close()",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=35).close()",
         ]
       interval: 10s
-      timeout: 5s
+      timeout: 40s
       retries: 5
       start_period: 30s
 
