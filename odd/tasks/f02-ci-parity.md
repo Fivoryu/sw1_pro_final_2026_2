@@ -31,7 +31,7 @@ Añadir CI de pull request para las superficies F02 que ya tienen código ejecut
 - [x] Documentar paridad local y actualizar el tracker F02 con evidencia preliminar; hash final pendiente del commit.
 - [x] Ejecutar validación estática disponible y registrar evidencia.
 - [x] Actualizar tracker/evidencia preliminar.
-- [ ] Crear un commit convencional y registrar su hash en este artefacto.
+- [x] Commit convencional `8002648`; 171 líneas cambiadas en el work-unit commit, sin push ni PR.
 
 ## Criterios de aceptación
 
@@ -53,4 +53,4 @@ Añadir CI de pull request para las superficies F02 que ya tienen código ejecut
 - Workflow: `.github/workflows/ci.yml` (59 líneas), jobs separados backend/panel/cliente.
 - Guía local: `docs/ci/f02-initial-ci.md` (52 líneas).
 - Verificación: PyYAML 6.0.3 parse PASS; triggers, permisos, exclusiones y comandos comprobados contra manifests/docs. `actionlint` no está instalado, por lo que la semántica GitHub permanece sin validar. Diff staged final: 171 líneas.
-- Commit: pendiente; luego actualizar el tracker base con el hash.
+- Commit: `8002648` (`ci(f02): add checks for active product surfaces`), 171 líneas cambiadas.
