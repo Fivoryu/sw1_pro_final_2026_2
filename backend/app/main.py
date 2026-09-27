@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import Settings
 from app.db.session import create_session_factory
 from app.modules.agencies.router import router as agencies_router
+from app.modules.customer_identity.errors import CustomerApiError
+from app.modules.customer_identity.router import router as customer_identity_router
 from app.modules.identity.router import router as identity_router
 
 
@@ -45,11 +47,27 @@ def create_app(
         allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
     )
     app.include_router(identity_router)
+    app.include_router(customer_identity_router)
     app.include_router(agencies_router)
+
+    @app.exception_handler(CustomerApiError)
+    async def customer_api_error(request: Request, exc: CustomerApiError) -> JSONResponse:
+        del request
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": {"code": exc.code}},
+        )
 
     @app.exception_handler(RequestValidationError)
     async def safe_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
-        del request, exc
-        return JSONResponse(status_code=422, content={"detail": "Request validation failed"})
+        if request.url.path.startswith("/api/v1/customer/auth/"):
+            return JSONResponse(
+                status_code=422,
+                content={"error": {"code": "validation_error"}},
+            )
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "Request validation failed"},
+        )
 
     return app
