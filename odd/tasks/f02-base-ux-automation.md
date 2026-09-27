@@ -31,12 +31,12 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 - El checkout raíz conserva cambios ajenos y no se modifica. Rebasar F02 solo después de que el responsable F01 confirme el push final de sus documentos a `origin/main`.
 - F01-T3/T4 fueron reportadas completas; no se realizarán operaciones Docker hasta coordinar pruebas F02.
 - Handoff móvil recibido desde `feat/roomforge-mobile-3d`; commits locales, sin push: `64c59c02b51d3db3194a51c4e8fd54dbd5c63843` (shell Flutter; candidato F02), `f9d37842876cb0bbe1b7791b9796a73e7048bdf4` (propuesta/documentación API; fuera de autoridad F02), `de534c779ea723ba3eab7168ca45f5d2449dbb6b` (identidad cliente/migración/tests; fuera de F02) y `f762286` (registro de tarea). El dueño reportó 101 passed/2 skipped, Ruff y Pyright OK, SQLite 0004→0005 OK; PostgreSQL no verificado. Antes de integrar, revisar rutas del commit candidato y confirmar que no acopla el prototipo F02 a la implementación F03 de identidad. No copiar ni integrar los commits fuera de F02.
-- Ninguna tarea F02 está cerrada ni verificada todavía.
+- F02-T1 cerró con el commit local `a156a53`; F02-T2 está en curso.
 
 ## Tareas
 
-- [ ] **F02-T1 — Proponer mapa UX y contratos de estado.** **Aprobado por el usuario; cierre pendiente de verificación y commit.** Entregable: `docs/ux/f02-surface-map.md`. Contrastar los roles/superficies autorizados con el estado real del panel y el handoff Flutter; la aprobación precede al detalle visual.
-- [ ] **F02-T2 — Completar la base del contrato API.** Definir límites modulares y convenciones homogéneas de validación/error, paginación y configuración; documentar disponibilidad y contrato. Añadir pruebas de contrato en RED primero. No añadir endpoints de negocio no aprobados.
+- [x] **F02-T1 — Proponer mapa UX y contratos de estado.** **CERRADA.** Entregable aprobado: `docs/ux/f02-surface-map.md`; commit `a156a53`. La aprobación precede al detalle visual.
+- [ ] **F02-T2 — Completar la base del contrato API.** **EN CURSO.** Definir límites modulares y convenciones homogéneas de validación/error, paginación y configuración; documentar disponibilidad y contrato. Añadir pruebas de contrato en RED primero. No añadir endpoints de negocio no aprobados.
 - [ ] **F02-T3 — Verificar el esquema y el ciclo de migraciones.** Basarse en el head real; probar creación desde cero y actualización desde la versión anterior cuando exista; documentar datos ficticios, rollback/recovery y comandos reproducibles. No añadir tablas de dominios posteriores sin autorización.
 - [ ] **F02-T4 — Entregar prototipos UX de las tres superficies.** Implementar los recorridos aprobados en el mapa, con carga/vacío/error/offline/permisos, diseño web adaptable, controles táctiles y accesibilidad. Usar el handoff móvil solo tras verificar commit y límites; mantener lo no ejecutable como prototipo honesto.
 - [ ] **F02-T5 — Añadir CI inicial y paridad local.** Configurar checks separados para las superficies presentes, versiones basadas en manifiestos, protección de secretos y fallos visibles; no desplegar infraestructura desde código no confiable.
@@ -46,8 +46,8 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 
 | Tarea | Commit | Verificación observada | Estado |
 |---|---|---|---|
-| F02-T1 | Pendiente | Mapa trazado contra las dos fuentes autorizadas y aprobado por el usuario; `git diff --check` pendiente | Cierre pendiente de commit/evidencia |
-| F02-T2 | Pendiente | Pendiente | Pendiente |
+| F02-T1 | `a156a53` | `git diff --cached --check` PASS; referencias relativas 2/2 PASS; N/A runtime (documentación sin límite de ejecución) | Hecho |
+| F02-T2 | Pendiente | Pendiente | En curso |
 | F02-T3 | Pendiente | Pendiente | Pendiente |
 | F02-T4 | Pendiente | Pendiente | Pendiente |
 | F02-T5 | Pendiente | Pendiente | Pendiente |
