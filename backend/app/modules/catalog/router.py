@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -27,8 +27,11 @@ from app.modules.catalog.schemas import (
     QuoteErrorResponse,
     QuoteLine,
     QuoteSnapshotResponse,
+    ListingDepositResponse,
+    ListingDepositUpdateRequest,
 )
 from app.modules.catalog.service import (
+    configure_listing_deposit,
     InvalidCursorError,
     consume_quote_rate_limit,
     create_quote_snapshot,
@@ -38,6 +41,7 @@ from app.modules.catalog.service import (
     normalize_geo_key,
     search_public_listings,
 )
+from app.modules.identity.session import ActiveStaff, get_active_staff
 
 
 router = APIRouter()
@@ -262,6 +266,38 @@ def create_public_quote(body: QuoteCreateRequest, request: Request) -> QuoteSnap
             "quote_service_unavailable",
             "The quote service is temporarily unavailable.",
         ) from None
+
+
+@router.patch(
+    "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/deposit",
+    response_model=ListingDepositResponse,
+)
+def set_listing_deposit(
+    agency_id: str,
+    listing_id: str,
+    body: ListingDepositUpdateRequest,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> ListingDepositResponse:
+    if staff["role"] != "agency_admin" or staff["tenant_id"] != agency_id:
+        raise HTTPException(status_code=403, detail="Agency-admin tenant access is required")
+
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    with session_factory.begin() as session:
+        listing = configure_listing_deposit(
+            session,
+            agency_id=agency_id,
+            listing_id=listing_id,
+            deposit_amount_cop=body.deposit_amount_cop,
+        )
+        if listing is None:
+            raise HTTPException(status_code=404, detail="Listing not found")
+        assert listing.deposit_amount_cop is not None
+        return ListingDepositResponse(
+            listing_id=listing.id,
+            deposit_amount_cop=format(listing.deposit_amount_cop, ".2f"),
+            offer_version=listing.offer_version,
+        )
 
 
 router.include_router(listings_router)

@@ -34,6 +34,14 @@ class Listing(Base):
         ),
         CheckConstraint("operation IN ('sale', 'rent')", name="ck_listing_operation"),
         CheckConstraint("base_price >= 0", name="ck_listing_base_price_nonnegative"),
+        CheckConstraint(
+            "deposit_amount_cop IS NULL OR deposit_amount_cop > 0",
+            name="ck_listing_deposit_amount_cop_positive",
+        ),
+        CheckConstraint(
+            "deposit_amount_cop IS NULL OR deposit_amount_cop = round(deposit_amount_cop, 2)",
+            name="ck_listing_deposit_amount_cop_scale",
+        ),
         CheckConstraint("offer_version >= 1", name="ck_listing_offer_version_positive"),
         CheckConstraint("bedrooms >= 0", name="ck_listing_bedrooms_nonnegative"),
         CheckConstraint("bathrooms >= 0", name="ck_listing_bathrooms_nonnegative"),
@@ -54,6 +62,7 @@ class Listing(Base):
     is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     operation: Mapped[str] = mapped_column(String(8), nullable=False)
     base_price: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    deposit_amount_cop: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     offer_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     city: Mapped[str] = mapped_column(String(120), nullable=False)
     city_key: Mapped[str] = mapped_column(String(360), nullable=False)

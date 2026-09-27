@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool, StaticPool
 
 from app.core.config import Settings
+from app.core.security import create_access_token
 from app.db.base import Base
 from app.db.session import (
     _authorize_sqlite_offer_version_guard,
@@ -27,7 +28,10 @@ from app.db.session import (
     protect_session_factory,
 )
 from app.main import create_app
-from app.modules.identity.models import Agency
+from app.modules.identity.models import Agency, StaffAccount, StaffSession
+
+
+_CATALOG_TEST_JWT_SECRET = "catalog-test-secret-that-is-at-least-thirty-two-bytes"
 
 
 @dataclass
@@ -70,15 +74,28 @@ def catalog_api_context() -> Iterator[CatalogApiContext]:
     assert quote_migration_spec is not None and quote_migration_spec.loader is not None
     quote_migration = importlib.util.module_from_spec(quote_migration_spec)
     quote_migration_spec.loader.exec_module(quote_migration)
+    deposit_migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "0009_agency_wallets_listing_deposit.py"
+    )
+    deposit_migration_spec = importlib.util.spec_from_file_location(
+        "listing_deposit_triggers_for_api_tests", deposit_migration_path
+    )
+    assert deposit_migration_spec is not None and deposit_migration_spec.loader is not None
+    deposit_migration = importlib.util.module_from_spec(deposit_migration_spec)
+    deposit_migration_spec.loader.exec_module(deposit_migration)
     with engine.begin() as connection:
         migration_context = MigrationContext.configure(connection)
         with Operations.context(migration_context):
             migration._install_offer_version_triggers()
             quote_migration._install_snapshot_immutability()
+            deposit_migration._install_listing_deposit_offer_version_triggers()
     app = create_app(
         settings=Settings(
             database_url="sqlite+pysqlite:///:memory:",
-            jwt_secret="catalog-test-secret-that-is-at-least-thirty-two-bytes",
+            jwt_secret=_CATALOG_TEST_JWT_SECRET,
             totp_encryption_key="MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
             web_origin="http://localhost",
         ),
@@ -145,6 +162,160 @@ def _seed_listing(
 
 def _listing_ids(response: Any) -> list[str]:
     return [item["listing_id"] for item in response.json()["items"]]
+
+
+def _staff_headers(
+    context: CatalogApiContext,
+    *,
+    account_id: str = "agency-admin",
+    role: str = "agency_admin",
+    tenant_id: str | None = "agency-one",
+) -> dict[str, str]:
+    now = datetime.now(timezone.utc)
+    session_id = f"session-{account_id}"
+    with context.session_factory.begin() as session:
+        if tenant_id is not None and session.get(Agency, tenant_id) is None:
+            session.add(Agency(id=tenant_id))
+            session.flush()
+        session.add(
+            StaffAccount(
+                id=account_id,
+                email=f"{account_id}@example.test",
+                password_hash="test-password-hash",
+                role=role,
+                tenant_id=tenant_id,
+                active=True,
+                totp_secret_encrypted="encrypted-test-secret",
+                totp_enabled=True,
+                created_at=now,
+            )
+        )
+        session.add(
+            StaffSession(
+                id=session_id,
+                user_id=account_id,
+                refresh_hash=f"refresh-{account_id}",
+                csrf_hash=f"csrf-{account_id}",
+                created_at=now,
+                last_activity_at=now,
+                expires_at=now + timedelta(hours=1),
+            )
+        )
+    token = create_access_token(
+        user_id=account_id,
+        session_id=session_id,
+        signing_key=_CATALOG_TEST_JWT_SECRET,
+        now=now,
+        lifetime_minutes=15,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.mark.parametrize("amount", ["0.00", "-0.01", "1.001"])
+def test_deposit_configuration_rejects_nonpositive_or_excess_precision(
+    catalog_api_context: CatalogApiContext, amount: str
+) -> None:
+    context = catalog_api_context
+    _seed_listing(context, listing_id="invalid-deposit")
+
+    response = context.client.patch(
+        "/api/v1/staff/agencies/agency-one/listings/invalid-deposit/deposit",
+        json={"deposit_amount_cop": amount},
+        headers=_staff_headers(context),
+    )
+
+    assert response.status_code == 422
+
+
+def test_only_owning_agency_admin_can_configure_listing_deposit(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    context = catalog_api_context
+    _seed_listing(context, listing_id="owned-deposit")
+    _seed_listing(context, listing_id="other-agency-deposit", agency_id="agency-two")
+    own_headers = _staff_headers(context)
+
+    configured = context.client.patch(
+        "/api/v1/staff/agencies/agency-one/listings/owned-deposit/deposit",
+        json={"deposit_amount_cop": "1250.50"},
+        headers=own_headers,
+    )
+    cross_tenant = context.client.patch(
+        "/api/v1/staff/agencies/agency-two/listings/other-agency-deposit/deposit",
+        json={"deposit_amount_cop": "1250.50"},
+        headers=own_headers,
+    )
+    agent = context.client.patch(
+        "/api/v1/staff/agencies/agency-one/listings/owned-deposit/deposit",
+        json={"deposit_amount_cop": "1500.00"},
+        headers=_staff_headers(context, account_id="listing-agent", role="agent"),
+    )
+    platform_admin = context.client.patch(
+        "/api/v1/staff/agencies/agency-one/listings/owned-deposit/deposit",
+        json={"deposit_amount_cop": "1500.00"},
+        headers=_staff_headers(
+            context,
+            account_id="listing-platform-admin",
+            role="platform_admin",
+            tenant_id=None,
+        ),
+    )
+
+    assert configured.status_code == 200, configured.text
+    assert configured.json() == {
+        "listing_id": "owned-deposit",
+        "deposit_amount_cop": "1250.50",
+        "offer_version": 2,
+    }
+    assert [cross_tenant.status_code, agent.status_code, platform_admin.status_code] == [
+        403,
+        403,
+        403,
+    ]
+    from app.modules.catalog.models import Listing
+
+    with context.session_factory() as session:
+        owned = session.get(Listing, "owned-deposit")
+        other = session.get(Listing, "other-agency-deposit")
+        assert owned is not None and owned.deposit_amount_cop == Decimal("1250.50")
+        assert other is not None and other.deposit_amount_cop is None
+
+
+def test_deposit_change_invalidates_existing_quote_by_offer_version(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    from app.modules.catalog.errors import QuoteOfferVersionMismatchError
+    from app.modules.catalog.models import Listing
+    from app.modules.catalog.service import validate_quote_for_use
+
+    context = catalog_api_context
+    _seed_listing(context, listing_id="deposit-quote")
+    quote_response = context.client.post(
+        "/api/v1/quotes",
+        json={
+            "listing_id": "deposit-quote",
+            "offer_version": 1,
+            "selected_extra_ids": [],
+        },
+    )
+    assert quote_response.status_code == 201, quote_response.text
+    changed = context.client.patch(
+        "/api/v1/staff/agencies/agency-one/listings/deposit-quote/deposit",
+        json={"deposit_amount_cop": "5000.00"},
+        headers=_staff_headers(context),
+    )
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["offer_version"] == 2
+
+    with context.session_factory() as session:
+        listing = session.get(Listing, "deposit-quote")
+        assert listing is not None and listing.offer_version == 2
+        with pytest.raises(QuoteOfferVersionMismatchError):
+            validate_quote_for_use(
+                session,
+                quote_response.json()["quote_id"],
+                now=datetime.now(timezone.utc),
+            )
 
 
 def test_public_list_is_approved_published_and_cross_agency(

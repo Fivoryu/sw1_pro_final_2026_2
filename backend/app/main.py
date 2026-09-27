@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
 from app.db.session import create_session_factory, protect_session_factory
-from app.modules.agencies.router import router as agencies_router
+from app.modules.agencies.router import agency_wallet_router, router as agencies_router
 from app.modules.catalog.errors import QuoteApiError
 from app.modules.catalog.router import router as catalog_router
 from app.modules.customer_identity.errors import CustomerApiError
@@ -48,13 +48,14 @@ def create_app(
         CORSMiddleware,
         allow_origins=[resolved_settings.web_origin.rstrip("/")],
         allow_credentials=True,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
     )
     app.include_router(identity_router)
     app.include_router(customer_identity_router)
     app.include_router(customer_wallet_router)
     app.include_router(agencies_router)
+    app.include_router(agency_wallet_router)
     app.include_router(catalog_router)
 
     @app.exception_handler(QuoteApiError)

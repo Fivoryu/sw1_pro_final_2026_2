@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
@@ -95,3 +96,20 @@ class QuoteErrorResponse(BaseModel):
     message: str
     request_id: str
     field_errors: list[QuoteErrorField] = Field(default_factory=list)
+
+
+class ListingDepositUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    deposit_amount_cop: Annotated[
+        Decimal,
+        Field(gt=Decimal("0"), max_digits=18, decimal_places=2),
+    ]
+
+
+class ListingDepositResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    listing_id: str
+    deposit_amount_cop: str
+    offer_version: int

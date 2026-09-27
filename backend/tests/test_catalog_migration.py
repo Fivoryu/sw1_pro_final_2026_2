@@ -7,7 +7,7 @@ from types import ModuleType
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import Numeric, create_engine, inspect, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
@@ -331,6 +331,102 @@ def test_catalog_migration_creates_constrained_listing_and_offer_tables() -> Non
                     "AND name LIKE 'trg_listing_%'"
                 )
             ) == 0
+    finally:
+        engine.dispose()
+
+
+def test_agency_wallet_and_listing_deposit_migration_upgrades_and_downgrades_sqlite() -> None:
+    migration_path = _MIGRATIONS / "0009_agency_wallets_listing_deposit.py"
+    assert migration_path.is_file(), "CC-05A must add the 0009 agency wallet/deposit migration"
+    offers = _load_migration(
+        _MIGRATIONS / "0007_catalog_offers.py", "catalog_offers_0007_for_agency_wallet_test"
+    )
+    quotes = _load_migration(
+        _MIGRATIONS / "0008_quote_snapshots.py", "quote_snapshots_0008_for_agency_wallet_test"
+    )
+    migration = _load_migration(migration_path, "agency_wallets_0009_for_test")
+    assert migration.revision == "0009_agency_wallets_listing_deposit"
+    assert migration.down_revision == quotes.revision
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+            connection.execute(text("CREATE TABLE agency (id VARCHAR(36) PRIMARY KEY)"))
+            connection.execute(text("INSERT INTO agency (id) VALUES ('agency-one')"))
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                offers.upgrade()
+                quotes.upgrade()
+            _insert_listing(connection)
+            connection.execute(
+                text(
+                    "INSERT INTO quote_snapshot "
+                    "(id, listing_id, offer_version, operation, lines, one_time_total, "
+                    "monthly_total, created_at, expires_at) VALUES "
+                    "('old-quote', 'listing-one', 1, 'sale', '[]', 1234.50, 0.00, "
+                    "'2026-09-01 12:00:00', '2026-09-01 12:15:00')"
+                )
+            )
+            with Operations.context(context):
+                migration.upgrade()
+
+            inspector = inspect(connection)
+            assert {"agency_wallet", "agency_wallet_challenge"}.issubset(
+                set(inspector.get_table_names())
+            )
+            deposit_column = {
+                column["name"]: column for column in inspector.get_columns("listing")
+            }["deposit_amount_cop"]
+            assert deposit_column["nullable"] is True
+            deposit_type = deposit_column["type"]
+            assert isinstance(deposit_type, Numeric)
+            assert deposit_type.precision == 18
+            assert deposit_type.scale == 2
+            assert connection.scalar(
+                text("SELECT deposit_amount_cop FROM listing WHERE id = 'listing-one'")
+            ) is None
+            wallet_unique_columns = {
+                tuple(constraint["column_names"])
+                for constraint in inspector.get_unique_constraints("agency_wallet")
+            }
+            assert {("agency_id",), ("address",)}.issubset(wallet_unique_columns)
+
+            connection.execute(
+                text(
+                    "UPDATE listing SET deposit_amount_cop = 5000.00 "
+                    "WHERE id = 'listing-one'"
+                )
+            )
+            _assert_integrity_error(
+                connection,
+                "UPDATE listing SET deposit_amount_cop = 5000.001 "
+                "WHERE id = 'listing-one'",
+                {},
+            )
+            assert connection.scalar(
+                text("SELECT offer_version FROM listing WHERE id = 'listing-one'")
+            ) == 2
+            assert connection.scalar(
+                text("SELECT offer_version FROM quote_snapshot WHERE id = 'old-quote'")
+            ) == 1
+
+            with Operations.context(context):
+                migration.downgrade()
+            inspector = inspect(connection)
+            assert not {"agency_wallet", "agency_wallet_challenge"}.intersection(
+                inspector.get_table_names()
+            )
+            assert "deposit_amount_cop" not in {
+                column["name"] for column in inspector.get_columns("listing")
+            }
+            connection.execute(
+                text("UPDATE listing SET base_price = 1500.00 WHERE id = 'listing-one'")
+            )
+            assert connection.scalar(
+                text("SELECT offer_version FROM listing WHERE id = 'listing-one'")
+            ) == 3
+            assert "quote_snapshot" in inspect(connection).get_table_names()
     finally:
         engine.dispose()
 

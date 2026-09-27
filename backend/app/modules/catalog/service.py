@@ -148,6 +148,28 @@ def get_public_listing(session: Session, listing_id: str) -> Listing | None:
     )
 
 
+def configure_listing_deposit(
+    session: Session,
+    *,
+    agency_id: str,
+    listing_id: str,
+    deposit_amount_cop: Decimal,
+) -> Listing | None:
+    listing = (
+        session.query(Listing)
+        .filter(Listing.id == listing_id, Listing.agency_id == agency_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if listing is None:
+        return None
+
+    listing.deposit_amount_cop = deposit_amount_cop
+    session.flush()
+    session.refresh(listing, attribute_names=["deposit_amount_cop", "offer_version"])
+    return listing
+
+
 def list_listing_extras(session: Session, listing_id: str) -> list[ListingExtra]:
     return (
         session.query(ListingExtra)
