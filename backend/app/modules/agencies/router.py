@@ -16,6 +16,7 @@ from app.modules.agencies.schemas import (
     AgencyWalletLinkRequest,
     AgencyWalletResponse,
     AgentInvitationCreate,
+    AgentListResponse,
 )
 from app.modules.agencies.service import (
     AgencyWalletAddressConflictError,
@@ -30,7 +31,7 @@ from app.modules.identity.invitations import (
     issue_agency_admin_invitation,
     issue_agent_invitation,
 )
-from app.modules.identity.models import Agency
+from app.modules.identity.models import Agency, StaffAccount, StaffSession
 from app.modules.identity.session import ActiveStaff, get_active_staff
 
 
@@ -220,3 +221,101 @@ def create_agent_invitation(
             status_code=502, detail="Invitation email delivery failed"
         ) from None
     return {"status": "sent"}
+
+
+@router.get("/agents", response_model=AgentListResponse)
+def list_agents(
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> dict[str, object]:
+    tenant_id = _require_agency_admin(staff)
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    with session_factory() as session:
+        agents_query = session.query(StaffAccount).filter(
+            StaffAccount.role == "agent",
+            StaffAccount.tenant_id == tenant_id,
+        )
+        total = agents_query.count()
+        agents = (
+            agents_query.order_by(StaffAccount.id)
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+    return {
+        "agents": [
+            {"id": agent.id, "email": agent.email, "active": agent.active}
+            for agent in agents
+        ],
+        "pagination": {"limit": limit, "offset": offset, "total": total},
+    }
+
+
+def _set_agent_active(
+    *,
+    agent_id: str,
+    active: bool,
+    request: Request,
+    staff: ActiveStaff,
+) -> dict[str, str]:
+    tenant_id = _require_agency_admin(staff)
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    now = request.app.state.clock()
+    with session_factory.begin() as session:
+        agent = (
+            session.query(StaffAccount)
+            .filter(
+                StaffAccount.id == agent_id,
+                StaffAccount.role == "agent",
+                StaffAccount.tenant_id == tenant_id,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        if agent is None:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        agent.active = active
+        if not active:
+            (
+                session.query(StaffSession)
+                .filter(
+                    StaffSession.user_id == agent.id,
+                    StaffSession.revoked_at.is_(None),
+                )
+                .update(
+                    {StaffSession.revoked_at: now},
+                    synchronize_session=False,
+                )
+            )
+    return {"status": "activated" if active else "deactivated"}
+
+
+@router.post("/agents/{agent_id}/deactivate", response_model=None)
+def deactivate_agent(
+    agent_id: str,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> dict[str, str]:
+    return _set_agent_active(
+        agent_id=agent_id,
+        active=False,
+        request=request,
+        staff=staff,
+    )
+
+
+@router.post("/agents/{agent_id}/activate", response_model=None)
+def activate_agent(
+    agent_id: str,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> dict[str, str]:
+    return _set_agent_active(
+        agent_id=agent_id,
+        active=True,
+        request=request,
+        staff=staff,
+    )
