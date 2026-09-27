@@ -238,7 +238,64 @@ def test_platform_admin_can_create_and_list_id_only_agencies(
     assert created_first.status_code == 201
     assert created_first.json() == {"id": "agency-a"}
     assert listed.status_code == 200
-    assert listed.json() == {"agencies": [{"id": "agency-a"}, {"id": "agency-z"}]}
+    assert listed.json() == {
+        "agencies": [{"id": "agency-a"}, {"id": "agency-z"}],
+        "pagination": {"limit": 20, "offset": 0, "total": 2},
+    }
+
+
+def test_agency_list_paginates_in_stable_order_and_keeps_total_accurate(
+    agency_api_context: AgencyApiContext,
+) -> None:
+    context = agency_api_context
+    with context.session_factory.begin() as session:
+        session.add_all(Agency(id=f"agency-{letter}") for letter in "edcba")
+    headers = _headers(_platform_admin_token(context))
+
+    page = context.client.get("/api/v1/agencies?limit=2&offset=1", headers=headers)
+    beyond_end = context.client.get("/api/v1/agencies?limit=2&offset=20", headers=headers)
+
+    assert page.status_code == 200
+    assert page.json() == {
+        "agencies": [{"id": "agency-b"}, {"id": "agency-c"}],
+        "pagination": {"limit": 2, "offset": 1, "total": 5},
+    }
+    assert beyond_end.status_code == 200
+    assert beyond_end.json() == {
+        "agencies": [],
+        "pagination": {"limit": 2, "offset": 20, "total": 5},
+    }
+
+
+def test_agency_list_accepts_maximum_page_size(
+    agency_api_context: AgencyApiContext,
+) -> None:
+    context = agency_api_context
+    with context.session_factory.begin() as session:
+        session.add_all(Agency(id=f"agency-{index:03d}") for index in range(101))
+
+    response = context.client.get(
+        "/api/v1/agencies?limit=100",
+        headers=_headers(_platform_admin_token(context)),
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["agencies"]) == 100
+    assert response.json()["pagination"] == {"limit": 100, "offset": 0, "total": 101}
+
+
+@pytest.mark.parametrize("query", ["limit=0", "limit=101", "offset=-1", "limit=invalid"])
+def test_agency_list_rejects_out_of_range_pagination(
+    agency_api_context: AgencyApiContext, query: str
+) -> None:
+    context = agency_api_context
+    response = context.client.get(
+        f"/api/v1/agencies?{query}",
+        headers=_headers(_platform_admin_token(context)),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
 
 
 def test_duplicate_agency_id_returns_409(agency_api_context: AgencyApiContext) -> None:
@@ -448,7 +505,8 @@ def test_api_maps_simulated_pending_email_unique_race_to_409(
     assert injected
     assert response.status_code == 409
     assert response.json() == {
-        "detail": "An account or active invitation already uses this email"
+        "detail": "An account or active invitation already uses this email",
+        "code": "conflict",
     }
     assert context.email_sender.messages == []
 
@@ -569,7 +627,10 @@ def test_failed_invitation_delivery_revokes_and_never_returns_token(
     )
 
     assert response.status_code == 502
-    assert response.json() == {"detail": "Invitation email delivery failed"}
+    assert response.json() == {
+        "detail": "A required dependency is unavailable",
+        "code": "dependency_unavailable",
+    }
     assert "token" not in response.text.lower()
     with context.session_factory() as session:
         invitation = session.query(StaffInvitation).one()

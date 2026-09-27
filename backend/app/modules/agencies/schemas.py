@@ -21,6 +21,21 @@ class AgencyCreate(BaseModel):
         return value
 
 
+class AgencyListItem(BaseModel):
+    id: str
+
+
+class AgencyPagination(BaseModel):
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
+    total: int = Field(ge=0)
+
+
+class AgencyListResponse(BaseModel):
+    agencies: list[AgencyListItem]
+    pagination: AgencyPagination
+
+
 class AgencyAdminInvitationCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

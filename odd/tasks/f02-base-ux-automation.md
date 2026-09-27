@@ -6,7 +6,7 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 
 ## Autoridad y alcance
 
-- Requisitos autorizados exclusivamente: `docs/redefinicion-roomforge.md` y `docs/plan-maestro-roomforge.md` (F02.1–F02.4). La integración de estos documentos en `origin/main` está pendiente de la finalización F01.
+- Requisitos autorizados exclusivamente: `docs/redefinicion-roomforge.md` y `docs/plan-maestro-roomforge.md` (F02.1–F02.4). F01 cerró en `origin/main` en `b8a07e3`; esos documentos están disponibles en la base actual.
 - El usuario eligió F02 según el plan y rechazó ampliar este cambio a F03–F10. No implementar sus APIs, reglas de negocio, esquemas o integración end-to-end en esta rama.
 - El alta pagada de agencias y las suscripciones quedan fuera del MVP según la redefinición.
 - F02.1 debe definir estructura modular, validaciones, errores homogéneos, paginación y configuración; documentar contrato y disponibilidad. `/api/v1/listings` es un ejemplo no aprobado, no una ruta autorizada.
@@ -22,21 +22,40 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 - Flujo ODD directo, por elección explícita del usuario; no ejecutar SDD/OpenSpec para este cambio.
 - Strict TDD solicitado previamente por el usuario: aplicar RED → GREEN → TRIANGULATE → REFACTOR a cada cambio de comportamiento. Confirmar el runner real de cada superficie antes de iniciar su tarea; nunca reportar PASS si no se ejecutó.
 - Crear commits convencionales por unidad de trabajo en esta rama, con sus pruebas y documentación. Medir líneas añadidas + eliminadas por unidad; si el alcance supera 400 líneas, detenerse para acordar slices/estrategia antes de preparar PRs. No se autoriza `size:exception`.
+- Por autorización del usuario, F02-T2 se divide antes de codificar en tres unidades revisables: T2a errores+paginación, T2b límites DB/correo, T2c health/readiness+Compose. Cada unidad debe mantenerse bajo 400 líneas cambiadas; si una se excede, detenerse y acordar otro corte.
 - Preparar localmente la rama para revisión. No hacer push ni abrir PR sin confirmación explícita al cerrar.
 
 ## Estado y coordinación
 
 - Worktree: `D:/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final-f02-base-ux-automation-wt`.
-- Rama: `feat/f02-base-ux-automation`, creada desde `origin/main` en `b6a468a20888b5c3272fdea1d4815a27897232ba`.
+- Rama: `feat/f02-base-ux-automation`, rebased localmente sobre `origin/main` en `b8a07e3726074531696faf401048108e70fff9cb`.
 - El checkout raíz conserva cambios ajenos y no se modifica. Rebasar F02 solo después de que el responsable F01 confirme el push final de sus documentos a `origin/main`.
 - F01-T3/T4 fueron reportadas completas; no se realizarán operaciones Docker hasta coordinar pruebas F02.
 - Handoff móvil recibido desde `feat/roomforge-mobile-3d`; commits locales, sin push: `64c59c02b51d3db3194a51c4e8fd54dbd5c63843` (shell Flutter; candidato F02), `f9d37842876cb0bbe1b7791b9796a73e7048bdf4` (propuesta/documentación API; fuera de autoridad F02), `de534c779ea723ba3eab7168ca45f5d2449dbb6b` (identidad cliente/migración/tests; fuera de F02) y `f762286` (registro de tarea). El dueño reportó 101 passed/2 skipped, Ruff y Pyright OK, SQLite 0004→0005 OK; PostgreSQL no verificado. Antes de integrar, revisar rutas del commit candidato y confirmar que no acopla el prototipo F02 a la implementación F03 de identidad. No copiar ni integrar los commits fuera de F02.
-- F02-T1 cerró con el commit local `a156a53`; F02-T2 está en curso.
+- F02-T1 cerró con el commit local `a156a53`; F02-T2a está en curso. No se ha empezado T2b/T2c.
+
+## Hallazgos base F02.1 (exploración de solo lectura)
+
+- `backend/app/main.py:create_app()` carga configuración, crea DB/session factory, registra CORS, routers de identidad/agencias y solo el handler seguro de validación. No existen rutas de catálogo/reserva ni un endpoint público de salud.
+- La única colección HTTP actual es `GET /api/v1/agencies`, sin paginación, con `{agencies:[...]}`. El panel lee errores de `detail` cuando es string; mantener ese campo preserva compatibilidad.
+- Errores 422 actuales son `{"detail":"Request validation failed"}`; HTTPException usa `{"detail":"..."}`. No hay esquema común ni handler global de errores 500. Las rutas usan `response_model=None`; el OpenAPI generado puede no reflejar el envelope común si las respuestas no se declaran.
+- Compose local verifica DB, Floci y OpenAPI; el probe API actual tiene timeout total de 5s y el TCP Floci 2s. No hay contrato público liveness/readiness. DB aún no declara deadlines. `EmailSender` es solo un Protocol y la fábrica carga un plugin externo; no hay proveedor concreto en el repo. Un timeout de thread/Future no puede detener un envío síncrono de forma segura.
+- `apps/cliente_mobile/README.md` describe registro/login de cliente que no coincide con las rutas actuales de identidad staff. No conectar prototipos F02 a esa implementación F03 ni usar el README como fuente de requisitos.
+- El scout propuso, pero no ejecutó, pruebas enfocadas en `backend/tests/test_api_contract.py`, `test_config.py`, `test_agencies.py` y regresión `test_staff_identity.py`; el panel tiene `staffAuthApi.test.ts`. No hay cambios ni pruebas T2 hechos.
+
+### Contratos F02.1 aprobados por el usuario
+
+1. Errores: mantener `detail` como string y añadir `code`; códigos estables `validation_error`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `dependency_unavailable`, `internal_error`. El 500 no revela excepciones ni secretos.
+2. Paginación: aplicar solo a `GET /api/v1/agencies`; `limit=20` por defecto, máximo `100`, `offset=0`; mantener `agencies` y añadir `pagination:{limit,offset,total}`.
+3. Deadlines configurables por dependencia: DB conexión/adquisición de pool `5s`, sentencia `10s`, proveedor de correo `10s`. No añadir timeout global de request que no cancele trabajo síncrono. El usuario autorizó ampliar el Protocol del plugin para que reciba/exija el límite nativo; no existe un proveedor concreto en este repositorio, por lo que su enforcement real quedará externo y sin verificar.
+4. Disponibilidad: `GET /health/live` para proceso y `GET /health/ready` para DB+Floci; respuestas seguras sin detalle interno y Compose usa readiness. El probe Compose actual de 5s es menor que el presupuesto secuencial DB (5+10s)+Floci (2s); el timeout externo deberá superar los límites internos y ser validado. La lectura de Floci es TCP (no certifica una operación S3).
 
 ## Tareas
 
 - [x] **F02-T1 — Proponer mapa UX y contratos de estado.** **CERRADA.** Entregable aprobado: `docs/ux/f02-surface-map.md`; commit `a156a53`. La aprobación precede al detalle visual.
-- [ ] **F02-T2 — Completar la base del contrato API.** **EN CURSO.** Definir límites modulares y convenciones homogéneas de validación/error, paginación y configuración; documentar disponibilidad y contrato. Añadir pruebas de contrato en RED primero. No añadir endpoints de negocio no aprobados.
+- [ ] **F02-T2a — Errores y paginación.** **EN CURSO; backend/panel y verificación independiente PASS; commit pendiente.** Sanitiza detalles arbitrarios 5xx; preserva contrato OpenAPI y paginación. Diff total: 393 líneas.
+- [ ] **F02-T2b — Deadlines DB y proveedor de correo.** Implementar settings PostgreSQL-only (connect/pool 5s, statement 10s) y exigir timeout nativo de 10s en el Protocol `EmailSender`; actualizar fakes/CLI y documentar limitación del plugin externo. No usar timeout de thread.
+- [ ] **F02-T2c — Salud API y Compose.** Implementar `/health/live` y `/health/ready` (SELECT 1 vía session factory inyectada + Floci TCP mediante S3_ENDPOINT_URL); usar probe inyectable en tests y alinear timeout HTTP/Compose al presupuesto real. No afirmar que TCP prueba operación S3.
 - [ ] **F02-T3 — Verificar el esquema y el ciclo de migraciones.** Basarse en el head real; probar creación desde cero y actualización desde la versión anterior cuando exista; documentar datos ficticios, rollback/recovery y comandos reproducibles. No añadir tablas de dominios posteriores sin autorización.
 - [ ] **F02-T4 — Entregar prototipos UX de las tres superficies.** Implementar los recorridos aprobados en el mapa, con carga/vacío/error/offline/permisos, diseño web adaptable, controles táctiles y accesibilidad. Usar el handoff móvil solo tras verificar commit y límites; mantener lo no ejecutable como prototipo honesto.
 - [ ] **F02-T5 — Añadir CI inicial y paridad local.** Configurar checks separados para las superficies presentes, versiones basadas en manifiestos, protección de secretos y fallos visibles; no desplegar infraestructura desde código no confiable.
@@ -47,7 +66,9 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 | Tarea | Commit | Verificación observada | Estado |
 |---|---|---|---|
 | F02-T1 | `a156a53` | `git diff --cached --check` PASS; referencias relativas 2/2 PASS; N/A runtime (documentación sin límite de ejecución) | Hecho |
-| F02-T2 | Pendiente | Pendiente | En curso |
+| F02-T2a | Pendiente | 98 backend PASS; 9 Vitest PASS; OpenAPI/whitespace PASS; 393 líneas; commit pendiente | En curso |
+| F02-T2b | Pendiente | Pendiente | Pendiente |
+| F02-T2c | Pendiente | Pendiente | Pendiente |
 | F02-T3 | Pendiente | Pendiente | Pendiente |
 | F02-T4 | Pendiente | Pendiente | Pendiente |
 | F02-T5 | Pendiente | Pendiente | Pendiente |
