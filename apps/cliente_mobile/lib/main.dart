@@ -37,9 +37,11 @@ class _CustomerShellState extends State<CustomerShell> {
       ),
     );
     if (result != null && mounted) {
-      setState(() => _filters
-        ..clear()
-        ..addAll(result));
+      setState(
+        () => _filters
+          ..clear()
+          ..addAll(result),
+      );
     }
   }
 
@@ -50,10 +52,18 @@ class _CustomerShellState extends State<CustomerShell> {
       index: _selectedIndex,
       children: [
         _catalog(context),
-        _placeholder(context, 'Prototipo de reservas',
-            'No hay reservas reales ni datos conectados.', Icons.event_note_outlined),
-        _placeholder(context, 'Prototipo de cuenta',
-            'No hay datos de cuenta conectados.', Icons.person_outline),
+        _placeholder(
+          context,
+          'Prototipo de reservas',
+          'No hay reservas reales ni datos conectados.',
+          Icons.event_note_outlined,
+        ),
+        _placeholder(
+          context,
+          'Prototipo de cuenta',
+          'No hay datos de cuenta conectados.',
+          Icons.person_outline,
+        ),
       ],
     ),
     bottomNavigationBar: NavigationBar(
@@ -83,7 +93,10 @@ class _CustomerShellState extends State<CustomerShell> {
     ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        Text('Explorar inmuebles', style: Theme.of(context).textTheme.headlineSmall),
+        Text(
+          'Explorar inmuebles',
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
         const SizedBox(height: 20),
         FilledButton.icon(
           key: const ValueKey('catalog-filter-button'),
@@ -104,34 +117,50 @@ class _CustomerShellState extends State<CustomerShell> {
   );
 
   Widget _placeholder(
-    BuildContext context, String title, String message, IconData icon,
-  ) => _content(ListView(
-    padding: const EdgeInsets.all(20),
-    children: [
-      Text(title, style: Theme.of(context).textTheme.headlineSmall),
-      const SizedBox(height: 20),
-      _messageCard(context, '', message, icon),
-    ],
-  ));
+    BuildContext context,
+    String title,
+    String message,
+    IconData icon,
+  ) => _content(
+    ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Text(title, style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 20),
+        _messageCard(context, '', message, icon),
+      ],
+    ),
+  );
 
   Widget _messageCard(
-    BuildContext context, String title, String message, IconData icon,
+    BuildContext context,
+    String title,
+    String message,
+    IconData icon,
   ) {
     final theme = Theme.of(context);
     return Card(
       color: theme.colorScheme.surfaceContainerLow,
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          ExcludeSemantics(
-            child: Icon(icon, size: 36, color: theme.colorScheme.primary),
-          ),
-          const SizedBox(height: 16),
-          if (title.isNotEmpty) Text(title, style: theme.textTheme.titleLarge),
-          if (title.isNotEmpty && message.isNotEmpty) const SizedBox(height: 8),
-          if (message.isNotEmpty)
-            Text(message, style: theme.textTheme.bodyLarge?.copyWith(height: 1.5)),
-        ]),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ExcludeSemantics(
+              child: Icon(icon, size: 36, color: theme.colorScheme.primary),
+            ),
+            const SizedBox(height: 16),
+            if (title.isNotEmpty)
+              Text(title, style: theme.textTheme.titleLarge),
+            if (title.isNotEmpty && message.isNotEmpty)
+              const SizedBox(height: 8),
+            if (message.isNotEmpty)
+              Text(
+                message,
+                style: theme.textTheme.bodyLarge?.copyWith(height: 1.5),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -190,46 +219,70 @@ class _CatalogFiltersSheetState extends State<_CatalogFiltersSheet> {
 
   @override
   Widget build(BuildContext context) => SingleChildScrollView(
-    padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Text('Filtros del catálogo', style: Theme.of(context).textTheme.titleLarge),
-      const SizedBox(height: 16),
-      _field('Ciudad/zona', _city, 'filter-city-zone'),
-      const SizedBox(height: 12),
-      DropdownButtonFormField<String>(
-        key: const ValueKey('filter-operation'),
-        initialValue: _operation,
-        decoration: const InputDecoration(
-          labelText: 'Operación', border: OutlineInputBorder(),
+    padding: EdgeInsets.fromLTRB(
+      20,
+      20,
+      20,
+      20 + MediaQuery.viewInsetsOf(context).bottom,
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Filtros del catálogo',
+          style: Theme.of(context).textTheme.titleLarge,
         ),
-        items: const [
-          DropdownMenuItem(value: 'Venta', child: Text('Venta')),
-          DropdownMenuItem(value: 'Alquiler', child: Text('Alquiler')),
-        ],
-        onChanged: (value) => setState(() => _operation = value),
-      ),
-      const SizedBox(height: 12),
-      _field('Precio base', _price, 'filter-base-price', numeric: true),
-      const SizedBox(height: 12),
-      _field('Habitaciones', _bedrooms, 'filter-bedrooms', numeric: true),
-      const SizedBox(height: 12),
-      _field('Baños', _bathrooms, 'filter-bathrooms', numeric: true),
-      const SizedBox(height: 12),
-      Text(
-        'Los filtros son una demostración local; no hay API ni resultados conectados.',
-        style: Theme.of(context).textTheme.bodySmall,
-      ),
-      const SizedBox(height: 16),
-      SizedBox(height: 48, child: FilledButton(onPressed: _save,
-        child: const Text('Guardar filtros'))),
-    ]),
+        const SizedBox(height: 16),
+        _field('Ciudad/zona', _city, 'filter-city-zone'),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          key: const ValueKey('filter-operation'),
+          initialValue: _operation,
+          decoration: const InputDecoration(
+            labelText: 'Operación',
+            border: OutlineInputBorder(),
+          ),
+          items: const [
+            DropdownMenuItem(value: 'Venta', child: Text('Venta')),
+            DropdownMenuItem(value: 'Alquiler', child: Text('Alquiler')),
+          ],
+          onChanged: (value) => setState(() => _operation = value),
+        ),
+        const SizedBox(height: 12),
+        _field('Precio base', _price, 'filter-base-price', numeric: true),
+        const SizedBox(height: 12),
+        _field('Habitaciones', _bedrooms, 'filter-bedrooms', numeric: true),
+        const SizedBox(height: 12),
+        _field('Baños', _bathrooms, 'filter-bathrooms', numeric: true),
+        const SizedBox(height: 12),
+        Text(
+          'Los filtros son una demostración local; no hay API ni resultados conectados.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          height: 48,
+          child: FilledButton(
+            onPressed: _save,
+            child: const Text('Guardar filtros'),
+          ),
+        ),
+      ],
+    ),
   );
 
-  Widget _field(String label, TextEditingController controller, String key,
-      {bool numeric = false}) => TextFormField(
+  Widget _field(
+    String label,
+    TextEditingController controller,
+    String key, {
+    bool numeric = false,
+  }) => TextFormField(
     key: ValueKey(key),
     controller: controller,
     keyboardType: numeric ? TextInputType.number : TextInputType.text,
-    decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+    decoration: InputDecoration(
+      labelText: label,
+      border: const OutlineInputBorder(),
+    ),
   );
 }
