@@ -1,12 +1,12 @@
 # F02.2 — Evidencia de esquema y migraciones
 
-> **Estado: parcial.** Se verificaron los casos SQLite aislados de `0003`/`0004` y se inspeccionó el head estático. No se ejecutó PostgreSQL, Alembic contra una base, Docker ni Compose. La verificación real PostgreSQL queda pendiente de autorización explícita.
+> **Estado: parcial; PostgreSQL bloqueado.** Los cuatro casos SQLite aislados pasan. Bajo autorización explícita se intentó la suite PostgreSQL en una base R6 nueva; cuatro pruebas pasaron y dos fallaron durante setup porque Alembic no puede guardar el ID de revisión de 42 caracteres en `alembic_version.version_num VARCHAR(32)`. No se completó una migración. La base de prueba quedó vacía (`alembic_version` ausente, 0 tablas de aplicación), el contenedor `roomforge-local-dev-postgres-1` fue detenido y su volumen se conservó. No se tocaron esquemas de bases preexistentes.
 
 ## Alcance y fuentes
 
 El criterio de F02.2 en [`../plan-maestro-roomforge.md`](../plan-maestro-roomforge.md) solicita probar creación desde una base vacía y actualización desde una versión anterior cuando exista, además de documentar recovery/rollback. La redefinición describe FastAPI/Alembic/PostgreSQL como arquitectura propuesta, no como evidencia de ejecución.
 
-Esta nota registra únicamente las pruebas ejecutadas en este worktree. No constituye evidencia de migración contra una base PostgreSQL real ni autoriza modificar bases compartidas.
+Esta nota registra las pruebas ejecutadas en este worktree. El intento PostgreSQL usó exclusivamente la base nueva `roomforge_r6_f02_t3_20260927`; no constituye una migración PostgreSQL completada ni autoriza modificar otras bases.
 
 ## Grafo de revisiones observado
 
@@ -41,13 +41,17 @@ python -m pytest -p no:cacheprovider tests/test_staff_identity_migration.py -q \
 
 Estos casos crean SQLite en memoria con datos sintéticos y aplican directamente las funciones de `0003`/`0004` a un esquema pre-agencia. Verifican backfill de tenants, referencias, reglas rol/tenant, unicidad de invitaciones pendientes y rechazo de duplicados heredados sin limpiarlos. No migran `0001`/`0002`, no prueban la cadena Alembic completa ni demuestran equivalencia con PostgreSQL. Pytest emitió dos `SAWarning` porque SQLite no refleja un índice basado en expresión.
 
-## Cobertura existente no ejecutada
+## Intento PostgreSQL autorizado y resultado
 
-`backend/tests/test_staff_identity_migration.py::test_blank_database_upgrade_matches_identity_metadata` prepara una base PostgreSQL R6 vacía, ejecuta `alembic upgrade head` y compara el esquema con `Base.metadata`. También existe cobertura PostgreSQL en `backend/tests/test_staff_identity_postgres.py`.
+Se ejecutaron únicamente `backend/tests/test_staff_identity_migration.py` y `backend/tests/test_staff_identity_postgres.py` con `ROOMFORGE_R6_DATABASE_URL` y `DATABASE_URL` apuntando a `roomforge_r6_f02_t3_20260927`, en `127.0.0.1:5434`. El contenedor iniciado fue solo el PostgreSQL existente `roomforge-local-dev-postgres-1`; no se iniciaron Floci, API ni panel. No se guardaron URLs con contraseña ni credenciales reales.
+
+**Resultado:** 4 passed, 2 errors. Los cuatro casos SQLite pasaron. `test_blank_database_upgrade_matches_identity_metadata` y `test_postgres_racing_recovery_code_logins_create_one_session` fallaron durante setup, al actualizar `alembic_version` de `0003_agency_registry` a `0004_staff_invitation_pending_email_unique`: PostgreSQL informó `value too long for type character varying(32)`. El ID nuevo tiene 42 caracteres. La prueba concurrente no alcanzó su cuerpo, por lo que la posible FK sin agencia sembrada sigue sin verificarse.
+
+Después del intento, una consulta read-only confirmó que la base R6 conserva cero tablas de aplicación y no tiene `alembic_version`; la transacción de migración no dejó el esquema parcial. El contenedor fue detenido y el volumen `roomforge-local-dev_postgres_data` quedó conservado. La base de prueba también debe conservarse; no ejecutar DROP ni limpieza.
 
 No se encontraron pruebas que marquen una revisión anterior en `alembic_version` y ejecuten una actualización Alembic completa hasta `head`. Los casos SQLite anteriores solo ejercitan `0003`/`0004`; `0002` contiene operaciones específicas de PostgreSQL.
 
-La fixture de PostgreSQL exige `ROOMFORGE_R6_DATABASE_URL` con `postgresql+psycopg`, host loopback, puerto explícito, nombre con prefijo `roomforge_r6_` y una base completamente vacía. Ejecuta migraciones y deja datos/esquema en esa base; no la elimina al terminar. No se registran URLs ni credenciales en esta nota.
+La fixture exige `ROOMFORGE_R6_DATABASE_URL` con `postgresql+psycopg`, host loopback, puerto explícito, prefijo `roomforge_r6_` y una base completamente vacía. No elimina la base al terminar.
 
 ## Datos, recuperación y límites
 
@@ -55,10 +59,10 @@ La fixture de PostgreSQL exige `ROOMFORGE_R6_DATABASE_URL` con `postgresql+psyco
 - Ningún `downgrade`, rollback ni recuperación se ejecutó. No asumir que `alembic downgrade -1` restaura datos o es reversible. En un entorno persistente, la recuperación requiere un respaldo/snapshot probado y un procedimiento aprobado antes de migrar.
 - Para una prueba real, el operador debe proporcionar y validar una base desechable dedicada que cumpla la fixture R6. El test no crea ni destruye la base por sí mismo.
 - Durante la lectura se observó un posible bloqueo no confirmado en una prueba de concurrencia PostgreSQL: crea un agente con un `tenant_id` que parece no estar sembrado, pese a la FK a `agency.id`. Revisar ese fixture antes de interpretar una eventual falla; no se ejecutó.
-- El responsable F01 indicó que no puede autorizar una base desechable ni operaciones Docker. La verificación PostgreSQL permanece pausada hasta recibir del usuario autorización y límites explícitos.
+- El usuario autorizó el intento descrito arriba con límites explícitos, que se respetaron. Cualquier cambio de la revisión o repetición de pruebas queda pausado hasta nueva autorización.
 
 ## Próximos pasos
 
-1. Mantener sin cambios Docker/PostgreSQL hasta contar con autorización explícita del usuario.
-2. Con una base R6 desechable aprobada, ejecutar el caso de creación vacía y la suite PostgreSQL pertinente; registrar resultados exactos y cualquier corrección de fixture por separado.
-3. Si se exige upgrade desde una versión previa, definir y probar una revisión de partida explícita en otra base desechable. No inferir cobertura completa de los casos SQLite.
+1. No modificar migraciones ni reanudar Docker/PostgreSQL hasta que el usuario decida cómo resolver el ID de revisión demasiado largo.
+2. Si se autoriza un cambio y repetición, usar exclusivamente la base R6 ya autorizada (confirmando que sigue vacía) o pedir autorización antes de crear otra; ejecutar solo estos mismos dos archivos de tests y conservar todos los recursos.
+3. Si se exige upgrade desde una versión previa, definir y probar una revisión de partida explícita en una base desechable autorizada. No inferir cobertura completa de los casos SQLite.

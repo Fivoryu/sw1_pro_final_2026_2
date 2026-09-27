@@ -32,7 +32,7 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 - El checkout raíz conserva cambios ajenos y no se modifica. Rebasar F02 solo después de que el responsable F01 confirme el push final de sus documentos a `origin/main`.
 - F01-T3/T4 fueron reportadas completas; no se realizarán operaciones Docker hasta coordinar pruebas F02.
 - Handoff móvil recibido desde `feat/roomforge-mobile-3d`; commits locales, sin push: `64c59c02b51d3db3194a51c4e8fd54dbd5c63843` (shell Flutter; candidato F02), `f9d37842876cb0bbe1b7791b9796a73e7048bdf4` (propuesta/documentación API; fuera de autoridad F02), `de534c779ea723ba3eab7168ca45f5d2449dbb6b` (identidad cliente/migración/tests; fuera de F02) y `f762286` (registro de tarea). El dueño reportó 101 passed/2 skipped, Ruff y Pyright OK, SQLite 0004→0005 OK; PostgreSQL no verificado. Antes de integrar, revisar rutas del commit candidato y confirmar que no acopla el prototipo F02 a la implementación F03 de identidad. No copiar ni integrar los commits fuera de F02.
-- F02-T1 cerró con `a156a53`; F02-T2a con `5d0cc8a`; F02-T2b con `eeda6e7`; F02-T2c con `447c8ec`; F02-T3a con `0952252`; T3b espera autorización; F02-T4 está en curso.
+- F02-T1 cerró con `a156a53`; F02-T2a con `5d0cc8a`; F02-T2b con `eeda6e7`; F02-T2c con `447c8ec`; F02-T3a con `0952252`. T3b permanece en diagnóstico de solo lectura tras el error `VARCHAR(32)`; el usuario revocó toda autorización de fix/retest. T4a–T4c del cliente móvil ya están implementados/verificados; falta resolver contenido de detalle y los prototipos de captura/panel.
 
 ## Hallazgos base F02.1 (exploración de solo lectura)
 
@@ -56,7 +56,7 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 - Hay pruebas PostgreSQL de base vacía a head que requieren `ROOMFORGE_R6_DATABASE_URL` dedicado y completamente vacío. No se encontró un upgrade Alembic completo desde revisión previa.
 - Las pruebas SQLite existentes cubren directamente `0003`/`0004` sobre esquema pre-agencia; no validan `0001`/`0002` ni sustituyen PostgreSQL. `0002` tiene operaciones específicas del dialecto PostgreSQL.
 - Se observó posible inconsistencia en test de concurrencia PostgreSQL: inserta agente con `tenant_id` sin sembrar `Agency`, pese a FK declarada; no está probado si bloquea la suite.
-- El responsable F01 confirmó que no puede autorizar base ni Docker; pidió autorización al usuario. Mantener Docker y tests PostgreSQL pausados hasta recibir límites explícitos.
+- El usuario autorizó un intento acotado contra la DB R6 vacía; falló durante setup porque el revision ID de `0004` excede `VARCHAR(32)`. La decisión posterior limita T3b a diagnóstico de solo lectura: no cambiar migraciones, repetir pruebas ni usar Docker/PostgreSQL sin nueva autorización.
 
 ## Tareas
 
@@ -65,8 +65,8 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 - [x] **F02-T2b — Deadlines DB y proveedor de correo.** **CERRADA.** Timeouts PostgreSQL-only y EmailSender nativo; provider externo no disponible; commit `eeda6e7` (395 líneas).
 - [x] **F02-T2c — Salud API y Compose.** **CERRADA.** `/health/live` y `/health/ready` DB+Floci TCP, Compose usa readiness; commit `447c8ec` (276 líneas). Tests 132 PASS/2 SKIP, Ruff PASS, Pyright 0; Docker no ejecutado por coordinación.
 - [x] **F02-T3a — Verificación SQLite y evidencia de migración.** **CERRADA.** Evidencia y límites de SQLite/head estático en `docs/migrations/f02-migration-verification.md`; commit `0952252` (78 líneas).
-- [ ] **F02-T3b — Verificación real PostgreSQL.** **PENDIENTE DE AUTORIZACIÓN.** La prueba de base vacía a head requiere DB desechable `roomforge_r6_*`; no crearla ni ejecutar Docker/PostgreSQL hasta autorización explícita del usuario y límites acordados.
-- [ ] **F02-T4 — Entregar prototipos UX de las tres superficies.** **EN CURSO; revisar primero el handoff Flutter.** Implementar recorridos aprobados con carga/vacío/error/offline/permisos y accesibilidad. Integrar solo el shell móvil F02-compatible; mantener lo no ejecutable como prototipo honesto.
+- [ ] **F02-T3b — Verificación real PostgreSQL.** **PAUSADA; diagnóstico-only.** `docs/migrations/f02-migration-verification.md` registra 4 PASS y 2 errores de setup: el ID de `0004` tiene 42 caracteres y `alembic_version.version_num` es `VARCHAR(32)`. DB R6 vacía, contenedor detenido y volumen preservado. No fix, retest, Docker ni PostgreSQL sin nueva autorización.
+- [ ] **F02-T4 — Entregar prototipos UX de las tres superficies.** **EN CURSO.** Cliente T4a–T4c: starter, catálogo/filtros y accesibilidad implementados, verificados y con revisión nativa aprobada. T4d detalle/disponibilidad espera decisión sobre datos sintéticos. Android de captura y panel web siguen pendientes. Mantener cada slice <400 líneas; no implementar APIs ni negocio F03–F10.
 - [ ] **F02-T5 — Añadir CI inicial y paridad local.** Configurar checks separados para las superficies presentes, versiones basadas en manifiestos, protección de secretos y fallos visibles; no desplegar infraestructura desde código no confiable.
 - [ ] **F02-T6 — Integrar, verificar y preparar revisión.** Ejecutar los runners disponibles, reportar todo PASS/FAIL/SKIP/BLOCKED, medir cada slice y registrar commits/evidencia. Resolver o declarar explícitamente cada verificación PostgreSQL/móvil no disponible. Detenerse antes de publicar.
 
@@ -79,7 +79,7 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 | F02-T2b | `eeda6e7` | 125 PASS/2 SKIP; Ruff PASS; Pyright 0; guard/README corregidos; 395 líneas | Hecho |
 | F02-T2c | `447c8ec` | 132 PASS/2 SKIP; Ruff PASS; Pyright 0; 276 líneas; Compose runtime no ejecutado | Hecho |
 | F02-T3a | `0952252` | 4 SQLite PASS; Alembic head; enlaces/whitespace PASS; PG no ejecutado | Hecho |
-| F02-T3b | Pendiente | PostgreSQL/Docker requieren autorización explícita; ninguna DB tocada | Pendiente |
-| F02-T4 | Pendiente | Map aprobado; revisión de shell commit `64c59c0` pendiente | En curso |
+| F02-T3b | Pendiente | 4 SQLite PASS; 2 errores PG en setup por revision ID de 42 caracteres vs `VARCHAR(32)`; diagnóstico-only, sin fix/retest; DB/volumen preservados | Pausada |
+| F02-T4 | Pendiente | T4a 129 líneas; T4b 352; T4c ≈360; 8 widget tests y analyze PASS; review lineage aprobado. T4d espera decisión; captura/panel pendientes | En curso |
 | F02-T5 | Pendiente | Pendiente | Pendiente |
 | F02-T6 | Pendiente | Pendiente | Pendiente |
