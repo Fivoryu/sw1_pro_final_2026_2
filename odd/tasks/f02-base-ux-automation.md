@@ -32,7 +32,7 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 - El checkout raíz conserva cambios ajenos y no se modifica. Rebasar F02 solo después de que el responsable F01 confirme el push final de sus documentos a `origin/main`.
 - F01-T3/T4 fueron reportadas completas; no se realizarán operaciones Docker hasta coordinar pruebas F02.
 - Handoff móvil recibido desde `feat/roomforge-mobile-3d`; commits locales, sin push: `64c59c02b51d3db3194a51c4e8fd54dbd5c63843` (shell Flutter; candidato F02), `f9d37842876cb0bbe1b7791b9796a73e7048bdf4` (propuesta/documentación API; fuera de autoridad F02), `de534c779ea723ba3eab7168ca45f5d2449dbb6b` (identidad cliente/migración/tests; fuera de F02) y `f762286` (registro de tarea). El dueño reportó 101 passed/2 skipped, Ruff y Pyright OK, SQLite 0004→0005 OK; PostgreSQL no verificado. Antes de integrar, revisar rutas del commit candidato y confirmar que no acopla el prototipo F02 a la implementación F03 de identidad. No copiar ni integrar los commits fuera de F02.
-- F02-T1 cerró con el commit local `a156a53`; F02-T2a está en curso. No se ha empezado T2b/T2c.
+- F02-T1 cerró con `a156a53`; F02-T2a cerró con `5d0cc8a`; F02-T2b está en curso.
 
 ## Hallazgos base F02.1 (exploración de solo lectura)
 
@@ -53,8 +53,8 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 ## Tareas
 
 - [x] **F02-T1 — Proponer mapa UX y contratos de estado.** **CERRADA.** Entregable aprobado: `docs/ux/f02-surface-map.md`; commit `a156a53`. La aprobación precede al detalle visual.
-- [ ] **F02-T2a — Errores y paginación.** **EN CURSO; backend/panel y verificación independiente PASS; commit pendiente.** Sanitiza detalles arbitrarios 5xx; preserva contrato OpenAPI y paginación. Diff total: 393 líneas.
-- [ ] **F02-T2b — Deadlines DB y proveedor de correo.** Implementar settings PostgreSQL-only (connect/pool 5s, statement 10s) y exigir timeout nativo de 10s en el Protocol `EmailSender`; actualizar fakes/CLI y documentar limitación del plugin externo. No usar timeout de thread.
+- [x] **F02-T2a — Errores y paginación.** **CERRADA.** Errores homogéneos, 5xx sanitizados, OpenAPI y paginación de agencias; commit `5d0cc8a` (393 líneas).
+- [ ] **F02-T2b — Deadlines DB y proveedor de correo.** **EN CURSO.** Implementar settings PostgreSQL-only (connect/pool 5s, statement 10s) y exigir timeout nativo de 10s en el Protocol `EmailSender`; actualizar fakes/CLI y documentar limitación del plugin externo. No usar timeout de thread.
 - [ ] **F02-T2c — Salud API y Compose.** Implementar `/health/live` y `/health/ready` (SELECT 1 vía session factory inyectada + Floci TCP mediante S3_ENDPOINT_URL); usar probe inyectable en tests y alinear timeout HTTP/Compose al presupuesto real. No afirmar que TCP prueba operación S3.
 - [ ] **F02-T3 — Verificar el esquema y el ciclo de migraciones.** Basarse en el head real; probar creación desde cero y actualización desde la versión anterior cuando exista; documentar datos ficticios, rollback/recovery y comandos reproducibles. No añadir tablas de dominios posteriores sin autorización.
 - [ ] **F02-T4 — Entregar prototipos UX de las tres superficies.** Implementar los recorridos aprobados en el mapa, con carga/vacío/error/offline/permisos, diseño web adaptable, controles táctiles y accesibilidad. Usar el handoff móvil solo tras verificar commit y límites; mantener lo no ejecutable como prototipo honesto.
@@ -66,8 +66,8 @@ Completar únicamente F02 del `plan-maestro-roomforge.md`: base API y modularida
 | Tarea | Commit | Verificación observada | Estado |
 |---|---|---|---|
 | F02-T1 | `a156a53` | `git diff --cached --check` PASS; referencias relativas 2/2 PASS; N/A runtime (documentación sin límite de ejecución) | Hecho |
-| F02-T2a | Pendiente | 98 backend PASS; 9 Vitest PASS; OpenAPI/whitespace PASS; 393 líneas; commit pendiente | En curso |
-| F02-T2b | Pendiente | Pendiente | Pendiente |
+| F02-T2a | `5d0cc8a` | 98 backend PASS; 9 Vitest PASS; OpenAPI/whitespace PASS; 393 líneas | Hecho |
+| F02-T2b | Pendiente | RED y contrato pendientes | En curso |
 | F02-T2c | Pendiente | Pendiente | Pendiente |
 | F02-T3 | Pendiente | Pendiente | Pendiente |
 | F02-T4 | Pendiente | Pendiente | Pendiente |
