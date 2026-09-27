@@ -15,6 +15,7 @@ from app.modules.agencies.schemas import (
     AgencyWalletChallengeResponse,
     AgencyWalletLinkRequest,
     AgencyWalletResponse,
+    AgentInvitationCreate,
 )
 from app.modules.agencies.service import (
     AgencyWalletAddressConflictError,
@@ -27,6 +28,7 @@ from app.modules.identity.invitations import (
     InvitationConflictError,
     InvitationDeliveryError,
     issue_agency_admin_invitation,
+    issue_agent_invitation,
 )
 from app.modules.identity.models import Agency
 from app.modules.identity.session import ActiveStaff, get_active_staff
@@ -48,6 +50,13 @@ def _require_platform_admin(staff: ActiveStaff) -> None:
 def _require_same_tenant_agency_admin(staff: ActiveStaff, agency_id: str) -> None:
     if staff["role"] != "agency_admin" or staff["tenant_id"] != agency_id:
         raise HTTPException(status_code=403, detail="Agency-admin tenant access is required")
+
+
+def _require_agency_admin(staff: ActiveStaff) -> str:
+    tenant_id = staff["tenant_id"]
+    if staff["role"] != "agency_admin" or tenant_id is None:
+        raise HTTPException(status_code=403, detail="Agency-admin role is required")
+    return tenant_id
 
 
 @router.post("", status_code=201, response_model=None)
@@ -182,3 +191,32 @@ def link_wallet(
     except AgencyWalletAddressConflictError:
         raise HTTPException(status_code=409, detail="Wallet conflict") from None
     return AgencyWalletResponse.model_validate(wallet)
+
+
+@router.post("/agent-invitations", status_code=201, response_model=None)
+def create_agent_invitation(
+    invitation: AgentInvitationCreate,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> dict[str, str]:
+    tenant_id = _require_agency_admin(staff)
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    try:
+        issue_agent_invitation(
+            session_factory=session_factory,
+            email_sender=request.app.state.email_sender,
+            email=invitation.email,
+            tenant_id=tenant_id,
+            settings=request.app.state.settings,
+            clock=request.app.state.clock,
+        )
+    except InvitationConflictError:
+        raise HTTPException(
+            status_code=409,
+            detail="An account or active invitation already uses this email",
+        ) from None
+    except InvitationDeliveryError:
+        raise HTTPException(
+            status_code=502, detail="Invitation email delivery failed"
+        ) from None
+    return {"status": "sent"}

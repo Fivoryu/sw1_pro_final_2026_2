@@ -1125,3 +1125,112 @@ def test_agency_admin_invitation_acceptance_and_totp_use_stored_role_and_tenant(
         account = session.query(StaffAccount).filter_by(email="admin@example.test").one()
         assert account.role == "agency_admin"
         assert account.tenant_id == "agency-one"
+
+
+def test_agency_admin_can_invite_agent_with_server_derived_role_and_tenant(
+    agency_api_context: AgencyApiContext,
+) -> None:
+    context = agency_api_context
+    admin_token = _seed_account(
+        context,
+        account_id="agency-admin-one",
+        role="agency_admin",
+        tenant_id="agency-one",
+    )
+    headers = _headers(admin_token)
+
+    issued = context.client.post(
+        "/api/v1/agencies/agent-invitations",
+        json={"email": "  AGENT@Example.Test  "},
+        headers=headers,
+    )
+
+    assert issued.status_code == 201
+    assert issued.json() == {"status": "sent"}
+    assert len(context.email_sender.messages) == 1
+    email, invitation_link, _ = context.email_sender.messages[0]
+    invitation_token = urlsplit(invitation_link).path.rsplit("/", 1)[-1]
+    assert email == "agent@example.test"
+    assert invitation_token not in issued.text
+    with context.session_factory() as session:
+        invitation = session.query(StaffInvitation).one()
+        assert invitation.email == email
+        assert invitation.role == "agent"
+        assert invitation.tenant_id == "agency-one"
+        assert invitation.status == "pending"
+        assert invitation.token_hash == hash_secret(invitation_token)
+
+    accepted = context.client.post(
+        "/api/v1/auth/invitations/accept",
+        json={
+            "token": invitation_token,
+            "password": "Initial-Password-42!",
+            "password_confirmation": "Initial-Password-42!",
+            "role": "platform_admin",
+            "tenant_id": "attacker-controlled-agency",
+        },
+    )
+    assert accepted.status_code == 200
+    enrollment = accepted.json()
+    verified = context.client.post(
+        "/api/v1/auth/totp/enroll/verify",
+        json={
+            "enrollment_token": enrollment["enrollment_token"],
+            "code": totp_code(enrollment["totp_secret"], context.now),
+            "role": "platform_admin",
+            "tenant_id": "attacker-controlled-agency",
+        },
+    )
+
+    assert verified.status_code == 200
+    assert verified.json()["account"]["role"] == "agent"
+    assert verified.json()["account"]["tenant_id"] == "agency-one"
+    override = context.client.post(
+        "/api/v1/agencies/agent-invitations",
+        json={
+            "email": "override@example.test",
+            "role": "agency_admin",
+            "tenant_id": "agency-two",
+        },
+        headers=headers,
+    )
+    assert override.status_code == 422
+    with context.session_factory() as session:
+        assert session.query(StaffInvitation).count() == 1
+        account = session.query(StaffAccount).filter_by(email=email).one()
+        assert account.role == "agent"
+        assert account.tenant_id == "agency-one"
+
+
+def test_agent_invitation_obeys_global_normalized_email_claims(
+    agency_api_context: AgencyApiContext,
+) -> None:
+    context = agency_api_context
+    admin_token = _seed_account(
+        context,
+        account_id="agency-admin-one",
+        role="agency_admin",
+        tenant_id="agency-one",
+    )
+    _seed_account(
+        context,
+        account_id="existing-agent-two",
+        email="claimed@example.test",
+        role="agent",
+        tenant_id="agency-two",
+    )
+
+    response = context.client.post(
+        "/api/v1/agencies/agent-invitations",
+        json={"email": "  CLAIMED@Example.Test "},
+        headers=_headers(admin_token),
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "An account or active invitation already uses this email",
+        "code": "conflict",
+    }
+    assert context.email_sender.messages == []
+    with context.session_factory() as session:
+        assert session.query(StaffInvitation).count() == 0

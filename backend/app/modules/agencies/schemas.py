@@ -83,3 +83,7 @@ class AgencyWalletResponse(BaseModel):
     agency_id: str
     address: str
     linked_at: datetime
+
+
+class AgentInvitationCreate(AgencyAdminInvitationCreate):
+    pass

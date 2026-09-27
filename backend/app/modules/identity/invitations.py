@@ -4,6 +4,7 @@ import sqlite3
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
+from typing import Literal
 
 from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
@@ -168,6 +169,48 @@ def issue_agency_admin_invitation(
     settings: Settings,
     clock: Callable[[], datetime],
 ) -> None:
+    _issue_agency_invitation(
+        role="agency_admin",
+        session_factory=session_factory,
+        email_sender=email_sender,
+        email=email,
+        tenant_id=tenant_id,
+        settings=settings,
+        clock=clock,
+    )
+
+
+def issue_agent_invitation(
+    *,
+    session_factory: sessionmaker[Session],
+    email_sender: EmailSender | None,
+    email: str,
+    tenant_id: str,
+    settings: Settings,
+    clock: Callable[[], datetime],
+) -> None:
+    _issue_agency_invitation(
+        role="agent",
+        session_factory=session_factory,
+        email_sender=email_sender,
+        email=email,
+        tenant_id=tenant_id,
+        settings=settings,
+        clock=clock,
+    )
+
+
+def _issue_agency_invitation(
+    *,
+    role: Literal["agency_admin", "agent"],
+    session_factory: sessionmaker[Session],
+    email_sender: EmailSender | None,
+    email: str,
+    tenant_id: str,
+    settings: Settings,
+    clock: Callable[[], datetime],
+) -> None:
+    role_label = "Agency-admin" if role == "agency_admin" else "Agent"
     normalized_email = normalize_email(email)
     if not normalized_email:
         raise ValueError("Invitation email must not be empty")
@@ -188,7 +231,7 @@ def issue_agency_admin_invitation(
                 expires_at = now + timedelta(hours=settings.invitation_ttl_hours)
                 invitation = StaffInvitation(
                     email=normalized_email,
-                    role="agency_admin",
+                    role=role,
                     tenant_id=tenant_id,
                     token_hash=hash_secret(raw_token),
                     status="pending",
@@ -213,7 +256,7 @@ def issue_agency_admin_invitation(
             "An account or active invitation already uses this email"
         )
     if invitation_id is None or invitation_link is None or expires_at is None:
-        raise RuntimeError("Agency-admin invitation could not be created")
+        raise RuntimeError(f"{role_label} invitation could not be created")
 
     try:
         sender = email_sender if email_sender is not None else configured_email_sender()
@@ -228,16 +271,18 @@ def issue_agency_admin_invitation(
             persisted_invitation = session.get(StaffInvitation, invitation_id)
             if persisted_invitation is None:
                 raise RuntimeError(
-                    "Agency-admin invitation could not be updated after delivery failure"
+                    f"{role_label} invitation could not be updated after delivery failure"
                 ) from None
             persisted_invitation.status = "revoked"
             persisted_invitation.delivery_status = "failed"
-        raise InvitationDeliveryError("Agency-admin invitation email delivery failed") from None
+        raise InvitationDeliveryError(
+            f"{role_label} invitation email delivery failed"
+        ) from None
 
     with session_factory.begin() as session:
         persisted_invitation = session.get(StaffInvitation, invitation_id)
         if persisted_invitation is None:
-            raise RuntimeError("Agency-admin invitation could not be marked as sent")
+            raise RuntimeError(f"{role_label} invitation could not be marked as sent")
         persisted_invitation.delivery_status = "sent"
 
 
