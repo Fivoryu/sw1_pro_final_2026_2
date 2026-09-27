@@ -12,7 +12,7 @@
 | **PROPUESTA** | Opción de contrato para revisar; no implica aprobación ni implementación. |
 | **PENDIENTE** | Decisión que debe cerrarse antes de depender de ella en una implementación. |
 
-Los valores `EXAMPLE_*`, `EXAMPLE-CURRENCY` y las direcciones entre corchetes son marcadores, no datos de configuración. Los ejemplos monetarios ilustran strings decimales exactos; no establecen moneda, escala ni precisión.
+Los valores `EXAMPLE_*` y las direcciones entre corchetes son marcadores, no datos de configuración. Los ejemplos de ofertas usan COP con dos decimales según la decisión confirmada para esta rama; los importes de depósito en token tienen unidades separadas y pendientes.
 
 ## 1. Alcance y límites
 
@@ -25,8 +25,11 @@ Los valores `EXAMPLE_*`, `EXAMPLE-CURRENCY` y las direcciones entre corchetes so
 ## 2. Reglas de producto confirmadas
 
 - **CONFIRMADA** El catálogo público muestra únicamente inmuebles aprobados y publicados, y sus publicaciones son visibles entre agencias.
-- **CONFIRMADA** Los filtros de producto incluyen ciudad/zona, operación (venta/alquiler), precio base, habitaciones y baños. La semántica precisa de “habitaciones” no está fijada.
+- **CONFIRMADA** Los filtros de producto incluyen ciudad/zona, operación (venta/alquiler), precio base, habitaciones y baños. Para esta rama, `min_rooms` cuenta dormitorios y `min_bathrooms` es un mínimo entero.
+- **CONFIRMADA** Los importes de oferta se expresan en COP con dos decimales y aritmética `Decimal` exacta; los totales calculados usan `ROUND_HALF_UP`. La precisión `NUMERIC(18,2)` es un límite técnico de esta implementación, no una regla de producto.
 - **CONFIRMADA** El precio base no incluye muebles opcionales. Para venta, los extras son de pago único; para alquiler, el precio base y los extras son mensuales. El servidor calcula y devuelve el desglose; ocultar un mueble en la visita 3D no modifica la oferta.
+- **CONFIRMADA** Todo cambio de precio base, extras o condiciones comerciales incrementa `offer_version`; cotizaciones de versiones anteriores quedan invalidadas. La cotización inmutable y su TTL de 15 minutos pertenecen a CC-04B.
+- **CONFIRMADA para la respuesta de detalle público** Incluir únicamente ID de publicación, versión de oferta, operación, precio base COP, ciudad/zona visibles, cantidades de dormitorios/baños y extras con ID estable, nombre visible y precio. Excluir descripción, fotos y dirección exacta.
 - **CONFIRMADA** La visita 3D prevista es sencilla, de un inmueble de una planta con ambientes conectados manualmente; no se promete reconstrucción fotorrealista.
 - **CONFIRMADA** El cliente debe tener una cuenta RoomForge y vincularle por separado una wallet externa verificada; la wallet no reemplaza la cuenta. Para reservar se requiere el cliente RoomForge autenticado y la wallet verificada vinculada a esa cuenta. No se acepta una dirección arbitraria enviada en el body como identidad o wallet de reserva.
 - **CONFIRMADA para CC-03B** Cada cuenta puede vincular como máximo una wallet externa y cada dirección canonicalizada puede pertenecer a una sola cuenta en todo el sistema. La verificación usa EIP-191 `personal_sign`; cualquier firma inválida, incluso malformada, consume el challenge antes de responder con un error genérico. Challenge expirado o repetido falla cerrado. No se incluyen endpoints para desvincular o reemplazar la wallet ni se revela qué otra cuenta pudiera poseer una dirección.
@@ -54,11 +57,11 @@ Los hechos de esta subsección se verificaron en los archivos versionados en el 
 | El árbol ejecutable de módulos contiene `identity` y `agencies`; no contiene `customer_identity`, ni módulos de catálogo/listings, cotización o reservas. `create_app()` tampoco registra routers de esos recursos. Por lo tanto, en esta base no hay rutas de cuenta/wallet de clientes, catálogo, cotización ni reservas. | `backend/app/modules/`; `backend/app/main.py` |
 | La aplicación usa el OpenAPI generado por FastAPI a partir de sus rutas y esquemas; en esta base no hay rutas ni esquemas propios para catálogo o reservas ni una definición OpenAPI manual para esos recursos. | `backend/app/main.py` |
 
-### IMPLEMENTADO EN ESTA RAMA — CC-03A/CC-03B
+### IMPLEMENTADO EN ESTA RAMA — CC-03A/CC-03B/CC-04A
 
-En el worktree actual, CC-03A implementa rutas y modelos de cuenta/sesión de cliente, y CC-03B implementa las rutas y modelos de vinculación de wallet, separados de `StaffAccount` y de la autenticación de personal. `create_app()` registra sus routers desde `backend/app/modules/customer_identity/`; las rutas se detallan en la sección 4. Este comportamiento de rama no estaba presente en `b6a468a` y no implica despliegue ni aprobación global del contrato.
+En el worktree actual, CC-03A implementa rutas y modelos de cuenta/sesión de cliente, CC-03B implementa rutas y modelos de vinculación de wallet, y CC-04A implementa lectura pública de catálogo y persistencia de publicaciones/ofertas; las identidades de cliente permanecen separadas de `StaffAccount` y de la autenticación de personal. `create_app()` registra sus routers desde `backend/app/modules/customer_identity/` y `backend/app/modules/catalog/`; las rutas se detallan en la sección 4. Este comportamiento de rama no estaba presente en `b6a468a` y no implica despliegue ni aprobación global del contrato.
 
-**Alcance restante:** catálogo/listings, cotizaciones y reservas siguen propuestos y no están implementados en esta rama. La implementación de CC-03A/CC-03B no convierte esta propuesta general en un contrato aprobado ni autoriza las políticas futuras que siguen pendientes.
+**Alcance restante:** CC-04A implementa en este worktree la lectura pública del catálogo, detalle mínimo y persistencia de publicaciones/ofertas mediante la migración `0007_catalog_offers`. Cotizaciones (CC-04B) y reservas siguen propuestas y no están implementadas. La implementación de CC-03A/CC-03B y CC-04A no convierte esta propuesta general en un contrato aprobado ni autoriza las políticas futuras que siguen pendientes.
 
 ## 4. Tabla de rutas propuesta
 
@@ -76,8 +79,8 @@ Los nombres y métodos de esta tabla son **PROPUESTA** como contrato general. La
 | `GET /api/v1/customer/wallets` | Listar wallets verificadas de la cuenta. | **IMPLEMENTADO EN ESTA RAMA, CC-03B**; requiere sesión de la cuenta titular y devuelve cero o una wallet. |
 | `POST /api/v1/staff/agencies/{agency_id}/wallet-challenges` | Emitir desafío para acreditar control de la wallet de agencia. | **PROPUESTA para CC-05**; `agency_admin` del tenant autenticado, rol/permisos exactos pendientes. |
 | `PUT /api/v1/staff/agencies/{agency_id}/wallet` | Verificar firma y vincular wallet a la agencia. | **PROPUESTA para CC-05**; `agency_admin` del tenant + challenge válido, rol/permisos exactos pendientes. |
-| `GET /api/v1/listings` | Buscar publicaciones públicas con filtros y cursor. | Público; solo publicaciones aprobadas y publicadas (**regla CONFIRMADA**). |
-| `GET /api/v1/listings/{listing_id}` | Leer el detalle de una publicación pública. | Público; la visibilidad sigue la regla confirmada. |
+| `GET /api/v1/listings` | Buscar publicaciones públicas con filtros y cursor. | **IMPLEMENTADO EN ESTA RAMA, CC-04A**; público, solo publicaciones aprobadas y publicadas (**regla CONFIRMADA**). La forma global del contrato sigue propuesta. |
+| `GET /api/v1/listings/{listing_id}` | Leer el detalle mínimo de una publicación pública. | **IMPLEMENTADO EN ESTA RAMA, CC-04A**; público y con la visibilidad confirmada. La forma global del contrato sigue propuesta. |
 | `POST /api/v1/quotes` | Crear una cotización calculada por el servidor para una versión de oferta y extras seleccionados. | Público con controles antiabuso/rate limit (**PROPUESTA**); no requiere identidad de wallet. |
 | `POST /api/v1/reservations` | Crear una solicitud pendiente y devolver la autorización de depósito. | Requiere el cliente RoomForge autenticado y una wallet verificada vinculada (**CONFIRMADA**); el body referencia su ID opaco. El servidor obtiene la dirección verificada, nunca confía en una dirección arbitraria. |
 | `GET /api/v1/reservations/{reservation_id}` | Consultar estado y snapshot de una reserva propia. | Requiere autenticación de cliente y pertenencia de la reserva a esa cuenta; diseño exacto de respuesta **PROPUESTA**. |
@@ -85,7 +88,7 @@ Los nombres y métodos de esta tabla son **PROPUESTA** como contrato general. La
 | `POST /api/v1/agency/reservations/{reservation_id}/decision` | Ruta propuesta para registrar o reconciliar la decisión ya ejecutada en cadena por la wallet externa de agencia. | **PROPUESTA**; no sustituye la ejecución on-chain de la wallet ni constituye autorización de agencia por sí sola. La wallet ejecuta aceptación y rechazo (**CONFIRMADO**); payload, nonce/replay, envío, timing y reconciliación de eventos **PENDIENTES**. |
 | `POST /api/v1/reservations/{reservation_id}/chain-transactions` | Informar un hash para reconciliar un depósito, reembolso o liberación. | Ruta opcional propuesta; el cliente no acredita el resultado. Acceso, reconciliación y confirmaciones **PENDIENTES**. |
 
-Las rutas propuestas en esta tabla para catálogo/listings, cotización, reservas y vinculación de wallet de agencia siguen siendo propuestas y no existen todavía en esta rama. Las rutas y schemas de cuenta/sesión de cliente y las tres rutas de wallet están implementadas en esta rama; preservan `/api/v1/auth/*` para personal y usan `/api/v1/customer/*` para clientes. Su presencia no aprueba el contrato general ni cambia el router de staff. Los nombres/campos de las demás rutas se verificarán al implementarlas. La respuesta pública no debe exponer publicación no visible, dirección de wallet privada ni datos de reserva ajenos.
+En esta rama CC-04A implementa las dos rutas públicas de catálogo/listings y sus schemas. Cotizaciones, reservas y vinculación de wallet de agencia siguen propuestas y no están implementadas. Las rutas y schemas de cuenta/sesión de cliente y las tres rutas de wallet también están implementadas en esta rama; preservan `/api/v1/auth/*` para personal y usan `/api/v1/customer/*` para clientes. Su presencia no aprueba el contrato general ni cambia el router de staff. No se agregan rutas para crear, editar, aprobar o publicar listings mientras los roles/workflow sigan pendientes. La respuesta pública no debe exponer publicaciones no visibles, descripción, fotos, dirección exacta, dirección de wallet privada ni datos de reserva ajenos.
 
 ### Rutas de publicación para personal — opcionales, fuera de alcance de CC-02 y de CC-04
 
@@ -120,14 +123,12 @@ Toda futura escritura de personal deberá autenticar con `get_active_staff`, der
 
 ### Dinero y fechas
 
-**PROPUESTA:** representar dinero de oferta con un objeto que contiene `amount` como string decimal base diez y `currency` explícita. No usar `float`, notación exponencial ni conversiones silenciosas. No se fija código de moneda, número de decimales, escala ni regla de redondeo. Cada cálculo debe ser exacto según la política que se resuelva antes de implementar.
-
-Ejemplo sintáctico (no configuración; la cantidad de dígitos no establece escala):
+**CONFIRMADA para esta rama; pendiente de revisión global del contrato:** representar dinero de oferta con `amount` como string decimal base diez y `currency: "COP"`; usar aritmética `Decimal` exacta, dos decimales y `ROUND_HALF_UP` para totales calculados. No usar `float` ni conversiones silenciosas. **PROPUESTA TÉCNICA CC-04A:** persistir en `NUMERIC(18,2)` (hasta 16 dígitos enteros); ese límite de almacenamiento no es una regla de producto.
 
 ```json
 {
-  "amount": "1234.56789",
-  "currency": "EXAMPLE-CURRENCY"
+  "amount": "1234.50",
+  "currency": "COP"
 }
 ```
 
@@ -141,12 +142,12 @@ Ejemplo sintáctico (no configuración; la cantidad de dígitos no establece esc
 
 | Parámetro candidato | Uso | Estado |
 |---|---|---|
-| `city`, `zone` | Filtros geográficos. | Filtros confirmados; codificación y normalización **PENDIENTES**. |
-| `operation` | Venta o alquiler; valores de wire posibles `sale` y `rent`. | Operaciones confirmadas; strings exactos **PROPUESTA**. |
-| `min_base_price`, `max_base_price`, `currency` | Rango exacto dentro de una moneda. | Filtro confirmado; parámetros y comparación inclusiva **PROPUESTA**. No convertir ni mezclar monedas. |
-| `min_rooms` | Filtro de habitaciones. | Filtro confirmado; nombre y semántica habitación/dormitorio **PENDIENTES**. |
-| `min_bathrooms` | Filtro de baños. | Filtro confirmado; representación y semántica de conteo **PENDIENTES**. |
-| `cursor`, `limit` | Continuación paginada. | Diseño **PROPUESTA**; formato, orden, valor predeterminado y límites **PENDIENTES**. |
+| `city`, `zone` | Filtros geográficos. | Parámetros **PROPUESTA**, implementados con igualdad exacta sobre claves `strip().casefold()`; se conserva la escritura visible. |
+| `operation` | Venta o alquiler; valores de wire `sale` y `rent`. | Semántica confirmada; strings exactos **PROPUESTA**, implementados en esta rama. |
+| `min_base_price`, `max_base_price` | Rango inclusivo del precio COP. | Filtro confirmado; parámetros **PROPUESTA**, límite y comparación inclusiva implementados en esta rama. |
+| `min_rooms` | Mínimo de dormitorios. | Semántica confirmada; nombre **PROPUESTA**, conteo entero implementado en esta rama. |
+| `min_bathrooms` | Mínimo entero de baños. | Semántica confirmada; nombre **PROPUESTA**, filtro entero implementado en esta rama. |
+| `cursor`, `limit` | Continuación paginada. | **PROPUESTA TÉCNICA CC-04A:** cursor opaco por `created_at DESC, id DESC`; `limit` predeterminado 20 y máximo 100. |
 
 Ejemplo de respuesta parcial; los nombres y tipos de propiedades son **PROPUESTA** y no definen el significado de “habitación”:
 
@@ -155,11 +156,11 @@ Ejemplo de respuesta parcial; los nombres y tipos de propiedades son **PROPUESTA
   "items": [
     {
       "listing_id": "EXAMPLE_LISTING_ID",
-      "offer_version": "EXAMPLE_OFFER_VERSION",
-      "operation": "EXAMPLE_OPERATION",
+      "offer_version": 1,
+      "operation": "sale",
       "base_price": {
-        "amount": "1234.56789",
-        "currency": "EXAMPLE-CURRENCY"
+        "amount": "1234.50",
+        "currency": "COP"
       },
       "city": "EXAMPLE_CITY",
       "zone": "EXAMPLE_ZONE"
@@ -169,7 +170,29 @@ Ejemplo de respuesta parcial; los nombres y tipos de propiedades son **PROPUESTA
 }
 ```
 
-No se incluye un schema de escena 3D. El mobiliario/extras puede detallarse en el recurso si la implementación lo necesita; sus precios respetan las reglas confirmadas y la cotización autoritativa. La forma de publicar esos datos queda **PENDIENTE**.
+**PROPUESTA de respuesta de detalle mínima, implementada en esta rama:** agrega `bedrooms`, `bathrooms` y `extras`. Cada extra contiene únicamente `extra_id` estable, `name` visible y `price` COP; no se exponen descripción, fotos ni dirección exacta. La lista sigue limitada a los campos del ejemplo parcial y no incluye extras ni medios.
+
+```json
+{
+  "listing_id": "EXAMPLE_LISTING_ID",
+  "offer_version": 1,
+  "operation": "sale",
+  "base_price": {"amount": "1234.50", "currency": "COP"},
+  "city": "EXAMPLE_CITY",
+  "zone": "EXAMPLE_ZONE",
+  "bedrooms": 2,
+  "bathrooms": 1,
+  "extras": [
+    {
+      "extra_id": "EXAMPLE_EXTRA_ID",
+      "name": "EXAMPLE_DISPLAY_NAME",
+      "price": {"amount": "123.45", "currency": "COP"}
+    }
+  ]
+}
+```
+
+Los valores son ilustrativos, no fixtures de migración ni datos desplegados. No se incluye un schema de escena 3D ni se agregan rutas de publicación para personal.
 
 ## 7. Cotización: snapshot, versión y vigencia
 
@@ -195,27 +218,27 @@ No se incluye un schema de escena 3D. El mobiliario/extras puede detallarse en e
     {
       "kind": "EXAMPLE_LINE_KIND",
       "extra_id": "EXAMPLE_EXTRA_ID",
-      "amount": "1234.56789",
-      "currency": "EXAMPLE-CURRENCY",
+      "amount": "1234.50",
+      "currency": "COP",
       "charge_period": "EXAMPLE_CHARGE_PERIOD"
     }
   ],
   "one_time_total": {
-    "amount": "1234.56789",
-    "currency": "EXAMPLE-CURRENCY"
+    "amount": "1234.50",
+    "currency": "COP"
   },
   "monthly_total": {
-    "amount": "0",
-    "currency": "EXAMPLE-CURRENCY"
+    "amount": "0.00",
+    "currency": "COP"
   },
   "created_at": "<UTC timestamp>",
   "expires_at": "<UTC timestamp>"
 }
 ```
 
-Los enums `kind`, `operation` y `charge_period`, así como la forma exacta de totals, son **PROPUESTA**. El ejemplo no fija el valor cero a una escala monetaria. Los períodos deben mantener la distinción confirmada: extras de venta de pago único; base y extras de alquiler mensuales.
+Los enums `kind`, `operation` y `charge_period`, así como la forma exacta de totals, son **PROPUESTA**. Los importes de ejemplo siguen la convención confirmada de COP con dos decimales. Los períodos deben mantener la distinción confirmada: extras de venta de pago único; base y extras de alquiler mensuales.
 
-**PENDIENTE:** duración/TTL de cotización y política para cambiar una oferta entre cotización y reserva. `expires_at` es un campo candidato y deberá generarlo el servidor una vez definida la vigencia. El cliente no prolonga la validez ni reescribe el snapshot.
+**CONFIRMADA para esta rama:** el snapshot cotizado vence a los 15 minutos según reloj del servidor y deja de ser válido si cambia `offer_version`. **Fuera de CC-04A:** cálculo, persistencia y ruta de cotización se implementan en CC-04B; el cliente no prolonga la vigencia ni reescribe el snapshot.
 
 ## 8. Reserva, idempotencia y concurrencia
 
@@ -334,33 +357,33 @@ Los códigos exactos y asignaciones HTTP son **PROPUESTA**. No copiar el formato
 
 ### Paginación propuesta
 
-Usar `cursor` opaco y `next_cursor` nullable como mecanismo candidato para `GET /api/v1/listings`, con filtros preservados entre páginas y orden estable definido por implementación. `limit` es un parámetro candidato con validación positiva; valor por defecto, máximo, política de orden, cursor expirado y respuesta vacía están **PENDIENTES**. No se fija ningún número de límite en esta propuesta.
+**PROPUESTA TÉCNICA CC-04A, implementada en esta rama:** `cursor` opaco y `next_cursor` nullable para `GET /api/v1/listings`; orden estable `created_at DESC, id DESC`; `limit` predeterminado 20 y máximo 100. Los cursores se validan antes de consultar y una forma inválida devuelve `400` (`invalid_cursor`). Los filtros deben conservarse al pedir páginas siguientes. El cursor no es una autorización ni una firma criptográfica. Estos defaults son elecciones técnicas de la rama, no aprobación global del contrato.
 
 ## 11. OpenAPI reproducible desde FastAPI
 
 **HECHO ACTUAL — BASE `b6a468a`:** `backend/app/main.py:create_app()` crea la instancia FastAPI e incluye los routers de personal y agencias; no define rutas ni esquemas de catálogo/ofertas, cotizaciones o reservas, ni configura un documento OpenAPI manual para esos recursos.
 
-**IMPLEMENTADO EN ESTA RAMA — CC-03A/CC-03B:** las rutas y modelos tipados de cuenta/sesión y wallet están registrados desde `create_app()` y documentados por `app.openapi()`. **PROPUESTA para CC-04–CC-05:** definir del mismo modo las rutas/esquemas de catálogo/ofertas y reservas; las rutas administrativas opcionales de publicación corresponden a CC-04. Este avance no aprueba el contrato general ni acredita despliegue. No editar a mano una copia JSON/YAML como fuente canónica.
+**IMPLEMENTADO EN ESTA RAMA — CC-03A/CC-03B/CC-04A:** las rutas y modelos tipados de cuenta/sesión, wallet y lectura pública de catálogo están registrados desde `create_app()` y documentados por `app.openapi()`. Las respuestas de catálogo exponen los schemas mínimos descritos arriba; no se registran cotizaciones, reservas ni rutas administrativas de publicación. Este avance no aprueba el contrato general ni acredita despliegue. No editar a mano una copia JSON/YAML como fuente canónica.
 
-**Reproducibilidad propuesta:** desde el entorno/backend fijado del proyecto, construir la misma `app` con la configuración de test segura, serializar su `app.openapi()` y verificar en pruebas posteriores los paths, métodos, schemas y respuestas documentados. Esa es una validación de implementación futura, no ejecutada por CC-02. No exponer secretos en schemas ni requerir wallet real para generar OpenAPI.
+**Reproducibilidad propuesta:** construir la misma `app` con configuración de test segura y serializar `app.openapi()`; el test de CC-04A verifica paths públicos, schemas mínimos y compatibilidad de validación `422` entre catálogo, staff y cliente. La propuesta global aún requiere revisión y no acredita despliegue ni verificación contra PostgreSQL. No exponer secretos en schemas ni requerir wallet real para generar OpenAPI.
 
 ## 12. Registro de decisiones pendientes
 
 | ID | Decisión pendiente | No asumir |
 |---|---|---|
-| D-01 | Moneda(s), precisión/escala y redondeo de importes. | Código de moneda, decimales fijos o conversión. |
-| D-02 | Duración de vigencia de cotización y qué cambio de oferta invalida una quote. | TTL/default o vigencia ilimitada. |
+| D-01 | **Resuelta para esta rama:** COP con dos decimales, aritmética `Decimal` exacta y `ROUND_HALF_UP` para totales; revisar globalmente junto con el contrato. | Conversión monetaria o tratar `NUMERIC(18,2)` como regla de producto. |
+| D-02 | **Resuelta para esta rama/CC-04B:** snapshot inmutable, TTL de 15 minutos y cambios de `offer_version` invalidan quotes anteriores; su implementación pertenece a CC-04B. | Que el cliente calcule, extienda o reescriba una quote. |
 | D-03 | Monto fijo del depósito por inmueble. | Valor derivado del precio o un monto de ejemplo. |
 | D-04 | Token de prueba: símbolo, decimales, supply y direcciones; `chainId`, contrato y RPC local de Hardhat. | Testnet o fondos reales sin aprobación posterior; tokens, cadena o despliegues de producción. |
 | D-05 | SDK/proveedor de wallet móvil y configuración pública. | SDK o project ID. No guardar secretos/configuración privada en Git. |
 | D-06 | Para wallet de cliente, CC-03B implementa EIP-191 `personal_sign` con challenge de un solo uso ligado a cuenta, dirección canonicalizada y propósito, nonce criptográfico y timestamps UTC; TTL de 5 minutos. Se confirma una wallet por cuenta, dirección globalmente única, consumo ante firma inválida y ausencia de unlink/reemplazo. Siguen pendientes el SDK móvil y el protocolo de prueba de wallet de agencia. | Que la wallet reemplace la cuenta, que una dirección enviada en el body pruebe control o que la prueba de identidad requiera una cadena no elegida. |
 | D-07 | Exactos roles y autorizaciones para publicación opcional y operaciones administrativas no decisorias sobre reservas. | Que un rol actual tenga permisos nuevos por inferencia o que la staff API baste para aceptar. |
 | D-08 | Actor autorizado a cancelar una reserva pendiente y autorización requerida para esa cancelación. | Un actor o mecanismo de cancelación aprobado sin decisión explícita. |
-| D-09 | Semántica del filtro “habitaciones” frente a dormitorios y representación del conteo de baños. | Que habitación equivalga a dormitorio o que baños admitan fracciones/enteros concretos. |
+| D-09 | **Resuelta para esta rama:** `min_rooms` cuenta dormitorios y `min_bathrooms` es un mínimo entero. | Fracciones de dormitorios o baños. |
 | D-10 | Schema de escena 3D, ambientes, conexiones y renderer. | Payload, geometría o formato de reconstrucción. |
 | D-11 | Rate controls para la ruta pública de cotización propuesta; titularidad de cotizaciones si se necesita consultar historial. La sesión de cliente está implementada en esta rama por CC-03A, pero su aceptación como contrato global sigue sujeta a revisión. | Que la wallet sustituya a la cuenta. La cuenta para reservar y la wallet vinculada/verificada son reglas confirmadas; el acceso público a quote es una propuesta técnica. |
 | D-12 | Revisión y aprobación global de nombres, schemas, enums, errores, respuestas y versionado; los schemas de identidad/wallet existentes en esta rama no aprueban el contrato general. | Que los nombres propuestos ya estén aprobados o que un schema de rama implique implementación de catálogo/reservas. |
-| D-13 | Cursor, orden, default/máximo de página y límites de filtros. | Cualquier límite numérico. |
+| D-13 | **Defaults técnicos propuestos e implementados en CC-04A:** keyset `created_at DESC, id DESC`; default 20 y máximo 100; filtros de precio no negativos con dos decimales COP. Requiere revisión global del contrato. | Presentar estos valores de implementación como reglas de producto o aprobación global. |
 | D-14 | Idempotency-Key: scope, duración, digest y concurrencia entre dispositivos. | Una política temporal o de almacenamiento no acordada. |
 | D-15 | Qué instante determina aceptación antes del deadline cuando API y cadena difieren; expiración, transacciones en vuelo, confirmaciones, reorgs y reconciliación. | Que hora de envío, hora de bloque o primera confirmación sea el criterio acordado. |
 | D-16 | Dominio EIP-712 final, hash canónico de snapshot, ABI/eventos, gas payer y semántica de escrow. | Tipos Solidity, nombres de eventos, contrato ni configuración de red. |
@@ -371,7 +394,7 @@ Usar `cursor` opaco y `next_cursor` nullable como mecanismo candidato para `GET 
 
 ## 13. Criterio de salida de CC-02
 
-Este artefacto conserva el estado de propuesta para revisión y no afirma despliegue ni aprobación final. CC-03A/CC-03B están implementados en esta rama para cuenta/sesión y wallet; catálogo, cotizaciones y reservas siguen propuestos y no implementados. La modalidad de identidad para reservar está **CONFIRMADA**: cuenta RoomForge autenticada más wallet externa vinculada y verificada; la wallet no la reemplaza. También se confirma una wallet por cuenta, unicidad global de direcciones, consumo del challenge ante firma inválida y ausencia de unlink/reemplazo. Se preserva `/api/v1/auth/*` para personal y `/api/v1/customer/auth/*` para clientes. Para el trabajo restante, cerrar rate controls de quote público, permisos administrativos, versión/vigencia de quote, valores económicos/de red y carrera del deadline. CC-06 y CC-08 deben mantener el límite de Hardhat local: sin testnet ni fondos reales sin aprobación posterior. Las decisiones marcadas **PENDIENTE** no deben convertirse en defaults silenciosos; las etiquetas **PROPUESTA** requieren resolución antes de tratarlas como contrato.
+Este artefacto conserva el estado de propuesta para revisión y no afirma despliegue ni aprobación final. CC-03A/CC-03B y la lectura pública de CC-04A están implementados en esta rama para cuenta/sesión, wallet y catálogo mínimo; cotizaciones (CC-04B) y reservas siguen propuestas y no implementadas. La modalidad de identidad para reservar está **CONFIRMADA**: cuenta RoomForge autenticada más wallet externa vinculada y verificada; la wallet no la reemplaza. También se confirma una wallet por cuenta, unicidad global de direcciones, consumo del challenge ante firma inválida y ausencia de unlink/reemplazo. Se preserva `/api/v1/auth/*` para personal y `/api/v1/customer/auth/*` para clientes. Para el trabajo restante, cerrar rate controls de quote público, permisos administrativos y carrera del deadline. CC-06 y CC-08 deben mantener el límite de Hardhat local: sin testnet ni fondos reales sin aprobación posterior. Las decisiones marcadas **PENDIENTE** no deben convertirse en defaults silenciosos; las etiquetas **PROPUESTA** requieren resolución antes de tratarlas como contrato.
 
 ## Key Learnings
 

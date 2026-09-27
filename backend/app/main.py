@@ -12,8 +12,9 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
-from app.db.session import create_session_factory
+from app.db.session import create_session_factory, protect_session_factory
 from app.modules.agencies.router import router as agencies_router
+from app.modules.catalog.router import router as catalog_router
 from app.modules.customer_identity.errors import CustomerApiError
 from app.modules.customer_identity.router import router as customer_identity_router
 from app.modules.customer_identity.router import wallet_router as customer_wallet_router
@@ -33,6 +34,7 @@ def create_app(
     engine = None
     if session_factory is None:
         engine, session_factory = create_session_factory(resolved_settings.database_url)
+    protect_session_factory(session_factory)
 
     app = FastAPI(title="RoomForge Staff API", version="1.0.0")
     app.state.settings = resolved_settings
@@ -51,6 +53,7 @@ def create_app(
     app.include_router(customer_identity_router)
     app.include_router(customer_wallet_router)
     app.include_router(agencies_router)
+    app.include_router(catalog_router)
 
     @app.exception_handler(CustomerApiError)
     async def customer_api_error(request: Request, exc: CustomerApiError) -> JSONResponse:
