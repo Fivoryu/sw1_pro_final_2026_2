@@ -257,15 +257,20 @@ Al cerrar: registrar archivos y comportamiento, ejecutar comprobaciones pertinen
 
 ### Estado local y evidencia (2026-09-26)
 
-F01-T1, F01-T2 y F01-T3 quedaron completadas y verificadas localmente en la worktree `proyecto_final-f01-infrastructure-wt`, rama `feat/f01-infrastructure-completion`, basada en `848f28c`. Los cambios permanecen sin commit y no están integrados en `origin/main`; este estado local no modifica el corte histórico de integración de §1.4. El registro de tarea y la evidencia detallada están en [F01 — infraestructura local](../odd/tasks/f01-infrastructure-completion.md).
+F01-T1–T4 quedaron completadas localmente en la worktree `proyecto_final-f01-infrastructure-wt`, rama `feat/f01-infrastructure-completion`, basada inicialmente en `848f28c`. En el punto de verificación local anterior a la autorización de entrega, la rama todavía no tenía commits F01 ni estaba integrada en `origin/main`; esta nota conserva ese estado temporal y no modifica el corte histórico de integración de §1.4. La integración posterior se registra en la subsección siguiente. El registro de tarea y la evidencia detallada están en [F01 — infraestructura local](../odd/tasks/f01-infrastructure-completion.md).
 
 - **F01-T1 — recursos locales:** `init-local-resources.ps1` crea únicamente el bucket y la cola configurados cuando faltan; se ejecutó dos veces y la segunda ejecución conservó los recursos existentes. Se usaron credenciales ficticias.
 - **F01-T2 — Compose y salud:** el stack incluye `postgres`, `floci`, `api` y `panel`, con puertos configurables enlazados a loopback. La API usa PostgreSQL en `postgres:5432` y Floci en `http://floci:4566`; el proxy Vite del panel usa `api:8000` en Compose y conserva su valor por defecto de host. Los probes comprueban PostgreSQL, Floci, dependencias de API y respuesta HTTP de Vite; API espera a PostgreSQL/Floci saludables y panel a API saludable.
 - **F01-T3 — verificación aislada:** en `roomforge-f01-verify` los cuatro servicios estuvieron saludables durante el smoke completo; el proxy del panel llegó a FastAPI y una ruta desconocida devolvió el 404 JSON esperado. El marcador PostgreSQL `f01-persist-20260926` sobrevivió el reinicio de PostgreSQL; el mensaje SQS del mismo nombre se recibió después del reinicio de Floci y se dejó sin borrar. El objeto S3 de 20 bytes `s3://roomforge-local-assets/f01/persistence-probe-20260926.txt` se descargó y coincidió con el marcador antes y después del reinicio de Floci, que volvió a `healthy`.
+- **F01-T4 — documentación:** `infra/README.md` recoge el uso de los cuatro servicios, healthchecks, modo de bajo consumo, pruebas observadas y límites; este apartado del plan añade el resultado local y separa la integración posterior del corte histórico.
 
 Al cierre de T3, los cuatro contenedores de prueba estaban detenidos; los volúmenes `roomforge-f01-verify_floci_data` y `roomforge-f01-verify_postgres_data` y sus datos se retuvieron intencionalmente, sin limpieza. `roomforge-local-dev` se observó detenido y no se operó; no se afirma que esté activo. Una medición puntual de Floci fue `38.37 MiB / 5.786 GiB`, no un objetivo ni una garantía.
 
 **Límites de la evidencia:** no existe worker y las aplicaciones móviles quedan fuera de Compose. Floci emula S3/SQS localmente; no es AWS ni ofrece paridad completa. Los probes de API y las pruebas directas de persistencia no demuestran operaciones S3/SQS ejecutadas por la aplicación.
+
+### Integración posterior al corte histórico de §1.4 (2026-09-26)
+
+Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/main` mediante el commit de trabajo `20919248ac53c76884e2037c7af6f9804c9b3f0e` (`feat(infra): complete local Docker and Floci stack`). La integración se confirmó por fast-forward de `b6a468a20888b5c3272fdea1d4815a27897232ba` a `af7345bed65c67f465fcd5fcfe36cd03adfd3dd3`; por tanto, la fila F01 de §1.4 permanece como fotografía histórica anterior y no como estado actual. El registro de tarea contiene los commits auxiliares, validaciones y límites de la entrega.
 
 ### F01.1 — Reutilizar el stack existente
 
