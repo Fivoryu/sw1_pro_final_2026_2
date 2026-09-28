@@ -783,6 +783,66 @@ a {
   line-height: 1.6;
 }
 
+.protected-staff-review-queue {
+  display: grid;
+  min-width: 0;
+  gap: 1.5rem;
+  padding: clamp(1.25rem, 3vw, 2.4rem);
+  border: 1px solid var(--line);
+  border-radius: 1.4rem;
+  background: var(--surface);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.protected-staff-review-queue__heading {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.protected-staff-review-queue__eyebrow {
+  color: var(--accent-hover);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1.5;
+}
+
+.protected-staff-review-queue h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  font-size: clamp(1.65rem, 4vw, 2.4rem);
+  font-weight: 400;
+  letter-spacing: -0.035em;
+  line-height: 1.12;
+}
+
+.protected-staff-review-queue__empty-state {
+  display: grid;
+  gap: 0.5rem;
+  padding: clamp(1rem, 2.5vw, 1.5rem);
+  border-radius: 1rem;
+  background: #f0f2ec;
+}
+
+.protected-staff-review-queue__empty,
+.protected-staff-review-queue__note {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.protected-staff-review-queue__empty {
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.protected-staff-review-queue__note {
+  max-width: 60ch;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+
 @media (max-width: 740px) {
   .protected-staff-header {
     flex-wrap: wrap;

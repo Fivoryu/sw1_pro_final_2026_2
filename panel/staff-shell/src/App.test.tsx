@@ -227,10 +227,10 @@ describe("protected staff session lifecycle", () => {
   });
 
   it.each([
-    ["platform_admin", "Administración de plataforma", "Inicio de plataforma"],
-    ["agency_admin", "Administración de inmobiliaria", "Inicio de inmobiliaria"],
-    ["agent", "Área de agente", "Inicio del agente"],
-  ])("renders only the supported %s role in its placeholder shell", async (role, heading, navigation) => {
+    ["platform_admin", "Administración de plataforma", "Inicio de plataforma", "El espacio protegido está listo."],
+    ["agency_admin", "Administración de inmobiliaria", "Inicio de inmobiliaria", "Cola de revisión"],
+    ["agent", "Área de agente", "Inicio del agente", "El espacio protegido está listo."],
+  ])("renders only the supported %s role in its placeholder shell", async (role, heading, navigation, viewText) => {
     sessionStorage.setItem("roomforge.staff.csrf", "stored-csrf");
     vi.mocked(refreshStaffSession).mockResolvedValue({
       access_token: "volatile-access-token",
@@ -242,7 +242,7 @@ describe("protected staff session lifecycle", () => {
 
     expect(await screen.findByRole("heading", { name: heading })).toBeVisible();
     expect(screen.getByRole("navigation")).toHaveTextContent(navigation);
-    expect(screen.getByText("El espacio protegido está listo.")).toBeVisible();
+    expect(screen.getByText(viewText)).toBeVisible();
   });
 
   it("rejects an unknown server role and falls back to login", async () => {
