@@ -44,7 +44,8 @@ Una unidad de trabajo: implementación + pruebas + este plan y actualización de
 - Implementación TDD: completada en `main.dart` y `widget_test.dart`. RED: tras corregir un error de compilación en el primer borrador de prueba, la prueba de navegación falló porque aún no existía la muestra. GREEN: las tres pruebas enfocadas pasaron. TRIANGULATE: la suite detectó un overflow de 28 px con texto ampliado; se simplificó el affordance y la suite final pasó.
 - Mirror temporal autorizado por el usuario: `D:\tmp\f02-t4d-validation`; no se creó `pubspec.lock` en el worktree.
 - Verificación independiente: Flutter 3.41.8 / Dart 3.11.5; `flutter test test/widget_test.dart` 11 PASS; `flutter analyze` sin issues; `dart format --output=none --set-exit-if-changed lib/main.dart test/widget_test.dart` PASS; `git diff --check` PASS.
-- Diff antes de actualizar los dos trackers: 231 líneas modificadas incluyendo este plan. La medición final de las cinco rutas del work-unit queda pendiente de verificación independiente; debe permanecer bajo 400 antes del commit.
-- Rutas del work-unit: los dos Dart autorizados, este plan, la tarea paraguas T4 y el tracker F02.
-- Commit del work-unit: pendiente; no se publicó.
-- Revisión nativa y registro final en el tracker: pendientes.
+- Diff final del work-unit: 245 líneas cambiadas (239 añadidas, 6 eliminadas) en cinco rutas; bajo 400. `git diff --cached --check` PASS.
+- Commit del work-unit: `67a3052` (`feat(cliente-mobile): add synthetic property detail prototype`); no push ni PR.
+- Revisión nativa exacta `c7cf98b3603d498275b38dce9d3421fa213e0905..67a3052517d1d76714a1e8373365aca07ee5b87c`: lineage `review-ee0459bbdc34f8a9`, cinco rutas, 245 líneas; aprobada y acknowledged. No se ofreció corrección y el cierre no expuso un resumen de hallazgos; no afirmar cero hallazgos.
+- ASSESS devolvió riesgo `unassessable` por `schema-incompatible` sin diagnóstico sanitizado. Se aplicó la barra de verificación alta: el verifier independiente confirmó alcance/245 líneas y ejecutó 11 tests, analyze, formato y whitespace PASS sobre el mismo árbol candidato antes del commit; el worktree quedó limpio en el commit revisado.
+- Registro de cierre: lineage y ASSESS anotados aquí y en ambos trackers; sin push ni PR.
