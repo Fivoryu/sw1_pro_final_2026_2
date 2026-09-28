@@ -4,10 +4,11 @@ import base64
 import hashlib
 import importlib.util
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 from alembic.migration import MigrationContext
@@ -16,6 +17,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+from eth_account import Account
+from eth_utils.crypto import keccak
 
 from app.core.config import Settings
 from app.db.base import Base
@@ -24,6 +27,7 @@ from app.modules.agencies.models import AgencyWallet
 from app.modules.catalog.models import Listing, QuoteSnapshot
 from app.modules.customer_identity.models import CustomerWallet
 from app.modules.identity.models import Agency
+from app.modules.reservations.models import Reservation
 
 
 @dataclass
@@ -86,6 +90,56 @@ def reservations_context() -> Iterator[ReservationsContext]:
     with TestClient(app, base_url="https://api.example.test") as client:
         yield ReservationsContext(client, session_factory, clock)
     engine.dispose()
+
+
+def _configure_fake_escrow(context: ReservationsContext):
+    private_key = "0x" + "11" * 32
+    signer = Account.from_key(private_key).address
+    rpc = _ReservationPermitRpc(signer=signer)
+    context.client.app.state.settings = replace(
+        context.client.app.state.settings,
+        escrow_rpc_url="http://127.0.0.1:8545",
+        escrow_address="0x" + "22" * 20,
+        escrow_chain_id="31337",
+        escrow_signer_private_key=private_key,
+    )
+    context.client.app.state.reservation_rpc_transport = rpc
+    return rpc
+
+
+class _ReservationPermitRpc:
+    def __init__(self, *, signer: str, nonce: int = 5) -> None:
+        self.signer = signer
+        self.nonce = nonce
+        self.calls: list[str] = []
+
+    def __call__(self, url: str, method: str, params: list[Any]) -> Any:
+        assert url == "http://127.0.0.1:8545"
+        self.calls.append(method)
+        if method == "eth_chainId":
+            return "0x7a69"
+        if method == "eth_getCode":
+            return "0x6000"
+        if method == "eth_call":
+            calldata = params[0]["data"]
+            if calldata == "0x" + keccak(text="authorizedSigner()")[:4].hex():
+                return "0x" + self.signer[2:].lower().rjust(64, "0")
+            if calldata.startswith("0x" + keccak(text="nonces(bytes32)")[:4].hex()):
+                return hex(self.nonce)
+        raise AssertionError(f"Unexpected JSON-RPC request: {method}")
+
+
+def _use_staff_principal(
+    context: ReservationsContext, *, role: str = "agency_admin", tenant_id: str | None = "agency-one"
+) -> None:
+    from app.modules.identity.session import get_active_staff
+
+    context.client.app.dependency_overrides[get_active_staff] = lambda: {
+        "id": "staff-one",
+        "email": "staff@example.test",
+        "role": role,
+        "tenant_id": tenant_id,
+    }
 
 
 def _customer_auth(
@@ -206,6 +260,31 @@ def _create_reservation(
             "customer_wallet_id": wallet_id or "missing-wallet",
         },
     )
+
+
+def _create_test_reservation(
+    context: ReservationsContext,
+    *,
+    listing_id: str,
+    email: str = "permit-customer@example.test",
+    deposit_amount_cop: Decimal | None = Decimal("1000.00"),
+):
+    customer_id, auth = _customer_auth(context, email=email)
+    quote_id, wallet_id = _seed_reservation_inputs(
+        context,
+        customer_id,
+        listing_id=listing_id,
+        deposit_amount_cop=deposit_amount_cop,
+    )
+    response = _create_reservation(
+        context,
+        auth,
+        listing_id=listing_id,
+        quote_id=quote_id,
+        wallet_id=wallet_id,
+    )
+    assert response.status_code == 201, response.text
+    return customer_id, auth, response.json()
 
 
 def test_create_snapshots_quote_deposit_and_both_linked_wallet_addresses(
@@ -804,6 +883,36 @@ def test_create_expires_due_reservations_only_for_requested_listing(
         assert unrelated is not None and unrelated.status == "pending"
 
 
+def test_customer_permit_route_fails_closed_when_escrow_is_not_configured(
+    reservations_context: ReservationsContext,
+) -> None:
+    context = reservations_context
+    customer_id, auth = _customer_auth(context)
+    quote_id, wallet_id = _seed_reservation_inputs(
+        context,
+        customer_id,
+        listing_id="permit-config-listing",
+        deposit_amount_cop=Decimal("1000.00"),
+    )
+    reservation = _create_reservation(
+        context,
+        auth,
+        listing_id="permit-config-listing",
+        quote_id=quote_id,
+        wallet_id=wallet_id,
+    )
+    assert reservation.status_code == 201, reservation.text
+
+    response = context.client.post(
+        f"/api/v1/reservations/{reservation.json()['reservation_id']}/permit",
+        headers=auth,
+        json={"action": "deposit"},
+    )
+
+    assert response.status_code == 503, response.text
+    assert response.json()["code"] == "permit_unavailable"
+
+
 def test_list_route_expires_overdue_pending_reservation_and_allows_new_creation(
     reservations_context: ReservationsContext,
 ) -> None:
@@ -874,3 +983,294 @@ def test_list_route_expires_overdue_pending_reservation_and_allows_new_creation(
         key="list-expiry-retry",
     )
     assert created_after_expiry.status_code == 201, created_after_expiry.text
+
+
+def test_customer_permit_uses_persisted_snapshot_without_mutation_or_transaction_send(
+    reservations_context: ReservationsContext,
+) -> None:
+    context = reservations_context
+    customer_id, auth, reservation = _create_test_reservation(
+        context, listing_id="permit-snapshot-listing"
+    )
+    rpc = _configure_fake_escrow(context)
+    with context.session_factory() as session:
+        stored = session.get(Reservation, reservation["reservation_id"])
+        assert stored is not None
+        before = (
+            stored.status,
+            stored.deposit_confirmed_at,
+            stored.customer_wallet_address,
+            stored.agency_wallet_address,
+            stored.deposit_amount_cop,
+        )
+
+    response = context.client.post(
+        f"/api/v1/reservations/{reservation['reservation_id']}/permit",
+        headers=auth,
+        json={"action": "deposit"},
+    )
+
+    assert response.status_code == 200, response.text
+    permit = response.json()
+    assert set(permit) == {
+        "reservationId",
+        "listingId",
+        "customer",
+        "agency",
+        "actor",
+        "action",
+        "amount",
+        "deadline",
+        "nonce",
+        "signature",
+    }
+    assert permit["reservationId"] == "0x" + keccak(text=reservation["reservation_id"]).hex()
+    assert permit["listingId"] == "0x" + keccak(text="permit-snapshot-listing").hex()
+    assert permit["customer"].lower() == before[2].lower()
+    assert permit["agency"].lower() == before[3].lower()
+    assert permit["actor"].lower() == before[2].lower()
+    assert permit["action"] == 0
+    assert permit["amount"] == 100000
+    assert permit["deadline"] == int(context.clock().timestamp()) + 24 * 60 * 60
+    assert permit["nonce"] == 5
+    assert rpc.calls == ["eth_chainId", "eth_getCode", "eth_call", "eth_call"]
+    assert not {"eth_sendTransaction", "eth_sendRawTransaction"}.intersection(rpc.calls)
+
+    with context.session_factory() as session:
+        stored = session.get(Reservation, reservation["reservation_id"])
+        assert stored is not None
+        assert (
+            stored.status,
+            stored.deposit_confirmed_at,
+            stored.customer_wallet_address,
+            stored.agency_wallet_address,
+            stored.deposit_amount_cop,
+        ) == before
+        assert stored.customer_id == customer_id
+
+
+def test_customer_permit_is_owner_scoped_action_limited_and_rejects_caller_terms(
+    reservations_context: ReservationsContext,
+) -> None:
+    context = reservations_context
+    _, owner_auth, own = _create_test_reservation(
+        context, listing_id="permit-owner-listing", email="permit-owner@example.test"
+    )
+    _, foreign_auth, foreign = _create_test_reservation(
+        context, listing_id="permit-foreign-listing", email="permit-foreign@example.test"
+    )
+    _configure_fake_escrow(context)
+
+    foreign_response = context.client.post(
+        f"/api/v1/reservations/{own['reservation_id']}/permit",
+        headers=foreign_auth,
+        json={"action": "cancel"},
+    )
+    prohibited = context.client.post(
+        f"/api/v1/reservations/{own['reservation_id']}/permit",
+        headers=owner_auth,
+        json={"action": "accept"},
+    )
+    caller_terms = context.client.post(
+        f"/api/v1/reservations/{own['reservation_id']}/permit",
+        headers=owner_auth,
+        json={"action": "deposit", "amount": 1, "actor": "0x" + "99" * 20},
+    )
+
+    assert (foreign_response.status_code, foreign_response.json()["code"]) == (
+        404,
+        "reservation_not_found",
+    )
+    assert prohibited.status_code == caller_terms.status_code == 422
+
+    cancel = context.client.post(
+        f"/api/v1/reservations/{own['reservation_id']}/permit",
+        headers=owner_auth,
+        json={"action": "cancel"},
+    )
+    assert cancel.status_code == 200, cancel.text
+    assert cancel.json()["action"] == 3
+    assert cancel.json()["actor"] == cancel.json()["customer"]
+    assert foreign["status"] == "pending"
+
+
+def test_staff_permits_require_agency_admin_tenant_and_actual_wallet_ownership(
+    reservations_context: ReservationsContext,
+) -> None:
+    context = reservations_context
+    _, _, reservation = _create_test_reservation(
+        context, listing_id="staff-permit-owner-listing"
+    )
+    _configure_fake_escrow(context)
+    from app.modules.reservations.models import Reservation as ReservationModel
+
+    path = f"/api/v1/staff/reservations/{reservation['reservation_id']}/permit"
+    _use_staff_principal(context, role="agent", tenant_id="agency-one")
+    agent = context.client.post(path, json={"action": "accept"})
+    _use_staff_principal(context, role="agency_admin", tenant_id="agency-one")
+    staff_deposit = context.client.post(path, json={"action": "deposit"})
+    _use_staff_principal(context, role="agency_admin", tenant_id="agency-two")
+    cross_tenant = context.client.post(path, json={"action": "accept"})
+    assert agent.status_code == cross_tenant.status_code == 403
+    assert staff_deposit.status_code == 422
+
+    with context.session_factory.begin() as session:
+        session.add(Agency(id="agency-two"))
+        session.add(
+            AgencyWallet(
+                id="agency-wallet-two",
+                agency_id="agency-two",
+                address="0x" + "b" * 40,
+                linked_at=context.clock(),
+            )
+        )
+        stored = session.get(ReservationModel, reservation["reservation_id"])
+        assert stored is not None
+        stored.agency_wallet_id = "agency-wallet-two"
+
+    _use_staff_principal(context, role="agency_admin", tenant_id="agency-two")
+    mismatched_wallet = context.client.post(path, json={"action": "cancel"})
+    assert mismatched_wallet.status_code == 409
+    assert mismatched_wallet.json()["code"] == "agency_wallet_mismatch"
+
+
+def test_staff_decision_requires_confirmed_positive_deposit_but_cancel_does_not(
+    reservations_context: ReservationsContext,
+) -> None:
+    context = reservations_context
+    _, _, reservation = _create_test_reservation(
+        context, listing_id="staff-deposit-listing"
+    )
+    rpc = _configure_fake_escrow(context)
+    _use_staff_principal(context)
+    path = f"/api/v1/staff/reservations/{reservation['reservation_id']}/permit"
+
+    denied_accept = context.client.post(path, json={"action": "accept"})
+    denied_reject = context.client.post(path, json={"action": "reject"})
+    assert (denied_accept.status_code, denied_accept.json()["code"]) == (
+        409,
+        "reservation_deposit_not_confirmed",
+    )
+    assert (denied_reject.status_code, denied_reject.json()["code"]) == (
+        409,
+        "reservation_deposit_not_confirmed",
+    )
+    assert rpc.calls == []
+
+    cancel = context.client.post(path, json={"action": "cancel"})
+    assert cancel.status_code == 200, cancel.text
+    assert cancel.json()["action"] == 3
+    from app.modules.reservations.models import Reservation as ReservationModel
+
+    with context.session_factory.begin() as session:
+        stored = session.get(ReservationModel, reservation["reservation_id"])
+        assert stored is not None
+        stored.deposit_confirmed_at = context.clock()
+
+    accepted = context.client.post(path, json={"action": "accept"})
+    rejected = context.client.post(path, json={"action": "reject"})
+    assert accepted.status_code == rejected.status_code == 200
+    assert accepted.json()["action"] == 1
+    assert rejected.json()["action"] == 2
+    assert accepted.json()["actor"].lower() == ("0x" + "a" * 40)
+    assert rejected.json()["actor"].lower() == ("0x" + "a" * 40)
+
+
+def test_nullable_deposit_allows_agency_decision_and_deadline_is_exclusive(
+    reservations_context: ReservationsContext,
+) -> None:
+    context = reservations_context
+    _, auth, reservation = _create_test_reservation(
+        context,
+        listing_id="nullable-permit-listing",
+        email="nullable-permit@example.test",
+        deposit_amount_cop=None,
+    )
+    rpc = _configure_fake_escrow(context)
+    _use_staff_principal(context)
+    path = f"/api/v1/staff/reservations/{reservation['reservation_id']}/permit"
+
+    accepted = context.client.post(path, json={"action": "accept"})
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["amount"] == 0
+
+    customer_deposit = context.client.post(
+        f"/api/v1/reservations/{reservation['reservation_id']}/permit",
+        headers=auth,
+        json={"action": "deposit"},
+    )
+    assert customer_deposit.status_code == 409
+    assert customer_deposit.json()["code"] == "reservation_deposit_not_configured"
+
+    context.clock.now = datetime.fromisoformat(
+        reservation["decision_deadline_at"].replace("Z", "+00:00")
+    )
+    expired = context.client.post(path, json={"action": "reject"})
+    assert (expired.status_code, expired.json()["code"]) == (
+        409,
+        "reservation_decision_deadline_passed",
+    )
+    login = context.client.post(
+        "/api/v1/customer/auth/login",
+        json={"email": "nullable-permit@example.test", "password": "password"},
+    )
+    assert login.status_code == 200
+    boundary_customer = context.client.post(
+        f"/api/v1/reservations/{reservation['reservation_id']}/permit",
+        headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+        json={"action": "deposit"},
+    )
+    assert (boundary_customer.status_code, boundary_customer.json()["code"]) == (
+        409,
+        "reservation_decision_deadline_passed",
+    )
+
+    assert rpc.calls == [
+        "eth_chainId",
+        "eth_getCode",
+        "eth_call",
+        "eth_call",
+    ]
+
+
+def test_permit_deadline_ceils_subsecond_policy_deadline_and_policy_stays_exclusive(
+    reservations_context: ReservationsContext,
+) -> None:
+    context = reservations_context
+    context.clock.now = datetime(2026, 9, 1, 12, 0, 0, 250_000, tzinfo=timezone.utc)
+    _, auth, reservation = _create_test_reservation(
+        context,
+        listing_id="subsecond-permit-listing",
+        email="subsecond-permit@example.test",
+    )
+    rpc = _configure_fake_escrow(context)
+    policy_deadline = datetime.fromisoformat(
+        reservation["decision_deadline_at"].replace("Z", "+00:00")
+    )
+    assert policy_deadline == datetime(2026, 9, 2, 12, 0, 0, 250_000, tzinfo=timezone.utc)
+
+    permitted = context.client.post(
+        f"/api/v1/reservations/{reservation['reservation_id']}/permit",
+        headers=auth,
+        json={"action": "deposit"},
+    )
+
+    assert permitted.status_code == 200, permitted.text
+    assert int(policy_deadline.timestamp()) == 1_788_350_400
+    assert permitted.json()["deadline"] == 1_788_350_401
+    assert rpc.calls == ["eth_chainId", "eth_getCode", "eth_call", "eth_call"]
+
+    context.clock.now = policy_deadline
+    boundary_login = context.client.post(
+        "/api/v1/customer/auth/login",
+        json={"email": "subsecond-permit@example.test", "password": "password"},
+    )
+    assert boundary_login.status_code == 200
+    expired = context.client.post(
+        f"/api/v1/reservations/{reservation['reservation_id']}/permit",
+        headers={"Authorization": f"Bearer {boundary_login.json()['access_token']}"},
+        json={"action": "deposit"},
+    )
+    assert expired.status_code == 409, expired.text
+    assert expired.json()["code"] == "reservation_decision_deadline_passed"
+    assert rpc.calls == ["eth_chainId", "eth_getCode", "eth_call", "eth_call"]

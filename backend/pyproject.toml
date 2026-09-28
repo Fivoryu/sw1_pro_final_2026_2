@@ -12,6 +12,7 @@ dependencies = [
   "argon2-cffi>=23.1",
   "cryptography>=42.0",
   "eth-account>=0.13.7,<1.0",
+  "eth-utils>=5.0",
   "fastapi>=0.110",
   "PyJWT>=2.8",
   "psycopg[binary]>=3.1",

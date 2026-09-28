@@ -7,24 +7,31 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.modules.customer_identity.schemas import CustomerErrorResponse
 from app.modules.customer_identity.session import ActiveCustomer, get_active_customer
+from app.modules.identity.session import ActiveStaff, get_active_staff
 from app.modules.reservations.schemas import (
+    CustomerReservationPermitRequest,
     ReservationCreateRequest,
     ReservationErrorResponse,
+    ReservationPermitResponse,
     ReservationResponse,
+    StaffReservationPermitRequest,
 )
 from app.modules.reservations.service import (
     create_reservation,
     get_customer_reservation,
+    issue_reservation_permit,
     list_customer_reservations,
 )
 
 
 router = APIRouter(prefix="/api/v1/reservations", tags=["reservations"])
+staff_router = APIRouter(prefix="/api/v1/staff/reservations", tags=["staff-reservations"])
 _RESERVATION_ERRORS = {
     403: ReservationErrorResponse,
     404: ReservationErrorResponse,
     409: ReservationErrorResponse,
 }
+_PERMIT_ERRORS = {**_RESERVATION_ERRORS, 503: ReservationErrorResponse}
 
 
 def _session_factory(request: Request) -> sessionmaker[Session]:
@@ -102,3 +109,63 @@ def get_own(
         reservation_id=reservation_id,
         now=request.app.state.clock(),
     )
+
+
+@router.post(
+    "/{reservation_id}/permit",
+    response_model=ReservationPermitResponse,
+    responses={
+        401: {"model": CustomerErrorResponse, "description": "Invalid customer session"},
+        **{
+            code: {"model": schema, "description": "Permit action is not eligible or unavailable"}
+            for code, schema in _PERMIT_ERRORS.items()
+        },
+        422: {"model": ReservationErrorResponse, "description": "Invalid permit request"},
+    },
+)
+def customer_permit(
+    reservation_id: str,
+    body: CustomerReservationPermitRequest,
+    request: Request,
+    customer: ActiveCustomer = Depends(_authenticated_customer),
+) -> ReservationPermitResponse:
+    permit = issue_reservation_permit(
+        session_factory=_session_factory(request),
+        settings=request.app.state.settings,
+        transport=getattr(request.app.state, "reservation_rpc_transport", None),
+        reservation_id=reservation_id,
+        actor=customer,
+        action=body.action,
+        now=request.app.state.clock(),
+    )
+    return ReservationPermitResponse.model_validate(permit)
+
+
+@staff_router.post(
+    "/{reservation_id}/permit",
+    response_model=ReservationPermitResponse,
+    responses={
+        401: {"description": "Invalid staff session"},
+        **{
+            code: {"model": schema, "description": "Permit action is not eligible or unavailable"}
+            for code, schema in _PERMIT_ERRORS.items()
+        },
+        422: {"model": ReservationErrorResponse, "description": "Invalid permit request"},
+    },
+)
+def staff_permit(
+    reservation_id: str,
+    body: StaffReservationPermitRequest,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> ReservationPermitResponse:
+    permit = issue_reservation_permit(
+        session_factory=_session_factory(request),
+        settings=request.app.state.settings,
+        transport=getattr(request.app.state, "reservation_rpc_transport", None),
+        reservation_id=reservation_id,
+        actor=staff,
+        action=body.action,
+        now=request.app.state.clock(),
+    )
+    return ReservationPermitResponse.model_validate(permit)

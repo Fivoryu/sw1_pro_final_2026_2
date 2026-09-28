@@ -10,15 +10,44 @@ from uuid import uuid4
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.core.config import Settings
 from app.modules.agencies.models import AgencyWallet
 from app.modules.catalog.models import Listing, QuoteSnapshot
 from app.modules.customer_identity.models import CustomerWallet
+from app.modules.identity.models import Agency
+from app.modules.customer_identity.session import ActiveCustomer
+from app.modules.identity.session import ActiveStaff
+from app.modules.reservations.authorization import (
+    ReservationAction,
+    ensure_reservation_action_eligible,
+)
+from app.modules.reservations.chain import (
+    PermitUnavailableError,
+    RpcTransport,
+    contract_deadline_seconds,
+    cop_to_token_units,
+    issue_permit,
+)
 from app.modules.reservations.errors import ReservationApiError
 from app.modules.reservations.models import Reservation
 from app.modules.reservations.schemas import ReservationResponse
 
 _ACTIVE_STATUSES = ("pending", "accepted")
 _DECISION_WINDOW = timedelta(hours=24)
+_STAFF_ACTIONS: tuple[ReservationAction, ...] = ("accept", "reject", "cancel")
+_CUSTOMER_ACTIONS = ("deposit", "cancel")
+
+
+def _authorized_staff_action(action: str) -> ReservationAction:
+    """Authorize one staff action and narrow it to the contract-level literal."""
+    for allowed in _STAFF_ACTIONS:
+        if action == allowed:
+            return allowed
+    raise ReservationApiError(
+        403,
+        "reservation_action_forbidden",
+        "The actor is not allowed to request this action.",
+    )
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -364,3 +393,160 @@ def get_customer_reservation(
                 "The reservation was not found.",
             )
         return _reservation_response(reservation)
+
+
+def _ensure_deposit_request_eligible(reservation: Reservation, *, now: datetime) -> None:
+    if reservation.status != "pending":
+        raise ReservationApiError(
+            409,
+            "reservation_not_pending",
+            "Only a pending reservation can receive this action request.",
+        )
+    if _as_utc(now) >= _as_utc(reservation.decision_deadline_at):
+        raise ReservationApiError(
+            409,
+            "reservation_decision_deadline_passed",
+            "The reservation decision deadline has passed.",
+        )
+    if reservation.deposit_amount_cop is None:
+        raise ReservationApiError(
+            409,
+            "reservation_deposit_not_configured",
+            "A configured deposit is required for a deposit permit.",
+        )
+    if reservation.deposit_confirmed_at is not None:
+        raise ReservationApiError(
+            409,
+            "reservation_deposit_already_confirmed",
+            "The reservation deposit is already confirmed.",
+        )
+
+
+def _wallet_snapshot_matches(wallet_address: str, reservation_address: str) -> bool:
+    return wallet_address.lower() == reservation_address.lower()
+
+
+def issue_reservation_permit(
+    *,
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    transport: RpcTransport | None,
+    reservation_id: str,
+    actor: ActiveCustomer | ActiveStaff,
+    action: str,
+    now: datetime,
+) -> dict[str, object]:
+    """Authorize and sign an action using only the persisted reservation snapshot."""
+    is_staff = "role" in actor
+    staff_action = _authorized_staff_action(action) if is_staff else None
+    if not is_staff and action not in _CUSTOMER_ACTIONS:
+        raise ReservationApiError(
+            403,
+            "reservation_action_forbidden",
+            "The actor is not allowed to request this action.",
+        )
+
+    with session_factory() as session:
+        reservation = session.get(Reservation, reservation_id)
+        if reservation is None:
+            raise ReservationApiError(
+                404,
+                "reservation_not_found",
+                "The reservation was not found.",
+            )
+        if not is_staff and actor["id"] != reservation.customer_id:
+            raise ReservationApiError(
+                404,
+                "reservation_not_found",
+                "The reservation was not found.",
+            )
+
+        agency_wallet = session.get(AgencyWallet, reservation.agency_wallet_id)
+        if agency_wallet is None:
+            raise ReservationApiError(
+                409,
+                "agency_wallet_mismatch",
+                "The reservation agency wallet snapshot is unavailable.",
+            )
+        agency = session.get(Agency, agency_wallet.agency_id)
+        if agency is None:
+            raise ReservationApiError(
+                409,
+                "agency_wallet_mismatch",
+                "The reservation agency wallet snapshot is unavailable.",
+            )
+
+        if staff_action is not None:
+            ensure_reservation_action_eligible(
+                reservation,
+                actor,
+                action=staff_action,
+                now=now,
+                reservation_agency_id=agency_wallet.agency_id,
+            )
+            if not _wallet_snapshot_matches(agency_wallet.address, reservation.agency_wallet_address):
+                raise ReservationApiError(
+                    409,
+                    "agency_wallet_mismatch",
+                    "The reservation agency wallet does not match its persisted snapshot.",
+                )
+        elif action == "cancel":
+            ensure_reservation_action_eligible(
+                reservation,
+                actor,
+                action="cancel",
+                now=now,
+            )
+        else:
+            _ensure_deposit_request_eligible(reservation, now=now)
+
+        customer_wallet = session.get(CustomerWallet, reservation.customer_wallet_id)
+        if (
+            customer_wallet is None
+            or customer_wallet.customer_id != reservation.customer_id
+            or not _wallet_snapshot_matches(
+                customer_wallet.address,
+                reservation.customer_wallet_address,
+            )
+        ):
+            raise ReservationApiError(
+                409,
+                "customer_wallet_mismatch",
+                "The reservation customer wallet does not match its persisted snapshot.",
+            )
+
+        try:
+            amount = cop_to_token_units(reservation.deposit_amount_cop)
+        except ValueError:
+            raise ReservationApiError(
+                409,
+                "reservation_deposit_invalid",
+                "The persisted reservation deposit is invalid.",
+            ) from None
+        deadline = contract_deadline_seconds(reservation.decision_deadline_at)
+        action_actor = (
+            reservation.agency_wallet_address if is_staff else reservation.customer_wallet_address
+        )
+        permit_terms = {
+            "reservation_id": reservation.id,
+            "listing_id": reservation.listing_id,
+            "customer_address": reservation.customer_wallet_address,
+            "agency_address": reservation.agency_wallet_address,
+            "actor_address": action_actor,
+            "amount": amount,
+            "deadline": deadline,
+        }
+
+    try:
+        return issue_permit(
+            settings=settings,
+            transport=transport,
+            action=action,
+            **permit_terms,
+        )
+    except PermitUnavailableError:
+        raise ReservationApiError(
+            503,
+            "permit_unavailable",
+            "A local reservation escrow permit is unavailable.",
+        ) from None

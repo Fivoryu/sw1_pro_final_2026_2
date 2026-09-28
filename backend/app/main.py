@@ -23,6 +23,7 @@ from app.modules.customer_identity.router import wallet_router as customer_walle
 from app.modules.identity.router import router as identity_router
 from app.modules.reservations.errors import ReservationApiError
 from app.modules.reservations.router import router as reservations_router
+from app.modules.reservations.router import staff_router as staff_reservations_router
 
 
 def create_app(
@@ -60,6 +61,7 @@ def create_app(
     app.include_router(agency_wallet_router)
     app.include_router(catalog_router)
     app.include_router(reservations_router)
+    app.include_router(staff_reservations_router)
 
     @app.exception_handler(ReservationApiError)
     async def reservation_api_error(

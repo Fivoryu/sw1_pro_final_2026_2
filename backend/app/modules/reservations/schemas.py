@@ -29,6 +29,33 @@ class ReservationQuoteSnapshotResponse(BaseModel):
     monthly_total: CatalogMoney
 
 
+class CustomerReservationPermitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["deposit", "cancel"]
+
+
+class StaffReservationPermitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["accept", "reject", "cancel"]
+
+
+class ReservationPermitResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reservationId: str
+    listingId: str
+    customer: str
+    agency: str
+    actor: str
+    action: Literal[0, 1, 2, 3]
+    amount: int
+    deadline: int
+    nonce: int
+    signature: str
+
+
 class ReservationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
