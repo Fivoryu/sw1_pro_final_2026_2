@@ -30,7 +30,7 @@ Extender el prototipo web del panel para que `agency_admin` pueda reconocer dón
 - [x] Adaptar la expectativa app-level en `src/App.test.tsx` sin cambiar las de otros roles.
 - [x] GREEN/REFACTOR: implementar shell/estado vacío y estilos accesibles en las cuatro rutas autorizadas.
 - [x] `npm run test`, `npm run build`, `git diff --check` y presupuesto <400 verificados de forma independiente.
-- [ ] Crear commit convencional con código y pruebas; luego registrar hash/evidencia en el tracker F02.
+- [x] Commit convencional `a7a8572` con código y pruebas; revisar exactamente este slice y registrar hash/evidencia en el tracker F02.
 
 ## Criterios de aceptación
 
@@ -46,5 +46,6 @@ Extender el prototipo web del panel para que `agency_admin` pueda reconocer dón
 - GREEN focal: `npm exec -- vitest run src/features/auth/ProtectedStaffShell.test.tsx` pasó 5/5.
 - Suite completa final: `npm run test` pasó en 6 archivos, 52/52 pruebas.
 - Build: `npm run build` pasó (`tsc --noEmit`; Vite transformó 35 módulos).
-- Diff staged final: 181 líneas cambiadas (169 añadidas, 12 eliminadas) en seis rutas, bajo 400; incluye 127 líneas de código, este task file y el tracker base. `git diff --cached --check` pasó; sin manifiestos/lockfile.
-- Commit: pendiente; las seis rutas verificadas están staged.
+- Diff del work-unit `a7a8572`: 181 líneas cambiadas (169 añadidas, 12 eliminadas) en seis rutas, bajo 400; incluye 127 líneas de código, este task file y el tracker base. `git diff --cached --check` pasó; sin manifiestos/lockfile.
+- Revisión nativa `review-db28560ab5d7d35c`: aprobada y acknowledged; R2-001 en `src/App.test.tsx:233` es SUGGESTION informativa, sin corrección.
+- Commit de evidencia: pendiente; no hubo push/PR.
