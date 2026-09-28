@@ -32,6 +32,7 @@ Añadir CI de pull request para las superficies F02 que ya tienen código ejecut
 - [x] Ejecutar validación estática disponible y registrar evidencia.
 - [x] Actualizar tracker/evidencia preliminar.
 - [x] Commit convencional `8002648`; 171 líneas cambiadas en el work-unit commit, sin push ni PR.
+- [x] Revisión nativa del rango exacto `a5223a6..8002648`: lineage `review-ccaef90d54cbf2cf` aprobada y acknowledged; cuatro lentes completadas, sin ruta de corrección.
 
 ## Criterios de aceptación
 
@@ -54,3 +55,4 @@ Añadir CI de pull request para las superficies F02 que ya tienen código ejecut
 - Guía local: `docs/ci/f02-initial-ci.md` (52 líneas).
 - Verificación: PyYAML 6.0.3 parse PASS; triggers, permisos, exclusiones y comandos comprobados contra manifests/docs. `actionlint` no está instalado, por lo que la semántica GitHub permanece sin validar. Diff staged final: 171 líneas.
 - Commit: `8002648` (`ci(f02): add checks for active product surfaces`), 171 líneas cambiadas.
+- Revisión nativa `review-ccaef90d54cbf2cf`: candidata exacta `8002648` sobre `a5223a645f0b1d63e8f54d49f846ecc7e50aaa48`; 4 rutas cambiadas y 171 líneas de diff. Se completaron las cuatro lentes; el cierre ofreció acknowledgement y no ofreció ruta de corrección. Resultado `approved` y `acknowledged`. El cierre no expuso un resumen de hallazgos, por lo que no se afirma que no los hubiera.
