@@ -15,6 +15,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import (
     Column,
     Engine,
@@ -37,6 +38,24 @@ from app.modules.identity import models as identity_models  # noqa: F401
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 _R6_DATABASE_PREFIX = "roomforge_r6_"
 _R6_ENGINE_INFO_KEY = "roomforge.r6.isolated_engine"
+_ALEMBIC_VERSION_NUM_LENGTH = 32
+
+
+def test_alembic_revision_ids_fit_version_num_limit() -> None:
+    config = Config()
+    config.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
+    script_directory = ScriptDirectory.from_config(config)
+    revision_ids = [script.revision for script in script_directory.walk_revisions()]
+    oversized_ids = [
+        revision_id
+        for revision_id in revision_ids
+        if len(revision_id) > _ALEMBIC_VERSION_NUM_LENGTH
+    ]
+
+    assert not oversized_ids, (
+        "Alembic revision IDs must fit alembic_version.version_num VARCHAR(32); "
+        f"oversized IDs: {oversized_ids}"
+    )
 
 
 @dataclass(frozen=True)
@@ -98,6 +117,35 @@ def r6_database() -> Iterator[R6Database]:
         database.engine.dispose()
 
 
+def test_normalize_sql_canonicalizes_postgres_default_trim_both_form() -> None:
+    expected = _normalize_sql("lower(trim(email))")
+
+    assert expected == "lower trim email"
+    assert _normalize_sql("lower(TRIM(BOTH FROM email))") == expected
+    assert _normalize_sql("lower(trim(BOTH FROM lower(email)))") == _normalize_sql(
+        "lower(trim(lower(email)))"
+    )
+
+
+def test_normalize_sql_preserves_non_default_trim_arguments() -> None:
+    collapsed = _normalize_sql("lower(trim(email))")
+
+    leading = _normalize_sql("lower(trim(LEADING FROM email))")
+    trailing = _normalize_sql("lower(trim(TRAILING FROM email))")
+    explicit_character = _normalize_sql("lower(trim(BOTH ' ' FROM email))")
+
+    assert leading == "lower trim leading from email"
+    assert trailing == "lower trim trailing from email"
+    assert explicit_character == "lower trim both ' ' from email"
+    assert collapsed not in (leading, trailing, explicit_character)
+
+
+# PostgreSQL deparses trim(expr) as TRIM(BOTH FROM expr); both spellings are the same
+# default form. Only the explicit default arguments are dropped so that LEADING,
+# TRAILING and explicit trim-character arguments keep their own semantics.
+_DEFAULT_TRIM_ARGUMENTS = re.compile(r"\btrim\s*\(\s*both\s+from\s+")
+
+
 def _normalize_sql(value: str | None) -> str | None:
     if value is None:
         return None
@@ -109,6 +157,7 @@ def _normalize_sql(value: str | None) -> str | None:
         r"in (\1)",
         normalized,
     )
+    normalized = _DEFAULT_TRIM_ARGUMENTS.sub("trim(", normalized)
     normalized = normalized.replace("(", " ").replace(")", " ")
     return " ".join(normalized.split())
 

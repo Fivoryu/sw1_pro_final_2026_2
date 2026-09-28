@@ -61,8 +61,22 @@ La fixture exige `ROOMFORGE_R6_DATABASE_URL` con `postgresql+psycopg`, host loop
 - Durante la lectura se observó un posible bloqueo no confirmado en una prueba de concurrencia PostgreSQL: crea un agente con un `tenant_id` que parece no estar sembrado, pese a la FK a `agency.id`. Revisar ese fixture antes de interpretar una eventual falla; no se ejecutó.
 - El usuario autorizó el intento descrito arriba con límites explícitos, que se respetaron. Cualquier cambio de la revisión o repetición de pruebas queda pausado hasta nueva autorización.
 
-## Próximos pasos
+## Próximos pasos (estado al cierre del primer intento)
 
 1. No modificar migraciones ni reanudar Docker/PostgreSQL hasta que el usuario decida cómo resolver el ID de revisión demasiado largo.
 2. Si se autoriza un cambio y repetición, usar exclusivamente la base R6 ya autorizada (confirmando que sigue vacía) o pedir autorización antes de crear otra; ejecutar solo estos mismos dos archivos de tests y conservar todos los recursos.
 3. Si se exige upgrade desde una versión previa, definir y probar una revisión de partida explícita en una base desechable autorizada. No inferir cobertura completa de los casos SQLite.
+
+## Resultado de T3b tras autorización — 2026-09-28
+
+El usuario autorizó corregir el ID, validar R6 y usar la vía administrativa del contenedor; se preservaron el target y volumen existentes, sin limpieza ni publicación.
+
+- Se acortó `revision` a `0004_pending_staff_email_uniq` (29 chars), conservando filename, `down_revision` y operaciones; se añadió el guard de 32 caracteres.
+- Primeras dos invocaciones con URLs locales fallaron autenticación antes de la fixture. La URL añadida al `.env` pasó las guardas de driver/host/puerto/target, pero no autenticó. Comparación in-memory, sin mostrar valores, detectó que sus credenciales no coinciden con el `POSTGRES_USER`/`POSTGRES_PASSWORD` inicial del contenedor; esa configuración no demuestra el estado actual de un volumen persistente.
+- Con permiso administrativo se hizo una tercera invocación usando el init config del contenedor, solo en memoria y sin imprimirlo. El pytest terminó con exit 1 y su salida se suprimió; no se afirma que el comando original terminara en PASS.
+- Lectura read-only posterior: rol `roomforge_local`, 7 tablas de aplicación más `alembic_version` y `version_num=0004_pending_staff_email_uniq` (head). El comparador inicial encontró solo diferencias de representación equivalentes: `trim(email)` frente a `trim(both from email)`.
+- Se corrigió `_normalize_sql` mediante TDD, limitando la equivalencia al default BOTH. RED: 1 failed/1 passed; GREEN: 2 passed. La suite backend independiente pasó 135 tests, 2 R6 SKIP; Ruff PASS; Pyright 0 issues.
+- Verificador independiente aplicó el comparador de metadata directamente a la base ya poblada, sin invocar fixture ni Alembic: PASS para tablas, columnas/tipos/nullability/defaults, PK, FK, unique keys, índices y checks. Esto acredita el schema actual, pero no prueba retroactivamente que el primer estado estuviera blank ni convierte el pytest original en PASS.
+- El contenedor quedó `exited`; `roomforge-local-dev_postgres_data` permanece montado y preservado. No se limpió ni se ejecutó otra migración.
+- El primer traceback imprimió accidentalmente una contraseña local; no se reproduce aquí ni en memoria; tratarla como expuesta y rotarla si es válida. Los outputs posteriores se capturaron y suprimieron.
+- Cambios de código y evidencia siguen sin commit/revisión nativa en este punto. No hubo push/PR.

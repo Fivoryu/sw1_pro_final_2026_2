@@ -1,6 +1,6 @@
 """Enforce one pending staff invitation per normalized email.
 
-Revision ID: 0004_staff_invitation_pending_email_unique
+Revision ID: 0004_pending_staff_email_uniq
 Revises: 0003_agency_registry
 """
 from __future__ import annotations
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0004_staff_invitation_pending_email_unique"
+revision = "0004_pending_staff_email_uniq"
 down_revision = "0003_agency_registry"
 branch_labels = None
 depends_on = None
