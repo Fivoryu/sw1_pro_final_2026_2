@@ -2,7 +2,7 @@
 
 ## Estado
 
-**VERIFICADA CON LIMITACIÓN DOCUMENTADA; pendiente commit/revisión.** La R6 existente está en `0004_pending_staff_email_uniq` y contiene 7 tablas de aplicación más `alembic_version`. Tras corregir el normalizador de PostgreSQL, una comparación read-only independiente de todo el esquema pasó. El tercer pytest original terminó con exit 1 antes de corregir la representación `TRIM`; su salida se suprimió y no se afirma como PASS. La base ya está poblada: no repetir la fixture fresh-DB ni Alembic, ni limpiar. El volumen se preserva.
+**CERRADA CON LIMITACIÓN DOCUMENTADA.** Work-unit `66076bb` (134 líneas), revisión nativa `review-cf05394c9a6e1d35` aprobada y acknowledged. La R6 existente está en `0004_pending_staff_email_uniq` y contiene 7 tablas de aplicación más `alembic_version`. Tras corregir el normalizador de PostgreSQL, una comparación read-only independiente de todo el esquema pasó. El tercer pytest original terminó con exit 1 antes de corregir la representación `TRIM`; su salida se suprimió y no se afirma como PASS. La base ya está poblada: no repetir la fixture fresh-DB ni Alembic, ni limpiar. El volumen se preserva.
 
 ## Contexto verificado
 
@@ -58,4 +58,4 @@
 - Se corrigió solo el normalizador del comparador mediante TDD: RED 1 failed/1 passed; GREEN 2 passed. Verificación independiente: `python -m pytest tests -q -p no:cacheprovider` con Python 3.14.6, R6 env unset y SQLite in-memory: 135 passed/2 R6 skipped; `python -m ruff check app tests`: PASS. Pyright del venv local del checkout raíz sobre `app tests`: 0 errors/warnings/informationals. El verificador ejecutó únicamente la comparación de metadata read-only contra la DB ya poblada: PASS para tablas, columnas/types/nullability/defaults, PK/FK/unique/index/check constraints. No ejecutó fixture, SQL migration ni Alembic en esa comparación.
 - El primer traceback incluyó accidentalmente una contraseña local; no se copia aquí ni en memoria; tratarla como expuesta y rotarla si es válida.
 - El contenedor está `exited`; el volumen sigue montado. No limpiar ni repetir fixture fresh-DB en esta base poblada.
-- Sin stage/commit/review hasta documentar la limitación y revisar el presupuesto. No hubo publicación.
+- Work-unit comprometido como `66076bb`; revisión nativa del mismo candidato aprobada y acknowledged (`review-cf05394c9a6e1d35`). No hubo push/PR. El exit 1 del test original y la no repetición sobre R6 poblada siguen siendo limitaciones declaradas.

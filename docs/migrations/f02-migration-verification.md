@@ -79,4 +79,4 @@ El usuario autorizó corregir el ID, validar R6 y usar la vía administrativa de
 - Verificador independiente aplicó el comparador de metadata directamente a la base ya poblada, sin invocar fixture ni Alembic: PASS para tablas, columnas/tipos/nullability/defaults, PK, FK, unique keys, índices y checks. Esto acredita el schema actual, pero no prueba retroactivamente que el primer estado estuviera blank ni convierte el pytest original en PASS.
 - El contenedor quedó `exited`; `roomforge-local-dev_postgres_data` permanece montado y preservado. No se limpió ni se ejecutó otra migración.
 - El primer traceback imprimió accidentalmente una contraseña local; no se reproduce aquí ni en memoria; tratarla como expuesta y rotarla si es válida. Los outputs posteriores se capturaron y suprimieron.
-- Cambios de código y evidencia siguen sin commit/revisión nativa en este punto. No hubo push/PR.
+- El work-unit de migración/comparador se comprometió como `66076bb` (134 líneas). Native review de ese candidato (`review-cf05394c9a6e1d35`, 5 archivos) quedó aprobada y acknowledged; el resumen no devolvió hallazgos adicionales. No hubo push/PR.
