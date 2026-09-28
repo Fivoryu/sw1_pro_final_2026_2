@@ -21,6 +21,8 @@ from app.modules.customer_identity.errors import CustomerApiError
 from app.modules.customer_identity.router import router as customer_identity_router
 from app.modules.customer_identity.router import wallet_router as customer_wallet_router
 from app.modules.identity.router import router as identity_router
+from app.modules.reservations.errors import ReservationApiError
+from app.modules.reservations.router import router as reservations_router
 
 
 def create_app(
@@ -49,7 +51,7 @@ def create_app(
         allow_origins=[resolved_settings.web_origin.rstrip("/")],
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
+        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "Idempotency-Key"],
     )
     app.include_router(identity_router)
     app.include_router(customer_identity_router)
@@ -57,6 +59,22 @@ def create_app(
     app.include_router(agencies_router)
     app.include_router(agency_wallet_router)
     app.include_router(catalog_router)
+    app.include_router(reservations_router)
+
+    @app.exception_handler(ReservationApiError)
+    async def reservation_api_error(
+        request: Request, exc: ReservationApiError
+    ) -> JSONResponse:
+        del request
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "code": exc.code,
+                "message": exc.message,
+                "request_id": str(uuid4()),
+                "field_errors": [],
+            },
+        )
 
     @app.exception_handler(QuoteApiError)
     async def quote_api_error(request: Request, exc: QuoteApiError) -> JSONResponse:
@@ -95,6 +113,23 @@ def create_app(
                 content={
                     "code": "validation_error",
                     "message": "The quote request is invalid.",
+                    "request_id": str(uuid4()),
+                    "field_errors": field_errors,
+                },
+            )
+        if request.url.path.startswith("/api/v1/reservations"):
+            field_errors = [
+                {
+                    "field": ".".join(str(part) for part in error.get("loc", ())),
+                    "message": str(error.get("msg", "Invalid value")),
+                }
+                for error in exc.errors()
+            ]
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "code": "validation_error",
+                    "message": "The reservation request is invalid.",
                     "request_id": str(uuid4()),
                     "field_errors": field_errors,
                 },

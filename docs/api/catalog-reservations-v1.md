@@ -20,7 +20,7 @@ Los valores `EXAMPLE_*` y las direcciones entre corchetes son marcadores, no dat
 
 **Fuera de este documento:** implementación de backend, rutas, modelos, migraciones, contrato Solidity, SDK o UI Flutter; compra/alquiler legal, pagos completos, fondos reales y custodia de claves; definición de escena o renderer 3D. Las rutas de publicación para personal son opcionales, fuera de CC-02 y corresponden a CC-04.
 
-**Desglose de trabajo:** CC-03A (cuenta/sesión) y CC-03B (vinculación/verificación de wallet) están implementados en esta rama, separados de la autenticación de personal. CC-04 (catálogo/ofertas y posible workflow de publicación), CC-05 (reservas y permisos EIP-712), CC-06 (escrow Solidity en Hardhat local), CC-07 (Flutter), CC-08 (integración vertical de wallet) y CC-09 (verificación) siguen siendo trabajo propuesto. Todo trabajo de cadena queda limitado a Hardhat local: sin testnet ni fondos reales salvo aprobación posterior.
+**Desglose de trabajo:** CC-03A (cuenta/sesión), CC-03B (vinculación/verificación de wallet), CC-04A/B (catálogo y cotizaciones) y CC-05A/B (wallet/deposito de agencia y ciclo persistido de reserva) están implementados en esta rama, separados de la autenticación de personal. CC-05C (permisos EIP-712 y reconciliación), CC-06 (escrow Solidity en Hardhat local), CC-07 (Flutter), CC-08 (integración vertical de wallet) y CC-09 (verificación integrada) siguen pendientes. El contrato API completo de este documento continúa en estado **PROPUESTA**, sin aprobación global ni afirmación de despliegue. Todo trabajo de cadena queda limitado a Hardhat local: sin testnet ni fondos reales salvo aprobación posterior.
 
 ## 2. Reglas de producto confirmadas
 
@@ -59,11 +59,11 @@ Los hechos de esta subsección se verificaron en los archivos versionados en el 
 | El árbol ejecutable de módulos contiene `identity` y `agencies`; no contiene `customer_identity`, ni módulos de catálogo/listings, cotización o reservas. `create_app()` tampoco registra routers de esos recursos. Por lo tanto, en esta base no hay rutas de cuenta/wallet de clientes, catálogo, cotización ni reservas. | `backend/app/modules/`; `backend/app/main.py` |
 | La aplicación usa el OpenAPI generado por FastAPI a partir de sus rutas y esquemas; en esta base no hay rutas ni esquemas propios para catálogo o reservas ni una definición OpenAPI manual para esos recursos. | `backend/app/main.py` |
 
-### IMPLEMENTADO EN ESTA RAMA — CC-03A/CC-03B/CC-04A
+### IMPLEMENTADO EN ESTA RAMA — CC-03A/CC-03B/CC-04A/CC-04B/CC-05B
 
-En el worktree actual, CC-03A implementa rutas y modelos de cuenta/sesión de cliente, CC-03B implementa rutas y modelos de vinculación de wallet, CC-04A implementa lectura pública de catálogo y persistencia de publicaciones/ofertas, y CC-04B implementa creación pública de snapshots de cotización y su control de frecuencia. Las identidades de cliente permanecen separadas de `StaffAccount` y de la autenticación de personal. `create_app()` registra sus routers desde `backend/app/modules/customer_identity/` y `backend/app/modules/catalog/`; las rutas se detallan en la sección 4. Este comportamiento de rama no estaba presente en `b6a468a` y no implica despliegue ni aprobación global del contrato.
+En el worktree actual, CC-03A implementa rutas y modelos de cuenta/sesión de cliente, CC-03B implementa rutas y modelos de vinculación de wallet, CC-04A implementa lectura pública de catálogo y persistencia de publicaciones/ofertas, CC-04B implementa creación pública de snapshots de cotización y su control de frecuencia, y CC-05B implementa creación, lectura y listado de reservas propias. Las identidades de cliente permanecen separadas de `StaffAccount` y de la autenticación de personal. `create_app()` registra sus routers desde `backend/app/modules/customer_identity/`, `backend/app/modules/catalog/` y `backend/app/modules/reservations/`; las rutas se detallan en la sección 4. Este comportamiento de rama no implica despliegue ni aprobación global del contrato.
 
-**Alcance restante:** CC-04A implementa en este worktree la lectura pública del catálogo, detalle mínimo y persistencia de publicaciones/ofertas mediante la migración `0007_catalog_offers`; CC-04B añade cotizaciones públicas y persistencia inmutable mediante `0008_quote_snapshots`. Las reservas siguen propuestas y no están implementadas. La implementación de CC-03A/CC-03B/CC-04A/CC-04B no convierte esta propuesta general en un contrato aprobado ni autoriza las políticas futuras que siguen pendientes.
+**Alcance restante:** CC-05C/CC-06 incluyen las transiciones terminales basadas en eventos on-chain, cancelación, decisiones de agencia, reconciliación de eventos/recibos, autorización EIP-712 y contrato escrow. La implementación CC-05B no convierte esta propuesta general en un contrato aprobado ni autoriza testnet o fondos reales.
 
 ## 4. Tabla de rutas propuesta
 
@@ -85,13 +85,14 @@ Los nombres y métodos de esta tabla son **PROPUESTA** como contrato general. La
 | `GET /api/v1/listings` | Buscar publicaciones públicas con filtros y cursor. | **IMPLEMENTADO EN ESTA RAMA, CC-04A**; público, solo publicaciones aprobadas y publicadas (**regla CONFIRMADA**). La forma global del contrato sigue propuesta. |
 | `GET /api/v1/listings/{listing_id}` | Leer el detalle mínimo de una publicación pública. | **IMPLEMENTADO EN ESTA RAMA, CC-04A**; público y con la visibilidad confirmada. La forma global del contrato sigue propuesta. |
 | `POST /api/v1/quotes` | Crear una cotización calculada por el servidor para una versión de oferta y extras seleccionados. | **IMPLEMENTADO EN ESTA RAMA, CC-04B**: público, sin cuenta/wallet, 10 solicitudes por IP cada minuto; cada POST crea un snapshot nuevo. La aceptación global del contrato sigue en propuesta. |
-| `POST /api/v1/reservations` | Crear una solicitud pendiente y devolver la autorización de depósito. | Requiere el cliente RoomForge autenticado y una wallet verificada vinculada (**CONFIRMADA**); el body referencia su ID opaco. El servidor obtiene la dirección verificada, nunca confía en una dirección arbitraria. |
-| `GET /api/v1/reservations/{reservation_id}` | Consultar estado y snapshot de una reserva propia. | Requiere autenticación de cliente y pertenencia de la reserva a esa cuenta; diseño exacto de respuesta **PROPUESTA**. |
+| `POST /api/v1/reservations` | Crear una solicitud pendiente y devolver el snapshot de la reserva. | **PROPUESTA de contrato; implementado en esta rama, CC-05B.** Requiere sesión de cliente, wallet de cliente vinculada y wallet vinculada a la misma agencia. El body referencia `listing_id`, `quote_id` y el ID opaco de wallet; `Idempotency-Key` es obligatorio. El servidor obtiene las direcciones verificadas, nunca confía en direcciones arbitrarias. |
+| `GET /api/v1/reservations` | Listar las reservas del cliente autenticado. | **PROPUESTA de ruta; implementada en esta rama, CC-05B.** Devuelve únicamente reservas de la cuenta autenticada. |
+| `GET /api/v1/reservations/{reservation_id}` | Consultar estado y snapshot de una reserva propia. | **PROPUESTA de contrato; implementada en esta rama, CC-05B.** Una reserva ajena se trata como no encontrada. |
 | `POST /api/v1/reservations/{reservation_id}/cancel` | Solicitar cancelación de una reserva aún pendiente. | Ruta candidata; actor autorizado para cancelar y autorización requerida **PENDIENTES**. |
 | `POST /api/v1/agency/reservations/{reservation_id}/decision` | Ruta propuesta para registrar o reconciliar la decisión ya ejecutada en cadena por la wallet externa de agencia. | **PROPUESTA**; no sustituye la ejecución on-chain de la wallet ni constituye autorización de agencia por sí sola. La wallet ejecuta aceptación y rechazo (**CONFIRMADO**); payload, nonce/replay, envío, timing y reconciliación de eventos **PENDIENTES**. |
 | `POST /api/v1/reservations/{reservation_id}/chain-transactions` | Informar un hash para reconciliar un depósito, reembolso o liberación. | Ruta opcional propuesta; el cliente no acredita el resultado. Acceso, reconciliación y confirmaciones **PENDIENTES**. |
 
-En esta rama CC-04A implementa las dos rutas públicas de catálogo/listings y sus schemas, CC-04B implementa `POST /api/v1/quotes` con snapshot y rate limit, y CC-05A implementa el challenge/vinculación de wallet de agencia y la configuración admin-only del depósito. Las reservas siguen propuestas y no están implementadas. Las rutas y schemas de cuenta/sesión de cliente y las tres rutas de wallet también están implementadas en esta rama; preservan `/api/v1/auth/*` para personal y usan `/api/v1/customer/*` para clientes. Su presencia no aprueba el contrato general ni cambia el router de staff. La configuración de depósito no crea, edita, aprueba ni publica listings. La respuesta pública no debe exponer publicaciones no visibles, descripción, fotos, dirección exacta, dirección de wallet privada ni datos de reserva ajenos.
+En esta rama CC-04A implementa las dos rutas públicas de catálogo/listings y sus schemas, CC-04B implementa `POST /api/v1/quotes` con snapshot y rate limit, CC-05A implementa el challenge/vinculación de wallet de agencia y la configuración admin-only del depósito, y CC-05B implementa creación, lectura y listado de reservas propias. Las decisiones de agencia, cancelación, reconciliación de eventos y transiciones terminales basadas en cadena quedan fuera de CC-05B. Las rutas y schemas de cuenta/sesión de cliente y las tres rutas de wallet también están implementadas en esta rama; preservan `/api/v1/auth/*` para personal y usan `/api/v1/customer/*` para clientes. Su presencia no aprueba el contrato general ni cambia el router de staff. La configuración de depósito no crea, edita, aprueba ni publica listings. Las rutas de reservas no exponen direcciones de wallet ni datos de reservas ajenas.
 
 ### Rutas de publicación para personal — opcionales, fuera de alcance de CC-02 y de CC-04
 
@@ -248,10 +249,15 @@ La vigencia es exactamente 15 minutos según el reloj UTC del servidor. Un quote
 
 ### Creación y reloj de 24 horas
 
-**CONFIRMADA:** la reserva requiere una cuenta RoomForge autenticada y una wallet externa verificada vinculada a esa cuenta. **PROPUESTA:** `POST /api/v1/reservations` toma `quote_id` y el ID opaco de la wallet vinculada elegida. No recibe una dirección arbitraria ni firma de wallet en cada solicitud.
+**CONFIRMADA:** la reserva requiere una cuenta RoomForge autenticada y una wallet externa verificada vinculada a esa cuenta. **PROPUESTA de contrato; implementada en esta rama, CC-05B:** `POST /api/v1/reservations` recibe `listing_id`, `quote_id` y el ID opaco de la wallet vinculada. Exige el header `Idempotency-Key`. No recibe una dirección arbitraria ni firma de wallet en cada solicitud.
+
+```http
+Idempotency-Key: <client-generated-key>
+```
 
 ```json
 {
+  "listing_id": "EXAMPLE_LISTING_ID",
   "quote_id": "EXAMPLE_QUOTE_ID",
   "customer_wallet_id": "EXAMPLE_LINKED_WALLET_ID"
 }
@@ -261,7 +267,7 @@ El servidor debe autenticar la cuenta, verificar que `customer_wallet_id` le per
 
 **CONFIRMADA:** el depósito es fijo por inmueble, no se deriva del total cotizado; el plazo de decisión de agencia empieza cuando la API crea la solicitud, antes de que se deposite el token.
 
-**PROPUESTA:** en una transacción atómica, el servidor valida cotización y autorización, captura `api_created_at` con su reloj y fija `decision_deadline_at = api_created_at + 24 horas`. La respuesta devuelve ese instante y un snapshot de oferta. Una retransmisión idempotente devuelve la reserva ya creada, sin reiniciar el reloj.
+**CONFIRMADA para CC-05B:** en una transacción atómica, el servidor valida la cotización y las wallets requeridas, captura `api_created_at` con su reloj y fija `decision_deadline_at = api_created_at + 24 horas`. Una publicación pública sin depósito (`deposit_amount_cop = null`) puede reservarse sin depósito; un monto positivo configurado se congela en la reserva. Una retransmisión idempotente devuelve la reserva ya creada, sin reiniciar el reloj.
 
 ```json
 {
@@ -271,29 +277,29 @@ El servidor debe autenticar la cuenta, verificar que `customer_wallet_id` le per
   "decision_deadline_at": "<api_created_at plus 24 hours>",
   "quote_snapshot": {
     "quote_id": "EXAMPLE_QUOTE_ID",
-    "offer_version": "EXAMPLE_OFFER_VERSION"
+    "offer_version": 1,
+    "operation": "sale",
+    "lines": [],
+    "one_time_total": {"amount": "100000.00", "currency": "COP"},
+    "monthly_total": {"amount": "0.00", "currency": "COP"}
   },
-  "deposit": {
-    "amount_base_units": "<configured integer string>",
-    "token_address": "<PENDING>",
-    "chain_id": "<PENDING>"
-  }
+  "deposit_amount_cop": null
 }
 ```
 
-`status` y campos exactos son **PROPUESTA**. Los placeholders no son valores permitidos de producción. La autorización EIP-712 que devuelve el servicio se describe en la sección 9.
+La forma global del contrato continúa **PROPUESTA**. En esta rama, CC-05B responde `status: "pending"`, congela el snapshot de quote, las direcciones de wallet verificadas y el depósito COP nullable. No genera ni devuelve autorización EIP-712; esa capacidad queda fuera de CC-05B. Los placeholders no son valores permitidos de producción.
 
 ### Invariante de una reserva pendiente
 
-**CONFIRMADA:** como máximo una reserva pendiente por inmueble.
+**CONFIRMADA para CC-05B:** como máximo una reserva `pending` o `accepted` por `listing_id`. La publicación queda bloqueada desde la creación API; `accepted` sigue bloqueando hasta una futura función explícita de liberación. El backend serializa la creación (SQLite `BEGIN IMMEDIATE`, PostgreSQL lock de la fila de listing) y una restricción única parcial protege el invariante en base de datos. El conflicto implementado es `409 listing_has_active_reservation`.
 
-**PROPUESTA de integridad:** el backend y la base de datos deben hacer cumplir la unicidad de forma atómica bajo solicitudes concurrentes, usando la identidad canónica del inmueble. La reserva pasa a ocupar el inmueble en el momento de creación API, no cuando llega un depósito on-chain. La invariante se aplica mientras haya una reserva `pending`; si el inmueble puede aceptar otra reserva después de que la actual termine —incluida una aceptación— queda **PENDIENTE** (D-18). Cómo se relacionan `listing_id` e identidad de inmueble queda **PENDIENTE** (D-19). La respuesta de conflicto candidata es `409` con `listing_has_pending_reservation`.
+**CONFIRMADA para CC-05B:** misma cuenta + mismo `Idempotency-Key` + mismo body reproduce la reserva original; la misma clave con otro body devuelve `409 idempotency_key_reused`. Se guarda clave y fingerprint SHA-256 en la reserva, sin tabla temporal ni vencimiento separado.
 
-**PROPUESTA de idempotencia:** requerir `Idempotency-Key` en la creación; misma clave y misma cuenta de cliente/cuerpo devuelve la misma respuesta lógica, mientras que clave reutilizada con cuerpo distinto produce `409 idempotency_key_reused`. No se elige acá longitud, retención, hash del cuerpo ni política de almacenamiento de claves. El alcance y tratamiento multi-dispositivo son **PENDIENTES** de concretar.
+**CONFIRMADA para CC-05B:** una quote puede reutilizarse mientras siga dentro de su TTL y mantenga el `offer_version` vigente, incluso luego de que una reserva anterior sea terminal. La quote no se consume por la creación de reserva.
 
 ### Estados y transiciones
 
-Los siguientes nombres son **PROPUESTA**, no estados ya implementados ni aprobados. La regla de negocio confirmada es el resultado indicado en la segunda columna.
+La forma global de estados sigue **PROPUESTA**. CC-05B implementa `pending` y la expiración local `expired`; el modelo reserva los demás estados para trabajo posterior. Solo `pending` y `accepted` bloquean el listing.
 
 | Estado candidato | Transición propuesta | Regla o decisión |
 |---|---|---|
@@ -301,7 +307,9 @@ Los siguientes nombres son **PROPUESTA**, no estados ya implementados ni aprobad
 | `accepted` | `pending` → `accepted`; depósito liberado a wallet de agencia. | La wallet externa de agencia ejecuta la aceptación en cadena (**CONFIRMADO**); la firma EIP-712 del backend autoriza por separado el deadline creado por la API antes del depósito. Envío wallet→contrato directo es **PROPUESTA**; payload, nonce/replay, timing y reconciliación de eventos **PENDIENTES**. |
 | `rejected` | `pending` → `rejected`; depósito reembolsado si fue depositado. | Rechazo y reembolso son reglas **CONFIRMADAS**; la wallet externa de agencia ejecuta el rechazo en cadena (**CONFIRMADO**). Payload, nonce/replay, envío a cadena, timing y reconciliación de eventos **PENDIENTES**. |
 | `cancelled` | `pending` → `cancelled`; depósito reembolsado si fue depositado. | Cancelación mientras sigue pendiente y reembolso confirmados; actor autorizado **PENDIENTE**. |
-| `expired` | `pending` → `expired` al vencer el plazo; depósito reembolsado si fue depositado. | Vencimiento y reembolso confirmados; job/instante límite y carrera con transacciones **PENDIENTES**. |
+| `expired` | `pending` → `expired` al vencer el plazo si no se confirmó depósito. | **CONFIRMADA para CC-05B:** vencimiento sin depósito confirmado se aplica localmente y desbloquea el listing. Si el depósito está confirmado, la reserva sigue bloqueando hasta que CC-05C/CC-06 confirme el reembolso on-chain. |
+
+**IMPLEMENTADO EN ESTA RAMA, CC-05B:** los accesos de lectura propia y los intentos de creación nuevos ejecutan la expiración local de pendientes vencidas sin depósito confirmado. La expiración es perezosa en estas rutas; no se agrega un scheduler en este unit. Una reserva con depósito confirmado no expira localmente ni libera el listing. La confirmación del reembolso, recepción de eventos y demás transiciones terminales basadas en cadena pertenecen a CC-05C/CC-06.
 
 **PROPUESTA:** mantener `deposit_status` separado de `status` para distinguir decisión comercial de ejecución on-chain. Los estados de depósito (por ejemplo, no enviado, pendiente de reconciliación, confirmado, reembolso pendiente/confirmado o liberación pendiente/confirmada) son solo categorías candidatas; strings, confirmaciones y fallos finales quedan **PENDIENTES** de la integración con Solidity. No anunciar depósito como confirmado a partir de un hash informado por Flutter.
 
@@ -368,7 +376,7 @@ Los códigos indicados como implementados describen solamente esta rama; los dem
 
 **HECHO ACTUAL — BASE `b6a468a`:** `backend/app/main.py:create_app()` crea la instancia FastAPI e incluye los routers de personal y agencias; no define rutas ni esquemas de catálogo/ofertas, cotizaciones o reservas, ni configura un documento OpenAPI manual para esos recursos.
 
-**IMPLEMENTADO EN ESTA RAMA — CC-03A/CC-03B/CC-04A/CC-04B:** las rutas y modelos tipados de cuenta/sesión, wallet, lectura pública de catálogo y creación pública de quote están registrados desde `create_app()` y documentados por `app.openapi()`. El schema de CC-04B publica body/respuesta, errores específicos y `201/422/429/503`; no se registran reservas ni rutas administrativas de publicación. Este avance no aprueba el contrato general ni acredita despliegue. No editar a mano una copia JSON/YAML como fuente canónica.
+**IMPLEMENTADO EN ESTA RAMA — CC-03A/CC-03B/CC-04A/CC-04B/CC-05B:** las rutas y modelos tipados de cuenta/sesión, wallet, lectura pública de catálogo, creación pública de quote y reservas están registrados desde `create_app()` y documentados por `app.openapi()`. CC-05B registra las rutas de reservas; no se registran rutas administrativas de publicación. Este avance no aprueba el contrato general ni acredita despliegue. No editar a mano una copia JSON/YAML como fuente canónica.
 
 **Reproducibilidad propuesta:** construir la misma `app` con configuración de test segura y serializar `app.openapi()`; los tests verifican paths públicos, schemas mínimos y que la validación `422` de quote no altere las respuestas previas de staff/cliente. La propuesta global aún requiere revisión y no acredita despliegue ni verificación contra PostgreSQL. No exponer secretos en schemas ni requerir wallet real para generar OpenAPI.
 
@@ -389,17 +397,17 @@ Los códigos indicados como implementados describen solamente esta rama; los dem
 | D-11 | **Resuelta para esta rama, CC-04B:** quote público sin autenticación ni idempotencia, una cotización nueva por POST y límite de 10 solicitudes por IP cada minuto en ventana móvil, compartido por DB; se usa la IP directa del peer y solo se persiste su HMAC. Sigue pendiente la titularidad/historial si se agrega consulta. | Confiar en headers de proxy no configurados, persistir la IP en texto claro o tratar la decisión técnica de rama como aprobación global. La cuenta para reservar y la wallet vinculada/verificada son reglas confirmadas. |
 | D-12 | Revisión y aprobación global de nombres, schemas, enums, errores, respuestas y versionado; los schemas de identidad/wallet existentes en esta rama no aprueban el contrato general. | Que los nombres propuestos ya estén aprobados o que un schema de rama implique implementación de catálogo/reservas. |
 | D-13 | **Defaults técnicos propuestos e implementados en CC-04A:** keyset `created_at DESC, id DESC`; default 20 y máximo 100; filtros de precio no negativos con dos decimales COP. Requiere revisión global del contrato. | Presentar estos valores de implementación como reglas de producto o aprobación global. |
-| D-14 | Idempotency-Key: scope, duración, digest y concurrencia entre dispositivos. | Una política temporal o de almacenamiento no acordada. |
+| D-14 | **Resuelta para CC-05B:** misma cuenta + misma clave + mismo body reproducen la reserva; body distinto da `409`; clave/fingerprint permanecen en la reserva sin tabla expirable. | No extrapolar esta política a operaciones distintas de crear reservas. |
 | D-15 | Qué instante determina aceptación antes del deadline cuando API y cadena difieren; expiración, transacciones en vuelo, confirmaciones, reorgs y reconciliación. | Que hora de envío, hora de bloque o primera confirmación sea el criterio acordado. |
 | D-16 | Dominio EIP-712 final, hash canónico de snapshot, ABI/eventos, gas payer y semántica de escrow. | Tipos Solidity, nombres de eventos, contrato ni configuración de red. |
 | D-17 | Si CC-04 necesita rutas para publicación antes del panel y cuál será el workflow opcional de aprobación/publicación. | Que haya un workflow o rutas administrativas aprobadas. |
-| D-18 | Disponibilidad de un inmueble después de una reserva aceptada y si puede iniciar otra reserva pendiente. | Que salir del estado `pending` vuelva automáticamente disponible la publicación. |
-| D-19 | Identidad canónica del inmueble y su relación con el recurso público `listing_id` para aplicar unicidad. | Que cada publicación y cada inmueble sean necesariamente la misma entidad. |
+| D-18 | **Resuelta para CC-05B:** una reserva `accepted` sigue bloqueando el listing hasta una función futura explícita de liberación. | No liberar automáticamente por salir de `pending`. |
+| D-19 | **Resuelta para CC-05B:** `listing_id` es la identidad de reserva y de bloqueo. | No inferir una entidad de inmueble distinta en este unit. |
 | D-20 | Revisar y aprobar globalmente el contrato de cuenta/sesión implementado en esta rama por CC-03A (paths `/api/v1/customer/auth/*`, schemas, expiración/refresh y revocación). | Confundir el comportamiento implementado en esta rama con aprobación global o despliegue; cambiar `/api/v1/auth/*`, que sigue siendo staff-only. |
 
 ## 13. Criterio de salida de CC-02
 
-Este artefacto conserva el estado de propuesta para revisión y no afirma despliegue ni aprobación final. CC-03A/CC-03B/CC-04A/CC-04B están implementados en esta rama para cuenta/sesión, wallet, catálogo mínimo y creación de snapshots de cotización; las reservas siguen propuestas y no implementadas. Para CC-04B se registran el acceso público sin autenticación/idempotencia, nuevo snapshot por POST, vigencia de 15 minutos, invalidación por `offer_version` y rate limit de 10 solicitudes por IP cada minuto. La modalidad de identidad para reservar está **CONFIRMADA**: cuenta RoomForge autenticada más wallet externa vinculada y verificada; la wallet no la reemplaza. También se confirma una wallet por cuenta, unicidad global de direcciones, consumo del challenge ante firma inválida y ausencia de unlink/reemplazo. Se preserva `/api/v1/auth/*` para personal y `/api/v1/customer/auth/*` para clientes. Para el trabajo restante, resolver permisos administrativos y carrera del deadline. CC-06 y CC-08 deben mantener el límite de Hardhat local: sin testnet ni fondos reales sin aprobación posterior. Las decisiones marcadas **PENDIENTE** no deben convertirse en defaults silenciosos; las etiquetas **PROPUESTA** requieren resolución antes de tratarlas como contrato.
+Este artefacto conserva explícitamente el estado **PROPUESTA** para revisión y no afirma despliegue ni aprobación final. CC-03A/CC-03B/CC-04A/CC-04B y el unit CC-05B están implementados en esta rama; el contrato global de rutas, schemas y errores sigue sujeto a revisión. Para CC-04B se registran el acceso público sin autenticación/idempotencia, nuevo snapshot por POST, vigencia de 15 minutos, invalidación por `offer_version` y rate limit de 10 solicitudes por IP cada minuto. Para CC-05B se registra cuenta autenticada + wallet de cliente y agencia vinculadas, snapshot COP con depósito nullable, deadline de 24 horas, bloqueo por `listing_id`, idempotencia persistida y acceso propio. El vencimiento local sin depósito confirmado libera el bloqueo; si el depósito fue confirmado, el listing permanece bloqueado hasta una futura confirmación de reembolso on-chain. CC-05C/CC-06 conservan cancelación, decisiones de agencia, eventos/recibos, EIP-712 y escrow. Se preserva `/api/v1/auth/*` para personal y `/api/v1/customer/auth/*` para clientes. CC-06 y CC-08 deben mantener el límite de Hardhat local: sin testnet ni fondos reales sin aprobación posterior. Las decisiones marcadas **PENDIENTE** no deben convertirse en defaults silenciosos; las etiquetas **PROPUESTA** requieren resolución antes de tratarlas como contrato.
 
 ## Key Learnings
 
