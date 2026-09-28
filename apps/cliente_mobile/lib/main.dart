@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+const _syntheticListingWarning =
+    'Muestra sintética; no es una publicación real.';
+
 void main() => runApp(const RoomForgeApp());
 
 class RoomForgeApp extends StatelessWidget {
@@ -43,6 +46,12 @@ class _CustomerShellState extends State<CustomerShell> {
           ..addAll(result),
       );
     }
+  }
+
+  void _openSyntheticPropertyDetail() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => const _PropertyDetailScreen()),
+    );
   }
 
   @override
@@ -104,6 +113,35 @@ class _CustomerShellState extends State<CustomerShell> {
           onPressed: _openFilters,
           icon: const Icon(Icons.tune),
           label: const Text('Filtrar catálogo'),
+        ),
+        const SizedBox(height: 16),
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            key: const ValueKey('catalog-synthetic-listing'),
+            onTap: _openSyntheticPropertyDetail,
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Vivienda de muestra',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(_syntheticListingWarning),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Ver detalle',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
         const SizedBox(height: 20),
         _messageCard(
@@ -169,6 +207,57 @@ class _CustomerShellState extends State<CustomerShell> {
     child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 720),
       child: child,
+    ),
+  );
+}
+
+class _PropertyDetailScreen extends StatelessWidget {
+  const _PropertyDetailScreen();
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Detalle del inmueble')),
+    body: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: ListView(
+          key: const ValueKey('property-detail-content'),
+          padding: const EdgeInsets.all(20),
+          children: [
+            Card(
+              color: Theme.of(context).colorScheme.surfaceContainerLow,
+              child: const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  _syntheticListingWarning,
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Vivienda de muestra',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 8),
+            const Text('Descripción ficticia para mostrar el detalle.'),
+            const SizedBox(height: 24),
+            Text(
+              'Recorrido 3D',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            const Text('Recorrido 3D no disponible.'),
+            const SizedBox(height: 24),
+            Text(
+              'Disponibilidad',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            const Text('Disponibilidad no consultada ni confirmada.'),
+          ],
+        ),
+      ),
     ),
   );
 }

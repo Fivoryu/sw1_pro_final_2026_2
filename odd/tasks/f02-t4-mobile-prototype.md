@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Construir incrementalmente la app móvil del cliente para F02.3, sin APIs ni comportamiento de negocio de F03–F10. T4a incorpora el shell Flutter aprobado; T4b añade catálogo/filtros y T4c accesibilidad/responsive. El detalle y recorrido/disponibilidad siguen pendientes de resolver cómo mostrar una propiedad sin inventar datos.
+Construir incrementalmente la app móvil del cliente para F02.3, sin APIs ni comportamiento de negocio de F03–F10. T4a incorpora el shell Flutter aprobado; T4b añade catálogo/filtros y T4c accesibilidad/responsive. Para T4d el usuario autorizó una muestra sintética claramente rotulada; no se presentará como publicación real ni se inventarán condiciones comerciales.
 
 ## Alcance autorizado de esta unidad
 
@@ -17,7 +17,7 @@ Construir incrementalmente la app móvil del cliente para F02.3, sin APIs ni com
 - [x] **T4b — Catálogo y filtros cliente.** Navegación aprobada (Explorar/Reservas/Cuenta), estado vacío honesto y cinco filtros locales, sin datos ficticios ni API. Verificación independiente: 352 líneas modificadas (bajo el límite de 400), 5 widget tests PASS y `flutter analyze` sin issues. Commit `49a853d`. El forecast de 240–340 quedó corto; T4c añadió comprobaciones de accesibilidad y viewport por pestaña.
 - [x] **T4c — Accesibilidad y adaptación móvil.** Añadidas pruebas de semantics/objetivos táctiles, tres pestañas en 320 px y filtro con texto ampliado/teclado. `dart format` aplicado solo a los dos Dart files. Verificación independiente: 8 tests PASS, analyze limpio, formato estable y whitespace limpio. Snapshot T4c: 336 líneas modificadas vs T4b, bajo el límite de 400; commit `ce5028e`.
 
-- [ ] **T4d — Detalle y recorrido/disponibilidad.** **PENDIENTE DE DECISIÓN DEL USUARIO:** usar un inmueble sintético explícitamente rotulado como muestra, o aplazar este flujo hasta recibir datos de muestra autorizados. No inventar información inmobiliaria.
+- [ ] **T4d — Detalle y recorrido/disponibilidad.** **AUTORIZADO; IMPLEMENTACIÓN EN CURSO:** el usuario eligió una muestra sintética claramente rotulada como no real. El detalle indica que no hay recorrido 3D ni disponibilidad consultada/confirmada. No incluir precio, moneda, términos comerciales ni reserva; no conectar APIs. Pruebas Flutter/analyze pasan en mirror, commit y review pendientes. Plan y alcance: `odd/tasks/f02-t4d-property-detail.md`.
 
 ## Criterios de aceptación T4b
 
@@ -42,4 +42,4 @@ Construir incrementalmente la app móvil del cliente para F02.3, sin APIs ni com
 - Mantener T3b de PostgreSQL en modo diagnóstico de solo lectura; no cambiar migraciones, repetir tests ni usar Docker/PostgreSQL.
 - El usuario autorizó commits por unidad; el consentimiento no incluye push ni PR.
 
-**Estado:** T4a, T4b y T4c cerradas, verificadas y comprometidas: `b154888` (129 líneas), `49a853d` (352 líneas) y `ce5028e` (336 líneas). T3b diagnóstico-only quedó documentado en `c7849b3`; DB R6 y volumen preservados. Flutter 3.41.8/Dart 3.11.5; hasta 8 widget tests y `flutter analyze` PASS en mirror, formatter estable. No hay `pubspec.lock` en el worktree. Revisión nativa `review-e64f5f3ca1291648` aprobada y reconocida; R3-001 es WARNING informativo, sin corrección. No hubo push ni PR. T4d espera decisión sobre datos de muestra; captura Android y panel web siguen pendientes.
+**Estado:** T4a, T4b y T4c cerradas, verificadas y comprometidas: `b154888` (129 líneas), `49a853d` (352 líneas) y `ce5028e` (336 líneas). T3b diagnóstico-only quedó documentado en `c7849b3`; DB R6 y volumen preservados. Flutter 3.41.8/Dart 3.11.5; T4c tuvo 8 widget tests y `flutter analyze` PASS. T4d usa el mirror temporal autorizado `D:\tmp\f02-t4d-validation`: suite 11 tests PASS, analyze PASS, formato estable; el work-unit y la revisión siguen pendientes. No hay `pubspec.lock` en el worktree. Revisión T4a–T4c `review-e64f5f3ca1291648` aprobada y reconocida; R3-001 es WARNING informativo, sin corrección. No hubo push ni PR. Captura Android y panel web siguen pendientes.

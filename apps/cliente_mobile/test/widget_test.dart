@@ -1,3 +1,5 @@
+import 'dart:ui' show SemanticsAction;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:cliente_mobile/main.dart';
@@ -30,7 +32,7 @@ void main() {
     );
   });
 
-  testWidgets('shows an honest empty catalog', (tester) async {
+  testWidgets('shows offline catalog notice', (tester) async {
     await tester.pumpWidget(const RoomForgeApp());
     expect(find.text('Catálogo sin conexión'), findsOneWidget);
     expect(
@@ -160,6 +162,96 @@ void main() {
     }
   });
 
+  testWidgets('opens a synthetic listing and returns to the catalog', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const RoomForgeApp());
+    const warning = 'Muestra sintética; no es una publicación real.';
+    expect(find.text(warning), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('catalog-synthetic-listing')));
+    await tester.pumpAndSettle();
+    expect(find.text('Detalle del inmueble'), findsOneWidget);
+    expect(find.text(warning), findsOneWidget);
+    expect(find.text('Vivienda de muestra'), findsOneWidget);
+
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    expect(find.text('Explorar inmuebles'), findsOneWidget);
+    expect(find.text(warning), findsOneWidget);
+  });
+
+  testWidgets('detail states unavailable tour and unconfirmed availability', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const RoomForgeApp());
+    await tester.tap(find.byKey(const ValueKey('catalog-synthetic-listing')));
+    await tester.pumpAndSettle();
+
+    final detail = find.byKey(const ValueKey('property-detail-content'));
+    expect(
+      find.descendant(
+        of: detail,
+        matching: find.text('Recorrido 3D no disponible.'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: detail,
+        matching: find.text('Disponibilidad no consultada ni confirmada.'),
+      ),
+      findsOneWidget,
+    );
+    for (final prohibited in [
+      'Reservar',
+      'Precio',
+      'Moneda',
+      'Impuestos',
+      'Cargos',
+      'Descuentos',
+    ]) {
+      expect(
+        find.descendant(of: detail, matching: find.text(prohibited)),
+        findsNothing,
+      );
+    }
+    expect(
+      find.descendant(of: detail, matching: find.byType(FilledButton)),
+      findsNothing,
+    );
+  });
+
+  testWidgets('detail is accessible and fits a 320 pixel viewport', (
+    tester,
+  ) async {
+    setNarrowViewport(tester);
+    await tester.pumpWidget(const RoomForgeApp());
+    final semantics = tester.ensureSemantics();
+    try {
+      final listing = find.byKey(const ValueKey('catalog-synthetic-listing'));
+      expect(tester.getSize(listing).height, greaterThanOrEqualTo(48));
+      expect(
+        tester
+            .getSemantics(listing)
+            .getSemanticsData()
+            .hasAction(SemanticsAction.tap),
+        isTrue,
+      );
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+
+      await tester.tap(listing);
+      await tester.pumpAndSettle();
+      expect(find.byType(BackButton), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+    } finally {
+      semantics.dispose();
+    }
+  });
+
   testWidgets('filter sheet handles keyboard insets at larger text scale', (
     tester,
   ) async {
@@ -180,7 +272,9 @@ void main() {
         ),
       ),
     );
+    expect(tester.takeException(), isNull, reason: 'catalog at 320 px');
     await openFilters(tester);
+    expect(tester.takeException(), isNull, reason: 'filter sheet at 320 px');
     await tester.tap(find.byKey(const ValueKey('filter-city-zone')));
     tester.view.viewInsets = const FakeViewPadding(bottom: 260);
     addTearDown(tester.view.resetViewInsets);
