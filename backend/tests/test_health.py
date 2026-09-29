@@ -55,6 +55,9 @@ def test_liveness_does_not_touch_database_or_floci(
         raise AssertionError("Floci was touched")
 
     monkeypatch.setattr(socket, "create_connection", unexpected_connection)
+    # The deliberately hostile factory must stay uninspected so liveness can assert
+    # that no database work happens; the guard itself is covered by test_catalog.py.
+    monkeypatch.setattr("app.main.protect_session_factory", lambda factory: None)
 
     with TestClient(_app(settings, session_factory)) as client:
         response = client.get("/health/live")

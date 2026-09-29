@@ -46,6 +46,11 @@ def test_non_psycopg_url_omits_connect_args(monkeypatch: pytest.MonkeyPatch) -> 
     engine = Mock()
     create_engine = Mock(return_value=engine)
     monkeypatch.setattr(database_session, "create_engine", create_engine)
+    # Building engine options is the subject here; the SQLite factory guard needs a real
+    # bind and is covered by test_catalog.py::test_create_session_factory_protects_sqlite_guard_writes.
+    monkeypatch.setattr(
+        database_session, "protect_session_factory", lambda factory: None
+    )
     database_session.create_session_factory("postgresql+pg8000://localhost/db")
     assert create_engine.call_args.kwargs == {"pool_pre_ping": True}
 

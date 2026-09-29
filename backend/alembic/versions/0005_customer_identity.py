@@ -1,7 +1,7 @@
 """Create isolated customer account and session tables.
 
 Revision ID: 0005_customer_identity
-Revises: 0004_staff_invitation_pending_email_unique
+Revises: 0004_pending_staff_email_uniq
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 revision = "0005_customer_identity"
-down_revision = "0004_staff_invitation_pending_email_unique"
+down_revision = "0004_pending_staff_email_uniq"
 branch_labels = None
 depends_on = None
 
