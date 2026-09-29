@@ -162,6 +162,7 @@ def test_customer_login_refresh_logout_and_me_obey_the_approved_wire_contract(
     )
 
     assert login.status_code == 200
+    absolute_deadline = context.clock() + timedelta(days=7)
     original = login.json()
     assert set(original) == {
         "access_token",
@@ -197,8 +198,8 @@ def test_customer_login_refresh_logout_and_me_obey_the_approved_wire_contract(
             context.clock().replace(tzinfo=None)
         )
         assert datetime.fromisoformat(saved_session["expires_at"]) == (
-            context.clock() + timedelta(days=7)
-        ).replace(tzinfo=None)
+            absolute_deadline.replace(tzinfo=None)
+        )
 
     me = context.client.get(
         "/api/v1/customer/auth/me",
@@ -245,8 +246,8 @@ def test_customer_login_refresh_logout_and_me_obey_the_approved_wire_contract(
         assert old_session["revoked_at"] is not None
         assert new_session["revoked_at"] is None
         assert datetime.fromisoformat(new_session["expires_at"]) == (
-            context.clock() + timedelta(days=7)
-        ).replace(tzinfo=None)
+            absolute_deadline.replace(tzinfo=None)
+        )
 
     reused = context.client.post(
         "/api/v1/customer/auth/refresh",
@@ -277,6 +278,40 @@ def test_customer_login_refresh_logout_and_me_obey_the_approved_wire_contract(
         "/api/v1/customer/auth/logout",
         json={"refresh_token": "unknown-but-valid-format"},
     ).status_code == 204
+
+
+def test_customer_refresh_cannot_extend_absolute_lifetime_beyond_login(
+    customer_identity_context: CustomerIdentityContext,
+) -> None:
+    context = customer_identity_context
+    assert _register(context).status_code == 201
+    login = context.client.post(
+        "/api/v1/customer/auth/login",
+        json={"email": "customer@example.test", "password": "password"},
+    )
+    assert login.status_code == 200
+    refresh_token = login.json()["refresh_token"]
+    absolute_deadline = context.clock() + timedelta(days=7)
+    refresh_interval = timedelta(minutes=29)
+
+    while context.clock() + refresh_interval < absolute_deadline:
+        context.clock.advance(refresh_interval)
+        refresh = context.client.post(
+            "/api/v1/customer/auth/refresh",
+            json={"refresh_token": refresh_token},
+        )
+        assert refresh.status_code == 200
+        rotated = refresh.json()
+        assert rotated["refresh_token"] != refresh_token
+        refresh_token = rotated["refresh_token"]
+
+    context.clock.advance(refresh_interval)
+    after_deadline = context.client.post(
+        "/api/v1/customer/auth/refresh",
+        json={"refresh_token": refresh_token},
+    )
+
+    assert after_deadline.status_code == 401
 
 
 def test_customer_rejects_invalid_credentials_with_one_generic_error(

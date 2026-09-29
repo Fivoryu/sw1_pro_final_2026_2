@@ -192,7 +192,6 @@ def refresh_customer_session(
     previous_hash = hash_secret(refresh_token)
     next_refresh_token = random_token()
     next_session_id = str(uuid4())
-    next_expiration = now_utc + timedelta(days=REFRESH_TOKEN_DAYS)
     unauthorized = False
     token_pair: dict[str, str | int] | None = None
 
@@ -242,7 +241,7 @@ def refresh_customer_session(
                         refresh_token_hash=hash_secret(next_refresh_token),
                         created_at=now_utc,
                         last_activity_at=now_utc,
-                        expires_at=next_expiration,
+                        expires_at=previous_session.expires_at,
                     )
                     session.add(next_session)
                     session.flush()
