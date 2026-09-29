@@ -4,7 +4,7 @@ import base64
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import jwt
@@ -517,12 +517,12 @@ def test_customer_wallet_link_race_for_same_account_maps_account_conflict(
         def __init__(self, session: Session) -> None:
             self._session = session
 
-        def query(self, entity: object, *args: object, **kwargs: object) -> object:
+        def query(self, entity: Any, *args: Any, **kwargs: Any) -> Any:
             if entity is customer_identity_service.CustomerWallet:
                 return HiddenPreflightQuery()
             return self._session.query(entity, *args, **kwargs)
 
-        def __getattr__(self, name: str) -> object:
+        def __getattr__(self, name: str) -> Any:
             return getattr(self._session, name)
 
     class RacingSessionFactory:
@@ -540,7 +540,7 @@ def test_customer_wallet_link_race_for_same_account_maps_account_conflict(
 
     with pytest.raises(customer_identity_service.CustomerWalletAlreadyLinkedError):
         customer_identity_service.verify_and_link_customer_wallet(
-            session_factory=RacingSessionFactory(),
+            session_factory=cast("sessionmaker[Session]", RacingSessionFactory()),
             customer_id=customer_id,
             challenge_id=challenge["challenge_id"],
             signature=_wallet_signature(challenge["message"]),
@@ -564,7 +564,7 @@ def test_unrelated_wallet_integrity_error_is_not_mapped_to_address_conflict(
     flush_calls: list[bool] = []
     original_flush = Session.flush
 
-    def fail_wallet_flush(self: Session, *args: object, **kwargs: object) -> None:
+    def fail_wallet_flush(self: Session, *args: Any, **kwargs: Any) -> None:
         if any(
             isinstance(instance, customer_identity_service.CustomerWallet)
             for instance in self.new

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+from collections.abc import Mapping
 from pathlib import Path
 from types import ModuleType
+from typing import Any, cast
 
 import pytest
 from alembic.migration import MigrationContext
@@ -110,15 +112,15 @@ def test_catalog_migration_creates_constrained_listing_and_offer_tables() -> Non
                 "bathrooms",
                 "created_at",
             }.issubset(listing_columns)
-            amount_type = listing_columns["base_price"]["type"]
+            amount_type = cast(Numeric, listing_columns["base_price"]["type"])
             assert amount_type.precision == 18
             assert amount_type.scale == 2
             extra_columns = {
                 column["name"]: column for column in inspector.get_columns("listing_extra")
             }
             assert {"id", "listing_id", "name", "price"}.issubset(extra_columns)
-            assert extra_columns["price"]["type"].precision == 18
-            assert extra_columns["price"]["type"].scale == 2
+            assert cast(Numeric, extra_columns["price"]["type"]).precision == 18
+            assert cast(Numeric, extra_columns["price"]["type"]).scale == 2
 
             listing_foreign_keys = inspector.get_foreign_keys("listing")
             assert any(
@@ -132,7 +134,7 @@ def test_catalog_migration_creates_constrained_listing_and_offer_tables() -> Non
                 fk["constrained_columns"] == ["listing_id"]
                 and fk["referred_table"] == "listing"
                 and fk["referred_columns"] == ["id"]
-                and fk["options"].get("ondelete") == "CASCADE"
+                and cast(Mapping[str, Any], fk)["options"].get("ondelete") == "CASCADE"
                 for fk in extra_foreign_keys
             )
 
@@ -336,7 +338,7 @@ def test_catalog_migration_creates_constrained_listing_and_offer_tables() -> Non
 
 
 def test_agency_wallet_and_listing_deposit_migration_upgrades_and_downgrades_sqlite() -> None:
-    migration_path = _MIGRATIONS / "0009_agency_wallets_listing_deposit.py"
+    migration_path = _MIGRATIONS / "0009_agency_wallets_deposit.py"
     assert migration_path.is_file(), "CC-05A must add the 0009 agency wallet/deposit migration"
     offers = _load_migration(
         _MIGRATIONS / "0007_catalog_offers.py", "catalog_offers_0007_for_agency_wallet_test"
@@ -345,7 +347,7 @@ def test_agency_wallet_and_listing_deposit_migration_upgrades_and_downgrades_sql
         _MIGRATIONS / "0008_quote_snapshots.py", "quote_snapshots_0008_for_agency_wallet_test"
     )
     migration = _load_migration(migration_path, "agency_wallets_0009_for_test")
-    assert migration.revision == "0009_agency_wallets_listing_deposit"
+    assert migration.revision == "0009_agency_wallets_deposit"
     assert migration.down_revision == quotes.revision
 
     engine = create_engine("sqlite+pysqlite:///:memory:")
@@ -469,8 +471,8 @@ def test_quote_snapshot_migration_upgrades_and_downgrades_sqlite() -> None:
                 "created_at",
                 "expires_at",
             }.issubset(snapshot_columns)
-            assert snapshot_columns["one_time_total"]["type"].precision == 18
-            assert snapshot_columns["one_time_total"]["type"].scale == 2
+            assert cast(Numeric, snapshot_columns["one_time_total"]["type"]).precision == 18
+            assert cast(Numeric, snapshot_columns["one_time_total"]["type"]).scale == 2
             rate_columns = {
                 column["name"]: column
                 for column in inspector.get_columns("quote_rate_limit_event")

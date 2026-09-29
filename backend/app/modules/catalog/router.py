@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Annotated, Literal
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy.exc import SQLAlchemyError
@@ -23,6 +23,7 @@ from app.modules.catalog.schemas import (
     CatalogListingItem,
     CatalogListingPage,
     CatalogMoney,
+    ListingOperation,
     QuoteCreateRequest,
     QuoteErrorResponse,
     QuoteLine,
@@ -59,7 +60,7 @@ def _listing_item(listing: Listing) -> CatalogListingItem:
     return CatalogListingItem(
         listing_id=listing.id,
         offer_version=listing.offer_version,
-        operation=listing.operation,
+        operation=cast(ListingOperation, listing.operation),
         base_price=_money(listing.base_price),
         city=listing.city,
         zone=listing.zone,
@@ -75,14 +76,14 @@ def list_public_listings(
     request: Request,
     city: Annotated[str | None, Query(max_length=120)] = None,
     zone: Annotated[str | None, Query(max_length=120)] = None,
-    operation: Annotated[Literal["sale", "rent"] | None, Query()] = None,
+    operation: Annotated[ListingOperation | None, Query()] = None,
     min_base_price: Annotated[
         Decimal | None,
-        Query(ge=Decimal("0"), max_digits=18, decimal_places=2),
+        Query(ge=0, max_digits=18, decimal_places=2),
     ] = None,
     max_base_price: Annotated[
         Decimal | None,
-        Query(ge=Decimal("0"), max_digits=18, decimal_places=2),
+        Query(ge=0, max_digits=18, decimal_places=2),
     ] = None,
     min_rooms: Annotated[int | None, Query(ge=0)] = None,
     min_bathrooms: Annotated[int | None, Query(ge=0)] = None,
@@ -159,7 +160,7 @@ def _quote_response(quote: QuoteSnapshot) -> QuoteSnapshotResponse:
         quote_id=quote.id,
         listing_id=quote.listing_id,
         offer_version=quote.offer_version,
-        operation=quote.operation,
+        operation=cast(ListingOperation, quote.operation),
         lines=[QuoteLine.model_validate(line) for line in quote.lines],
         one_time_total=_money(quote.one_time_total),
         monthly_total=_money(quote.monthly_total),

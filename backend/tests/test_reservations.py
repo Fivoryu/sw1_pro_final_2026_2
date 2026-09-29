@@ -63,7 +63,7 @@ def reservations_context() -> Iterator[ReservationsContext]:
         ("0007_catalog_offers.py", "reservation_catalog_0007", "_install_offer_version_triggers"),
         ("0008_quote_snapshots.py", "reservation_quotes_0008", "_install_snapshot_immutability"),
         (
-            "0009_agency_wallets_listing_deposit.py",
+            "0009_agency_wallets_deposit.py",
             "reservation_deposits_0009",
             "_install_listing_deposit_offer_version_triggers",
         ),

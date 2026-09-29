@@ -1,6 +1,6 @@
 """Add agency wallet ownership and fixed listing deposits.
 
-Revision ID: 0009_agency_wallets_listing_deposit
+Revision ID: 0009_agency_wallets_deposit
 Revises: 0008_quote_snapshots
 """
 from __future__ import annotations
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0009_agency_wallets_listing_deposit"
+revision = "0009_agency_wallets_deposit"
 down_revision = "0008_quote_snapshots"
 branch_labels = None
 depends_on = None

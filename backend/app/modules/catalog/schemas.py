@@ -8,6 +8,10 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
+# Single source of truth for the listing operation domain; the ORM stores it as a plain
+# string guarded by a CHECK constraint, so routers cast database values to this alias.
+ListingOperation = Literal["sale", "rent"]
+
 
 class CatalogMoney(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -21,7 +25,7 @@ class CatalogListingItem(BaseModel):
 
     listing_id: str
     offer_version: int
-    operation: Literal["sale", "rent"]
+    operation: ListingOperation
     base_price: CatalogMoney
     city: str
     zone: str
@@ -74,7 +78,7 @@ class QuoteSnapshotResponse(BaseModel):
     quote_id: str
     listing_id: str
     offer_version: int
-    operation: Literal["sale", "rent"]
+    operation: ListingOperation
     lines: list[QuoteLine]
     one_time_total: CatalogMoney
     monthly_total: CatalogMoney
