@@ -3,7 +3,7 @@
 Prototipo local de interfaz para la app de captura del agente inmobiliario.
 
 - Stack: Flutter 3.41.8 / Dart 3.11.5, Material 3.
-- Superficie implementada: paso de acceso (solo UI) y estado vacío de borradores con la acción `Nuevo inmueble`.
+- Superficie implementada: paso de acceso (solo UI), estado vacío de borradores, datos básicos y operación, ambientes/fotos con permisos, conectividad, error/reintento y captura simulados, y corrección de geometría y objetos con formas ilustrativas.
 - Estado: prototipo de UX en construcción; no hay backend, autenticación, cámara, almacenamiento ni sincronización.
 - Trazabilidad: `odd/tasks/f02-t4e-capture-prototype.md` y `docs/ux/f02-surface-map.md`.
 
@@ -11,8 +11,10 @@ Prototipo local de interfaz para la app de captura del agente inmobiliario.
 
 - El acceso es una interacción de prototipo: no pide credenciales, no abre sesión y no valida identidad.
 - La lista de borradores arranca vacía: no hay inmuebles, precios, monedas, fotos ni geometría de ejemplo.
-- La acción `Nuevo inmueble` solo muestra un aviso local; el asistente de creación todavía no está construido.
-- Los pasos de captura, permisos simulados, corrección de geometría y envío corresponden a unidades posteriores y no están implementados.
+- La acción `Nuevo inmueble` abre un asistente local de cinco pasos: datos básicos y operación, ambientes/fotos, corrección de geometría y objetos, preparación de oferta y resumen de envío. Solo los tres primeros existen como pantallas; los dos últimos pertenecen a la unidad siguiente.
+- Nada del flujo se guarda: el estado vive únicamente en memoria mientras la pantalla está abierta, y el acceso no pide credenciales.
+- La captura de fotos, los permisos y la conectividad son estados simulados rotulados; las formas de geometría son ilustrativas y no provienen de fotos, medición ni reconstrucción.
+- Los pasos de preparación de oferta y envío a revisión corresponden a la unidad siguiente y no están implementados.
 - Sin directorios Android/iOS generados, sin plugins nativos, sin dependencias externas y sin `pubspec.lock` versionado.
 
 ## Verificación

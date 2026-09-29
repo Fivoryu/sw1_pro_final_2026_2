@@ -17,13 +17,21 @@ void main() {
     );
   });
 
-  testWidgets('access step offers no credential fields', (tester) async {
-    await tester.pumpWidget(const CaptureApp());
+  testWidgets(
+    'access step keeps its prototype screen and offers no credentials',
+    (tester) async {
+      await tester.pumpWidget(const CaptureApp());
 
-    expect(find.byType(TextFormField), findsNothing);
-    expect(find.byType(TextField), findsNothing);
-    expect(find.byType(Form), findsNothing);
-  });
+      expect(find.text('Acceso del agente'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('access-continue-button')),
+        findsOneWidget,
+      );
+      expect(find.byType(TextFormField), findsNothing);
+      expect(find.byType(TextField), findsNothing);
+      expect(find.byType(Form), findsNothing);
+    },
+  );
 
   testWidgets('continues from access to the drafts shell', (tester) async {
     await tester.pumpWidget(const CaptureApp());
@@ -183,6 +191,115 @@ void main() {
     );
     expect(
       find.byKey(const ValueKey('simulated-photo-placeholder')),
+      findsOneWidget,
+    );
+  });
+
+  Future<void> openGeometryPrototype(WidgetTester tester) async {
+    await openNewPropertyPrototype(tester);
+    await tester.tap(find.byKey(const ValueKey('basic-operation-continue')));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('rooms-photos-continue')),
+      200,
+    );
+    await tester.tap(find.byKey(const ValueKey('rooms-photos-continue')));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('geometry step marks every shape as illustrative, not measured', (
+    tester,
+  ) async {
+    await openGeometryPrototype(tester);
+
+    expect(
+      find.byKey(const ValueKey('geometry-objects-screen')),
+      findsOneWidget,
+    );
+    expect(find.text('Corregir geometría y objetos'), findsOneWidget);
+    expect(find.textContaining('Forma ilustrativa'), findsWidgets);
+    expect(find.textContaining('sin medición real'), findsWidgets);
+    expect(find.textContaining(RegExp(r'\d+([.,]\d+)? ?m\b')), findsNothing);
+    expect(
+      find.textContaining(RegExp(r'medición (automática|de fotos)')).evaluate(),
+      isEmpty,
+    );
+  });
+
+  testWidgets('shape correction only changes local prototype state', (
+    tester,
+  ) async {
+    await openGeometryPrototype(tester);
+    final summary = find.byKey(const ValueKey('geometry-correction-summary'));
+
+    await tester.scrollUntilVisible(summary, 200);
+    expect(find.text('Formas corregidas: 0 de 2'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('shape-room-correction')),
+      -200,
+    );
+    await tester.tap(find.byKey(const ValueKey('shape-room-correction')));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(summary, 200);
+    expect(find.text('Formas corregidas: 1 de 2'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('shape-object-correction')),
+      200,
+    );
+    await tester.tap(find.byKey(const ValueKey('shape-object-correction')));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(summary, 200);
+    expect(find.text('Formas corregidas: 2 de 2'), findsOneWidget);
+  });
+
+  testWidgets('new capture steps meet touch target guidelines', (tester) async {
+    await openGeometryPrototype(tester);
+    final semantics = tester.ensureSemantics();
+    try {
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+      await tester.tap(find.byKey(const ValueKey('shape-room-correction')));
+      await tester.pumpAndSettle();
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+    } finally {
+      semantics.dispose();
+    }
+  });
+
+  testWidgets('new capture steps survive 320 px and larger text', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(1.5)),
+            child: const AgentAccessScreen(),
+          ),
+        ),
+      ),
+    );
+    for (final key in [
+      'access-continue-button',
+      'new-property-button',
+      'basic-operation-continue',
+      'rooms-photos-continue',
+    ]) {
+      await tester.scrollUntilVisible(find.byKey(ValueKey(key)), 200);
+      await tester.tap(find.byKey(ValueKey(key)));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: 'after $key');
+    }
+    expect(
+      find.byKey(const ValueKey('geometry-objects-screen')),
       findsOneWidget,
     );
   });

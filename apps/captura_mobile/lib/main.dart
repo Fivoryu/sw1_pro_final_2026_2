@@ -156,7 +156,7 @@ class BasicOperationScreen extends StatelessWidget {
             style: Theme.of(context).textTheme.headlineSmall,
           ),
           const SizedBox(height: 12),
-          const Text('Paso 1 de 2 · Prototipo local'),
+          const Text('Paso 1 de 5 · Prototipo local'),
           const SizedBox(height: 20),
           const _NoticeCard(
             message:
@@ -231,7 +231,7 @@ class _RoomsPhotosScreenState extends State<RoomsPhotosScreen> {
             style: Theme.of(context).textTheme.headlineSmall,
           ),
           const SizedBox(height: 12),
-          const Text('Paso 2 de 2 · Prototipo local'),
+          const Text('Paso 2 de 5 · Prototipo local'),
           const SizedBox(height: 20),
           const _NoticeCard(
             message:
@@ -330,6 +330,18 @@ class _RoomsPhotosScreenState extends State<RoomsPhotosScreen> {
               ),
             ),
           ],
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            key: const ValueKey('rooms-photos-continue'),
+            style: FilledButton.styleFrom(minimumSize: _actionMinSize),
+            onPressed: () => Navigator.of(context).push<void>(
+              MaterialPageRoute<void>(
+                builder: (_) => const GeometryObjectsScreen(),
+              ),
+            ),
+            icon: const Icon(Icons.arrow_forward),
+            label: const Text('Continuar a corregir geometría'),
+          ),
         ],
       ),
     ),
@@ -373,6 +385,119 @@ class _ErrorState extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// Step three: illustrative demonstration shapes with honest provenance.
+class GeometryObjectsScreen extends StatefulWidget {
+  const GeometryObjectsScreen({super.key});
+
+  @override
+  State<GeometryObjectsScreen> createState() => _GeometryObjectsScreenState();
+}
+
+class _DemoShape {
+  const _DemoShape(this.id, this.kind, this.label);
+
+  final String id;
+  final String kind;
+  final String label;
+}
+
+const _demoShapes = <_DemoShape>[
+  _DemoShape('room', 'Contorno', 'Ambiente de demostración'),
+  _DemoShape('object', 'Bloque', 'Objeto de demostración'),
+];
+
+class _GeometryObjectsScreenState extends State<GeometryObjectsScreen> {
+  final Set<String> _corrected = <String>{};
+
+  void _toggle(String id) => setState(() {
+    if (!_corrected.remove(id)) _corrected.add(id);
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Nuevo inmueble'),
+        leading: const BackButton(key: ValueKey('geometry-objects-back')),
+      ),
+      body: KeyedSubtree(
+        key: const ValueKey('geometry-objects-screen'),
+        child: _PrototypePage(
+          children: [
+            Text(
+              'Corregir geometría y objetos',
+              style: theme.textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 12),
+            const Text('Paso 3 de 5 · Prototipo local'),
+            const SizedBox(height: 20),
+            const _NoticeCard(
+              message:
+                  'Formas ilustrativas: no provienen de fotos, cámara, medición '
+                  'ni reconstrucción real. Corregir aquí solo cambia el estado '
+                  'local del prototipo.',
+            ),
+            const SizedBox(height: 20),
+            for (final shape in _demoShapes) ...[
+              Card(
+                key: ValueKey('shape-${shape.id}-card'),
+                color: theme.colorScheme.surfaceContainerLow,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${shape.kind} · ${shape.label}',
+                        style: theme.textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Forma ilustrativa del prototipo; sin medición real ni '
+                        'procedencia fotográfica.',
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${shape.label}: '
+                        '${_corrected.contains(shape.id) ? 'corregida' : 'pendiente'}',
+                        key: ValueKey('shape-${shape.id}-state'),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        height: 48,
+                        child: OutlinedButton(
+                          key: ValueKey('shape-${shape.id}-correction'),
+                          onPressed: () => _toggle(shape.id),
+                          child: Text(
+                            _corrected.contains(shape.id)
+                                ? 'Marcar como pendiente'
+                                : 'Marcar como corregida',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            Text(
+              'Formas corregidas: ${_corrected.length} de ${_demoShapes.length}',
+              key: const ValueKey('geometry-correction-summary'),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'La preparación de oferta y el resumen de envío pertenecen a la '
+              'siguiente unidad del prototipo y todavía no están construidos.',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// Responsive page wrapper: scrollable content capped at a readable width.
