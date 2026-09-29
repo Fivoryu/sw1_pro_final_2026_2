@@ -18,6 +18,10 @@ class Settings:
     login_challenge_minutes: int = 5
     admin_idle_minutes: int = 30
     recovery_code_count: int = 10
+    escrow_rpc_url: str | None = None
+    escrow_address: str | None = None
+    escrow_chain_id: str | None = None
+    escrow_signer_private_key: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -44,6 +48,10 @@ class Settings:
             totp_encryption_key=values["totp_encryption_key"],
             web_origin=origin,
             secure_cookies=os.environ.get("STAFF_SECURE_COOKIES", "true").lower() != "false",
+            escrow_rpc_url=os.environ.get("ROOMFORGE_ESCROW_RPC_URL"),
+            escrow_address=os.environ.get("ROOMFORGE_ESCROW_ADDRESS"),
+            escrow_chain_id=os.environ.get("ROOMFORGE_ESCROW_CHAIN_ID"),
+            escrow_signer_private_key=os.environ.get("ROOMFORGE_ESCROW_SIGNER_PRIVATE_KEY"),
         )
 
     def validate(self) -> None:

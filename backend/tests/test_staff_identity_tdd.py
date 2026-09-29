@@ -280,9 +280,9 @@ def test_bootstrap_is_not_exposed_as_a_public_api_route(
     staff_identity_context: StaffIdentityContext,
 ) -> None:
     paths = staff_identity_context.client.get("/openapi.json").json()["paths"]
-    assert not any(
-        "/register" in path or "/bootstrap" in path for path in paths
-    )
+    assert "/api/v1/auth/register" not in paths
+    assert "/api/v1/auth/bootstrap" not in paths
+    assert "/api/v1/customer/auth/register" in paths
     response = staff_identity_context.client.post("/api/v1/auth/bootstrap", json={})
 
     assert response.status_code == 404

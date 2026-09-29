@@ -142,7 +142,9 @@ def _begin_admin_login(client: TestClient, email: str, password: str) -> str:
 def test_operator_invitation_is_one_time_and_not_exposed_by_public_route(def_context: Any) -> None:
     client, session_factory, email_sender, clock = def_context
     paths = client.get("/openapi.json").json()["paths"]
-    assert not any("register" in path or "bootstrap" in path for path in paths)
+    assert "/api/v1/auth/register" not in paths
+    assert "/api/v1/auth/bootstrap" not in paths
+    assert "/api/v1/customer/auth/register" in paths
 
     issue_platform_admin_invitation(
         session_factory=session_factory,
@@ -166,6 +168,17 @@ def test_operator_invitation_is_one_time_and_not_exposed_by_public_route(def_con
             clock=clock,
         )
     assert len(email_sender.messages) == 1
+
+
+def test_malformed_staff_login_preserves_baseline_validation_response(
+    def_context: Any,
+) -> None:
+    client, _, _, _ = def_context
+
+    response = client.post("/api/v1/auth/login", json={})
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Request validation failed"}
 
 
 def test_operator_can_reissue_an_expired_platform_invitation(def_context: Any) -> None:
