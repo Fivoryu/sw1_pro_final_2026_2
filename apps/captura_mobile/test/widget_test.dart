@@ -67,6 +67,17 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// Scrolls a prototype step to its end so its final action is fully visible.
+  Future<void> tapScreenEndAction(WidgetTester tester, String key) async {
+    final target = find.byKey(ValueKey(key));
+    await tester.drag(find.byType(ListView), const Offset(0, -1000));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(target);
+    await tester.pumpAndSettle();
+    await tester.tap(target);
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('Nuevo inmueble opens the basic operation step', (tester) async {
     await openNewPropertyPrototype(tester);
 
@@ -199,12 +210,7 @@ void main() {
     await openNewPropertyPrototype(tester);
     await tester.tap(find.byKey(const ValueKey('basic-operation-continue')));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.byKey(const ValueKey('rooms-photos-continue')),
-      200,
-    );
-    await tester.tap(find.byKey(const ValueKey('rooms-photos-continue')));
-    await tester.pumpAndSettle();
+    await tapScreenEndAction(tester, 'rooms-photos-continue');
   }
 
   testWidgets('geometry step marks every shape as illustrative, not measured', (
@@ -252,6 +258,51 @@ void main() {
     expect(find.text('Formas corregidas: 2 de 2'), findsOneWidget);
   });
 
+  Future<void> openOfferPrototype(WidgetTester tester) async {
+    await openGeometryPrototype(tester);
+    await tapScreenEndAction(tester, 'geometry-continue');
+  }
+
+  testWidgets('offer step stays conceptual without commercial values', (
+    tester,
+  ) async {
+    await openOfferPrototype(tester);
+
+    expect(find.byKey(const ValueKey('offer-screen')), findsOneWidget);
+    expect(find.text('Preparar oferta'), findsOneWidget);
+    expect(find.textContaining('pendiente de definir'), findsNWidgets(2));
+    expect(find.textContaining('Sin moneda definida'), findsOneWidget);
+    expect(find.textContaining(RegExp(r'USD|EUR|\$|€')), findsNothing);
+    expect(find.textContaining(RegExp(r'\d+[.,]\d{2}')), findsNothing);
+  });
+
+  testWidgets(
+    'summary states object, consequence and action before a simulated submit',
+    (tester) async {
+      await openOfferPrototype(tester);
+      await tapScreenEndAction(tester, 'offer-continue');
+
+      expect(
+        find.byKey(const ValueKey('review-summary-screen')),
+        findsOneWidget,
+      );
+      expect(find.text('Objeto:'), findsOneWidget);
+      expect(find.text('Consecuencia:'), findsOneWidget);
+      expect(find.text('Acción elegida:'), findsOneWidget);
+      expect(find.byKey(const ValueKey('submission-result')), findsNothing);
+
+      await tapScreenEndAction(tester, 'confirm-submit');
+
+      expect(find.byKey(const ValueKey('submission-result')), findsOneWidget);
+      expect(
+        find.textContaining('pendiente de revisión (simulado)'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('no se envió nada real'), findsOneWidget);
+      expect(find.textContaining('no hay persistencia'), findsOneWidget);
+    },
+  );
+
   testWidgets('new capture steps meet touch target guidelines', (tester) async {
     await openGeometryPrototype(tester);
     final semantics = tester.ensureSemantics();
@@ -260,6 +311,9 @@ void main() {
       await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
       await tester.tap(find.byKey(const ValueKey('shape-room-correction')));
       await tester.pumpAndSettle();
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+      await tapScreenEndAction(tester, 'geometry-continue');
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
       await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
     } finally {
@@ -292,15 +346,12 @@ void main() {
       'new-property-button',
       'basic-operation-continue',
       'rooms-photos-continue',
+      'geometry-continue',
+      'offer-continue',
     ]) {
-      await tester.scrollUntilVisible(find.byKey(ValueKey(key)), 200);
-      await tester.tap(find.byKey(ValueKey(key)));
-      await tester.pumpAndSettle();
+      await tapScreenEndAction(tester, key);
       expect(tester.takeException(), isNull, reason: 'after $key');
     }
-    expect(
-      find.byKey(const ValueKey('geometry-objects-screen')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const ValueKey('review-summary-screen')), findsOneWidget);
   });
 }

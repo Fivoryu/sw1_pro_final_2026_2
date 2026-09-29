@@ -488,16 +488,215 @@ class _GeometryObjectsScreenState extends State<GeometryObjectsScreen> {
               'Formas corregidas: ${_corrected.length} de ${_demoShapes.length}',
               key: const ValueKey('geometry-correction-summary'),
             ),
-            const SizedBox(height: 12),
-            const Text(
-              'La preparación de oferta y el resumen de envío pertenecen a la '
-              'siguiente unidad del prototipo y todavía no están construidos.',
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              key: const ValueKey('geometry-continue'),
+              style: FilledButton.styleFrom(minimumSize: _actionMinSize),
+              onPressed: () => Navigator.of(context).push<void>(
+                MaterialPageRoute<void>(
+                  builder: (_) => const OfferPreparationScreen(),
+                ),
+              ),
+              icon: const Icon(Icons.arrow_forward),
+              label: const Text('Continuar a preparar oferta'),
             ),
           ],
         ),
       ),
     );
   }
+}
+
+/// Step four: the approved offer structure without any commercial value.
+class OfferPreparationScreen extends StatelessWidget {
+  const OfferPreparationScreen({super.key});
+
+  static const _structure = <(String, String)>[
+    ('Precio base', 'pendiente de definir en una fase posterior'),
+    ('Ajustes seleccionados', 'pendiente de definir en una fase posterior'),
+    (
+      'Total calculado',
+      'regla de dos decimales aprobada para fases posteriores',
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Nuevo inmueble'),
+        leading: const BackButton(key: ValueKey('offer-back')),
+      ),
+      body: KeyedSubtree(
+        key: const ValueKey('offer-screen'),
+        child: _PrototypePage(
+          children: [
+            Text('Preparar oferta', style: theme.textTheme.headlineSmall),
+            const SizedBox(height: 12),
+            const Text('Paso 4 de 5 · Prototipo local'),
+            const SizedBox(height: 20),
+            const _NoticeCard(
+              message:
+                  'Estructura conceptual: no se muestran precios, moneda, '
+                  'impuestos, cargos, descuentos ni vigencia.',
+            ),
+            const SizedBox(height: 20),
+            Card(
+              color: theme.colorScheme.surfaceContainerLow,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final (label, value) in _structure) ...[
+                      Text(label, style: theme.textTheme.titleMedium),
+                      const SizedBox(height: 4),
+                      Text(value),
+                      const SizedBox(height: 12),
+                    ],
+                    const Text(
+                      'Sin moneda definida en F02: la moneda y las condiciones '
+                      'comerciales siguen pendientes.',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              key: const ValueKey('offer-continue'),
+              style: FilledButton.styleFrom(minimumSize: _actionMinSize),
+              onPressed: () => Navigator.of(context).push<void>(
+                MaterialPageRoute<void>(
+                  builder: (_) => const ReviewSummaryScreen(),
+                ),
+              ),
+              icon: const Icon(Icons.arrow_forward),
+              label: const Text('Revisar resumen'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Step five: explicit confirmation, then a simulated submission result.
+class ReviewSummaryScreen extends StatefulWidget {
+  const ReviewSummaryScreen({super.key});
+
+  @override
+  State<ReviewSummaryScreen> createState() => _ReviewSummaryScreenState();
+}
+
+class _ReviewSummaryScreenState extends State<ReviewSummaryScreen> {
+  bool _submitted = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Nuevo inmueble'),
+        leading: const BackButton(key: ValueKey('review-summary-back')),
+      ),
+      body: KeyedSubtree(
+        key: const ValueKey('review-summary-screen'),
+        child: _PrototypePage(
+          children: [
+            Text('Revisar resumen', style: theme.textTheme.headlineSmall),
+            const SizedBox(height: 12),
+            const Text('Paso 5 de 5 · Prototipo local'),
+            const SizedBox(height: 20),
+            const _NoticeCard(
+              message:
+                  'Confirmación del prototipo: nada se envía, se guarda ni se '
+                  'sincroniza.',
+            ),
+            const SizedBox(height: 20),
+            const _SummaryRow(
+              label: 'Objeto:',
+              value: 'borrador de demostración sin datos reales',
+            ),
+            const _SummaryRow(
+              label: 'Consecuencia:',
+              value:
+                  'el borrador aparecería en la cola de revisión de la '
+                  'agencia (simulado)',
+            ),
+            const _SummaryRow(
+              label: 'Acción elegida:',
+              value: 'enviar a revisión (simulado)',
+            ),
+            const SizedBox(height: 24),
+            if (_submitted)
+              Card(
+                key: const ValueKey('submission-result'),
+                color: theme.colorScheme.surfaceContainerLow,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Envío simulado registrado',
+                        style: theme.textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      const Text('Estado: pendiente de revisión (simulado)'),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Nada se guarda ni se sincroniza: no hay persistencia, '
+                        'carga ni notificación real; no se envió nada real.',
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        height: 48,
+                        child: OutlinedButton(
+                          key: const ValueKey('result-restart'),
+                          onPressed: () => Navigator.of(
+                            context,
+                          ).popUntil((route) => route.isFirst),
+                          child: const Text('Volver al inicio del prototipo'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              FilledButton.icon(
+                key: const ValueKey('confirm-submit'),
+                style: FilledButton.styleFrom(minimumSize: _actionMinSize),
+                onPressed: () => setState(() => _submitted = true),
+                icon: const Icon(Icons.send),
+                label: const Text('Confirmar envío (simulado)'),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SummaryRow extends StatelessWidget {
+  const _SummaryRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+        Text(value),
+      ],
+    ),
+  );
 }
 
 /// Responsive page wrapper: scrollable content capped at a readable width.
