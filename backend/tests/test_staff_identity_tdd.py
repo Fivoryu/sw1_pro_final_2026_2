@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from threading import Barrier
 from urllib.parse import unquote, urlsplit
@@ -45,8 +45,12 @@ class FrozenClock:
 class FakeEmailSender:
     def __init__(self) -> None:
         self.messages: list[tuple[str, str, datetime]] = []
+        self.timeouts: list[int] = []
 
-    def send_invitation(self, email: str, link: str, expires_at: datetime) -> None:
+    def send_invitation(
+        self, email: str, link: str, expires_at: datetime, *, timeout_seconds: int
+    ) -> None:
+        self.timeouts.append(timeout_seconds)
         self.messages.append((email, link, expires_at))
 
 
@@ -547,12 +551,22 @@ def test_operator_cli_issues_platform_admin_invitation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     context = staff_identity_context
-    operation_calls: list[dict[str, object]] = []
+    settings = replace(
+        context.settings,
+        database_connect_timeout_seconds=6,
+        database_pool_timeout_seconds=7,
+        database_statement_timeout_seconds=8,
+        email_send_timeout_seconds=13,
+    )
+    session_factory_calls: list[dict[str, object]] = []
 
-    def record_invitation(**kwargs: object) -> None:
-        operation_calls.append(kwargs)
+    def use_test_session_factory(
+        database_url: str, **kwargs: int
+    ) -> tuple[None, sessionmaker[Session]]:
+        session_factory_calls.append({"database_url": database_url, **kwargs})
+        return None, context.session_factory
 
-    monkeypatch.setattr(Settings, "from_env", lambda: context.settings)
+    monkeypatch.setattr(Settings, "from_env", lambda: settings)
     monkeypatch.setattr(
         bootstrap,
         "configured_email_sender",
@@ -562,20 +576,25 @@ def test_operator_cli_issues_platform_admin_invitation(
     monkeypatch.setattr(
         bootstrap,
         "create_session_factory",
-        lambda *args, **kwargs: (None, context.session_factory),
+        use_test_session_factory,
         raising=False,
     )
-    monkeypatch.setattr(bootstrap, "issue_platform_admin_invitation", record_invitation)
     monkeypatch.setattr(sys, "argv", ["roomforge-bootstrap", "--email", "owner@example.test"])
 
     result = bootstrap.main()
 
     assert result == 0
-    assert len(operation_calls) == 1
-    assert operation_calls[0]["email"] == "owner@example.test"
-    assert operation_calls[0]["settings"] is context.settings
-    assert operation_calls[0]["email_sender"] is context.email_sender
-    assert operation_calls[0]["session_factory"] is context.session_factory
+    assert len(context.email_sender.messages) == 1
+    assert context.email_sender.messages[0][0] == "owner@example.test"
+    assert context.email_sender.timeouts == [13]
+    assert session_factory_calls == [
+        {
+            "database_url": settings.database_url,
+            "connect_timeout_seconds": 6,
+            "pool_timeout_seconds": 7,
+            "statement_timeout_seconds": 8,
+        }
+    ]
 
 
 @pytest.mark.parametrize("password", ["", "   "])
@@ -616,7 +635,10 @@ def test_failed_platform_admin_invitation_delivery_revokes_durable_invitation(
     context = staff_identity_context
 
     class FailingEmailSender:
-        def send_invitation(self, email: str, link: str, expires_at: datetime) -> None:
+        def send_invitation(
+            self, email: str, link: str, expires_at: datetime, *, timeout_seconds: int
+        ) -> None:
+            del timeout_seconds
             raise RuntimeError("mail transport unavailable")
 
     with pytest.raises(RuntimeError, match="delivery failed"):

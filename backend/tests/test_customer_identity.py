@@ -965,7 +965,10 @@ def test_customer_wallet_openapi_and_validation_scope_preserve_staff_errors(
     assert malformed.json() == {"error": {"code": "validation_error"}}
     staff_validation = context.client.post("/api/v1/auth/login", json={})
     assert staff_validation.status_code == 422
-    assert staff_validation.json() == {"detail": "Request validation failed"}
+    assert staff_validation.json() == {
+        "detail": "Request validation failed",
+        "code": "validation_error",
+    }
 
     unauthenticated_list = context.client.get("/api/v1/customer/wallets")
     assert unauthenticated_list.status_code == 401

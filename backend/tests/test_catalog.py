@@ -1208,8 +1208,14 @@ def test_openapi_and_validation_preserve_staff_customer_namespaces(
     customer_invalid = context.client.post("/api/v1/customer/auth/register", json={})
 
     assert catalog_invalid.status_code == staff_invalid.status_code == 422
-    assert catalog_invalid.json() == {"detail": "Request validation failed"}
-    assert staff_invalid.json() == {"detail": "Request validation failed"}
+    assert catalog_invalid.json() == {
+        "detail": "Request validation failed",
+        "code": "validation_error",
+    }
+    assert staff_invalid.json() == {
+        "detail": "Request validation failed",
+        "code": "validation_error",
+    }
     assert customer_invalid.status_code == 422
     assert customer_invalid.json() == {"error": {"code": "validation_error"}}
 
@@ -1596,7 +1602,10 @@ def test_quote_validation_envelope_is_quote_specific(
     _assert_quote_error(malformed, status_code=422, code="validation_error")
     _assert_quote_error(string_version, status_code=422, code="validation_error")
     _assert_quote_error(unknown_field, status_code=422, code="validation_error")
-    assert staff_invalid.json() == {"detail": "Request validation failed"}
+    assert staff_invalid.json() == {
+        "detail": "Request validation failed",
+        "code": "validation_error",
+    }
     assert customer_invalid.json() == {"error": {"code": "validation_error"}}
 
     from app.modules.catalog.models import QuoteRateLimitEvent

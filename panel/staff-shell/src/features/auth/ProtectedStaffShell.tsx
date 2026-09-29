@@ -101,6 +101,7 @@ export function ProtectedStaffShell() {
   }
 
   const presentation = rolePresentation[session.user.role];
+  const isAgencyAdmin = session.user.role === "agency_admin";
 
   return (
     <div className="protected-staff-workspace">
@@ -137,10 +138,34 @@ export function ProtectedStaffShell() {
               {logoutError}
             </p>
           ) : null}
-          <section className="protected-staff-placeholder" aria-label="Vista inicial">
-            <span className="protected-staff-placeholder__eyebrow">ROOMFORGE · PERSONAL</span>
-            <p>El espacio protegido está listo.</p>
-          </section>
+          {isAgencyAdmin ? (
+            <section
+              aria-labelledby="agency-review-queue-heading"
+              className="protected-staff-review-queue"
+            >
+              <div className="protected-staff-review-queue__heading">
+                <span className="protected-staff-review-queue__eyebrow">
+                  PROTOTIPO · SIN CONEXIÓN
+                </span>
+                <h2 id="agency-review-queue-heading">Cola de revisión</h2>
+              </div>
+              <div className="protected-staff-review-queue__empty-state">
+                <p className="protected-staff-review-queue__empty" role="status">
+                  No se muestran solicitudes en este prototipo.
+                </p>
+                <p className="protected-staff-review-queue__note">
+                  Esta vista no está conectada a solicitudes reales.
+                </p>
+              </div>
+            </section>
+          ) : (
+            <section className="protected-staff-placeholder" aria-label="Vista inicial">
+              <span className="protected-staff-placeholder__eyebrow">
+                ROOMFORGE · PERSONAL
+              </span>
+              <p>El espacio protegido está listo.</p>
+            </section>
+          )}
         </main>
       </div>
     </div>

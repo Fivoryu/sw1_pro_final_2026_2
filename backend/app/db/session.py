@@ -5,7 +5,7 @@ from collections.abc import Iterator, Mapping
 from typing import Any
 
 from sqlalchemy import create_engine, event
-from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine import Connection, Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 
@@ -169,9 +169,24 @@ def protect_session_factory(session_factory: sessionmaker[Session]) -> None:
 
 
 def create_session_factory(
-    database_url: str, *, engine_options: dict[str, Any] | None = None
+    database_url: str,
+    *,
+    connect_timeout_seconds: int = 5,
+    pool_timeout_seconds: int = 5,
+    statement_timeout_seconds: int = 10,
+    engine_options: dict[str, Any] | None = None,
 ) -> tuple[Engine, sessionmaker[Session]]:
-    engine = create_engine(database_url, pool_pre_ping=True, **(engine_options or {}))
+    options: dict[str, Any] = {"pool_pre_ping": True}
+    if make_url(database_url).drivername == "postgresql+psycopg":
+        options.update(
+            pool_timeout=pool_timeout_seconds,
+            connect_args={
+                "connect_timeout": connect_timeout_seconds,
+                "options": f"-c statement_timeout={statement_timeout_seconds * 1000}",
+            },
+        )
+    options.update(engine_options or {})
+    engine = create_engine(database_url, **options)
     factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     protect_session_factory(factory)
     return engine, factory

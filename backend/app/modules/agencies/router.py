@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+
+from app.core.errors import ERROR_RESPONSES
 
 from app.modules.agencies.schemas import (
     AgencyAdminInvitationCreate,
     AgencyCreate,
+    AgencyListResponse,
     AgencyWalletChallengeCreate,
     AgencyWalletChallengeResponse,
     AgencyWalletLinkRequest,
@@ -28,7 +32,9 @@ from app.modules.identity.models import Agency
 from app.modules.identity.session import ActiveStaff, get_active_staff
 
 
-router = APIRouter(prefix="/api/v1/agencies", tags=["agencies"])
+router = APIRouter(
+    prefix="/api/v1/agencies", tags=["agencies"], responses=ERROR_RESPONSES
+)
 agency_wallet_router = APIRouter(
     prefix="/api/v1/staff/agencies", tags=["agency-wallets"]
 )
@@ -61,16 +67,28 @@ def create_agency(
     return {"id": agency.id}
 
 
-@router.get("", response_model=None)
+@router.get("", response_model=AgencyListResponse)
 def list_agencies(
     request: Request,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     staff: ActiveStaff = Depends(get_active_staff),
-) -> dict[str, list[dict[str, str]]]:
+) -> dict[str, object]:
     _require_platform_admin(staff)
     session_factory: sessionmaker[Session] = request.app.state.session_factory
     with session_factory() as session:
-        agency_ids = session.query(Agency.id).order_by(Agency.id).all()
-    return {"agencies": [{"id": agency_id} for (agency_id,) in agency_ids]}
+        total = session.query(func.count(Agency.id)).scalar() or 0
+        agency_ids = (
+            session.query(Agency.id)
+            .order_by(Agency.id)
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+    return {
+        "agencies": [{"id": agency_id} for (agency_id,) in agency_ids],
+        "pagination": {"limit": limit, "offset": offset, "total": total},
+    }
 
 
 @router.post("/{agency_id}/admin-invitations", status_code=201, response_model=None)

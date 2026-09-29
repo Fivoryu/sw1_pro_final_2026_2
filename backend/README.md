@@ -11,7 +11,7 @@ The application reads process environment variables only; it does not load `.env
 - `STAFF_TOTP_ENCRYPTION_KEY`: Fernet-compatible key used to encrypt TOTP seeds at rest.
 - `STAFF_WEB_ORIGIN`: exact trusted panel origin used for CORS and cookie-authenticated request checks.
 - `STAFF_SECURE_COOKIES`: defaults to `true`; disable only for isolated local HTTP development.
-- `STAFF_EMAIL_SENDER_FACTORY`: optional `module:factory` plugin implementing `send_invitation(email, link, expires_at)`. There is no default SMTP implementation or paid email integration. Without an approved existing transport, live invitation delivery remains unavailable.
+- `STAFF_EMAIL_SENDER_FACTORY`: optional `module:factory` plugin implementing `send_invitation(email, link, expires_at, *, timeout_seconds)`. The required keyword-only timeout must be enforced by the provider's native transport; the application does not wrap synchronous sends in a thread or `Future`. There is no default SMTP implementation or paid email integration. Without an approved existing transport, live invitation delivery remains unavailable.
 
 Do not place credentials in source control or return/log authentication material. The TOTP seed is returned only to the invitee during enrollment; recovery codes are returned once after successful enrollment. Refresh credentials are only placed in an `HttpOnly`, `Secure` (unless explicitly disabled), `SameSite=Strict` cookie. The CSRF value is returned separately and must accompany refresh/logout requests with an exact allowed `Origin`.
 

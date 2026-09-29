@@ -39,8 +39,12 @@ class FrozenClock:
 class FakeEmailSender:
     def __init__(self) -> None:
         self.messages: list[tuple[str, str, datetime]] = []
+        self.timeouts: list[int] = []
 
-    def send_invitation(self, email: str, link: str, expires_at: datetime) -> None:
+    def send_invitation(
+        self, email: str, link: str, expires_at: datetime, *, timeout_seconds: int
+    ) -> None:
+        self.timeouts.append(timeout_seconds)
         self.messages.append((email, link, expires_at))
 
 
@@ -178,7 +182,10 @@ def test_malformed_staff_login_preserves_baseline_validation_response(
     response = client.post("/api/v1/auth/login", json={})
 
     assert response.status_code == 422
-    assert response.json() == {"detail": "Request validation failed"}
+    assert response.json() == {
+        "detail": "Request validation failed",
+        "code": "validation_error",
+    }
 
 
 def test_operator_can_reissue_an_expired_platform_invitation(def_context: Any) -> None:

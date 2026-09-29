@@ -11,12 +11,28 @@ class EmailDeliveryUnavailable(RuntimeError):
 
 
 class EmailSender(Protocol):
-    def send_invitation(self, email: str, link: str, expires_at: datetime) -> None: ...
+    """External transport contract; implementations must enforce the native timeout."""
+
+    def send_invitation(
+        self,
+        email: str,
+        link: str,
+        expires_at: datetime,
+        *,
+        timeout_seconds: int,
+    ) -> None: ...
 
 
 class UnconfiguredEmailSender:
-    def send_invitation(self, email: str, link: str, expires_at: datetime) -> None:
-        del email, link, expires_at
+    def send_invitation(
+        self,
+        email: str,
+        link: str,
+        expires_at: datetime,
+        *,
+        timeout_seconds: int,
+    ) -> None:
+        del email, link, expires_at, timeout_seconds
         raise EmailDeliveryUnavailable("No approved staff email transport is configured")
 
 

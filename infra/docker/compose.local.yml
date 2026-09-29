@@ -56,6 +56,10 @@ services:
       dockerfile: Dockerfile
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-roomforge_local}:${POSTGRES_PASSWORD:-local-postgres-only}@postgres:5432/${POSTGRES_DB:-roomforge_local}
+      DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
+      DATABASE_POOL_TIMEOUT_SECONDS: ${DATABASE_POOL_TIMEOUT_SECONDS:-5}
+      DATABASE_STATEMENT_TIMEOUT_SECONDS: ${DATABASE_STATEMENT_TIMEOUT_SECONDS:-10}
+      STAFF_EMAIL_SEND_TIMEOUT_SECONDS: ${STAFF_EMAIL_SEND_TIMEOUT_SECONDS:-10}
       JWT_SECRET: ${JWT_SECRET:-roomforge-local-only-jwt-secret-do-not-use-outside-development}
       STAFF_TOTP_ENCRYPTION_KEY: ${STAFF_TOTP_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
       STAFF_WEB_ORIGIN: "http://127.0.0.1:${PANEL_PORT:-5173}"
@@ -80,10 +84,10 @@ services:
           "CMD",
           "python",
           "-c",
-          "import os, socket, urllib.request; from sqlalchemy import create_engine; engine = create_engine(os.environ['DATABASE_URL']); connection = engine.connect(); connection.exec_driver_sql('SELECT 1').close(); connection.close(); engine.dispose(); socket.create_connection(('floci', 4566), timeout=2).close(); urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=2).close()",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=35).close()",
         ]
       interval: 10s
-      timeout: 5s
+      timeout: 40s
       retries: 5
       start_period: 30s
 

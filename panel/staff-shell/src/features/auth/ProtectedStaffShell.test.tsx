@@ -47,7 +47,6 @@ describe("ProtectedStaffShell", () => {
 
   it.each([
     ["platform_admin", "Administración de plataforma", "Inicio de plataforma"],
-    ["agency_admin", "Administración de inmobiliaria", "Inicio de inmobiliaria"],
     ["agent", "Área de agente", "Inicio del agente"],
   ])("shows a minimal role-aware shell for %s", async (role, heading, navigation) => {
     sessionStorage.setItem("roomforge.staff.csrf", "stored-csrf");
@@ -63,6 +62,29 @@ describe("ProtectedStaffShell", () => {
     expect(screen.getByRole("navigation")).toHaveTextContent(navigation);
     expect(screen.getByText("El espacio protegido está listo.")).toBeVisible();
     expect(screen.queryByText(/crear|editar|eliminar|publicar/i)).not.toBeInTheDocument();
+  });
+
+  it("shows an honest prototype review queue for agency admins", async () => {
+    sessionStorage.setItem("roomforge.staff.csrf", "stored-csrf");
+    vi.mocked(refreshStaffSession).mockResolvedValue({
+      access_token: "volatile-access",
+      csrf_token: "rotated-csrf",
+    });
+    vi.mocked(getStaffMe).mockResolvedValue({ user: staffUser("agency_admin") });
+
+    render(<ProtectedStaffShell />);
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "Cola de revisión" }),
+    ).toBeVisible();
+    expect(screen.getByRole("navigation")).toHaveTextContent("Inicio de inmobiliaria");
+    expect(screen.getByText("No se muestran solicitudes en este prototipo.")).toBeVisible();
+    expect(
+      screen.getByText("Esta vista no está conectada a solicitudes reales."),
+    ).toBeVisible();
+    expect(screen.queryByText("El espacio protegido está listo.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /aprobar|rechazar/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/precio|disponibilidad/i)).not.toBeInTheDocument();
   });
 
   it("returns to login after a successful API logout", async () => {

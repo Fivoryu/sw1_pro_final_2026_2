@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
+from app.core.errors import ERROR_RESPONSES
 from app.core.security import (
     create_access_token,
     decrypt_totp_secret,
@@ -39,7 +40,9 @@ from app.modules.identity.models import (
 )
 from app.modules.identity.session import get_active_staff
 
-router = APIRouter(prefix="/api/v1/auth", tags=["staff-auth"])
+router = APIRouter(
+    prefix="/api/v1/auth", tags=["staff-auth"], responses=ERROR_RESPONSES
+)
 _MAX_ENROLLMENT_ATTEMPTS = 5
 
 
