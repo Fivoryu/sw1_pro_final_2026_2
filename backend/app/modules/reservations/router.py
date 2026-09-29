@@ -9,11 +9,14 @@ from app.modules.customer_identity.schemas import CustomerErrorResponse
 from app.modules.customer_identity.session import ActiveCustomer, get_active_customer
 from app.modules.identity.session import ActiveStaff, get_active_staff
 from app.modules.reservations.schemas import (
+    CustomerReservationChainTransactionRequest,
     CustomerReservationPermitRequest,
+    ReservationChainTransactionResponse,
     ReservationCreateRequest,
     ReservationErrorResponse,
     ReservationPermitResponse,
     ReservationResponse,
+    StaffReservationChainTransactionRequest,
     StaffReservationPermitRequest,
 )
 from app.modules.reservations.service import (
@@ -21,6 +24,7 @@ from app.modules.reservations.service import (
     get_customer_reservation,
     issue_reservation_permit,
     list_customer_reservations,
+    reconcile_chain_transaction,
 )
 
 
@@ -90,6 +94,36 @@ def list_own(
     )
 
 
+@router.post(
+    "/{reservation_id}/chain-transactions",
+    response_model=ReservationChainTransactionResponse,
+    responses={
+        401: {"model": CustomerErrorResponse, "description": "Invalid customer session"},
+        **{
+            code: {"model": schema, "description": "Chain proof conflict or validation error"}
+            for code, schema in {403: ReservationErrorResponse, 404: ReservationErrorResponse, 409: ReservationErrorResponse, 422: ReservationErrorResponse}.items()
+        },
+    },
+)
+def reconcile_customer_chain_transaction(
+    reservation_id: str,
+    body: CustomerReservationChainTransactionRequest,
+    request: Request,
+    customer: ActiveCustomer = Depends(_authenticated_customer),
+) -> ReservationChainTransactionResponse:
+    return reconcile_chain_transaction(
+        session_factory=_session_factory(request),
+        settings=request.app.state.settings,
+        transport=getattr(request.app.state, "reservation_rpc_transport", None),
+        reservation_id=reservation_id,
+        actor=customer,
+        action=body.action,
+        transaction_hash=body.transaction_hash,
+        nonce=body.nonce,
+        now=request.app.state.clock(),
+    )
+
+
 @router.get(
     "/{reservation_id}",
     response_model=ReservationResponse,
@@ -139,6 +173,36 @@ def customer_permit(
         now=request.app.state.clock(),
     )
     return ReservationPermitResponse.model_validate(permit)
+
+
+@staff_router.post(
+    "/{reservation_id}/chain-transactions",
+    response_model=ReservationChainTransactionResponse,
+    responses={
+        401: {"description": "Invalid staff session"},
+        **{
+            code: {"model": schema, "description": "Chain proof conflict or validation error"}
+            for code, schema in {403: ReservationErrorResponse, 404: ReservationErrorResponse, 409: ReservationErrorResponse, 422: ReservationErrorResponse}.items()
+        },
+    },
+)
+def reconcile_staff_chain_transaction(
+    reservation_id: str,
+    body: StaffReservationChainTransactionRequest,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> ReservationChainTransactionResponse:
+    return reconcile_chain_transaction(
+        session_factory=_session_factory(request),
+        settings=request.app.state.settings,
+        transport=getattr(request.app.state, "reservation_rpc_transport", None),
+        reservation_id=reservation_id,
+        actor=staff,
+        action=body.action,
+        transaction_hash=body.transaction_hash,
+        nonce=body.nonce,
+        now=request.app.state.clock(),
+    )
 
 
 @staff_router.post(

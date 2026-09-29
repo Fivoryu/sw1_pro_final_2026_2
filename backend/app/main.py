@@ -119,7 +119,7 @@ def create_app(
                     "field_errors": field_errors,
                 },
             )
-        if request.url.path.startswith("/api/v1/reservations"):
+        if request.url.path.startswith(("/api/v1/reservations", "/api/v1/staff/reservations")):
             field_errors = [
                 {
                     "field": ".".join(str(part) for part in error.get("loc", ())),

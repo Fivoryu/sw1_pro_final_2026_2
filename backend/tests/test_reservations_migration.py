@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 _MIGRATION_PATH = _BACKEND_ROOT / "alembic" / "versions" / "0010_reservations.py"
+_CHAIN_MIGRATION_PATH = _BACKEND_ROOT / "alembic" / "versions" / "0011_reservation_chain_transactions.py"
 
 
 def _load_migration(connection: Connection) -> ModuleType:
@@ -273,5 +274,93 @@ def test_reservation_migration_enforces_active_partial_index_checks_and_downgrad
 
             migration.downgrade()
             assert "reservation" not in inspect(connection).get_table_names()
+    finally:
+        engine.dispose()
+
+
+def test_chain_transaction_migration_is_unique_by_chain_hash_and_reversible() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE reservation (id VARCHAR(36) PRIMARY KEY)"))
+            spec = importlib.util.spec_from_file_location(
+                "reservations_0011_test", _CHAIN_MIGRATION_PATH
+            )
+            assert spec is not None and spec.loader is not None
+            migration = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(migration)
+            setattr(migration, "op", Operations(MigrationContext.configure(connection)))
+            assert migration.revision == "0011_reservation_chain_transactions"
+            assert migration.down_revision == "0010_reservations"
+            migration.upgrade()
+
+            inspector = inspect(connection)
+            columns = {column["name"] for column in inspector.get_columns("reservation_chain_transaction")}
+            assert {
+                "reservation_id",
+                "chain_id",
+                "tx_hash",
+                "event_name",
+                "event_signature",
+                "event_topic",
+                "log_index",
+            }.issubset(columns)
+            unique_constraints = {
+                constraint["name"]
+                for constraint in inspector.get_unique_constraints("reservation_chain_transaction")
+            }
+            assert "uq_reservation_chain_transaction_chain_tx_hash" in unique_constraints
+
+            values = {
+                "id": "audit-one",
+                "reservation_id": "reservation-one",
+                "chain_id": 31337,
+                "tx_hash": "0x" + "1" * 64,
+                "action": "deposit",
+                "event_name": "Deposited",
+                "event_signature": "Deposited(bytes32,bytes32,address,uint256,uint256)",
+                "event_topic": "0x" + "2" * 64,
+                "log_index": 1,
+                "block_number": 12,
+                "block_hash": "0x" + "3" * 64,
+                "block_timestamp": 100,
+                "transaction_index": 0,
+                "amount": 100,
+                "nonce": 0,
+                "escrow_address": "0x" + "4" * 40,
+                "participant": "0x" + "5" * 40,
+                "actor": "0x" + "5" * 40,
+                "created_at": "2026-09-01 12:00:00",
+            }
+            connection.execute(
+                text(
+                    "INSERT INTO reservation_chain_transaction "
+                    "(id, reservation_id, chain_id, tx_hash, action, event_name, event_signature, "
+                    "event_topic, log_index, block_number, block_hash, block_timestamp, "
+                    "transaction_index, amount, nonce, escrow_address, participant, actor, created_at) "
+                    "VALUES (:id, :reservation_id, :chain_id, :tx_hash, :action, :event_name, :event_signature, "
+                    ":event_topic, :log_index, :block_number, :block_hash, "
+                    ":block_timestamp, :transaction_index, :amount, :nonce, :escrow_address, "
+                    ":participant, :actor, :created_at)"
+                ),
+                values,
+            )
+            with pytest.raises(IntegrityError):
+                with connection.begin_nested():
+                    connection.execute(
+                        text(
+                            "INSERT INTO reservation_chain_transaction "
+                            "(id, reservation_id, chain_id, tx_hash, action, event_name, event_signature, "
+                            "event_topic, log_index, block_number, block_hash, block_timestamp, "
+                            "transaction_index, amount, nonce, escrow_address, participant, actor, created_at) "
+                            "VALUES (:id, :reservation_id, :chain_id, :tx_hash, :action, :event_name, :event_signature, "
+                            ":event_topic, :log_index, :block_number, :block_hash, "
+                            ":block_timestamp, :transaction_index, :amount, :nonce, :escrow_address, "
+                            ":participant, :actor, :created_at)"
+                        ),
+                        {**values, "id": "audit-two", "reservation_id": "reservation-two"},
+                    )
+            migration.downgrade()
+            assert "reservation_chain_transaction" not in inspect(connection).get_table_names()
     finally:
         engine.dispose()

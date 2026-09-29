@@ -62,12 +62,18 @@ def ensure_reservation_action_eligible(
     action: ReservationAction,
     now: datetime,
     reservation_agency_id: str | None = None,
+    require_before_deadline: bool = True,
 ) -> None:
     """Raise a stable API error unless this actor may request the action.
 
     ``reservation_agency_id`` is supplied by the caller from already-resolved
     context: Reservation currently stores its agency wallet ID, not its agency
     ID, so determining that ID belongs to the integrating service/router.
+
+    ``require_before_deadline`` stays true for permit issuance, where a signature
+    produced after the exclusive policy deadline would only be rejected on chain.
+    Reconciliation passes false because the authoritative instant there is the
+    mined block timestamp, which the receipt verifier already checks per action.
     """
     if action not in {"cancel", "accept", "reject"}:
         raise ReservationApiError(
@@ -95,7 +101,8 @@ def ensure_reservation_action_eligible(
             )
 
     _ensure_pending(reservation)
-    _ensure_before_deadline(reservation, now)
+    if require_before_deadline:
+        _ensure_before_deadline(reservation, now)
 
     if (
         _is_staff(actor)

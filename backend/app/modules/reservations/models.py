@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
@@ -13,6 +13,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    BigInteger,
     Numeric,
     String,
     UniqueConstraint,
@@ -105,3 +106,45 @@ class Reservation(Base):
     )
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class ReservationChainTransaction(Base):
+    """Immutable proof that one local escrow event was reconciled."""
+
+    __tablename__ = "reservation_chain_transaction"
+    __table_args__ = (
+        UniqueConstraint(
+            "chain_id",
+            "tx_hash",
+            name="uq_reservation_chain_transaction_chain_tx_hash",
+        ),
+        Index(
+            "ix_reservation_chain_transaction_reservation",
+            "reservation_id",
+            "block_number",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    reservation_id: Mapped[str] = mapped_column(
+        ForeignKey("reservation.id", ondelete="RESTRICT"), nullable=False
+    )
+    chain_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    tx_hash: Mapped[str] = mapped_column(String(66), nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    event_name: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_signature: Mapped[str] = mapped_column(String(128), nullable=False)
+    event_topic: Mapped[str] = mapped_column(String(66), nullable=False)
+    log_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    block_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    block_hash: Mapped[str] = mapped_column(String(66), nullable=False)
+    block_timestamp: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    transaction_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    nonce: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    escrow_address: Mapped[str] = mapped_column(String(42), nullable=False)
+    participant: Mapped[str] = mapped_column(String(42), nullable=False)
+    actor: Mapped[str | None] = mapped_column(String(42), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )

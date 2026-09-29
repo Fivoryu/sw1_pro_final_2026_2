@@ -41,6 +41,46 @@ class StaffReservationPermitRequest(BaseModel):
     action: Literal["accept", "reject", "cancel"]
 
 
+class CustomerReservationChainTransactionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["deposit", "cancel", "expire"]
+    transaction_hash: str = Field(pattern=r"^0x[0-9a-fA-F]{64}$")
+    nonce: int = Field(ge=0)
+
+
+class StaffReservationChainTransactionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["accept", "reject", "cancel", "expire"]
+    transaction_hash: str = Field(pattern=r"^0x[0-9a-fA-F]{64}$")
+    nonce: int = Field(ge=0)
+
+
+class ReservationChainTransactionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reservation_id: str
+    status: Literal["pending", "accepted", "rejected", "cancelled", "expired"]
+    replayed: bool
+    chain_id: int
+    tx_hash: str
+    action: Literal["deposit", "accept", "reject", "cancel", "expire"]
+    event_name: str
+    event_signature: str
+    event_topic: str
+    log_index: int
+    block_number: int
+    block_hash: str
+    block_timestamp: int
+    transaction_index: int | None
+    amount: int
+    nonce: int
+    escrow_address: str
+    participant: str
+    actor: str | None
+
+
 class ReservationPermitResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
