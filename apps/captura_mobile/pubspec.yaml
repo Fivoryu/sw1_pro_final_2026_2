@@ -1,0 +1,18 @@
+name: captura_mobile
+description: Minimal RoomForge capture application prototype shell.
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

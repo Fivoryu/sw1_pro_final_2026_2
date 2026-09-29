@@ -1,0 +1,2 @@
+# This project avoids a third-party lint dependency; Flutter analyze uses the
+# Dart analyzer defaults for this minimal prototype scaffold.
