@@ -18,7 +18,9 @@ from sqlalchemy import (
     String,
     Text,
     event,
+    false,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -58,12 +60,18 @@ class Listing(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     agency_id: Mapped[str] = mapped_column(ForeignKey("agency.id"), nullable=False)
-    approval_status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
-    is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    approval_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="draft", server_default=text("'draft'")
+    )
+    is_published: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     operation: Mapped[str] = mapped_column(String(8), nullable=False)
     base_price: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     deposit_amount_cop: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
-    offer_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    offer_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
     city: Mapped[str] = mapped_column(String(120), nullable=False)
     city_key: Mapped[str] = mapped_column(String(360), nullable=False)
     zone: Mapped[str] = mapped_column(String(120), nullable=False)

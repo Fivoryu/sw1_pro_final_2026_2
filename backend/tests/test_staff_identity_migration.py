@@ -127,6 +127,33 @@ def test_normalize_sql_canonicalizes_postgres_default_trim_both_form() -> None:
     )
 
 
+def test_normalize_sql_canonicalizes_postgres_numeric_literal_casts() -> None:
+    assert _normalize_sql("base_price >= 0::numeric") == _normalize_sql("base_price >= 0")
+    assert _normalize_sql("one_time_total >= 0::NUMERIC") == _normalize_sql(
+        "one_time_total >= 0"
+    )
+    assert _normalize_sql("deposit_amount_cop > 0::numeric") == _normalize_sql(
+        "deposit_amount_cop > 0"
+    )
+
+
+def test_normalize_sql_canonicalizes_postgres_any_array_without_parentheses() -> None:
+    canonical = _normalize_sql("status in 'pending', 'accepted'")
+    assert _normalize_sql("status = any array['pending', 'accepted'] []") == canonical
+    assert _normalize_sql("status = any (array['pending', 'accepted']) []") == canonical
+
+
+def test_normalize_sql_canonicalizes_postgres_partial_index_predicate() -> None:
+    canonical = _normalize_sql("status in 'pending', 'accepted'")
+    assert (
+        _normalize_sql(
+            "((status)::text = ANY ((ARRAY['pending'::character varying, "
+            "'accepted'::character varying])::text[]))"
+        )
+        == canonical
+    )
+
+
 def test_normalize_sql_preserves_non_default_trim_arguments() -> None:
     collapsed = _normalize_sql("lower(trim(email))")
 
@@ -151,9 +178,14 @@ def _normalize_sql(value: str | None) -> str | None:
         return None
     normalized = value.lower().replace('"', "")
     normalized = re.sub(r"\b[a-z_][a-z0-9_]*\.", "", normalized)
-    normalized = re.sub(r"::\s*(?:character varying|varchar|text)(?:\(\d+\))?", "", normalized)
     normalized = re.sub(
-        r"=\s*any\s*\(\s*array\s*\[(.*?)\]\s*(?:\[\])?\s*\)",
+        r"::\s*(?:(?:character varying|varchar|text)(?:\(\d+\))?"
+        r"|numeric(?:\(\d+(?:\s*,\s*\d+)?\))?)(?:\[\])?",
+        "",
+        normalized,
+    )
+    normalized = re.sub(
+        r"=\s*any\s*\(*\s*array\s*\[(.*?)\]\s*\)*\s*(?:\[\])?",
         r"in (\1)",
         normalized,
     )
@@ -639,9 +671,7 @@ def test_pending_invitation_migration_refuses_legacy_duplicates_without_cleanup(
         engine.dispose()
 
 
-def test_blank_database_upgrade_matches_identity_metadata(r6_database: R6Database) -> None:
-    assert r6_database.started_blank, "schema verification must begin from a blank R6 database"
-    engine = r6_database.engine
+def _metadata_differences(engine: Engine) -> list[str]:
     inspector = inspect(engine)
     actual_tables = set(inspector.get_table_names()) - {"alembic_version"}
     expected_tables = set(Base.metadata.tables)
@@ -732,6 +762,13 @@ def test_blank_database_upgrade_matches_identity_metadata(r6_database: R6Databas
             differences.append(
                 f"{table_name} check constraints: expected {expected_checks}, got {actual_checks}"
             )
+
+    return differences
+
+
+def test_blank_database_upgrade_matches_identity_metadata(r6_database: R6Database) -> None:
+    assert r6_database.started_blank, "schema verification must begin from a blank R6 database"
+    differences = _metadata_differences(r6_database.engine)
 
     assert not differences, "migrated schema differs from identity metadata:\n- " + "\n- ".join(
         differences
