@@ -136,4 +136,19 @@ F02-T6 queda completada como verificación local con las limitaciones anteriores
 
 - **PR #6** mergeado a `main` el **2026-09-29T16:01:13Z** como `98ce894b97356e5c1808f8f9be0814495ad30697`. `origin/main` ya contiene todos los commits de F02 verificados en este informe.
 - **Primera ejecución real de GitHub Actions** del workflow de F02 (run `36594625038`, evento `push` a `main`): **captura ✅, cliente ✅, panel ✅** y backend ❌ **solo** en `pyright app tests` (pytest y ruff en verde también en CI). Los 15 errores de pyright y los dos revision ids de 35 caracteres eran defectos heredados de la línea catálogo/reservas, y se corrigieron en el PR de seguimiento: `odd/tasks/main-inherited-ci-defects.md`.
-- **Límites que siguen vigentes:** PostgreSQL/E2E no se ejecutaron (autorización T3b), el runtime Android/cámara real no se verifica por diseño, y el merge no recibió aprobación nativa propia: la autoridad quemada corresponde a las unidades de trabajo revisadas.
+- **Límites que siguen vigentes:** el retest de T3b sobre la base R6 poblada sigue pausado por decisión del usuario (el E2E, en cambio, sí se ejecutó después y pasó: ver *Ejecución E2E en `main`*), el runtime Android/cámara real no se verifica por diseño, y el merge no recibió aprobación nativa propia: la autoridad quemada corresponde a las unidades de trabajo revisadas.
+
+## Ejecución E2E en `main` (2026-09-29)
+
+**Árbol:** `main` en `881e5c5` (con PR #6 y PR #7 ya mergeados). **Comando:** `npm run test:e2e` desde `panel/staff-shell` (`node ./e2e/staff-login.e2e.test.mjs`). **Resultado: PASS**, salida `Staff login browser E2E passed: login, TOTP, /me, reload/restore, logout/revocation, and auth/CSRF negatives.` con exit 0.
+
+Recursos que el propio runner creó y destruyó:
+
+- Un PostgreSQL 16 aislado (`docker run --detach --rm --label roomforge.staff-login-e2e.run=<id> --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=536870912 --publish 127.0.0.1::5432 postgres:16-alpine`) con base, usuario y contraseña aleatorios y **sin volúmenes**.
+- `python -m alembic upgrade head` sobre esa base **vacía**: verificación real de la cadena de migraciones en PostgreSQL 16, incluidos los revision ids acortados en el arreglo de CI, hasta el head `0011_reservation_chain_txns`.
+- Siembra de un `platform_admin` con secreto TOTP (`backend/tests/staff_login_e2e_seed.py`), FastAPI con Uvicorn y el servidor de desarrollo de Vite, los tres en puertos de loopback libres y efímeros.
+- Un navegador **Chromium headless** con Playwright que verifica: pantalla de acceso de personal; `/api/v1/auth/me` sin sesión → **401**; credenciales válidas → desafío TOTP; TOTP válido → **200** con identidad sembrada, rol `platform_admin`, `access_token` y `csrf_token`; vista protegida con el correo autenticado; tokens **no** almacenados en `localStorage` (solo el CSRF en `sessionStorage`); cookie de refresh `HttpOnly`, `path=/api/v1/auth` y sin TLS en local; CSRF inválido → **403**; recarga que restaura la sesión rotando refresh y CSRF; cierre de sesión → **204** con revocación y limpieza de cookie y CSRF; token previo al cierre → **401**; y las cinco llamadas a la API pasando por el proxy `/api` de Vite.
+
+**Higiene comprobada después de la corrida:** no quedaron contenedores con la etiqueta del runner, ni Uvicorn ni Vite huérfanos. El contenedor, el volumen `roomforge_pgdata` y la base R6 del diagnóstico T3b quedaron intactos; el E2E nunca elimina volúmenes ajenos.
+
+**Alcance del resultado:** cierra el ítem *Playwright E2E* que figuraba como SKIP en los snapshots anteriores y aporta el `alembic upgrade head` desde base vacía en PostgreSQL real. **No** reabre ni sustituye el retest de T3b sobre la base R6 poblada, que sigue pausado por decisión del usuario.

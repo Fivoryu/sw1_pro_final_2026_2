@@ -32,3 +32,4 @@ Cadena verificada con Alembic: 11 revisiones lineales, `0001_staff_identity → 
 - Backend: **398 passed, 2 skipped** (pytest 9.1.1 / Python 3.12.13), Ruff 0.16.4 `All checks passed!`, Pyright 1.1.411 **0 errores, 0 warnings, 0 informations**.
 - Alembic: cadena lineal y límite de 32 caracteres aplicado sin excepciones.
 - Sin cambios en el workflow, el panel ni las apps Flutter: sus jobs ya estaban en verde en el run `36594625038` y este cambio no los toca.
+- **Validación adicional en PostgreSQL real:** el E2E del panel (`npm run test:e2e`) corrió después sobre `main` en `881e5c5` y pasó; su `alembic upgrade head` sobre una base PostgreSQL 16 vacía verifica los revision ids renombrados contra el motor real, no solo contra SQLite (head `0011_reservation_chain_txns`).
