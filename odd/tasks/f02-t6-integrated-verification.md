@@ -6,7 +6,7 @@
 
 **Árbol verificado:** `feat/f02-base-ux-automation` en `e7d18f9682058dff8749aeb22ce1dea2d0126796`. El worktree estuvo limpio antes y después de las corridas (sin cambios sin confirmar, sin archivos sin seguimiento).
 
-**Resultado:** reejecutada como verificación local con limitaciones declaradas; no se publicó y no se declara F02 terminado.
+**Resultado:** reejecutada como verificación local con limitaciones declaradas; no se publicó y no autoriza publicación.
 
 ### Alcance y seguridad
 
@@ -50,7 +50,7 @@ Se observaron cuatro warnings, sin tests fallidos: dos avisos deprecados de Star
 
 ### Límites que se mantienen
 
-- La revisión nativa de **T4f** sí quedó cerrada: tras el `operation_timeout` inicial sin mutación, el proveedor volvió a ofrecer el mismo slot, la lente `review-reliability` se admitió y la lineage `review-bfee92cef5c28da1` terminó **aprobada y acknowledged** sobre el rango exacto `2251e2d..c1c4b99` (revisión consumida `sha256:35866775…`, evidencia `gentle-ai.review-acknowledged/v1`, autoridad quemada). Las unidades posteriores —T4g-1, T4g-2, T4h y esta evidencia T6— forman un candidato distinto y **no** tienen revisión nativa propia; el proveedor ofrece un `START` nuevo para ese rango mayor, no iniciado. La verificación de este informe es técnica y local y no sustituye una aprobación nativa de esas unidades.
+- La revisión nativa de las unidades de captura quedó cerrada: **T4f** `review-bfee92cef5c28da1` y, tras reofrecerse cada slot, **T4g-1** `review-140dcc79298cbf8a`, **T4g-2** `review-ff2b2911e2e55ea7` y **T4h** `review-dc87edad58b003c8` (tier alto, cuatro lentes), cada una sobre su commit exacto contra su padre y no sobre la rama acumulada; todas **aprobadas y acknowledged** con autoridad quemada y solo hallazgos informativos (`R3-001`, `R2-stale-status`). El commit de evidencia `b3b56d5` es solo documental y no tuvo revisión nativa propia, como corresponde a un cambio pasivo de documentación. La verificación de este informe es técnica y local y no sustituye la decisión de publicación.
 - No se verificó runtime Android, emulador, cámara, AR, red ni persistencia reales; el prototipo de captura declara todas las simulaciones como tales.
 - No se validó cobertura numérica ni semántica de GitHub Actions, y el workflow sigue sin ejecutarse en GitHub.
 - Esta verificación no autoriza publicación: no hubo push, PR ni despliegue.
