@@ -79,7 +79,11 @@ def _register(
 
 
 def _error_code(response: Any) -> str:
-    return response.json()["error"]["code"]
+    body = response.json()
+    assert set(body) == {"detail", "code"}
+    assert "error" not in body
+    assert isinstance(body["detail"], str)
+    return body["code"]
 
 
 def test_customer_registration_returns_minimal_account_and_allows_immediate_login(
@@ -142,8 +146,7 @@ def test_customer_registration_validates_and_enforces_case_insensitive_uniquenes
     duplicate = _register(context, email="  CUSTOMER@EXAMPLE.TEST ")
 
     assert duplicate.status_code == 409
-    assert _error_code(duplicate) == "account_conflict"
-    assert "detail" not in duplicate.json()
+    assert _error_code(duplicate) == "conflict"
     with context.session_factory() as session:
         assert session.execute(text("SELECT count(*) FROM customer_account")).scalar_one() == 1
 
@@ -254,7 +257,7 @@ def test_customer_login_refresh_logout_and_me_obey_the_approved_wire_contract(
         json={"refresh_token": original["refresh_token"]},
     )
     assert reused.status_code == 401
-    assert _error_code(reused) == "invalid_session"
+    assert _error_code(reused) == "unauthorized"
     assert context.client.get(
         "/api/v1/customer/auth/me",
         headers={"Authorization": f"Bearer {original['access_token']}"},
@@ -331,7 +334,8 @@ def test_customer_rejects_invalid_credentials_with_one_generic_error(
 
     assert unknown.status_code == wrong_password.status_code == 401
     assert unknown.json() == wrong_password.json() == {
-        "error": {"code": "invalid_credentials"}
+        "detail": "Authentication failed.",
+        "code": "unauthorized",
     }
     with context.session_factory() as session:
         assert session.execute(text("SELECT count(*) FROM customer_session")).scalar_one() == 0
@@ -361,7 +365,10 @@ def test_customer_refresh_allows_exact_idle_boundary_and_rejects_after_it(
         json={"refresh_token": at_boundary.json()["refresh_token"]},
     )
     assert after_boundary.status_code == 401
-    assert after_boundary.json() == {"error": {"code": "invalid_session"}}
+    assert after_boundary.json() == {
+        "detail": "Authentication failed.",
+        "code": "unauthorized",
+    }
 
 
 def test_customer_me_slides_idle_window_for_refresh(
@@ -431,7 +438,10 @@ def test_customer_and_staff_route_namespaces_and_dependencies_remain_separate(
         headers={"Authorization": f"Bearer {customer_token}"},
     )
     assert customer_me.status_code == 401
-    assert customer_me.json() == {"error": {"code": "invalid_session"}}
+    assert customer_me.json() == {
+        "detail": "Authentication failed.",
+        "code": "unauthorized",
+    }
 
 
 def test_customer_me_requires_customer_bearer_session(
@@ -440,7 +450,10 @@ def test_customer_me_requires_customer_bearer_session(
     response = customer_identity_context.client.get("/api/v1/customer/auth/me")
 
     assert response.status_code == 401
-    assert response.json() == {"error": {"code": "invalid_session"}}
+    assert response.json() == {
+        "detail": "Authentication failed.",
+        "code": "unauthorized",
+    }
 
 
 def test_customer_openapi_documents_error_envelopes_and_email_format(
@@ -463,15 +476,12 @@ def test_customer_openapi_documents_error_envelopes_and_email_format(
         for status_code in statuses:
             assert status_code in responses
             response_schema = responses[status_code]["content"]["application/json"]["schema"]
-            assert response_schema["$ref"].endswith("/CustomerErrorResponse")
+            assert response_schema["$ref"] == "#/components/schemas/ErrorResponse"
 
-    error_response = schemas["CustomerErrorResponse"]
-    assert error_response["required"] == ["error"]
-    error_detail_ref = error_response["properties"]["error"]["$ref"].rsplit("/", 1)[-1]
-    error_detail = schemas[error_detail_ref]
-    assert "code" in error_detail["required"]
-    assert "fields" in error_detail["properties"]
-    assert "fields" not in error_detail["required"]
+    error_response = schemas["ErrorResponse"]
+    assert set(error_response["properties"]) == {"detail", "code"}
+    assert set(error_response["required"]) == {"detail", "code"}
+    assert "CustomerErrorResponse" not in schemas
 
     for path in ("/api/v1/customer/auth/register", "/api/v1/customer/auth/login"):
         request_schema = paths[path]["post"]["requestBody"]["content"]["application/json"]["schema"]
@@ -633,7 +643,10 @@ def test_wallet_challenge_requires_customer_session_and_persists_exact_canonical
         "/api/v1/customer/wallet-challenges", json={"address": address}
     )
     assert unauthorized.status_code == 401
-    assert unauthorized.json() == {"error": {"code": "invalid_session"}}
+    assert unauthorized.json() == {
+        "detail": "Authentication failed.",
+        "code": "unauthorized",
+    }
 
     customer_id, auth = _customer_auth(context)
     response = _create_wallet_challenge(context, auth, address)
@@ -682,7 +695,10 @@ def test_wallet_challenge_rejects_malformed_addresses_with_customer_validation_e
     response = _create_wallet_challenge(customer_identity_context, auth, address)
 
     assert response.status_code == 422
-    assert response.json() == {"error": {"code": "validation_error"}}
+    assert response.json() == {
+        "detail": "Request validation failed",
+        "code": "validation_error",
+    }
 
 
 def test_valid_wallet_signature_links_wallet_and_replay_fails_generically(
@@ -721,7 +737,7 @@ def test_valid_wallet_signature_links_wallet_and_replay_fails_generically(
         },
     )
     assert replay.status_code == 401
-    assert replay.json() == {"error": {"code": "invalid_wallet_challenge"}}
+    assert _error_code(replay) == "unauthorized"
 
 
 @pytest.mark.parametrize("invalid_signature", ["not-a-signature", "0x" + "00" * 65])
@@ -741,7 +757,7 @@ def test_invalid_wallet_signature_durably_consumes_challenge_before_retry(
     )
 
     assert failed.status_code == 401
-    assert failed.json() == {"error": {"code": "invalid_wallet_challenge"}}
+    assert _error_code(failed) == "unauthorized"
     with context.session_factory() as session:
         consumed_at = session.execute(
             text("SELECT consumed_at FROM customer_wallet_challenge WHERE id = :id"),
@@ -758,7 +774,7 @@ def test_invalid_wallet_signature_durably_consumes_challenge_before_retry(
         },
     )
     assert valid_retry.status_code == 401
-    assert valid_retry.json() == {"error": {"code": "invalid_wallet_challenge"}}
+    assert _error_code(valid_retry) == "unauthorized"
     assert context.client.get("/api/v1/customer/wallets", headers=auth).json() == []
 
 
@@ -781,7 +797,7 @@ def test_signature_from_a_different_wallet_is_rejected_and_consumed(
     )
 
     assert response.status_code == 401
-    assert response.json() == {"error": {"code": "invalid_wallet_challenge"}}
+    assert _error_code(response) == "unauthorized"
     with context.session_factory() as session:
         consumed_at = session.execute(
             text("SELECT consumed_at FROM customer_wallet_challenge WHERE id = :id"),
@@ -823,7 +839,7 @@ def test_wallet_challenge_consumption_commits_before_signature_recovery(
     )
 
     assert response.status_code == 401
-    assert response.json() == {"error": {"code": "invalid_wallet_challenge"}}
+    assert _error_code(response) == "unauthorized"
     assert consumed_before_recovery == [True]
 
 
@@ -846,7 +862,7 @@ def test_expired_wallet_challenge_fails_closed(
     )
 
     assert response.status_code == 401
-    assert response.json() == {"error": {"code": "invalid_wallet_challenge"}}
+    assert _error_code(response) == "unauthorized"
     assert context.client.get("/api/v1/customer/wallets", headers=auth).json() == []
 
 
@@ -868,7 +884,7 @@ def test_wallet_challenge_is_bound_to_customer_without_consuming_other_customers
     )
 
     assert cross_customer_attempt.status_code == 401
-    assert cross_customer_attempt.json() == {"error": {"code": "invalid_wallet_challenge"}}
+    assert _error_code(cross_customer_attempt) == "unauthorized"
     with context.session_factory() as session:
         assert session.execute(
             text("SELECT consumed_at FROM customer_wallet_challenge WHERE id = :id"),
@@ -915,7 +931,7 @@ def test_wallet_is_globally_unique_and_owner_is_never_disclosed(
     )
 
     assert conflict.status_code == 409
-    assert conflict.json() == {"error": {"code": "wallet_conflict"}}
+    assert _error_code(conflict) == "conflict"
     assert alice_auth["Authorization"] not in conflict.text
     assert "alice@example.test" not in conflict.text
     assert "customer_id" not in conflict.text
@@ -954,10 +970,10 @@ def test_customer_wallet_has_cardinality_one_and_cannot_be_replaced(
         },
     )
     assert replacement.status_code == 409
-    assert replacement.json() == {"error": {"code": "wallet_already_linked"}}
-    assert _create_wallet_challenge(context, auth, replacement_address).json() == {
-        "error": {"code": "wallet_already_linked"}
-    }
+    assert _error_code(replacement) == "conflict"
+    challenge_conflict = _create_wallet_challenge(context, auth, replacement_address)
+    assert challenge_conflict.status_code == 409
+    assert _error_code(challenge_conflict) == "conflict"
     listed = context.client.get("/api/v1/customer/wallets", headers=auth)
     assert listed.status_code == 200
     assert len(listed.json()) == 1
@@ -992,12 +1008,28 @@ def test_customer_wallet_openapi_and_validation_scope_preserve_staff_errors(
             assert status_code in responses
             assert responses[status_code]["content"]["application/json"]["schema"][
                 "$ref"
-            ].endswith("/CustomerErrorResponse")
+            ] == "#/components/schemas/ErrorResponse"
+
+    reservation_unauthorized_responses = (
+        ("/api/v1/reservations", "post"),
+        ("/api/v1/reservations", "get"),
+        ("/api/v1/reservations/{reservation_id}/chain-transactions", "post"),
+        ("/api/v1/reservations/{reservation_id}", "get"),
+        ("/api/v1/reservations/{reservation_id}/permit", "post"),
+    )
+    for path, method in reservation_unauthorized_responses:
+        schema = paths[path][method]["responses"]["401"]["content"][
+            "application/json"
+        ]["schema"]
+        assert schema["$ref"] == "#/components/schemas/ErrorResponse"
 
     _, auth = _customer_auth(context)
     malformed = _create_wallet_challenge(context, auth, "invalid")
     assert malformed.status_code == 422
-    assert malformed.json() == {"error": {"code": "validation_error"}}
+    assert malformed.json() == {
+        "detail": "Request validation failed",
+        "code": "validation_error",
+    }
     staff_validation = context.client.post("/api/v1/auth/login", json={})
     assert staff_validation.status_code == 422
     assert staff_validation.json() == {
@@ -1007,4 +1039,13 @@ def test_customer_wallet_openapi_and_validation_scope_preserve_staff_errors(
 
     unauthenticated_list = context.client.get("/api/v1/customer/wallets")
     assert unauthenticated_list.status_code == 401
-    assert unauthenticated_list.json() == {"error": {"code": "invalid_session"}}
+    assert unauthenticated_list.json() == {
+        "detail": "Authentication failed.",
+        "code": "unauthorized",
+    }
+    unauthenticated_reservations = context.client.get("/api/v1/reservations")
+    assert unauthenticated_reservations.status_code == 401
+    assert unauthenticated_reservations.json() == {
+        "detail": "Authentication failed.",
+        "code": "unauthorized",
+    }

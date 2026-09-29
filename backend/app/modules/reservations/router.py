@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, Request, status
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.modules.customer_identity.schemas import CustomerErrorResponse
+from app.core.errors import ErrorResponse
 from app.modules.customer_identity.session import ActiveCustomer, get_active_customer
 from app.modules.identity.session import ActiveStaff, get_active_staff
 from app.modules.reservations.schemas import (
@@ -51,7 +51,7 @@ def _authenticated_customer(request: Request) -> ActiveCustomer:
     status_code=status.HTTP_201_CREATED,
     response_model=ReservationResponse,
     responses={
-        401: {"model": CustomerErrorResponse, "description": "Invalid customer session"},
+        401: {"model": ErrorResponse, "description": "Invalid customer session"},
         **{
             code: {"model": schema, "description": "Reservation request conflict or validation error"}
             for code, schema in _RESERVATION_ERRORS.items()
@@ -81,7 +81,7 @@ def create(
 @router.get(
     "",
     response_model=list[ReservationResponse],
-    responses={401: {"model": CustomerErrorResponse, "description": "Invalid customer session"}},
+    responses={401: {"model": ErrorResponse, "description": "Invalid customer session"}},
 )
 def list_own(
     request: Request,
@@ -98,7 +98,7 @@ def list_own(
     "/{reservation_id}/chain-transactions",
     response_model=ReservationChainTransactionResponse,
     responses={
-        401: {"model": CustomerErrorResponse, "description": "Invalid customer session"},
+        401: {"model": ErrorResponse, "description": "Invalid customer session"},
         **{
             code: {"model": schema, "description": "Chain proof conflict or validation error"}
             for code, schema in {403: ReservationErrorResponse, 404: ReservationErrorResponse, 409: ReservationErrorResponse, 422: ReservationErrorResponse}.items()
@@ -128,7 +128,7 @@ def reconcile_customer_chain_transaction(
     "/{reservation_id}",
     response_model=ReservationResponse,
     responses={
-        401: {"model": CustomerErrorResponse, "description": "Invalid customer session"},
+        401: {"model": ErrorResponse, "description": "Invalid customer session"},
         404: {"model": ReservationErrorResponse, "description": "Reservation not found"},
     },
 )
@@ -149,7 +149,7 @@ def get_own(
     "/{reservation_id}/permit",
     response_model=ReservationPermitResponse,
     responses={
-        401: {"model": CustomerErrorResponse, "description": "Invalid customer session"},
+        401: {"model": ErrorResponse, "description": "Invalid customer session"},
         **{
             code: {"model": schema, "description": "Permit action is not eligible or unavailable"}
             for code, schema in _PERMIT_ERRORS.items()

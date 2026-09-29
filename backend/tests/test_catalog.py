@@ -1217,7 +1217,10 @@ def test_openapi_and_validation_preserve_staff_customer_namespaces(
         "code": "validation_error",
     }
     assert customer_invalid.status_code == 422
-    assert customer_invalid.json() == {"error": {"code": "validation_error"}}
+    assert customer_invalid.json() == {
+        "detail": "Request validation failed",
+        "code": "validation_error",
+    }
 
 
 def _quote_payload(
@@ -1606,7 +1609,10 @@ def test_quote_validation_envelope_is_quote_specific(
         "detail": "Request validation failed",
         "code": "validation_error",
     }
-    assert customer_invalid.json() == {"error": {"code": "validation_error"}}
+    assert customer_invalid.json() == {
+        "detail": "Request validation failed",
+        "code": "validation_error",
+    }
 
     from app.modules.catalog.models import QuoteRateLimitEvent
 
