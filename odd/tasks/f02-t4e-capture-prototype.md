@@ -2,7 +2,11 @@
 
 ## Estado
 
-**EN PROGRESO.** El plan y su espejo Engram se crearon antes del código. El usuario autorizó completar F02-T4 antes de F03 y extender el workflow/guía local de CI para ejecutar esta superficie. T4e está implementado en el worktree (328 líneas de app); worker y verificador independiente obtuvieron seis widget tests, analyze y format PASS. La resolución de paquetes fue offline y solo usó Flutter SDK. Commit/evidencia pendientes. Cada work-unit tendrá commit local propio, menos de 400 líneas modificadas y pruebas TDD. Sin push ni PR.
+**EN PROGRESO.** El plan y su espejo Engram se crearon antes del código. El usuario autorizó completar F02-T4 antes de F03 y extender el workflow/guía local de CI para ejecutar esta superficie. T4e está cerrado como el primer work-unit de captura: commit `a6d899c` (`feat(capture): add access and drafts prototype`), seis archivos, `390` inserciones + `5` eliminaciones = `395` líneas modificadas (<400). El slice de app es UI-only: `Access → empty drafts → local not-built Nuevo inmueble placeholder`. T4f, T4g, T4h y T6 siguen pendientes. Cada work-unit tendrá commit local propio, menos de 400 líneas modificadas y pruebas TDD. Sin push ni PR.
+
+**Evidencia T4e:** Strict TDD observado con RED conductual mediante stub compilable y GREEN final. Los 6 widget tests, `flutter analyze --no-pub` y Dart format pasaron en el worker y en la verificación independiente, con Flutter 3.41.8 / Dart 3.11.5 y resolución offline solo SDK en el único mirror existente autorizado. Las fuentes, manifiestos, lockfile y `.dart_tool` del cliente en el mirror fueron restaurados y verificados por hash; se preservaron el `build/` existente y el snapshot del worker. El pre-commit ASSESS fue `unassessable` por archivos sin seguimiento; el verificador independiente de barra alta pasó.
+
+La revisión nativa `review-023f7c902198a590` quedó acotada exactamente al commit de seis archivos contra el padre `cfb8679e422b649b49b05d9ba16f1e2e4802963f`, tier medio; fue aprobada y acknowledged. No se expuso resumen de hallazgos. No se verificaron autenticación real, API, propiedades/precios, cámara/AR, persistencia, emulador Android ni runtime de cámara.
 
 ## Objetivo
 
@@ -43,11 +47,9 @@ Crear el prototipo Flutter de la app Android de captura del agente conforme al f
 - `odd/tasks/f02-base-ux-automation.md`
 - `odd/tasks/f02-t6-integrated-verification.md`
 
-No usar otros paths sin reexplorar y autorización del usuario.
-
 ## Plan por work-units
 
-1. **T4e — Esqueleto, acceso visual y borradores.** Crear manifiesto Flutter mínimo, entrada/app, flujo de acceso visual-only y estado vacío de borradores con acción “Nuevo inmueble”; actualizar README. Pruebas widget RED→GREEN. Mantener la huella de archivos similar a `apps/cliente_mobile`; sin scaffolding generado. Target: <400 líneas. Commit y evidencia pendientes.
+1. **T4e — Esqueleto, acceso visual y borradores.** **CERRADA.** Commit `a6d899c` (`feat(capture): add access and drafts prototype`), seis archivos, `390` inserciones + `5` eliminaciones = `395` líneas modificadas (<400). Slice UI-only: `Access → empty drafts → local not-built Nuevo inmueble placeholder`. RED conductual con stub compilable y GREEN final; 6 widget tests, `flutter analyze --no-pub` y Dart format PASS en worker y verificación independiente con Flutter 3.41.8 / Dart 3.11.5, resolución offline solo SDK en el mirror autorizado. Fuentes, manifiestos, lockfile y `.dart_tool` restaurados y hash-checkeados; `build/` existente y snapshot del worker preservados. ASSESS pre-commit `unassessable` por archivos sin seguimiento; verificador independiente de barra alta PASS. Revisión `review-023f7c902198a590`, exactamente sobre el commit de seis archivos contra `cfb8679e422b649b49b05d9ba16f1e2e4802963f`, tier medio: aprobada y acknowledged, sin resumen de hallazgos expuesto. Sin autenticación real, API, propiedades/precios, cámara/AR, persistencia, emulador Android ni runtime de cámara.
 2. **T4f — Flujo de captura y permisos simulados.** Añadir pasos genéricos de datos/operación, ambientes/fotos con acciones de cámara explícitamente simuladas, estados de permiso requerido/denegado, offline/error/reintento, y retorno sin perder contexto. No definir campos de F04 ni guardar archivos. RED→GREEN→TRIANGULATE→REFACTOR; <400 líneas. Commit y evidencia pendientes.
 3. **T4g — Corrección conceptual y revisión simulada.** Añadir formas/objetos editables de demostración con procedencia honesta, paso conceptual de oferta sin valores comerciales, resumen, confirmación y resultado de envío simulado; cubrir accesibilidad, tamaño de pantalla y escala de texto. <400 líneas. Commit y evidencia pendientes.
 4. **T4h — CI, guía y tracker.** Añadir job Flutter para `apps/captura_mobile` usando Flutter 3.41.8; ejecutar `flutter pub get`, `flutter test`, `flutter analyze` y formato. Actualizar guía CI, tracker y registro T4. No ejecutar GitHub Actions. <400 líneas. Commit documental/CI pendiente.
