@@ -1,7 +1,7 @@
 """Create customer reservations with per-listing active locks.
 
 Revision ID: 0010_reservations
-Revises: 0009_agency_wallets_listing_deposit
+Revises: 0009_agency_wallets_deposit
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 revision = "0010_reservations"
-down_revision = "0009_agency_wallets_listing_deposit"
+down_revision = "0009_agency_wallets_deposit"
 branch_labels = None
 depends_on = None
 

@@ -78,7 +78,7 @@ def catalog_api_context() -> Iterator[CatalogApiContext]:
         Path(__file__).resolve().parents[1]
         / "alembic"
         / "versions"
-        / "0009_agency_wallets_listing_deposit.py"
+        / "0009_agency_wallets_deposit.py"
     )
     deposit_migration_spec = importlib.util.spec_from_file_location(
         "listing_deposit_triggers_for_api_tests", deposit_migration_path

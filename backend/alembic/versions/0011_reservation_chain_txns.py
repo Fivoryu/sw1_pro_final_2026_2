@@ -1,6 +1,6 @@
 """Persist validated local escrow transaction evidence.
 
-Revision ID: 0011_reservation_chain_transactions
+Revision ID: 0011_reservation_chain_txns
 Revises: 0010_reservations
 """
 from __future__ import annotations
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0011_reservation_chain_transactions"
+revision = "0011_reservation_chain_txns"
 down_revision = "0010_reservations"
 branch_labels = None
 depends_on = None

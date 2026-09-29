@@ -131,3 +131,9 @@ Dos intentos auxiliares iniciales fallaron antes de ejecutar verificaciones: uno
 ## Cierre
 
 F02-T6 queda completada como verificación local con las limitaciones anteriores explícitas. El proyecto F02 **no** se declara terminado: F02-T4 continúa en curso hasta que exista un prototipo verificable de captura Android; T3b permanece pausada hasta nueva autorización PostgreSQL. La verificación integrada no autoriza publicación.
+
+## Publicación (2026-09-29)
+
+- **PR #6** mergeado a `main` el **2026-09-29T16:01:13Z** como `98ce894b97356e5c1808f8f9be0814495ad30697`. `origin/main` ya contiene todos los commits de F02 verificados en este informe.
+- **Primera ejecución real de GitHub Actions** del workflow de F02 (run `36594625038`, evento `push` a `main`): **captura ✅, cliente ✅, panel ✅** y backend ❌ **solo** en `pyright app tests` (pytest y ruff en verde también en CI). Los 15 errores de pyright y los dos revision ids de 35 caracteres eran defectos heredados de la línea catálogo/reservas, y se corrigieron en el PR de seguimiento: `odd/tasks/main-inherited-ci-defects.md`.
+- **Límites que siguen vigentes:** PostgreSQL/E2E no se ejecutaron (autorización T3b), el runtime Android/cámara real no se verifica por diseño, y el merge no recibió aprobación nativa propia: la autoridad quemada corresponde a las unidades de trabajo revisadas.
