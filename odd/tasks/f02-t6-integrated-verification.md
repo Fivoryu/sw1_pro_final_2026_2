@@ -1,5 +1,62 @@
 # F02-T6 — Verificación integrada
 
+## Snapshot actual — `e7d18f9682058dff8749aeb22ce1dea2d0126796`
+
+**Fecha:** 2026-09-28 (reejecución). Este bloque es el estado vigente; el informe anterior se conserva sin reescribir como snapshot histórico al final del archivo.
+
+**Árbol verificado:** `feat/f02-base-ux-automation` en `e7d18f9682058dff8749aeb22ce1dea2d0126796`. El worktree estuvo limpio antes y después de las corridas (sin cambios sin confirmar, sin archivos sin seguimiento).
+
+**Resultado:** reejecutada como verificación local con limitaciones declaradas; no se publicó y no se declara F02 terminado.
+
+### Alcance y seguridad
+
+Se verificaron los runners locales de backend, panel, app cliente y **app de captura** (esta última ya ejecutable, antes ausente). No se cambió código ni configuración para verificar. Para aislar PostgreSQL, el proceso de `pytest` eliminó `ROOMFORGE_R6_DATABASE_URL`, fijó `DATABASE_URL=sqlite+pysqlite:///:memory:`, deshabilitó bytecode y la caché de pytest. No se ejecutaron PostgreSQL, Alembic, migraciones, Docker, Compose, Playwright E2E ni builds APK, y no se hizo push ni PR. La base, el volumen y el contenedor pausados del diagnóstico T3b siguen preservados.
+
+### Resultados
+
+| Área | Estado | Evidencia |
+|---|---|---|
+| Backend — suite | **PASS** | Python 3.12.13, pytest 9.1.1, entorno virtual existente. `python -m pytest tests -q -p no:cacheprovider`: **135 passed, 2 skipped, 4 warnings**. Los 2 skips son los tests R6/PostgreSQL de `test_staff_identity_migration.py` y `test_staff_identity_postgres.py`; no hubo conexión a PostgreSQL. |
+| Backend — lint | **PASS** | Ruff 0.16.4: `ruff check --no-cache app tests` → `All checks passed!`. |
+| Backend — tipos | **PASS** | Pyright 1.1.411: `pyright app tests` → **0 errors, 0 warnings, 0 informations**. El ejecutable avisó de una versión más nueva (1.1.414); no se instaló. |
+| Panel — tests | **PASS** | Node v22.23.0, Vitest 3.2.7: `npm run test` → **52 tests en 6 archivos**. No se ejecutó `npm ci`. |
+| Panel — build | **PASS** | `npm run build` con Vite 6.4.3 y TypeScript: build correcto (35 módulos, `dist/index.html` + `assets/`). El `dist/` generado no se limpió. |
+| Cliente Flutter | **PASS** | SHA-256 comparados entre el worktree y el mirror autorizado: `lib/main.dart` `3132384798…4146`, `test/widget_test.dart` `7be9d75e…0a57`. Flutter 3.41.8 / Dart 3.11.5: **11 tests PASS**, `flutter analyze --no-pub` sin issues, `dart format --output=none --set-exit-if-changed` sin cambios. |
+| Captura Flutter | **PASS** | SHA-256: `lib/main.dart` `59d9624e…fd26c`, `test/widget_test.dart` `65c0738f…8ffe`. Flutter 3.41.8 / Dart 3.11.5: **15 tests PASS**, `flutter analyze --no-pub` sin issues, `dart format --output=none --set-exit-if-changed` sin cambios. Antes de la corrida se guardaron hashes y `baseline.tar` del mirror; después se restauró y el `diff` de hashes quedó vacío (restauración byte-idéntica), con `build/` preservado. |
+| Lockfiles y scaffolding | **PASS** | No existe `pubspec.lock` rastreado (`git ls-files` = 0) ni presente en `apps/`; `apps/captura_mobile` sigue sin `android/`, `ios/` ni `.dart_tool`. El único directorio `ios/` de `apps/` pertenece a la app cliente y es preexistente. |
+| PostgreSQL / T3b | **BLOCKED / EXCLUIDO** | La instrucción vigente prohíbe el retest PostgreSQL y toda acción de Docker/Alembic. Los 2 tests R6 se omitieron de forma explícita mediante el entorno saneado. |
+| Playwright E2E | **SKIP** | `npm run test:e2e` levanta servicios y Docker/PostgreSQL; queda excluido por el límite de T3b. |
+| GitHub Actions | **PASS parcial / BLOCKED** | PyYAML 6.0.3 parseó `.github/workflows/ci.yml` completo: 4 jobs (`backend`, `panel`, `customer-flutter`, `capture-flutter`), permiso `contents: read` y `flutter-version: 3.41.8` en ambos jobs Flutter. `actionlint` no está instalado, así que la semántica de GitHub sigue sin validar, y **el workflow no se ejecutó en GitHub Actions**: los cuatro comandos del job de captura se corrieron solo localmente en el mirror. |
+| Presupuesto de commits | **PASS** | En el rango local `origin/main..e7d18f9` (sin fetch) hay **32 commits**; ninguno alcanza 400 líneas cambiadas. El máximo es `a6d899c` con 395; le siguen `c1c4b99` (392) y `5d0cc8a` (393). La última unidad, `e7d18f9`, sumó 44. |
+| Estado Git | **PASS** | Tras los runners el worktree seguía limpio en `e7d18f9`; sin push ni PR. |
+
+### Unidades añadidas desde el snapshot histórico
+
+| Commit | + | − | Total |
+|---|---:|---:|---:|
+| `a6d899c` | 390 | 5 | 395 |
+| `2251e2d` | 11 | 9 | 20 |
+| `c1c4b99` | 355 | 37 | 392 |
+| `23f4b03` | 11 | 5 | 16 |
+| `fedeccc` | 259 | 15 | 274 |
+| `e495575` | 273 | 22 | 295 |
+| `e7d18f9` | 37 | 7 | 44 |
+
+Ninguna excede el límite de 400 líneas.
+
+### Advertencias de pytest
+
+Se observaron cuatro warnings, sin tests fallidos: dos avisos deprecados de Starlette/`httpx` sobre `testclient` y sobre `cookies=` por petición, y dos `SAWarning` por reflexión omitida del índice basado en expresión `uq_staff_invitation_pending_normalized_email`.
+
+### Límites que se mantienen
+
+- La revisión nativa de las unidades de captura no está cerrada: `review-bfee92cef5c28da1` (T4f) quedó sin recolectar por `operation_timeout` del proveedor, y T4g-1/T4g-2/T4h no tienen revisión nativa propia. La verificación de este informe es técnica y local; no sustituye una aprobación nativa.
+- No se verificó runtime Android, emulador, cámara, AR, red ni persistencia reales; el prototipo de captura declara todas las simulaciones como tales.
+- No se validó cobertura numérica ni semántica de GitHub Actions, y el workflow sigue sin ejecutarse en GitHub.
+- Esta verificación no autoriza publicación: no hubo push, PR ni despliegue.
+
+## Snapshot histórico — `e7452c5a426f9aa6f4928ce1c1663aeb36a6acf6`
+
 **Fecha:** 2026-09-28
 
 **Árbol verificado:** `feat/f02-base-ux-automation` en `e7452c5a426f9aa6f4928ce1c1663aeb36a6acf6` (HEAD esperado antes de registrar este informe).
