@@ -35,8 +35,8 @@ Remaining gate: ejecución de CP-006 y cobertura residual explícitamente pendie
 Inicio: confirmar fixtures y convenciones existentes en `backend/tests/` y módulos `backend/app/modules/identity/` y `backend/app/modules/tenant/`. Fin: las pruebas codifican los contratos sin implementar producción. Rollback: eliminar únicamente las pruebas nuevas de esta unidad.
 
 - [x] Crear `backend/tests/test_hu007_agent_invitations.py` con pruebas RED de normalización `trim + lowercase`, TTL de 7 días, estados, hash SHA-256 sin token claro y generación segura. <!-- sdd-owner: implementation -->
-- [ ] Añadir pruebas RED del servicio/repositorio para emisión, reinvitación atómica, fallo de entrega observable, membresía existente, reutilización de `UsuarioGlobal`, contraseña Argon2id para cuenta nueva y ausencia de sesión/permisos. <!-- sdd-owner: implementation -->
-- [ ] Añadir pruebas RED de rollback transaccional y de aceptación single-use para cuenta, membresía e invitación, usando los dobles de persistencia existentes. <!-- sdd-owner: implementation -->
+- [x] Añadir pruebas RED del servicio/repositorio para emisión, reinvitación atómica, fallo de entrega observable, membresía existente, reutilización de `UsuarioGlobal`, contraseña Argon2id para cuenta nueva y ausencia de sesión/permisos. <!-- evidencia: backend HU-007 21 passed; cubre emisión, reinvitación, entrega, reutilización, contraseña, autorización y errores. --> <!-- sdd-owner: implementation -->
+- [x] Añadir pruebas RED de rollback transaccional y de aceptación single-use para cuenta, membresía e invitación, usando los dobles de persistencia existentes. <!-- evidencia: backend HU-007 21 passed; incluye rollback ante fallo intermedio, conflicto de membresía y segunda aceptación. --> <!-- sdd-owner: implementation -->
 
 ### Unidad R2 — Contrato HTTP backend
 
@@ -50,8 +50,8 @@ Inicio: fijar en pruebas los contratos del diseño. Fin: API tests fallan por ru
 Inicio: identificar pruebas y seam actuales de `panel/src/`. Fin: Vitest expresa requests, errores y estados de UI antes de sustituir la memoria local. Rollback: retirar las pruebas nuevas sin tocar la UI existente.
 
 - [x] Añadir pruebas Vitest para requests exactas, token solo en body y contratos autenticados/públicos. <!-- evidencia: commit de panel 46950ed; Vitest completa: 13 archivos/53 tests passed. --> <!-- sdd-owner: implementation -->
-- [ ] Completar en las pruebas del panel el mapeo de errores y la cobertura de los servicios/seams indicados. <!-- sdd-owner: implementation -->
-- [ ] Cubrir estados `pending/accepted/invalidated/expired`, reinvitación, expiración, token no utilizable, membresía existente, error de red y contraseña condicional en la ruta pública. <!-- sdd-owner: implementation -->
+- [x] Completar en las pruebas del panel el mapeo de errores y la cobertura de los servicios/seams indicados. <!-- evidencia: Vitest 13 archivos/59 tests passed; mapeo HU-007 y seams verificados. --> <!-- sdd-owner: implementation -->
+- [x] Cubrir estados `pending/accepted/invalidated/expired`, reinvitación, expiración, token no utilizable, membresía existente, error de red y contraseña condicional en la ruta pública. <!-- evidencia: Vitest 13 archivos/59 tests passed; estados, reinvitación, expiración, errores de red y contraseña condicional cubiertos. --> <!-- sdd-owner: implementation -->
 
 ## GREEN — implementación mínima para satisfacer RED
 
@@ -80,7 +80,7 @@ Inicio: conservar autenticación, suscripción y login actuales. Fin: ninguna mu
 - [x] Actualizar `panel/src/application/userManagementService.ts` para usar `SessionService.request` en administración y `ApiClient.request` público en inspección/aceptación, sin enviar `tenant_id`. <!-- sdd-owner: implementation -->
 - [x] Actualizar `panel/src/App.tsx` y `panel/src/features/user-management/UserManagementPage.tsx` para listar estados, emitir/reinvitar y presentar conflictos/red sin UI de activación, permisos o RBAC. <!-- sdd-owner: implementation -->
 - [x] Crear `panel/src/features/agent-invitations/AgentInvitationAcceptancePage.tsx`, leyendo `#token` solo en memoria, solicitando contraseña según `inspect` y mostrando estados no sensibles. <!-- sdd-owner: implementation -->
-- [ ] Eliminar `panel/src/domain/user.ts`, `UserRepository.ts`, `InMemoryUserRepository.ts` o fixtures locales únicamente si una búsqueda final confirma que no tienen consumidores fuera de HU-007. <!-- sdd-owner: implementation -->
+- [x] Revisar `panel/src/domain/user.ts`, `UserRepository.ts`, `InMemoryUserRepository.ts` y fixtures locales; la búsqueda final confirmó consumidores fuera de HU-007, por lo que se conservaron sin eliminarlos. <!-- evidencia: consumidores confirmados en `UserManagementService`, página y pruebas. --> <!-- sdd-owner: implementation -->
 
 ## TRIANGULATE — integración, PostgreSQL y evidencia reproducible
 
@@ -91,14 +91,14 @@ Inicio: disponer de PostgreSQL local y fixtures de integración existentes. Fin:
 - [x] Ejecutar la migración con `.venv/Scripts/python.exe -m alembic -c backend/alembic.ini upgrade head` y verificar que Alembic queda en `0013 (head)` sobre PostgreSQL; la migración PostgreSQL fue verificada. <!-- evidencia: upgrade aplicado y `0013 (head)` confirmado. --> <!-- sdd-owner: implementation -->
 - [x] Completar la verificación independiente de FKs, checks, índice parcial, unicidad tenant/usuario y downgrade protegido con datos. <!-- evidencia: probe transaccional confirmó tablas/FKs/checks/índices; el downgrade protegido falló con `HU-007 tables contain data; downgrade is disabled` y las tablas permanecieron tras el rollback. --> <!-- sdd-owner: implementation -->
 - [x] Añadir/ajustar prueba PostgreSQL en `backend/tests/test_hu007_agent_invitations_postgres.py` para dos aceptaciones concurrentes del mismo token y dos reinvitaciones concurrentes, demostrando una sola cuenta/membresía y un único pendiente utilizable. <!-- evidencia: probe PostgreSQL real; aceptación concurrente produjo exactamente un `accepted` y un `InvitationUnavailableError`, un usuario global y una membresía pendiente; la reinvitación concurrente dejó una invitación pendiente utilizable y una invalidada. --> <!-- sdd-owner: implementation -->
-- [ ] Verificar rollback ante fallo intermedio y que una invitación expirada se materializa como `expired` sin crear cuenta ni membresía. <!-- sdd-owner: implementation -->
+- [x] Verificar rollback ante fallo intermedio y que una invitación expirada se materializa como `expired` sin crear cuenta ni membresía. <!-- evidencia: backend HU-007 21 passed; rollback, expiración en listado y aceptación terminal cubiertos. --> <!-- sdd-owner: implementation -->
 
 ### Unidad T2 — Suite completa y CP-006
 
 Inicio: todas las unidades GREEN integradas. Fin: resultados reproducibles y límites de evidencia explícitos. Rollback: corregir solo la unidad que falle y repetir su verificación.
 
 - [x] Ejecutar `.venv/Scripts/python.exe -m pytest backend/tests -q` y Vitest del panel, registrando los resultados disponibles para el expediente: backend `226 passed`; panel `13 files/53 tests passed`. CP-006 permanece sin ejecutar y no se declara cerrado. <!-- evidencia: suite backend completa 226 passed; cobertura enfocada API/security 61 passed; Vitest completa 13 archivos/53 tests passed. --> <!-- sdd-owner: implementation -->
-- [ ] Comprobar manualmente que no se expone token, contraseña, JWT, `tenant_id` de autoridad ni detalles de enumeración en respuestas, logs, UI o notificador fake; registrar CP-006 como preparado/pendiente salvo evidencia independiente. <!-- sdd-owner: implementation -->
+- [x] Comprobar manualmente que no se expone token, contraseña, JWT, `tenant_id` de autoridad ni detalles de enumeración en respuestas, logs, UI o notificador fake; registrar CP-006 como preparado/pendiente salvo evidencia independiente. <!-- evidencia: revisión manual y prueba backend de no eco; panel conserva token solo en memoria; CP-006 permanece no ejecutado. --> <!-- sdd-owner: implementation -->
 
 ## REFACTOR — calidad sin alterar comportamiento
 
