@@ -7,20 +7,22 @@ from typing import Any, cast
 import pytest
 from eth_utils.crypto import keccak
 
+from app.modules.identity.models import Agency
 from app.modules.reservations import chain
+from app.modules.reservations import models as reservation_models
 from app.modules.reservations.errors import ReservationApiError
 from app.modules.reservations.models import Reservation
 from app.modules.reservations.service import (
     expire_unpaid_reservations,
     reconcile_chain_transaction,
 )
-from app.modules.reservations import models as reservation_models
 
 from test_reservations import (
     ReservationsContext,
     reservations_context as _reservations_context,
     _configure_fake_escrow,
     _create_test_reservation,
+    _customer_auth,
     _create_reservation,
     _seed_reservation_inputs,
     _use_staff_principal,
@@ -393,6 +395,98 @@ def test_customer_route_rejects_staff_only_actions_before_any_chain_work(
     with context.session_factory() as session:
         stored = session.get(Reservation, reservation["reservation_id"])
         assert stored is not None and stored.status == "pending"
+        assert session.query(reservation_models.ReservationChainTransaction).count() == 0
+
+
+def test_staff_chain_reconciliation_rejects_cross_agency_admin_before_chain_work(
+    reservations_context: ReservationsContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = reservations_context
+    _customer_id, _customer_auth_token, reservation = _create_test_reservation(
+        context,
+        listing_id="chain-cross-agency-admin",
+        deposit_amount_cop=None,
+    )
+    with context.session_factory.begin() as session:
+        session.add(Agency(id="agency-two"))
+    _use_staff_principal(context, role="agency_admin", tenant_id="agency-two")
+    called = False
+
+    def verify(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal called
+        called = True
+        raise AssertionError("verification must not run for a cross-agency actor")
+
+    monkeypatch.setattr(chain, "verify_action_receipt", verify)
+    path = (
+        f"/api/v1/staff/reservations/"
+        f"{reservation['reservation_id']}/chain-transactions"
+    )
+    response = _submit(
+        context,
+        path,
+        {},
+        action="accept",
+        tx_hash="0x" + "c" * 64,
+    )
+
+    assert response.status_code == 403
+    body = response.json()
+    assert set(body) == {"code", "message", "request_id", "field_errors"}
+    assert body["code"] == "reservation_action_forbidden"
+    assert body["message"] == "The actor is not allowed to request this reservation action."
+    assert isinstance(body["request_id"], str)
+    assert body["field_errors"] == []
+    assert called is False
+    with context.session_factory() as session:
+        stored = session.get(Reservation, reservation["reservation_id"])
+        assert stored is not None and stored.status == "pending"
+        assert stored.deposit_confirmed_at is None
+        assert session.query(reservation_models.ReservationChainTransaction).count() == 0
+
+
+def test_customer_chain_reconciliation_rejects_another_customers_reservation(
+    reservations_context: ReservationsContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = reservations_context
+    owner_id, _owner_auth, reservation = _create_test_reservation(
+        context,
+        listing_id="chain-cross-customer-owner",
+    )
+    other_customer_id, other_customer_auth = _customer_auth(
+        context,
+        email="chain-cross-customer@example.test",
+    )
+    assert other_customer_id != owner_id
+    called = False
+
+    def verify(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal called
+        called = True
+        raise AssertionError("verification must not run for another customer")
+
+    monkeypatch.setattr(chain, "verify_action_receipt", verify)
+    path = f"/api/v1/reservations/{reservation['reservation_id']}/chain-transactions"
+    response = _submit(
+        context,
+        path,
+        other_customer_auth,
+        action="deposit",
+        tx_hash="0x" + "d" * 64,
+    )
+
+    assert response.status_code == 404
+    body = response.json()
+    assert set(body) == {"code", "message", "request_id", "field_errors"}
+    assert body["code"] == "reservation_not_found"
+    assert body["message"] == "The reservation was not found."
+    assert isinstance(body["request_id"], str)
+    assert body["field_errors"] == []
+    assert called is False
+    with context.session_factory() as session:
+        stored = session.get(Reservation, reservation["reservation_id"])
+        assert stored is not None and stored.status == "pending"
+        assert stored.deposit_confirmed_at is None
         assert session.query(reservation_models.ReservationChainTransaction).count() == 0
 
 

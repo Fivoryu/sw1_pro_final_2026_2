@@ -1426,3 +1426,34 @@ def test_agents_cannot_manage_memberships_and_admins_cannot_change_other_account
         assert agent_two.active is True
         assert agency_admin_target.active is True
     assert context.email_sender.messages == []
+
+
+def test_agency_admin_cannot_activate_agent_from_another_agency(
+    agency_api_context: AgencyApiContext,
+) -> None:
+    context = agency_api_context
+    admin_token = _seed_account(
+        context,
+        account_id="agency-admin-one",
+        role="agency_admin",
+        tenant_id="agency-one",
+    )
+    _seed_account(
+        context,
+        account_id="inactive-agent-two",
+        role="agent",
+        tenant_id="agency-two",
+        active=False,
+    )
+
+    response = context.client.post(
+        "/api/v1/agencies/agents/inactive-agent-two/activate",
+        headers=_headers(admin_token),
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Agent not found", "code": "not_found"}
+    with context.session_factory() as session:
+        agent = session.get(StaffAccount, "inactive-agent-two")
+        assert agent is not None
+        assert agent.active is False

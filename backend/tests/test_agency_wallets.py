@@ -17,6 +17,7 @@ from app.core.config import Settings
 from app.core.security import create_access_token
 from app.db.base import Base
 from app.main import create_app
+from app.modules.agencies.models import AgencyWallet
 from app.modules.identity.models import Agency, StaffAccount, StaffSession
 
 
@@ -197,6 +198,34 @@ def test_agency_admin_cannot_act_for_another_tenant(
     )
 
     assert response.status_code == 403
+
+
+def test_agency_admin_cannot_link_wallet_for_another_tenant(
+    agency_wallet_context: AgencyWalletContext,
+) -> None:
+    context = agency_wallet_context
+    token = _staff_token(context, account_id="agency-one-admin")
+    _staff_token(
+        context,
+        account_id="agency-two-admin",
+        tenant_id="agency-two",
+    )
+    challenge = _issue_challenge(context, token)
+
+    response = _link_wallet(
+        context,
+        token,
+        challenge,
+        agency_id="agency-two",
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Agency-admin tenant access is required",
+        "code": "forbidden",
+    }
+    with context.session_factory() as session:
+        assert session.query(AgencyWallet).count() == 0
 
 
 def test_invalid_expired_and_replayed_wallet_challenges_fail_generically(
