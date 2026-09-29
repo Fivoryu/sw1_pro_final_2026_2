@@ -50,7 +50,7 @@ Se observaron cuatro warnings, sin tests fallidos: dos avisos deprecados de Star
 
 ### Límites que se mantienen
 
-- La revisión nativa de las unidades de captura no está cerrada: `review-bfee92cef5c28da1` (T4f) quedó sin recolectar por `operation_timeout` del proveedor, y T4g-1/T4g-2/T4h no tienen revisión nativa propia. La verificación de este informe es técnica y local; no sustituye una aprobación nativa.
+- La revisión nativa de **T4f** sí quedó cerrada: tras el `operation_timeout` inicial sin mutación, el proveedor volvió a ofrecer el mismo slot, la lente `review-reliability` se admitió y la lineage `review-bfee92cef5c28da1` terminó **aprobada y acknowledged** sobre el rango exacto `2251e2d..c1c4b99` (revisión consumida `sha256:35866775…`, evidencia `gentle-ai.review-acknowledged/v1`, autoridad quemada). Las unidades posteriores —T4g-1, T4g-2, T4h y esta evidencia T6— forman un candidato distinto y **no** tienen revisión nativa propia; el proveedor ofrece un `START` nuevo para ese rango mayor, no iniciado. La verificación de este informe es técnica y local y no sustituye una aprobación nativa de esas unidades.
 - No se verificó runtime Android, emulador, cámara, AR, red ni persistencia reales; el prototipo de captura declara todas las simulaciones como tales.
 - No se validó cobertura numérica ni semántica de GitHub Actions, y el workflow sigue sin ejecutarse en GitHub.
 - Esta verificación no autoriza publicación: no hubo push, PR ni despliegue.
