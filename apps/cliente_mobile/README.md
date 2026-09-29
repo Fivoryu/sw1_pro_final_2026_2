@@ -1,58 +1,39 @@
-# Cliente mobile (Flutter)
+# Aplicación cliente (Flutter)
 
-Aplicación cliente para autenticación y gestión de sesión. El catálogo,
-recorridos 3D y reservas todavía no forman parte de esta entrega.
+## Estado de este snapshot
 
-## Estado implementado
+Este checkout contiene únicamente el shell inicial de RoomForge: una pantalla
+Material que informa que el catálogo está pendiente de integración. No muestra
+publicaciones ficticias ni consulta una API.
 
-- Registro contra `POST /api/v1/auth/register`.
-- Inicio de sesión contra `POST /api/v1/auth/login`.
-- Restauración de sesión mediante `GET /api/v1/auth/me`.
-- Rotación de tokens una sola vez ante una respuesta `401`, persistida solo
-  después de confirmar la sesión con `/auth/me`.
-- Cierre de sesión contra `POST /api/v1/auth/logout`, con limpieza local aun si
-  la solicitud falla.
-- Credenciales persistidas mediante `flutter_secure_storage`, detrás de una
-  abstracción testeable sin plugins nativos.
-- Navegación declarativa con `go_router` y formularios accesibles y adaptables.
+La autenticación, la gestión de sesión, la persistencia de credenciales y la
+integración del catálogo **no están implementadas en este snapshot**. El README
+anterior describía capacidades de código que no existe en este checkout; esas
+afirmaciones no deben tomarse como comportamiento disponible o verificado.
+Tampoco hay un contrato canónico de catálogo configurado en esta app.
 
-## Configuración y ejecución
+## Plataformas y verificaciones
 
-Requiere Flutter con Dart SDK `^3.11.5`.
+Se requiere Flutter con Dart SDK `^3.11.5`. El proyecto incluye runners nativos
+para Android e iOS. Sus identificadores actuales (`com.example.cliente_mobile`
+y `com.example.clienteMobile`) son valores de ejemplo y deben definirse antes de
+una distribución.
+
+Comandos principales:
 
 ```bash
 flutter pub get
 flutter test
 flutter analyze
-flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000/api/v1
+flutter build apk --debug
 ```
 
-`API_BASE_URL` debe ser la URL base que ya incluye `/api/v1`. El valor
-predeterminado es `http://10.0.2.2:8000/api/v1`, que permite acceder al host
-desde un emulador Android. En un dispositivo físico o en otra plataforma,
-reemplazalo por la dirección accesible del backend, por ejemplo:
+| Verificación | Resultado en este corte |
+| --- | --- |
+| `flutter test` | Correcto: 2 pruebas. |
+| `flutter analyze` | Correcto: sin problemas reportados. |
+| `flutter build apk --debug` | Correcto: APK de depuración generado. |
+| Build de iOS | No ejecutado: el entorno Windows no dispone de Xcode. |
 
-```bash
-flutter run --dart-define=API_BASE_URL=http://<host-accesible>:8000/api/v1
-```
-
-### Red local en desarrollo y producción
-
-Los builds `debug` y `profile` permiten el backend HTTP local documentado: en
-Android la excepción `usesCleartextTraffic` vive únicamente en los manifests
-de esas variantes, y en iOS se permite solo `NSAllowsLocalNetworking`. El
-permiso de Internet está declarado en el manifest principal para todas las
-variantes.
-
-Los builds de producción deben usar un backend HTTPS; configurá, por ejemplo:
-
-```bash
-flutter build apk --release \
-  --dart-define=API_BASE_URL=https://api.example.com/api/v1
-```
-
-No habilites cleartext globalmente ni uses una URL HTTP en producción.
-
-No se guardan secretos en el repositorio ni en los comandos documentados. Los
-tokens se reciben en tiempo de ejecución y se almacenan únicamente en el
-almacenamiento seguro del dispositivo.
+El build Android no implica que las funciones de autenticación o catálogo estén
+implementadas. El README original de los recursos de lanzamiento iOS se conservó.

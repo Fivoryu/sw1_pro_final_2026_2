@@ -36,6 +36,10 @@ class Settings:
     database_statement_timeout_seconds: int = 10
     email_send_timeout_seconds: int = 10
     s3_endpoint_url: str | None = None
+    escrow_rpc_url: str | None = None
+    escrow_address: str | None = None
+    escrow_chain_id: str | None = None
+    escrow_signer_private_key: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -75,6 +79,10 @@ class Settings:
                 "STAFF_EMAIL_SEND_TIMEOUT_SECONDS", 10
             ),
             s3_endpoint_url=os.environ.get("S3_ENDPOINT_URL"),
+            escrow_rpc_url=os.environ.get("ROOMFORGE_ESCROW_RPC_URL"),
+            escrow_address=os.environ.get("ROOMFORGE_ESCROW_ADDRESS"),
+            escrow_chain_id=os.environ.get("ROOMFORGE_ESCROW_CHAIN_ID"),
+            escrow_signer_private_key=os.environ.get("ROOMFORGE_ESCROW_SIGNER_PRIVATE_KEY"),
         )
 
     def validate(self) -> None:

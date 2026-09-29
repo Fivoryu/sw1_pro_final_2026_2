@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -11,6 +11,17 @@ from app.modules.agencies.schemas import (
     AgencyAdminInvitationCreate,
     AgencyCreate,
     AgencyListResponse,
+    AgencyWalletChallengeCreate,
+    AgencyWalletChallengeResponse,
+    AgencyWalletLinkRequest,
+    AgencyWalletResponse,
+)
+from app.modules.agencies.service import (
+    AgencyWalletAddressConflictError,
+    AgencyWalletAlreadyLinkedError,
+    InvalidAgencyWalletChallengeError,
+    create_agency_wallet_challenge,
+    verify_and_link_agency_wallet,
 )
 from app.modules.identity.invitations import (
     InvitationConflictError,
@@ -24,11 +35,19 @@ from app.modules.identity.session import ActiveStaff, get_active_staff
 router = APIRouter(
     prefix="/api/v1/agencies", tags=["agencies"], responses=ERROR_RESPONSES
 )
+agency_wallet_router = APIRouter(
+    prefix="/api/v1/staff/agencies", tags=["agency-wallets"]
+)
 
 
 def _require_platform_admin(staff: ActiveStaff) -> None:
     if staff["role"] != "platform_admin":
         raise HTTPException(status_code=403, detail="Platform-admin role is required")
+
+
+def _require_same_tenant_agency_admin(staff: ActiveStaff, agency_id: str) -> None:
+    if staff["role"] != "agency_admin" or staff["tenant_id"] != agency_id:
+        raise HTTPException(status_code=403, detail="Agency-admin tenant access is required")
 
 
 @router.post("", status_code=201, response_model=None)
@@ -104,3 +123,62 @@ def create_agency_admin_invitation(
             status_code=502, detail="Invitation email delivery failed"
         ) from None
     return {"status": "sent"}
+
+
+@agency_wallet_router.post(
+    "/{agency_id}/wallet-challenges",
+    status_code=status.HTTP_201_CREATED,
+    response_model=AgencyWalletChallengeResponse,
+)
+def create_wallet_challenge(
+    agency_id: str,
+    body: AgencyWalletChallengeCreate,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> AgencyWalletChallengeResponse:
+    _require_same_tenant_agency_admin(staff, agency_id)
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    with session_factory() as session:
+        if session.get(Agency, agency_id) is None:
+            raise HTTPException(status_code=404, detail="Agency not found")
+
+    try:
+        challenge = create_agency_wallet_challenge(
+            session_factory=session_factory,
+            agency_id=agency_id,
+            address=body.address,
+            now=request.app.state.clock(),
+        )
+    except AgencyWalletAlreadyLinkedError:
+        raise HTTPException(status_code=409, detail="Agency wallet is already linked") from None
+    return AgencyWalletChallengeResponse.model_validate(challenge)
+
+
+@agency_wallet_router.put(
+    "/{agency_id}/wallet",
+    status_code=status.HTTP_201_CREATED,
+    response_model=AgencyWalletResponse,
+)
+def link_wallet(
+    agency_id: str,
+    body: AgencyWalletLinkRequest,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> AgencyWalletResponse:
+    _require_same_tenant_agency_admin(staff, agency_id)
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    try:
+        wallet = verify_and_link_agency_wallet(
+            session_factory=session_factory,
+            agency_id=agency_id,
+            challenge_id=body.challenge_id,
+            signature=body.signature,
+            now=request.app.state.clock(),
+        )
+    except InvalidAgencyWalletChallengeError:
+        raise HTTPException(status_code=401, detail="Wallet challenge is invalid") from None
+    except AgencyWalletAlreadyLinkedError:
+        raise HTTPException(status_code=409, detail="Agency wallet is already linked") from None
+    except AgencyWalletAddressConflictError:
+        raise HTTPException(status_code=409, detail="Wallet conflict") from None
+    return AgencyWalletResponse.model_validate(wallet)
