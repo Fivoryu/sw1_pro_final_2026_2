@@ -30,7 +30,8 @@ El usuario pidió retirar OpenSpec de la conversión y eligió **quitar solo las
 - [x] Actualizar `README.md` y `AGENTS.md` para describir repositorio único y clonado normal.
 - [x] Archivar localmente y excluir `backend/openspec/` y `panel/openspec/`; mantener intacto y sin stagear `openspec/` raíz.
 - [x] Retirar las secciones locales `submodule.*`; verificar staging/ignores/secretos y confirmar que los cambios raíz ajenos siguen intactos.
-- [ ] **En curso:** cambiar a `main`, hacer commit convencional, registrar su hash aquí y hacer push a `origin/main` sin force.
+- [x] Crear y publicar en `main` el commit `848f28c` (`chore(repo): flatten product submodules into monorepo`).
+- [ ] **Bloqueado:** registrar este hash en un PR de evidencia; no se encontró un issue con `status:approved`, requisito obligatorio de la guía de PR.
 
 ## Criterios de cierre
 
@@ -41,12 +42,15 @@ El usuario pidió retirar OpenSpec de la conversión y eligió **quitar solo las
 5. README/AGENTS documentan un solo repositorio y los cambios raíz no relacionados se preservan.
 6. Un commit convencional queda en `main` y se publica a `origin/main`; sin force push.
 
-## Evidencia antes del commit
+## Evidencia del commit y push
 
-Staging final: 70 paths, 12,344 inserciones y 77 eliminaciones; `git diff --cached --check` pasó. No hay `.gitmodules`, entradas modo `160000`, marcadores `.git` anidados ni configuración local `submodule.*`. Las copias `backend/openspec/` y `panel/openspec/` están archivadas en `.git/legacy-openspec/{backend,panel}` y no staged; `openspec/` raíz y sus cambios locales permanecen intactos y unstaged.
-
-La verificación confirmó que los paths staged están limitados a la conversión aprobada, no hay secretos confirmados ni cachés/build/.env real, y los cambios raíz ajenos conservan su estado. El escáner heurístico tuvo coincidencias de strings de prueba, sin valor confirmado como credencial activa. No se ejecutaron pruebas/build después de la conversión estructural. Git emitió avisos LF→CRLF al agregar archivos; no se reescribió el árbol de trabajo.
+- Commit: `848f28c` — `chore(repo): flatten product submodules into monorepo`.
+- Publicado exitosamente en `origin/main`; 70 archivos, 12,345 inserciones y 77 eliminaciones.
+- Se verificó antes del commit: `git diff --cached --check` pasó; no quedaron `.gitmodules`, gitlinks modo `160000`, marcadores `.git` activos ni configuración local `submodule.*`.
+- Las copias `backend/openspec/` y `panel/openspec/` permanecen archivadas localmente en `.git/legacy-openspec/`; OpenSpec raíz y cambios ajenos no se incluyeron.
+- El escaneo staged no confirmó credenciales; no se ejecutaron pruebas/build tras la conversión. Git emitió avisos LF→CRLF al agregar archivos, sin reescribir el árbol.
+- GitHub informó que el push a `main` omitió una regla de rama que exige PR. No hacer otro push directo sin autorización nueva.
 
 ## Siguiente paso
 
-Cambiar a `main`, refrescar el staging con paths explícitos, ejecutar el commit convencional, registrar su hash en este documento y publicar a `origin/main` sin force.
+Para publicar el registro ODD del hash mediante PR, proporcionar o aprobar primero un issue con la etiqueta obligatoria `status:approved`. `gh issue list --state all --label status:approved` no encontró ninguno; el PR está bloqueado hasta entonces.

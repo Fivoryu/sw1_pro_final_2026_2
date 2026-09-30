@@ -43,6 +43,9 @@
 - PostgreSQL: Alembic upgrade verified at **`0013 (head)`**; migration verification completed.
 - PostgreSQL constraints/downgrade probe: **passed transactionally**; tables, FKs, checks, indexes, partial pending index and tenant/user uniqueness were present. With HU-007 data, downgrade raised **`HU-007 tables contain data; downgrade is disabled`** and the tables remained after rollback.
 - Real PostgreSQL concurrency probe: **passed**; concurrent acceptance produced exactly one `accepted` and one `InvitationUnavailableError`, exactly one global user and one pending membership. Concurrent reinvitation left exactly one usable pending invitation and one invalidated invitation.
+- Backend residual coverage: **21 HU-007 tests passed**, including intermediate rollback, terminal expiration, inspection snapshot, and sensitive-material non-echo checks.
+- Panel residual coverage: **13 files / 59 Vitest tests passed**; build passed, including invitation error mapping, all invitation states, reinvitation, retry, and conditional password flows.
+- Legacy panel seam review: consumers remain in `UserManagementService`, the user-management page, and tests; legacy files were intentionally preserved.
 - CP-006: **not executed**; it remains prepared/pending and is not declared closed.
 
 Los resultados agregados de las suites son validación posterior. No sustituyen ni amplían la evidencia RED/GREEN/TRIANGULATE/REFACTOR ya registrada en la tabla; no se inventa una nueva secuencia TDD a partir de los conteos.
@@ -71,7 +74,7 @@ Quedan sin marcar las filas cuya evidencia todavía no fue reportada: pruebas ba
 
 ## Tareas restantes
 
-- Completar pruebas backend RED adicionales de servicio/repositorio, atomicidad y rollback; verificar también la materialización de invitaciones expiradas.
-- Completar cobertura Vitest de mapeo de errores, estados administrativos, expiración, reinvitación y contraseña condicional no cubierta por evidencia actual.
-- Ejecutar CP-006 con evidencia independiente, fechada y reproducible; hasta entonces debe permanecer como no ejecutado.
-- Confirmar en la revisión pendiente el límite de líneas y la eliminación de legacy únicamente si la búsqueda final demuestra que no existen consumidores.
+- La cobertura backend residual y la cobertura Vitest residual fueron completadas y validadas; las tareas correspondientes conservan su evidencia en `tasks.md`.
+- CP-006 permanece preparado/pendiente y no ejecutado; no se inventa evidencia independiente.
+- Confirmar en la revisión pendiente el límite de líneas y la partición aprobada; el diff total excede 400 líneas y no se elimina legacy porque la búsqueda confirmó consumidores.
+- Ejecutar el gate de ciclo de vida SDD cuando exista una ruta nativa soportada para los dos repositorios Git independientes.
