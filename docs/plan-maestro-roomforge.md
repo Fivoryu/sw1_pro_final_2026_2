@@ -182,6 +182,10 @@ Las superficies son las rutas que existen hoy (corte 2026-09-30). Una fase que n
 3. **Ramas separadas por fase.** Dos ramas que tocan el mismo módulo se integran de a una, no en paralelo.
 4. **F10, F12 y F13 son transversales.** F10 no se paraleliza porque toca todas las superficies; cuando F12 o F13 estén activas, son el punto de coordinación antes de tocar `backend/tests/` y `docs/`.
 5. **Excepciones de arranque anticipado ya declaradas en el plan**, y solo esas: F06 puede empezar con escenas sintéticas antes de F07; F08 puede empezar con el piloto de inferencia antes de F05/F06; F11 admite un smoke temprano después de F02.
+6. **Contrato primero, código después.** Cuando dos fases comparten una interfaz, esa interfaz se congela y se documenta antes de que cada rama implemente, así ninguna espera a la otra. Interfaces conocidas: contrato de escena (F06 ↔ F07), sugerencias de IA (F08 ↔ F05/F06), oferta versionada (F04/F05 ↔ F09) y estado de publicación (F04 ↔ F10). El catálogo de contratos propuestos está en §4.3.
+7. **Si dos ramas agregan migraciones, la segunda rebasa.** Al integrar la segunda, se cambia su `down_revision` al head nuevo, se vuelve a correr la migración en SQLite y recién entonces se integra. Nunca se reescribe una migración ya integrada en `main`.
+8. **Una rama y un worktree por fase**, nombrados `feat/<fase>-<tema>` (por ejemplo `feat/f05-furniture-inventory`), partiendo de `main` actualizado. La rama se rebasa sobre `main` y se integra por fast-forward; no se hace merge entre ramas de features. Al cerrar, la rama se borra una vez contenida.
+9. **Nadie espera a otra fase para empezar lo que no comparte.** Si dos fases solo comparten la cadena de migraciones, cada una avanza con su código y con un fixture propio; lo único que se serializa es la integración, no el desarrollo.
 
 ### 1.5 Restricciones
 
