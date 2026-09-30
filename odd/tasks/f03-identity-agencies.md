@@ -164,4 +164,15 @@ The F03 worktree is on branch `feat/f03-identity-agencies`, rebased onto `7973ff
 
 F03-01, F03-02, and F03-03 are complete in local commits with no push: `a9614ba` and `0251015` (agent membership), `2cec63d` (rebase record), `703186e` (absolute refresh lifetime), `a5f20e1` (shared customer envelope), and `e53eb59` (denial coverage). F03-04's client-app slice adds six more: `f7ba2e4`, `696c1a4`, `3b447ac`, `9c25b61`, `389b91d`, and `24ec48a`.
 
-F03-04 still owes the panel refinements (active expiry and a distinct 401/403/network UI) and any staff session state in `apps/captura_mobile`; both were excluded when the user scoped this first unit to the client app. The open reservation/quote envelope finding still needs its own authorized decision. F03-05 recorded the closure checks above and keeps the public catalog criterion marked pending for F04.
+F03-04 still owes the staff session in `apps/captura_mobile`; the panel refinements were delivered in `e262524` and `88444a2`. The open reservation/quote envelope finding still needs its own authorized decision. F03-05 recorded the closure checks and keeps the public catalog criterion marked pending for F04.
+
+## Closure record
+
+The branch was frozen for handover at `2664d29` with 16 commits, none pushed, and a clean worktree. Verification on that exact revision: backend **411 passed, 2 skipped, 4 warnings** with Ruff clean and Pyright unchanged from the `main` baseline (33 pre-existing diagnostics, identical normalized set); panel **69 passed** with `tsc --noEmit` clean; `apps/cliente_mobile` **50 passed** with `flutter analyze` clean; `apps/captura_mobile` **15 passed** with `flutter analyze` clean (untouched by F03; regression check only). Not run, with reasons: PostgreSQL, Docker and the real migration chain; the panel e2e suite, which needs a PostgreSQL container; device and iOS checks; and `flutter build apk --debug`.
+
+Two decisions remain open, each with a recommendation for whoever picks it up:
+
+1. **Staff session in `apps/captura_mobile`.** The staff API is browser-shaped: `/api/v1/auth/refresh` reads the HttpOnly `roomforge_refresh` cookie and requires an `x-csrf-token` header (`backend/app/modules/identity/router.py:534-539`), and login needs a second TOTP step. Recommended design: capture the refresh cookie value from the `set-cookie` header of the TOTP-login response, persist only that value through `flutter_secure_storage`, and send it back as a `Cookie` header together with the CSRF token on refresh and logout. This keeps the backend unchanged and mirrors the client app's layering, and it should be two chained units (data layer, then the access and TOTP UI) because the flow is larger than the customer one.
+2. **Reservation and quote error envelopes.** They emit `{code, message, request_id, field_errors}` while `docs/api/f02-api-contract.md:6` documents a single `{detail, code}` envelope. Option (a) unifies the handlers, schemas, tests, and the clients built against that shape; option (b) amends the F02 contract document to declare the reserved reservation/quote shape explicitly, which is far cheaper and breaks no client. Recommendation: (b) unless the team wants one envelope for every surface.
+
+The public catalog read API remains deferred to F04 and is not reported as satisfied.
