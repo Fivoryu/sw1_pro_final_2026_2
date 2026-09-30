@@ -145,7 +145,8 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
       style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.5),
     ),
     const SizedBox(height: 16),
-    if (widget.controller.message != null) _message(context, widget.controller.message),
+    if (widget.controller.message != null)
+      _message(context, widget.controller.message),
     Form(
       key: _credentialsKey,
       child: Column(
@@ -204,7 +205,8 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
 
   List<Widget> _codeStep(BuildContext context) => [
     ..._heading(context, 'Ingresá el código de tu segundo factor'),
-    if (widget.controller.message != null) _message(context, widget.controller.message),
+    if (widget.controller.message != null)
+      _message(context, widget.controller.message),
     Form(
       key: _codeKey,
       child: Column(

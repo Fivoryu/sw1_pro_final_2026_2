@@ -94,7 +94,8 @@ StaffAuthFailure failureFromResponse({
   final fallback = codeForStatus(statusCode);
   return StaffAuthFailure(
     code: fallback,
-    detail: kSafeFailureDetails[fallback] ?? kSafeFailureDetails[kInternalError]!,
+    detail:
+        kSafeFailureDetails[fallback] ?? kSafeFailureDetails[kInternalError]!,
     statusCode: statusCode,
   );
 }

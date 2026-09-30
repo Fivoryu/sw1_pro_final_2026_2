@@ -13,10 +13,7 @@ http.Response _json(Object body, int status, {Map<String, String>? headers}) =>
     http.Response(
       jsonEncode(body),
       status,
-      headers: {
-        'content-type': 'application/json',
-        ...?headers,
-      },
+      headers: {'content-type': 'application/json', ...?headers},
     );
 
 Map<String, Object?> _loginBody() => const {
@@ -106,10 +103,10 @@ void main() {
       final api = StaffAuthApi(
         baseUrl: _baseUrl,
         client: MockClient(
-          (_) async => _json(
-            {'detail': 'The proof was rejected.', 'code': 'unauthorized'},
-            401,
-          ),
+          (_) async => _json({
+            'detail': 'The proof was rejected.',
+            'code': 'unauthorized',
+          }, 401),
         ),
       );
 
@@ -130,33 +127,36 @@ void main() {
   });
 
   group('StaffAuthApi session maintenance', () {
-    test('refresh sends the cookie and CSRF header and re-captures rotation', () async {
-      late http.Request captured;
-      final api = StaffAuthApi(
-        baseUrl: _baseUrl,
-        client: MockClient((request) async {
-          captured = request;
-          return _json(
-            _loginBody(),
-            200,
-            headers: {
-              'set-cookie':
-                  'roomforge_refresh=rotated-value; HttpOnly; Path=/api/v1/auth',
-            },
-          );
-        }),
-      );
+    test(
+      'refresh sends the cookie and CSRF header and re-captures rotation',
+      () async {
+        late http.Request captured;
+        final api = StaffAuthApi(
+          baseUrl: _baseUrl,
+          client: MockClient((request) async {
+            captured = request;
+            return _json(
+              _loginBody(),
+              200,
+              headers: {
+                'set-cookie':
+                    'roomforge_refresh=rotated-value; HttpOnly; Path=/api/v1/auth',
+              },
+            );
+          }),
+        );
 
-      final grant = await api.refresh(
-        csrfToken: 'csrf-token',
-        refreshCookie: 'refresh-value',
-      );
+        final grant = await api.refresh(
+          csrfToken: 'csrf-token',
+          refreshCookie: 'refresh-value',
+        );
 
-      expect(captured.url.path, '/api/v1/auth/refresh');
-      expect(captured.headers['X-CSRF-Token'], 'csrf-token');
-      expect(captured.headers['Cookie'], 'roomforge_refresh=refresh-value');
-      expect(grant.refreshCookie, 'rotated-value');
-    });
+        expect(captured.url.path, '/api/v1/auth/refresh');
+        expect(captured.headers['X-CSRF-Token'], 'csrf-token');
+        expect(captured.headers['Cookie'], 'roomforge_refresh=refresh-value');
+        expect(grant.refreshCookie, 'rotated-value');
+      },
+    );
 
     test('logout sends the cookie and CSRF header and tolerates 204', () async {
       late http.Request captured;
@@ -175,31 +175,31 @@ void main() {
       expect(captured.headers['Cookie'], 'roomforge_refresh=refresh-value');
     });
 
-    test('fetchAccount sends the bearer token and parses the account', () async {
-      late http.Request captured;
-      final api = StaffAuthApi(
-        baseUrl: _baseUrl,
-        client: MockClient((request) async {
-          captured = request;
-          return _json(
-            const {
+    test(
+      'fetchAccount sends the bearer token and parses the account',
+      () async {
+        late http.Request captured;
+        final api = StaffAuthApi(
+          baseUrl: _baseUrl,
+          client: MockClient((request) async {
+            captured = request;
+            return _json(const {
               'user': {
                 'id': 'staff-1',
                 'email': 'agent@example.test',
                 'role': 'agency_admin',
                 'tenant_id': 'agency-1',
               },
-            },
-            200,
-          );
-        }),
-      );
+            }, 200);
+          }),
+        );
 
-      final account = await api.fetchAccount(accessToken: 'access-token');
+        final account = await api.fetchAccount(accessToken: 'access-token');
 
-      expect(captured.url.path, '/api/v1/auth/me');
-      expect(captured.headers['Authorization'], 'Bearer access-token');
-      expect(account.role, 'agency_admin');
-    });
+        expect(captured.url.path, '/api/v1/auth/me');
+        expect(captured.headers['Authorization'], 'Bearer access-token');
+        expect(account.role, 'agency_admin');
+      },
+    );
   });
 }

@@ -156,9 +156,10 @@ class StaffAuthApi {
     try {
       final response = switch (method) {
         'GET' => await _client.get(uri, headers: headers).timeout(timeout),
-        _ => await _client
-            .post(uri, headers: headers, body: jsonEncode(body ?? const {}))
-            .timeout(timeout),
+        _ =>
+          await _client
+              .post(uri, headers: headers, body: jsonEncode(body ?? const {}))
+              .timeout(timeout),
       };
       if (response.statusCode >= 200 && response.statusCode < 300) {
         return response;

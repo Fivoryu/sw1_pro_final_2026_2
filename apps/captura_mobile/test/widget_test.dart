@@ -6,10 +6,11 @@ import 'support/fake_staff_backend.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-
 /// Builds a controller backed by the fake staff API. When [signedIn] is true the
 /// session is opened first, which is what the prototype screens require.
-Future<StaffSessionController> captureController({bool signedIn = false}) async {
+Future<StaffSessionController> captureController({
+  bool signedIn = false,
+}) async {
   final controller = StaffSessionController(
     api: StaffAuthApi(
       baseUrl: 'https://api.example.test',
@@ -409,7 +410,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('agent@example.test'), findsOneWidget);
-    expect(find.byKey(const ValueKey('access-continue-button')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('access-continue-button')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('reports rejected credentials without opening a session', (
@@ -466,7 +470,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('access-retry')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('access-continue-button')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('access-continue-button')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('logs out and returns to the credentials step', (tester) async {

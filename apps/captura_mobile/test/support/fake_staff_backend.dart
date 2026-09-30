@@ -58,14 +58,13 @@ class FakeStaffBackend {
         headers: {
           'content-type': 'application/json',
           if (cookie != null)
-            'set-cookie': 'roomforge_refresh=$cookie; HttpOnly; Path=/api/v1/auth',
+            'set-cookie':
+                'roomforge_refresh=$cookie; HttpOnly; Path=/api/v1/auth',
         },
       );
 
-  static http.Response _failure(int status, String code) => _json({
-    'detail': 'Rejected by the API.',
-    'code': code,
-  }, status);
+  static http.Response _failure(int status, String code) =>
+      _json({'detail': 'Rejected by the API.', 'code': code}, status);
 
   static Map<String, Object?> _grantBody(String csrf) => {
     'access_token': 'access-token',
@@ -83,18 +82,20 @@ class FakeStaffBackend {
     if (offline) throw http.ClientException('offline');
     final cookie = exposeRefreshCookie ? 'refresh-cookie' : null;
     return switch (request.url.path) {
-      '/api/v1/auth/login' => loginRejected
-          ? _failure(401, 'unauthorized')
-          : _json({'challenge_token': 'challenge-1'}, 200),
-      '/api/v1/auth/login/totp' => codeRejected
-          ? _failure(401, 'unauthorized')
-          : _json(_grantBody('csrf-1'), 200, cookie: cookie),
-      '/api/v1/auth/refresh' => refreshRejected
-          ? _failure(401, 'unauthorized')
-          : _json(_grantBody('csrf-2'), 200, cookie: 'rotated-cookie'),
-      '/api/v1/auth/logout' => logoutRejected
-          ? _failure(401, 'unauthorized')
-          : http.Response('', 204),
+      '/api/v1/auth/login' =>
+        loginRejected
+            ? _failure(401, 'unauthorized')
+            : _json({'challenge_token': 'challenge-1'}, 200),
+      '/api/v1/auth/login/totp' =>
+        codeRejected
+            ? _failure(401, 'unauthorized')
+            : _json(_grantBody('csrf-1'), 200, cookie: cookie),
+      '/api/v1/auth/refresh' =>
+        refreshRejected
+            ? _failure(401, 'unauthorized')
+            : _json(_grantBody('csrf-2'), 200, cookie: 'rotated-cookie'),
+      '/api/v1/auth/logout' =>
+        logoutRejected ? _failure(401, 'unauthorized') : http.Response('', 204),
       '/api/v1/auth/me' => _json({
         'user': {
           'id': 'staff-1',

@@ -47,13 +47,17 @@ void main() {
 
     test('rejects an envelope missing detail or code', () {
       expect(
-        failureFromResponse(statusCode: 500, body: '{"code":"unauthorized"}')
-            .code,
+        failureFromResponse(
+          statusCode: 500,
+          body: '{"code":"unauthorized"}',
+        ).code,
         kInternalError,
       );
       expect(
-        failureFromResponse(statusCode: 409, body: '{"detail":7,"code":false}')
-            .code,
+        failureFromResponse(
+          statusCode: 409,
+          body: '{"detail":7,"code":false}',
+        ).code,
         kConflict,
       );
       expect(
@@ -90,7 +94,10 @@ void main() {
 
     test('returns null when the header is absent or holds another cookie', () {
       expect(readRefreshCookie(const {}), isNull);
-      expect(readRefreshCookie(const {'set-cookie': 'other=1; Path=/'}), isNull);
+      expect(
+        readRefreshCookie(const {'set-cookie': 'other=1; Path=/'}),
+        isNull,
+      );
       expect(
         readRefreshCookie(const {'set-cookie': 'roomforge_refresh=; Path=/'}),
         isNull,

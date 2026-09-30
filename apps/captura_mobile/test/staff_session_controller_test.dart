@@ -6,7 +6,11 @@ import 'support/fake_staff_backend.dart';
 
 const _baseUrl = 'https://api.example.test';
 
-({StaffSessionController controller, FakeStaffBackend backend, InMemoryStaffCredentialStore store})
+({
+  StaffSessionController controller,
+  FakeStaffBackend backend,
+  InMemoryStaffCredentialStore store,
+})
 _build({String? cookie, String? csrf}) {
   final backend = FakeStaffBackend();
   final store = InMemoryStaffCredentialStore(
@@ -82,32 +86,38 @@ void main() {
       expect(harness.backend.calls, ['/api/v1/auth/login']);
     });
 
-    test('signs out with a message when the credentials are rejected', () async {
-      final harness = _build();
-      harness.backend.loginRejected = true;
+    test(
+      'signs out with a message when the credentials are rejected',
+      () async {
+        final harness = _build();
+        harness.backend.loginRejected = true;
 
-      await harness.controller.startLogin(
-        email: 'agent@example.test',
-        password: 'wrong-password',
-      );
+        await harness.controller.startLogin(
+          email: 'agent@example.test',
+          password: 'wrong-password',
+        );
 
-      expect(harness.controller.status, StaffSessionStatus.signedOut);
-      expect(harness.controller.message, 'Rejected by the API.');
-    });
+        expect(harness.controller.status, StaffSessionStatus.signedOut);
+        expect(harness.controller.message, 'Rejected by the API.');
+      },
+    );
 
-    test('opens the session with a valid code and stores the credentials', () async {
-      final harness = _build();
-      await harness.controller.startLogin(
-        email: 'agent@example.test',
-        password: 'password123',
-      );
+    test(
+      'opens the session with a valid code and stores the credentials',
+      () async {
+        final harness = _build();
+        await harness.controller.startLogin(
+          email: 'agent@example.test',
+          password: 'password123',
+        );
 
-      await harness.controller.submitCode('123456');
+        await harness.controller.submitCode('123456');
 
-      expect(harness.controller.status, StaffSessionStatus.signedIn);
-      expect(harness.store.refreshCookie, 'refresh-cookie');
-      expect(harness.store.csrfToken, 'csrf-1');
-    });
+        expect(harness.controller.status, StaffSessionStatus.signedIn);
+        expect(harness.store.refreshCookie, 'refresh-cookie');
+        expect(harness.store.csrfToken, 'csrf-1');
+      },
+    );
 
     test('keeps the challenge available when the code is rejected', () async {
       final harness = _build();
