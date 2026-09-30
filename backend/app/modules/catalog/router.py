@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy.exc import SQLAlchemyError
@@ -30,9 +30,18 @@ from app.modules.catalog.schemas import (
     QuoteSnapshotResponse,
     ListingDepositResponse,
     ListingDepositUpdateRequest,
+    ListingAuthoringRequest,
+    ListingAuthoringResponse,
+    ListingTransitionRequest,
+    ListingTransitionResponse,
 )
+from app.modules.catalog.errors import InvalidListingTransitionError
 from app.modules.catalog.service import (
     configure_listing_deposit,
+    create_staff_listing,
+    edit_staff_listing,
+    get_staff_listing,
+    list_listing_transitions,
     InvalidCursorError,
     consume_quote_rate_limit,
     create_quote_snapshot,
@@ -41,6 +50,7 @@ from app.modules.catalog.service import (
     list_listing_extras,
     normalize_geo_key,
     search_public_listings,
+    transition_staff_listing,
 )
 from app.modules.identity.session import ActiveStaff, get_active_staff
 
@@ -299,6 +309,237 @@ def set_listing_deposit(
             deposit_amount_cop=format(listing.deposit_amount_cop, ".2f"),
             offer_version=listing.offer_version,
         )
+
+
+def _require_listing_editor(staff: ActiveStaff, agency_id: str) -> None:
+    if staff["role"] not in {"agency_admin", "agent"} or staff["tenant_id"] != agency_id:
+        raise HTTPException(status_code=403, detail="Agency tenant access is required")
+
+
+def _require_listing_admin(staff: ActiveStaff, agency_id: str) -> None:
+    if staff["role"] != "agency_admin" or staff["tenant_id"] != agency_id:
+        raise HTTPException(status_code=403, detail="Agency-admin tenant access is required")
+
+
+def _authoring_response(listing: Listing) -> ListingAuthoringResponse:
+    return ListingAuthoringResponse(
+        listing_id=listing.id,
+        agency_id=listing.agency_id,
+        operation=cast(ListingOperation, listing.operation),
+        base_price=listing.base_price,
+        city=listing.city,
+        zone=listing.zone,
+        bedrooms=listing.bedrooms,
+        bathrooms=listing.bathrooms,
+        description=listing.description,
+        exact_address=listing.exact_address,
+        approval_status=cast(
+            Literal["draft", "pending", "approved", "rejected"], listing.approval_status
+        ),
+        is_published=listing.is_published,
+        offer_version=listing.offer_version,
+        created_at=listing.created_at,
+    )
+
+
+@router.post(
+    "/api/v1/staff/agencies/{agency_id}/listings",
+    status_code=201,
+    response_model=ListingAuthoringResponse,
+)
+def create_agency_listing(
+    agency_id: str,
+    body: ListingAuthoringRequest,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> ListingAuthoringResponse:
+    _require_listing_editor(staff, agency_id)
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    with session_factory.begin() as session:
+        listing = create_staff_listing(
+            session,
+            agency_id=agency_id,
+            content=body,
+            actor_id=staff["id"],
+            actor_role=staff["role"],
+            now=request.app.state.clock(),
+        )
+        return _authoring_response(listing)
+
+
+@router.put(
+    "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}",
+    response_model=ListingAuthoringResponse,
+)
+def replace_agency_listing(
+    agency_id: str,
+    listing_id: str,
+    body: ListingAuthoringRequest,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> ListingAuthoringResponse:
+    _require_listing_editor(staff, agency_id)
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    with session_factory.begin() as session:
+        listing = edit_staff_listing(
+            session,
+            agency_id=agency_id,
+            listing_id=listing_id,
+            content=body,
+            actor_id=staff["id"],
+            actor_role=staff["role"],
+            now=request.app.state.clock(),
+        )
+        if listing is None:
+            raise HTTPException(status_code=404, detail="Listing not found")
+        return _authoring_response(listing)
+
+
+def _apply_listing_transition(
+    *,
+    agency_id: str,
+    listing_id: str,
+    action: str,
+    request: Request,
+    staff: ActiveStaff,
+    body: ListingTransitionRequest | None,
+    admin_only: bool = False,
+) -> ListingAuthoringResponse:
+    if admin_only:
+        _require_listing_admin(staff, agency_id)
+    else:
+        _require_listing_editor(staff, agency_id)
+    observation = body.observation if body is not None else None
+    if action == "reject" and (observation is None or not observation.strip()):
+        raise HTTPException(status_code=422, detail="A rejection reason is required")
+
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    try:
+        with session_factory.begin() as session:
+            listing = transition_staff_listing(
+                session,
+                agency_id=agency_id,
+                listing_id=listing_id,
+                action=action,
+                observation=observation,
+                actor_id=staff["id"],
+                actor_role=staff["role"],
+                now=request.app.state.clock(),
+            )
+            if listing is None:
+                raise HTTPException(status_code=404, detail="Listing not found")
+            return _authoring_response(listing)
+    except InvalidListingTransitionError:
+        raise HTTPException(
+            status_code=409, detail="Listing cannot be changed from its current state"
+        ) from None
+
+
+@router.post(
+    "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/submit",
+    response_model=ListingAuthoringResponse,
+)
+def submit_agency_listing(
+    agency_id: str,
+    listing_id: str,
+    request: Request,
+    body: ListingTransitionRequest | None = None,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> ListingAuthoringResponse:
+    return _apply_listing_transition(
+        agency_id=agency_id, listing_id=listing_id, action="submit",
+        request=request, staff=staff, body=body,
+    )
+
+
+@router.post(
+    "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/approve",
+    response_model=ListingAuthoringResponse,
+)
+def approve_agency_listing(
+    agency_id: str,
+    listing_id: str,
+    request: Request,
+    body: ListingTransitionRequest | None = None,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> ListingAuthoringResponse:
+    return _apply_listing_transition(
+        agency_id=agency_id, listing_id=listing_id, action="approve",
+        request=request, staff=staff, body=body, admin_only=True,
+    )
+
+
+@router.post(
+    "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/reject",
+    response_model=ListingAuthoringResponse,
+)
+def reject_agency_listing(
+    agency_id: str,
+    listing_id: str,
+    request: Request,
+    body: ListingTransitionRequest | None = None,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> ListingAuthoringResponse:
+    return _apply_listing_transition(
+        agency_id=agency_id, listing_id=listing_id, action="reject",
+        request=request, staff=staff, body=body, admin_only=True,
+    )
+
+
+@router.post(
+    "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/publish",
+    response_model=ListingAuthoringResponse,
+)
+def publish_agency_listing(
+    agency_id: str,
+    listing_id: str,
+    request: Request,
+    body: ListingTransitionRequest | None = None,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> ListingAuthoringResponse:
+    return _apply_listing_transition(
+        agency_id=agency_id, listing_id=listing_id, action="publish",
+        request=request, staff=staff, body=body, admin_only=True,
+    )
+
+
+@router.post(
+    "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/unpublish",
+    response_model=ListingAuthoringResponse,
+)
+def unpublish_agency_listing(
+    agency_id: str,
+    listing_id: str,
+    request: Request,
+    body: ListingTransitionRequest | None = None,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> ListingAuthoringResponse:
+    return _apply_listing_transition(
+        agency_id=agency_id, listing_id=listing_id, action="unpublish",
+        request=request, staff=staff, body=body, admin_only=True,
+    )
+
+
+@router.get(
+    "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/transitions",
+    response_model=list[ListingTransitionResponse],
+)
+def get_agency_listing_transitions(
+    agency_id: str,
+    listing_id: str,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> list[ListingTransitionResponse]:
+    _require_listing_editor(staff, agency_id)
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    with session_factory() as session:
+        listing = get_staff_listing(session, agency_id=agency_id, listing_id=listing_id)
+        if listing is None:
+            raise HTTPException(status_code=404, detail="Listing not found")
+        return [
+            ListingTransitionResponse.model_validate(row)
+            for row in list_listing_transitions(session, listing_id)
+        ]
 
 
 router.include_router(listings_router)

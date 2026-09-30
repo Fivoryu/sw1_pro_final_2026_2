@@ -91,6 +91,31 @@ class Listing(Base):
     )
 
 
+class ListingTransition(Base):
+    __tablename__ = "listing_transition"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('create', 'edit', 'submit', 'approve', 'reject', 'publish', 'unpublish')",
+            name="ck_listing_transition_action",
+        ),
+        Index("ix_listing_transition_listing_id", "listing_id"),
+        Index("ix_listing_transition_listing_id_created_at", "listing_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    agency_id: Mapped[str] = mapped_column(ForeignKey("agency.id"), nullable=False)
+    listing_id: Mapped[str] = mapped_column(ForeignKey("listing.id"), nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    from_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    from_published: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    to_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    to_published: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    observation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actor_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ListingExtra(Base):
     __tablename__ = "listing_extra"
     __table_args__ = (

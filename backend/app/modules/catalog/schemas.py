@@ -117,3 +117,61 @@ class ListingDepositResponse(BaseModel):
     listing_id: str
     deposit_amount_cop: str
     offer_version: int
+
+
+class ListingAuthoringRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    operation: ListingOperation
+    base_price: Annotated[
+        Decimal,
+        Field(gt=Decimal("0"), max_digits=18, decimal_places=2),
+    ]
+    city: Annotated[str, Field(min_length=1, max_length=120)]
+    zone: Annotated[str, Field(min_length=1, max_length=120)]
+    bedrooms: Annotated[StrictInt, Field(ge=0)]
+    bathrooms: Annotated[StrictInt, Field(ge=0)]
+    description: str | None = None
+    exact_address: str | None = None
+
+
+class ListingTransitionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    observation: str | None = None
+
+
+class ListingAuthoringResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    listing_id: str
+    agency_id: str
+    operation: ListingOperation
+    base_price: Decimal
+    city: str
+    zone: str
+    bedrooms: int
+    bathrooms: int
+    description: str | None
+    exact_address: str | None
+    approval_status: Literal["draft", "pending", "approved", "rejected"]
+    is_published: bool
+    offer_version: int
+    created_at: datetime
+
+
+class ListingTransitionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    id: str
+    agency_id: str
+    listing_id: str
+    action: Literal["create", "edit", "submit", "approve", "reject", "publish", "unpublish"]
+    from_status: str | None
+    from_published: bool | None
+    to_status: str
+    to_published: bool
+    observation: str | None
+    actor_id: str
+    actor_role: str
+    created_at: datetime

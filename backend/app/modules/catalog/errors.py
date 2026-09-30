@@ -37,3 +37,7 @@ class InvalidQuoteExtrasError(Exception):
 
 class UnsupportedRateLimitDialectError(Exception):
     """The database dialect cannot safely serialize quote rate-limit attempts."""
+
+
+class InvalidListingTransitionError(Exception):
+    """The requested listing action does not match its current state."""

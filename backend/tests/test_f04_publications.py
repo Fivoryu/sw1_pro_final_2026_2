@@ -1,0 +1,473 @@
+from __future__ import annotations
+
+import base64
+import importlib.util
+from collections.abc import Iterator
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.core.config import Settings
+from app.db.base import Base
+from app.main import create_app
+from app.modules.catalog.errors import QuoteOfferVersionMismatchError
+from app.modules.catalog.models import Listing
+from app.modules.catalog.service import validate_quote_for_use
+from app.modules.identity.models import Agency
+from app.modules.identity.session import get_active_staff
+
+
+@dataclass
+class F04Context:
+    client: TestClient
+    app: FastAPI
+    session_factory: sessionmaker[Session]
+
+
+@pytest.fixture
+
+def f04_context() -> Iterator[F04Context]:
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    Base.metadata.create_all(engine)
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "0007_catalog_offers.py"
+    )
+    spec = importlib.util.spec_from_file_location("f04_catalog_offers", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    with engine.begin() as connection:
+        with Operations.context(MigrationContext.configure(connection)):
+            migration._install_sqlite_offer_version_triggers()
+    app = create_app(
+        settings=Settings(
+            database_url="sqlite+pysqlite:///:memory:",
+            jwt_secret="f04-test-secret-that-is-at-least-thirty-two-bytes",
+            totp_encryption_key=base64.urlsafe_b64encode(b"0" * 32).decode(),
+            web_origin="http://localhost",
+        ),
+        session_factory=factory,
+    )
+    with TestClient(app) as client:
+        yield F04Context(client, app, factory)
+    engine.dispose()
+
+
+def _staff(
+    context: F04Context,
+    *,
+    role: str = "agency_admin",
+    tenant_id: str | None = "agency-one",
+    actor_id: str = "f04-actor",
+) -> None:
+    if tenant_id is not None:
+        with context.session_factory.begin() as session:
+            if session.get(Agency, tenant_id) is None:
+                session.add(Agency(id=tenant_id))
+    context.app.dependency_overrides[get_active_staff] = lambda: {
+        "id": actor_id,
+        "email": f"{actor_id}@example.test",
+        "role": role,
+        "tenant_id": tenant_id,
+    }
+
+
+def _payload(**changes: Any) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "operation": "sale",
+        "base_price": "125000.00",
+        "city": "  Medellín ",
+        "zone": " El Poblado ",
+        "bedrooms": 3,
+        "bathrooms": 2,
+        "description": "A bright apartment",
+        "exact_address": "Private address",
+    }
+    result.update(changes)
+    return result
+
+
+def _url(agency_id: str, listing_id: str) -> str:
+    return f"/api/v1/staff/agencies/{agency_id}/listings/{listing_id}"
+
+
+def _collection_url(agency_id: str) -> str:
+    return f"/api/v1/staff/agencies/{agency_id}/listings"
+
+
+def _seed_listing(
+    context: F04Context,
+    listing_id: str,
+    *,
+    agency_id: str = "agency-one",
+    approval_status: str = "draft",
+    is_published: bool = False,
+    base_price: str = "100000.00",
+) -> None:
+    with context.session_factory.begin() as session:
+        if session.get(Agency, agency_id) is None:
+            session.add(Agency(id=agency_id))
+            session.flush()
+        session.add(
+            Listing(
+                id=listing_id,
+                agency_id=agency_id,
+                approval_status=approval_status,
+                is_published=is_published,
+                operation="sale",
+                base_price=Decimal(base_price),
+                offer_version=1,
+                city="Córdoba",
+                zone="Centro",
+                bedrooms=2,
+                bathrooms=1,
+            )
+        )
+
+
+def _create_quote(context: F04Context, listing_id: str) -> str:
+    response = context.client.post(
+        "/api/v1/quotes",
+        json={"listing_id": listing_id, "offer_version": 1, "selected_extra_ids": []},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["quote_id"]
+
+
+def _history(context: F04Context, listing_id: str) -> list[Any]:
+    from app.modules.catalog.models import ListingTransition
+
+    with context.session_factory() as session:
+        return (
+            session.query(ListingTransition)
+            .filter(ListingTransition.listing_id == listing_id)
+            .order_by(ListingTransition.created_at, ListingTransition.id)
+            .all()
+        )
+
+
+def test_create_listing_starts_as_normalized_unpublished_draft(f04_context: F04Context) -> None:
+    context = f04_context
+    _staff(context, actor_id="creator")
+    response = context.client.post(_collection_url("agency-one"), json=_payload())
+
+    assert response.status_code == 201, response.text
+    listing_id = response.json()["listing_id"]
+    assert response.json()["approval_status"] == "draft"
+    assert response.json()["is_published"] is False
+    assert response.json()["offer_version"] == 1
+    with context.session_factory() as session:
+        listing = session.get(Listing, listing_id)
+        assert listing is not None
+        assert listing.city_key == "medellín" and listing.zone_key == "el poblado"
+        assert listing.deposit_amount_cop is None
+    assert [(row.action, row.from_status, row.to_status) for row in _history(context, listing_id)] == [
+        ("create", None, "draft")
+    ]
+
+
+def test_invalid_listing_payloads_create_nothing(f04_context: F04Context) -> None:
+    context = f04_context
+    _staff(context)
+    missing = _payload()
+    missing.pop("bedrooms")
+    cases = [missing, _payload(unknown="value"), _payload(base_price="0"), _payload(operation="buy")]
+
+    for index, body in enumerate(cases):
+        response = context.client.post(_collection_url("agency-one"), json=body)
+        assert response.status_code == 422, response.text
+    with context.session_factory() as session:
+        assert session.query(Listing).count() == 0
+
+
+def test_client_cannot_supply_authority_or_server_derived_fields(f04_context: F04Context) -> None:
+    context = f04_context
+    _staff(context)
+    response = context.client.post(
+        _collection_url("agency-one"),
+        json=_payload(
+            tenant_id="agency-one",
+            actor="forged",
+            role="agency_admin",
+            status="approved",
+            is_published=True,
+            offer_version=9,
+            created_at="2026-09-30T00:00:00Z",
+            city_key="forged",
+            zone_key="forged",
+            photos=["ignored.jpg"],
+        ),
+    )
+
+    assert response.status_code == 422
+    with context.session_factory() as session:
+        assert session.query(Listing).count() == 0
+
+
+def test_editing_published_listing_reopens_it_and_hides_it_immediately(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    _seed_listing(context, "published", approval_status="approved", is_published=True)
+    _staff(context, role="agent")
+
+    response = context.client.put(
+        _url("agency-one", "published"),
+        json=_payload(
+            base_price="100000.00",
+            city="Córdoba",
+            zone="Centro",
+            bedrooms=2,
+            bathrooms=1,
+            description="Updated description",
+            exact_address=None,
+        ),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["approval_status"] == "draft"
+    assert response.json()["is_published"] is False
+    assert response.json()["offer_version"] == 1
+    assert "published" not in [item["listing_id"] for item in context.client.get("/api/v1/listings").json()["items"]]
+    assert _history(context, "published")[-1].action == "edit"
+
+
+def test_price_edit_advances_commercial_version_once(f04_context: F04Context) -> None:
+    context = f04_context
+    _seed_listing(context, "price-change")
+    _staff(context, role="agent")
+
+    response = context.client.put(
+        _url("agency-one", "price-change"),
+        json=_payload(
+            base_price="110000.00",
+            city="Córdoba",
+            zone="Centro",
+            bedrooms=2,
+            bathrooms=1,
+            description=None,
+            exact_address=None,
+        ),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["offer_version"] == 2
+
+
+def test_quotes_survive_description_edits_but_price_edits_make_them_stale(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    _seed_listing(context, "description-quote", approval_status="approved", is_published=True)
+    _seed_listing(context, "price-quote", approval_status="approved", is_published=True)
+    description_quote = _create_quote(context, "description-quote")
+    price_quote = _create_quote(context, "price-quote")
+    _staff(context, role="agent")
+
+    description_edit = context.client.put(
+        _url("agency-one", "description-quote"),
+        json=_payload(
+            base_price="100000.00",
+            city="Córdoba",
+            zone="Centro",
+            bedrooms=2,
+            bathrooms=1,
+            description="Updated description",
+            exact_address=None,
+        ),
+    )
+    price_edit = context.client.put(
+        _url("agency-one", "price-quote"),
+        json=_payload(
+            base_price="110000.00",
+            city="Córdoba",
+            zone="Centro",
+            bedrooms=2,
+            bathrooms=1,
+            description=None,
+            exact_address=None,
+        ),
+    )
+
+    assert description_edit.status_code == price_edit.status_code == 200
+    assert description_edit.json()["offer_version"] == 1
+    assert price_edit.json()["offer_version"] == 2
+    now = datetime.now(timezone.utc)
+    with context.session_factory() as session:
+        assert validate_quote_for_use(session, description_quote, now=now).offer_version == 1
+        with pytest.raises(QuoteOfferVersionMismatchError):
+            validate_quote_for_use(session, price_quote, now=now)
+
+
+def test_submit_is_draft_only_and_invalid_retry_adds_no_history(f04_context: F04Context) -> None:
+    context = f04_context
+    _seed_listing(context, "submit-me")
+    _staff(context, role="agent")
+    url = _url("agency-one", "submit-me")
+
+    first = context.client.post(url + "/submit")
+    second = context.client.post(url + "/submit")
+
+    assert first.status_code == 200 and first.json()["approval_status"] == "pending"
+    assert second.status_code == 409
+    assert [row.action for row in _history(context, "submit-me")] == ["submit"]
+
+
+def test_agent_cannot_self_approve_or_run_admin_only_transitions(f04_context: F04Context) -> None:
+    context = f04_context
+    states = {
+        "approve-me": ("pending", False, "approve", None),
+        "reject-me": ("pending", False, "reject", {"observation": "Reason"}),
+        "publish-me": ("approved", False, "publish", None),
+        "unpublish-me": ("approved", True, "unpublish", None),
+    }
+    for listing_id, (status, published, _action, _body) in states.items():
+        _seed_listing(context, listing_id, approval_status=status, is_published=published)
+    _staff(context, role="agent")
+
+    for listing_id, (_status, _published, action, body) in states.items():
+        response = context.client.post(_url("agency-one", listing_id) + f"/{action}", json=body)
+        assert response.status_code == 403, response.text
+    with context.session_factory() as session:
+        for listing_id, (status, published, _action, _body) in states.items():
+            listing = session.get(Listing, listing_id)
+            assert listing is not None
+            assert (listing.approval_status, listing.is_published) == (status, published)
+    assert all(not _history(context, listing_id) for listing_id in states)
+
+
+def test_admin_approves_then_publishes_listing_to_public_catalog(f04_context: F04Context) -> None:
+    context = f04_context
+    _seed_listing(context, "publish-me", approval_status="pending")
+    _staff(context, actor_id="admin")
+    url = _url("agency-one", "publish-me")
+
+    approved = context.client.post(url + "/approve")
+    published = context.client.post(url + "/publish")
+
+    assert approved.status_code == published.status_code == 200
+    assert approved.json()["approval_status"] == "approved"
+    assert published.json()["is_published"] is True
+    assert "publish-me" in [item["listing_id"] for item in context.client.get("/api/v1/listings").json()["items"]]
+
+
+def test_reject_requires_nonblank_reason_and_records_it(f04_context: F04Context) -> None:
+    context = f04_context
+    _seed_listing(context, "reject-me", approval_status="pending")
+    _staff(context)
+    url = _url("agency-one", "reject-me") + "/reject"
+
+    for observation in ("", "   "):
+        assert context.client.post(url, json={"observation": observation}).status_code == 422
+    rejected = context.client.post(url, json={"observation": "  Missing documents  "})
+
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["approval_status"] == "rejected"
+    assert _history(context, "reject-me")[-1].observation == "Missing documents"
+
+
+def test_unpublish_removes_listing_from_public_catalog(f04_context: F04Context) -> None:
+    context = f04_context
+    _seed_listing(context, "withdraw-me", approval_status="approved", is_published=True)
+    _staff(context)
+    assert "withdraw-me" in [item["listing_id"] for item in context.client.get("/api/v1/listings").json()["items"]]
+
+    response = context.client.post(_url("agency-one", "withdraw-me") + "/unpublish")
+
+    assert response.status_code == 200 and response.json()["is_published"] is False
+    assert "withdraw-me" not in [item["listing_id"] for item in context.client.get("/api/v1/listings").json()["items"]]
+
+
+def test_cross_tenant_listing_access_is_forbidden_without_mutation(f04_context: F04Context) -> None:
+    context = f04_context
+    _seed_listing(context, "other-listing", agency_id="agency-two")
+    _staff(context, role="agency_admin", tenant_id="agency-one")
+
+    response = context.client.put(_url("agency-two", "other-listing"), json=_payload())
+
+    assert response.status_code == 403
+    with context.session_factory() as session:
+        listing = session.get(Listing, "other-listing")
+        assert listing is not None and listing.approval_status == "draft"
+    assert not _history(context, "other-listing")
+
+
+def test_missing_listing_is_404_for_authorized_agency_staff(f04_context: F04Context) -> None:
+    context = f04_context
+    _staff(context, role="agent")
+
+    edited = context.client.put(_url("agency-one", "missing"), json=_payload())
+    history = context.client.get(_url("agency-one", "missing") + "/transitions")
+
+    assert edited.status_code == history.status_code == 404
+
+
+def test_platform_admin_is_forbidden_from_tenant_listing_routes(f04_context: F04Context) -> None:
+    context = f04_context
+    _staff(context, role="platform_admin", tenant_id=None)
+
+    response = context.client.post(_collection_url("agency-one"), json=_payload())
+
+    assert response.status_code == 403
+    with context.session_factory() as session:
+        assert session.get(Listing, "platform-listing") is None
+
+
+def test_listing_authoring_routes_are_documented_only_under_staff_prefix(
+    f04_context: F04Context,
+) -> None:
+    paths = f04_context.client.get("/openapi.json").json()["paths"]
+    expected = {
+        "/api/v1/staff/agencies/{agency_id}/listings",
+        "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}",
+        "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/submit",
+        "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/approve",
+        "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/reject",
+        "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/publish",
+        "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/unpublish",
+        "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/transitions",
+    }
+    assert expected <= paths.keys()
+    assert all(path.startswith("/api/v1/staff/") for path in expected)
+
+
+def test_transition_history_is_staff_only_append_ordered_and_absent_from_catalog(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    _staff(context, role="agent", actor_id="history-actor")
+    created = context.client.post(_collection_url("agency-one"), json=_payload())
+    assert created.status_code == 201, created.text
+    url = _url("agency-one", created.json()["listing_id"])
+    submitted = context.client.post(url + "/submit")
+    history = context.client.get(url + "/transitions")
+
+    assert created.status_code == 201 and submitted.status_code == 200
+    assert history.status_code == 200, history.text
+    assert [item["action"] for item in history.json()] == ["create", "submit"]
+    assert history.json()[0]["from_status"] is None
+    assert history.json()[0]["to_status"] == "draft"
+    assert history.json()[1]["from_status"] == "draft"
+    assert all(item["actor_id"] == "history-actor" for item in history.json())
+    public = context.client.get("/api/v1/listings")
+    assert "transitions" not in public.text and "history-actor" not in public.text

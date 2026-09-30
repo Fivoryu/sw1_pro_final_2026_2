@@ -16,18 +16,26 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
-from sqlalchemy import and_, delete, or_, text
+from sqlalchemy import and_, delete, or_, text, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.modules.catalog.errors import (
+    InvalidListingTransitionError,
     InvalidQuoteExtrasError,
     QuoteExpiredError,
     QuoteNotFoundError,
     QuoteOfferVersionMismatchError,
     UnsupportedRateLimitDialectError,
 )
-from app.modules.catalog.models import Listing, ListingExtra, QuoteRateLimitEvent, QuoteSnapshot
+from app.modules.catalog.models import (
+    Listing,
+    ListingExtra,
+    ListingTransition,
+    QuoteRateLimitEvent,
+    QuoteSnapshot,
+)
+from app.modules.catalog.schemas import ListingAuthoringRequest
 
 
 _CURSOR_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,512}\Z")
@@ -168,6 +176,184 @@ def configure_listing_deposit(
     session.flush()
     session.refresh(listing, attribute_names=["deposit_amount_cop", "offer_version"])
     return listing
+
+
+def create_staff_listing(
+    session: Session,
+    *,
+    agency_id: str,
+    content: ListingAuthoringRequest,
+    actor_id: str,
+    actor_role: str,
+    now: datetime,
+) -> Listing:
+    listing = Listing(
+        agency_id=agency_id,
+        approval_status="draft",
+        is_published=False,
+        operation=content.operation,
+        base_price=content.base_price,
+        deposit_amount_cop=None,
+        offer_version=1,
+        city=content.city,
+        city_key=normalize_geo_key(content.city),
+        zone=content.zone,
+        zone_key=normalize_geo_key(content.zone),
+        bedrooms=content.bedrooms,
+        bathrooms=content.bathrooms,
+        description=content.description,
+        exact_address=content.exact_address,
+    )
+    session.add(listing)
+    session.flush()
+    session.add(
+        ListingTransition(
+            agency_id=agency_id,
+            listing_id=listing.id,
+            action="create",
+            from_status=None,
+            from_published=None,
+            to_status="draft",
+            to_published=False,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            created_at=now,
+        )
+    )
+    session.flush()
+    return listing
+
+
+def edit_staff_listing(
+    session: Session,
+    *,
+    agency_id: str,
+    listing_id: str,
+    content: ListingAuthoringRequest,
+    actor_id: str,
+    actor_role: str,
+    now: datetime,
+) -> Listing | None:
+    listing = (
+        session.query(Listing)
+        .filter(Listing.id == listing_id, Listing.agency_id == agency_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if listing is None:
+        return None
+
+    from_status, from_published = listing.approval_status, listing.is_published
+    session.execute(
+        update(Listing)
+        .where(Listing.id == listing_id, Listing.agency_id == agency_id)
+        .values(
+            operation=content.operation,
+            base_price=content.base_price,
+            city=content.city,
+            city_key=normalize_geo_key(content.city),
+            zone=content.zone,
+            zone_key=normalize_geo_key(content.zone),
+            bedrooms=content.bedrooms,
+            bathrooms=content.bathrooms,
+            description=content.description,
+            exact_address=content.exact_address,
+            approval_status="draft",
+            is_published=False,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    session.flush()
+    session.refresh(listing)
+    session.add(
+        ListingTransition(
+            agency_id=agency_id,
+            listing_id=listing.id,
+            action="edit",
+            from_status=from_status,
+            from_published=from_published,
+            to_status="draft",
+            to_published=False,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            created_at=now,
+        )
+    )
+    session.flush()
+    return listing
+
+
+_TRANSITION_STATES = {
+    "submit": (("draft", False), ("pending", False)),
+    "approve": (("pending", False), ("approved", False)),
+    "reject": (("pending", False), ("rejected", False)),
+    "publish": (("approved", False), ("approved", True)),
+    "unpublish": (("approved", True), ("approved", False)),
+}
+
+
+def transition_staff_listing(
+    session: Session,
+    *,
+    agency_id: str,
+    listing_id: str,
+    action: str,
+    observation: str | None,
+    actor_id: str,
+    actor_role: str,
+    now: datetime,
+) -> Listing | None:
+    listing = (
+        session.query(Listing)
+        .filter(Listing.id == listing_id, Listing.agency_id == agency_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if listing is None:
+        return None
+
+    expected, target = _TRANSITION_STATES[action]
+    from_status, from_published = listing.approval_status, listing.is_published
+    if (from_status, from_published) != expected:
+        raise InvalidListingTransitionError
+    listing.approval_status, listing.is_published = target
+    session.flush()
+    session.add(
+        ListingTransition(
+            agency_id=agency_id,
+            listing_id=listing_id,
+            action=action,
+            from_status=from_status,
+            from_published=from_published,
+            to_status=target[0],
+            to_published=target[1],
+            observation=observation,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            created_at=now,
+        )
+    )
+    session.flush()
+    return listing
+
+
+def get_staff_listing(
+    session: Session, *, agency_id: str, listing_id: str
+) -> Listing | None:
+    return (
+        session.query(Listing)
+        .filter(Listing.id == listing_id, Listing.agency_id == agency_id)
+        .one_or_none()
+    )
+
+
+def list_listing_transitions(session: Session, listing_id: str) -> list[ListingTransition]:
+    return (
+        session.query(ListingTransition)
+        .filter(ListingTransition.listing_id == listing_id)
+        .order_by(ListingTransition.created_at.asc(), ListingTransition.id.asc())
+        .all()
+    )
 
 
 def list_listing_extras(session: Session, listing_id: str) -> list[ListingExtra]:
