@@ -38,6 +38,7 @@ class StaffSessionController extends ChangeNotifier {
 
   StaffSessionStatus _status = StaffSessionStatus.restoring;
   StaffAccount? _account;
+  StaffAccessChallenge? _challenge;
   String? _message;
 
   StaffSessionStatus get status => _status;
@@ -73,6 +74,47 @@ class StaffSessionController extends ChangeNotifier {
       } else {
         await _discardSession(message: failure.detail);
       }
+    }
+  }
+
+  /// First step: exchanges credentials for a TOTP challenge.
+  Future<void> startLogin({
+    required String email,
+    required String password,
+  }) async {
+    _message = null;
+    try {
+      _challenge = await _api.startLogin(email: email, password: password);
+      _status = StaffSessionStatus.awaitingCode;
+      notifyListeners();
+    } on StaffAuthFailure catch (failure) {
+      _challenge = null;
+      _applyFailure(failure);
+    }
+  }
+
+  /// Second step: proves the TOTP code and opens the session.
+  Future<void> submitCode(String code) async {
+    final challenge = _challenge;
+    if (challenge == null) {
+      _setSignedOut(message: 'Volvé a ingresar tus credenciales.');
+      return;
+    }
+
+    _message = null;
+    try {
+      final grant = await _api.completeLogin(
+        challengeToken: challenge.challengeToken,
+        code: code,
+      );
+      _challenge = null;
+      await _acceptGrant(grant);
+    } on StaffAuthFailure catch (failure) {
+      if (failure.isNetworkFailure) {
+        _status = StaffSessionStatus.unavailable;
+      }
+      _message = failure.detail;
+      notifyListeners();
     }
   }
 
@@ -116,9 +158,20 @@ class StaffSessionController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _applyFailure(StaffAuthFailure failure) {
+    if (failure.isNetworkFailure) {
+      _status = StaffSessionStatus.unavailable;
+      _message = failure.detail;
+      notifyListeners();
+      return;
+    }
+    _setSignedOut(message: failure.detail);
+  }
+
   Future<void> _discardSession({String? message}) async {
     await _credentialStore.clear();
     _account = null;
+    _challenge = null;
     _status = StaffSessionStatus.signedOut;
     _message = message;
     notifyListeners();
@@ -126,6 +179,7 @@ class StaffSessionController extends ChangeNotifier {
 
   void _setSignedOut({String? message}) {
     _account = null;
+    _challenge = null;
     _status = StaffSessionStatus.signedOut;
     _message = message;
     notifyListeners();

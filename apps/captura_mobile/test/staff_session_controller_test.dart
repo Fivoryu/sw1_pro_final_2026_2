@@ -69,6 +69,80 @@ void main() {
     });
   });
 
+  group('two-step login', () {
+    test('asks for the TOTP code after valid credentials', () async {
+      final harness = _build();
+
+      await harness.controller.startLogin(
+        email: 'agent@example.test',
+        password: 'password123',
+      );
+
+      expect(harness.controller.status, StaffSessionStatus.awaitingCode);
+      expect(harness.backend.calls, ['/api/v1/auth/login']);
+    });
+
+    test('signs out with a message when the credentials are rejected', () async {
+      final harness = _build();
+      harness.backend.loginRejected = true;
+
+      await harness.controller.startLogin(
+        email: 'agent@example.test',
+        password: 'wrong-password',
+      );
+
+      expect(harness.controller.status, StaffSessionStatus.signedOut);
+      expect(harness.controller.message, 'Rejected by the API.');
+    });
+
+    test('opens the session with a valid code and stores the credentials', () async {
+      final harness = _build();
+      await harness.controller.startLogin(
+        email: 'agent@example.test',
+        password: 'password123',
+      );
+
+      await harness.controller.submitCode('123456');
+
+      expect(harness.controller.status, StaffSessionStatus.signedIn);
+      expect(harness.store.refreshCookie, 'refresh-cookie');
+      expect(harness.store.csrfToken, 'csrf-1');
+    });
+
+    test('keeps the challenge available when the code is rejected', () async {
+      final harness = _build();
+      await harness.controller.startLogin(
+        email: 'agent@example.test',
+        password: 'password123',
+      );
+      harness.backend.codeRejected = true;
+
+      await harness.controller.submitCode('000000');
+
+      expect(harness.controller.status, StaffSessionStatus.awaitingCode);
+      expect(harness.controller.message, 'Rejected by the API.');
+      expect(harness.store.refreshCookie, isNull);
+
+      harness.backend.codeRejected = false;
+      await harness.controller.submitCode('123456');
+      expect(harness.controller.status, StaffSessionStatus.signedIn);
+    });
+
+    test('signs in even when the API exposed no refresh cookie', () async {
+      final harness = _build();
+      harness.backend.exposeRefreshCookie = false;
+      await harness.controller.startLogin(
+        email: 'agent@example.test',
+        password: 'password123',
+      );
+
+      await harness.controller.submitCode('123456');
+
+      expect(harness.controller.status, StaffSessionStatus.signedIn);
+      expect(harness.store.refreshCookie, isNull);
+    });
+  });
+
   group('signOut', () {
     test('revokes the session and clears the stored credentials', () async {
       final harness = _build(cookie: 'refresh-cookie', csrf: 'csrf-1');
