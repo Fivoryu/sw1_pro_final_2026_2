@@ -24,7 +24,7 @@ Se verificaron los runners locales de backend, panel, app cliente y **app de cap
 | Cliente Flutter | **PASS** | SHA-256 comparados entre el worktree y el mirror autorizado: `lib/main.dart` `3132384798…4146`, `test/widget_test.dart` `7be9d75e…0a57`. Flutter 3.41.8 / Dart 3.11.5: **11 tests PASS**, `flutter analyze --no-pub` sin issues, `dart format --output=none --set-exit-if-changed` sin cambios. |
 | Captura Flutter | **PASS** | SHA-256: `lib/main.dart` `59d9624e…fd26c`, `test/widget_test.dart` `65c0738f…8ffe`. Flutter 3.41.8 / Dart 3.11.5: **15 tests PASS**, `flutter analyze --no-pub` sin issues, `dart format --output=none --set-exit-if-changed` sin cambios. Antes de la corrida se guardaron hashes y `baseline.tar` del mirror; después se restauró y el `diff` de hashes quedó vacío (restauración byte-idéntica), con `build/` preservado. |
 | Lockfiles y scaffolding | **PASS** | No existe `pubspec.lock` rastreado (`git ls-files` = 0) ni presente en `apps/`; `apps/captura_mobile` sigue sin `android/`, `ios/` ni `.dart_tool`. El único directorio `ios/` de `apps/` pertenece a la app cliente y es preexistente. |
-| PostgreSQL / T3b | **BLOCKED / EXCLUIDO** | La instrucción vigente prohíbe el retest PostgreSQL y toda acción de Docker/Alembic. Los 2 tests R6 se omitieron de forma explícita mediante el entorno saneado. |
+| PostgreSQL / T3b | **COMPLETADO (2026-09-29)** | En ese corte la instrucción vigente prohibía el retest PostgreSQL y toda acción de Docker/Alembic, y los 2 tests R6 se omitieron con el entorno saneado. Después, con autorización explícita, se ejecutó la suite R6 completa sobre PostgreSQL 16 real: **12 passed** desde base vacía → `head`, actualización desde `0004_pending_staff_email_uniq` con datos intactos, R6 real actualizada a `0011_reservation_chain_txns` (19 tablas, 0 diferencias de metadata) y downgrade/upgrade de un paso. Detalle: `docs/migrations/f02-migration-verification.md`. |
 | Playwright E2E | **SKIP** | `npm run test:e2e` levanta servicios y Docker/PostgreSQL; queda excluido por el límite de T3b. |
 | GitHub Actions | **PASS parcial / BLOCKED** | PyYAML 6.0.3 parseó `.github/workflows/ci.yml` completo: 4 jobs (`backend`, `panel`, `customer-flutter`, `capture-flutter`), permiso `contents: read` y `flutter-version: 3.41.8` en ambos jobs Flutter. `actionlint` no está instalado, así que la semántica de GitHub sigue sin validar, y **el workflow no se ejecutó en GitHub Actions**: los cuatro comandos del job de captura se corrieron solo localmente en el mirror. |
 | Presupuesto de commits | **PASS** | En el rango local `origin/main..e7d18f9` (sin fetch) hay **32 commits**; ninguno alcanza 400 líneas cambiadas. El máximo es `a6d899c` con 395; le siguen `c1c4b99` (392) y `5d0cc8a` (393). La última unidad, `e7d18f9`, sumó 44. |
@@ -131,3 +131,36 @@ Dos intentos auxiliares iniciales fallaron antes de ejecutar verificaciones: uno
 ## Cierre
 
 F02-T6 queda completada como verificación local con las limitaciones anteriores explícitas. El proyecto F02 **no** se declara terminado: F02-T4 continúa en curso hasta que exista un prototipo verificable de captura Android; T3b permanece pausada hasta nueva autorización PostgreSQL. La verificación integrada no autoriza publicación.
+
+## Publicación (2026-09-29)
+
+- **PR #6** mergeado a `main` el **2026-09-29T16:01:13Z** como `98ce894b97356e5c1808f8f9be0814495ad30697`. `origin/main` ya contiene todos los commits de F02 verificados en este informe.
+- **Primera ejecución real de GitHub Actions** del workflow de F02 (run `36594625038`, evento `push` a `main`): **captura ✅, cliente ✅, panel ✅** y backend ❌ **solo** en `pyright app tests` (pytest y ruff en verde también en CI). Los 15 errores de pyright y los dos revision ids de 35 caracteres eran defectos heredados de la línea catálogo/reservas, y se corrigieron en el PR de seguimiento: `odd/tasks/main-inherited-ci-defects.md`.
+- **Límites:** el retest de T3b sobre la base R6 poblada dejó de ser un límite el 2026-09-29 (ver *Verificación PostgreSQL R6*); el runtime Android/cámara real sigue fuera de alcance por diseño, y ni el merge ni los PR recibieron aprobación nativa propia: la autoridad quemada corresponde a las unidades de trabajo revisadas.
+
+## Ejecución E2E en `main` (2026-09-29)
+
+**Árbol:** `main` en `881e5c5` (con PR #6 y PR #7 ya mergeados). **Comando:** `npm run test:e2e` desde `panel/staff-shell` (`node ./e2e/staff-login.e2e.test.mjs`). **Resultado: PASS**, salida `Staff login browser E2E passed: login, TOTP, /me, reload/restore, logout/revocation, and auth/CSRF negatives.` con exit 0.
+
+Recursos que el propio runner creó y destruyó:
+
+- Un PostgreSQL 16 aislado (`docker run --detach --rm --label roomforge.staff-login-e2e.run=<id> --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=536870912 --publish 127.0.0.1::5432 postgres:16-alpine`) con base, usuario y contraseña aleatorios y **sin volúmenes**.
+- `python -m alembic upgrade head` sobre esa base **vacía**: verificación real de la cadena de migraciones en PostgreSQL 16, incluidos los revision ids acortados en el arreglo de CI, hasta el head `0011_reservation_chain_txns`.
+- Siembra de un `platform_admin` con secreto TOTP (`backend/tests/staff_login_e2e_seed.py`), FastAPI con Uvicorn y el servidor de desarrollo de Vite, los tres en puertos de loopback libres y efímeros.
+- Un navegador **Chromium headless** con Playwright que verifica: pantalla de acceso de personal; `/api/v1/auth/me` sin sesión → **401**; credenciales válidas → desafío TOTP; TOTP válido → **200** con identidad sembrada, rol `platform_admin`, `access_token` y `csrf_token`; vista protegida con el correo autenticado; tokens **no** almacenados en `localStorage` (solo el CSRF en `sessionStorage`); cookie de refresh `HttpOnly`, `path=/api/v1/auth` y sin TLS en local; CSRF inválido → **403**; recarga que restaura la sesión rotando refresh y CSRF; cierre de sesión → **204** con revocación y limpieza de cookie y CSRF; token previo al cierre → **401**; y las cinco llamadas a la API pasando por el proxy `/api` de Vite.
+
+**Higiene comprobada después de la corrida:** no quedaron contenedores con la etiqueta del runner, ni Uvicorn ni Vite huérfanos. El contenedor, el volumen `roomforge_pgdata` y la base R6 del diagnóstico T3b quedaron intactos; el E2E nunca elimina volúmenes ajenos.
+
+**Alcance del resultado:** cierra el ítem *Playwright E2E* que figuraba como SKIP en los snapshots anteriores y aporta el `alembic upgrade head` desde base vacía en PostgreSQL real. **No** reabre ni sustituye el retest de T3b sobre la base R6 poblada, que se completó por separado.
+
+## Verificación PostgreSQL R6 (2026-09-29)
+
+Con autorización explícita del usuario se reactivó T3b y quedó cerrado **sin limitación**:
+
+- **Base vacía → `head` en PostgreSQL 16 real:** `python -m pytest tests/test_staff_identity_migration.py tests/test_staff_identity_postgres.py -q` → **12 passed**, exit 0. La fixture aplica `alembic upgrade head` desde una base completamente vacía y la comparación de metadata contra los modelos pasa sin diferencias (tablas, columnas/tipos/nullability/defaults, PK, FK, unique keys, índices y checks).
+- **Actualización desde una revisión anterior con datos:** base desechable en `0004_pending_staff_email_uniq` con una `agency` y un `staff_account` sembrados → `upgrade head` → 19 tablas coincidentes con los modelos, 0 diferencias y la fila intacta.
+- **R6 real actualizada:** `roomforge_r6_f02_t3_20260927` pasó de `0004_pending_staff_email_uniq` a **`0011_reservation_chain_txns`** (19 tablas de aplicación, 0 diferencias de metadata; 0 filas previas, con `pg_dump` de respaldo antes de migrar).
+- **Reversibilidad:** en base desechable, `downgrade 0010_reservations` eliminó la tabla y `upgrade head` la recreó, con los datos intactos. Acredita un paso, no reversibilidad universal.
+- **Defectos corregidos:** FK sin agencia sembrada en el test de concurrencia R6, `server_default` de la migración `0007` ausentes en el modelo ORM del catálogo, y dos normalizaciones de PostgreSQL faltantes en el comparador de metadata (`::numeric` y `= ANY ((ARRAY[...]))`).
+- **Higiene:** contenedores temporales eliminados, sin residuales, el contenedor original sigue detenido y el volumen conservado con la R6 ya migrada. Detalle completo en `docs/migrations/f02-migration-verification.md`.
+- **Verificación local del cambio:** 401 passed / 2 skipped, Ruff limpio, pyright 0 errores.

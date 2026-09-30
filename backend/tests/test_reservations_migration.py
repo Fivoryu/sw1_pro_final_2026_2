@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 _MIGRATION_PATH = _BACKEND_ROOT / "alembic" / "versions" / "0010_reservations.py"
-_CHAIN_MIGRATION_PATH = _BACKEND_ROOT / "alembic" / "versions" / "0011_reservation_chain_transactions.py"
+_CHAIN_MIGRATION_PATH = _BACKEND_ROOT / "alembic" / "versions" / "0011_reservation_chain_txns.py"
 
 
 def _load_migration(connection: Connection) -> ModuleType:
@@ -106,7 +106,7 @@ def test_reservation_migration_enforces_active_partial_index_checks_and_downgrad
             )
             migration = _load_migration(connection)
             assert migration.revision == "0010_reservations"
-            assert migration.down_revision == "0009_agency_wallets_listing_deposit"
+            assert migration.down_revision == "0009_agency_wallets_deposit"
             migration.upgrade()
 
             inspector = inspect(connection)
@@ -290,7 +290,7 @@ def test_chain_transaction_migration_is_unique_by_chain_hash_and_reversible() ->
             migration = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(migration)
             setattr(migration, "op", Operations(MigrationContext.configure(connection)))
-            assert migration.revision == "0011_reservation_chain_transactions"
+            assert migration.revision == "0011_reservation_chain_txns"
             assert migration.down_revision == "0010_reservations"
             migration.upgrade()
 

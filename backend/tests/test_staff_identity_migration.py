@@ -41,34 +41,20 @@ _R6_ENGINE_INFO_KEY = "roomforge.r6.isolated_engine"
 _ALEMBIC_VERSION_NUM_LENGTH = 32
 
 
-# Revision IDs inherited from the parallel catalog/reservations workstream that this branch
-# merged in. They exceed alembic_version.version_num VARCHAR(32), so a PostgreSQL upgrade
-# that stamps them fails. They are recorded here rather than silently renamed because
-# renaming a revision ID invalidates any database already stamped with it, and the owning
-# workstream must shorten them. This test still fails for any *new* oversized ID.
-_INHERITED_OVERSIZED_REVISION_IDS = frozenset(
-    {
-        "0009_agency_wallets_listing_deposit",
-        "0011_reservation_chain_transactions",
-    }
-)
-
-
 def test_alembic_revision_ids_fit_version_num_limit() -> None:
     config = Config()
     config.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script_directory = ScriptDirectory.from_config(config)
     revision_ids = [script.revision for script in script_directory.walk_revisions()]
-    oversized_ids = {
+    oversized_ids = sorted(
         revision_id
         for revision_id in revision_ids
         if len(revision_id) > _ALEMBIC_VERSION_NUM_LENGTH
-    }
-    newly_oversized_ids = oversized_ids - _INHERITED_OVERSIZED_REVISION_IDS
+    )
 
-    assert not newly_oversized_ids, (
+    assert not oversized_ids, (
         "Alembic revision IDs must fit alembic_version.version_num VARCHAR(32); "
-        f"oversized IDs: {sorted(newly_oversized_ids)}"
+        f"oversized IDs: {oversized_ids}"
     )
 
 
@@ -141,6 +127,33 @@ def test_normalize_sql_canonicalizes_postgres_default_trim_both_form() -> None:
     )
 
 
+def test_normalize_sql_canonicalizes_postgres_numeric_literal_casts() -> None:
+    assert _normalize_sql("base_price >= 0::numeric") == _normalize_sql("base_price >= 0")
+    assert _normalize_sql("one_time_total >= 0::NUMERIC") == _normalize_sql(
+        "one_time_total >= 0"
+    )
+    assert _normalize_sql("deposit_amount_cop > 0::numeric") == _normalize_sql(
+        "deposit_amount_cop > 0"
+    )
+
+
+def test_normalize_sql_canonicalizes_postgres_any_array_without_parentheses() -> None:
+    canonical = _normalize_sql("status in 'pending', 'accepted'")
+    assert _normalize_sql("status = any array['pending', 'accepted'] []") == canonical
+    assert _normalize_sql("status = any (array['pending', 'accepted']) []") == canonical
+
+
+def test_normalize_sql_canonicalizes_postgres_partial_index_predicate() -> None:
+    canonical = _normalize_sql("status in 'pending', 'accepted'")
+    assert (
+        _normalize_sql(
+            "((status)::text = ANY ((ARRAY['pending'::character varying, "
+            "'accepted'::character varying])::text[]))"
+        )
+        == canonical
+    )
+
+
 def test_normalize_sql_preserves_non_default_trim_arguments() -> None:
     collapsed = _normalize_sql("lower(trim(email))")
 
@@ -165,9 +178,14 @@ def _normalize_sql(value: str | None) -> str | None:
         return None
     normalized = value.lower().replace('"', "")
     normalized = re.sub(r"\b[a-z_][a-z0-9_]*\.", "", normalized)
-    normalized = re.sub(r"::\s*(?:character varying|varchar|text)(?:\(\d+\))?", "", normalized)
     normalized = re.sub(
-        r"=\s*any\s*\(\s*array\s*\[(.*?)\]\s*(?:\[\])?\s*\)",
+        r"::\s*(?:(?:character varying|varchar|text)(?:\(\d+\))?"
+        r"|numeric(?:\(\d+(?:\s*,\s*\d+)?\))?)(?:\[\])?",
+        "",
+        normalized,
+    )
+    normalized = re.sub(
+        r"=\s*any\s*\(*\s*array\s*\[(.*?)\]\s*\)*\s*(?:\[\])?",
         r"in (\1)",
         normalized,
     )
@@ -653,9 +671,7 @@ def test_pending_invitation_migration_refuses_legacy_duplicates_without_cleanup(
         engine.dispose()
 
 
-def test_blank_database_upgrade_matches_identity_metadata(r6_database: R6Database) -> None:
-    assert r6_database.started_blank, "schema verification must begin from a blank R6 database"
-    engine = r6_database.engine
+def _metadata_differences(engine: Engine) -> list[str]:
     inspector = inspect(engine)
     actual_tables = set(inspector.get_table_names()) - {"alembic_version"}
     expected_tables = set(Base.metadata.tables)
@@ -746,6 +762,13 @@ def test_blank_database_upgrade_matches_identity_metadata(r6_database: R6Databas
             differences.append(
                 f"{table_name} check constraints: expected {expected_checks}, got {actual_checks}"
             )
+
+    return differences
+
+
+def test_blank_database_upgrade_matches_identity_metadata(r6_database: R6Database) -> None:
+    assert r6_database.started_blank, "schema verification must begin from a blank R6 database"
+    differences = _metadata_differences(r6_database.engine)
 
     assert not differences, "migrated schema differs from identity metadata:\n- " + "\n- ".join(
         differences

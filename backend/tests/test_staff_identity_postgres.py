@@ -24,7 +24,13 @@ from app.core.config import Settings
 from app.core.security import encrypt_totp_secret, hash_password, hash_secret
 from app.db.base import Base
 from app.main import create_app
-from app.modules.identity.models import StaffAccount, StaffLoginChallenge, StaffRecoveryCode, StaffSession
+from app.modules.identity.models import (
+    Agency,
+    StaffAccount,
+    StaffLoginChallenge,
+    StaffRecoveryCode,
+    StaffSession,
+)
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 _R6_DATABASE_PREFIX = "roomforge_r6_"
@@ -113,6 +119,7 @@ def test_postgres_racing_recovery_code_logins_create_one_session(
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
     with session_factory.begin() as session:
+        session.add(Agency(id=tenant_id))
         session.add(
             StaffAccount(
                 id=user_id,

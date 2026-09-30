@@ -2,7 +2,9 @@
 
 ## Estado
 
-**CERRADA CON LIMITACIÓN DOCUMENTADA.** Work-unit `66076bb` (134 líneas), revisión nativa `review-cf05394c9a6e1d35` aprobada y acknowledged. La R6 existente está en `0004_pending_staff_email_uniq` y contiene 7 tablas de aplicación más `alembic_version`. Tras corregir el normalizador de PostgreSQL, una comparación read-only independiente de todo el esquema pasó. El tercer pytest original terminó con exit 1 antes de corregir la representación `TRIM`; su salida se suprimió y no se afirma como PASS. La base ya está poblada: no repetir la fixture fresh-DB ni Alembic, ni limpiar. El volumen se preserva.
+**CERRADA (limitación superada el 2026-09-29).** Work-unit `66076bb` (134 líneas), revisión nativa `review-cf05394c9a6e1d35` aprobada y acknowledged. El usuario autorizó reactivar T3b y la verificación PostgreSQL quedó completa: base vacía → `head` con **12 passed**, actualización desde `0004_pending_staff_email_uniq` en base desechable con datos que sobrevivieron, y la **R6 real actualizada a `0011_reservation_chain_txns`** (19 tablas de aplicación) sin diferencias de metadata; también se verificó downgrade/upgrade de un paso. Se corrigieron tres defectos reales: el test de concurrencia R6 que violaba la FK `staff_account.tenant_id → agency.id`, los `server_default` que la migración `0007` define y el modelo ORM no declaraba, y dos formas de representación de PostgreSQL que el comparador de metadata no canonizaba. Detalle completo en `docs/migrations/f02-migration-verification.md`.
+
+> Registro histórico previo (limitación ya superada): La R6 existente está en `0004_pending_staff_email_uniq` y contiene 7 tablas de aplicación más `alembic_version`. Tras corregir el normalizador de PostgreSQL, una comparación read-only independiente de todo el esquema pasó. El tercer pytest original terminó con exit 1 antes de corregir la representación `TRIM`; su salida se suprimió y no se afirma como PASS. La base ya está poblada: no repetir la fixture fresh-DB ni Alembic, ni limpiar. El volumen se preserva.
 
 ## Contexto verificado
 

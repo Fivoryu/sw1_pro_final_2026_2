@@ -1,6 +1,6 @@
 # F02.2 — Evidencia de esquema y migraciones
 
-> **Estado: parcial; PostgreSQL bloqueado.** Los cuatro casos SQLite aislados pasan. Bajo autorización explícita se intentó la suite PostgreSQL en una base R6 nueva; cuatro pruebas pasaron y dos fallaron durante setup porque Alembic no puede guardar el ID de revisión de 42 caracteres en `alembic_version.version_num VARCHAR(32)`. No se completó una migración. La base de prueba quedó vacía (`alembic_version` ausente, 0 tablas de aplicación), el contenedor `roomforge-local-dev-postgres-1` fue detenido y su volumen se conservó. No se tocaron esquemas de bases preexistentes.
+> **Estado: completo (2026-09-29).** Los cuatro casos SQLite aislados pasan y la verificación PostgreSQL quedó completada bajo autorización explícita del usuario: base vacía → `head` con **12 pruebas en verde**, actualización desde `0004_pending_staff_email_uniq` en base desechable con datos que sobrevivieron, R6 real actualizada a `0011_reservation_chain_txns` sin diferencias de metadata, y downgrade/upgrade de un paso verificados. La cadena ya no contiene IDs de 42 caracteres: todas las revisiones miden ≤ 32. Las secciones siguientes conservan el registro histórico de los intentos previos y de la limitación, ya superada.
 
 ## Alcance y fuentes
 
@@ -80,3 +80,49 @@ El usuario autorizó corregir el ID, validar R6 y usar la vía administrativa de
 - El contenedor quedó `exited`; `roomforge-local-dev_postgres_data` permanece montado y preservado. No se limpió ni se ejecutó otra migración.
 - El primer traceback imprimió accidentalmente una contraseña local; no se reproduce aquí ni en memoria; tratarla como expuesta y rotarla si es válida. Los outputs posteriores se capturaron y suprimieron.
 - El work-unit de migración/comparador se comprometió como `66076bb` (134 líneas). Native review de ese candidato (`review-cf05394c9a6e1d35`, 5 archivos) quedó aprobada y acknowledged; el resumen no devolvió hallazgos adicionales. No hubo push/PR.
+
+## Reactivación y verificación PostgreSQL completa — 2026-09-29
+
+El usuario autorizó reactivar T3b para cerrar F02. Se trabajó sobre `main` en `be13a44` (F02 ya mergeado). El contenedor `roomforge-local-dev-postgres-1` permaneció **detenido** y su volumen `roomforge-local-dev_postgres_data` conservado; el puerto original 5434 estaba ocupado por un contenedor de otro proyecto (`ynab-postgres-1`), así que la R6 se montó en contenedores temporales con puerto de loopback aleatorio. No se detuvo ningún contenedor ajeno ni se eliminó volumen alguno.
+
+Aclaración de identidad: el volumen contiene dos bases; la R6 objetivo es **`roomforge_r6_f02_t3_20260927`** (8 tablas al inicio: 7 de aplicación más `alembic_version`). La base `roomforge_local` del mismo volumen está **vacía** y no es el objeto de esta verificación.
+
+### 1. Base vacía → `head` en PostgreSQL real
+
+Contenedor descartable `postgres:16-alpine` con `--tmpfs` (sin volúmenes) y base con el prefijo exigido por la fixture:
+
+```bash
+python -m pytest tests/test_staff_identity_migration.py tests/test_staff_identity_postgres.py -q
+```
+
+**Resultado: 12 passed, exit 0.** La fixture aplicó `alembic upgrade head` desde una base completamente vacía y la comparación de metadata contra los modelos pasó sin diferencias: tablas, columnas/tipos/nullability/defaults, PK, FK, unique keys, índices y check constraints.
+
+### 2. Actualización desde una revisión anterior, con datos presentes
+
+En una base desechable: `alembic upgrade 0004_pending_staff_email_uniq`, sembrado de una `agency` y un `staff_account`, y luego `alembic upgrade head` (0005→0011).
+
+**Resultado:** revisión final `0011_reservation_chain_txns`, **19 tablas** coincidentes con los modelos, la fila sembrada intacta (con su FK válida) y `_metadata_differences` sin diferencias. Esto cierra el punto de F02.2 sobre actualización desde una versión anterior.
+
+### 3. R6 real actualizada a `head`
+
+Respaldo previo: `pg_dump --format=custom` de la R6 a `D:\tmp\t3b-backups\r6_backup_before_upgrade.dump` (18 308 bytes). La R6 estaba en `0004_pending_staff_email_uniq` con **0 filas** en `agency` y `staff_account`, por lo que no había datos de usuario en riesgo.
+
+**Resultado de `alembic upgrade head`:** revisión `0011_reservation_chain_txns`, **20 tablas** en `public` (19 de aplicación más `alembic_version`) y diferencias de metadata **ninguna**. La actualización quedó persistida en el volumen, verificado con un contenedor de comprobación posterior a la limpieza.
+
+### 4. Reversibilidad (alcance declarado)
+
+En la base desechable se ejecutó `alembic downgrade 0010_reservations` (la tabla `reservation_chain_transaction` desapareció y la revisión quedó en `0010_reservations`) y después `alembic upgrade head` (la tabla volvió y la revisión regresó a `0011_reservation_chain_txns`), con la fila sembrada intacta. Esto acredita **un paso** de la última revisión, no reversibilidad universal: la recuperación real depende de un respaldo probado, como el dump tomado antes de migrar la R6.
+
+### 5. Defectos reales encontrados y corregidos
+
+La reactivación encontró tres problemas que los intentos previos no habían podido observar:
+
+1. **Test de concurrencia R6 con FK inválida.** `test_postgres_racing_recovery_code_logins_create_one_session` insertaba un `staff_account` con un `tenant_id` sin `agency` sembrada; PostgreSQL lo rechazaba con `ForeignKeyViolation`. Corregido sembrando `Agency(id=tenant_id)` antes de la cuenta.
+2. **Defaults de servidor no declarados en el modelo.** La migración `0007` define `server_default` para `listing.approval_status` (`'draft'`), `listing.is_published` (`false`) y `listing.offer_version` (`1`), pero el modelo ORM solo tenía defaults de Python, así que la metadata no describía el esquema real. Corregido declarando `server_default=text("'draft'")`, `server_default=false()` y `server_default=text("1")`.
+3. **Comparador de metadata incompleto frente a PostgreSQL.** Faltaba canonizar dos representaciones: los casts numéricos de literales (`base_price >= 0::numeric`) y el predicado de índices parciales tal como lo devuelve el inspector (`((status)::text = ANY ((ARRAY['pending'::character varying, 'accepted'::character varying])::text[]))`). Corregido con TDD, incluido un test de regresión con el texto exacto de `pg_indexes.indexdef`.
+
+### 6. Verificación local y estado
+
+- Suite local: **401 passed, 2 skipped**; Ruff `All checks passed!`; pyright **0 errores**.
+- Contenedores temporales detenidos y eliminados; sin residuales; el contenedor original sigue detenido y el volumen `roomforge-local-dev_postgres_data` conservado.
+- La credencial local que apareció en un traceback anterior sigue pendiente de rotación por decisión del dueño; no se reproduce en ningún registro nuevo.
