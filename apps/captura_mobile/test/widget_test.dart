@@ -1,40 +1,68 @@
+import 'package:captura_mobile/data/services/staff_auth_api.dart';
+import 'package:captura_mobile/domain/staff_session_controller.dart';
 import 'package:captura_mobile/main.dart';
+
+import 'support/fake_staff_backend.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+
+/// Builds a controller backed by the fake staff API. When [signedIn] is true the
+/// session is opened first, which is what the prototype screens require.
+Future<StaffSessionController> captureController({bool signedIn = false}) async {
+  final controller = StaffSessionController(
+    api: StaffAuthApi(
+      baseUrl: 'https://api.example.test',
+      client: FakeStaffBackend().client,
+    ),
+    credentialStore: InMemoryStaffCredentialStore(),
+  );
+  await controller.restore();
+  if (signedIn) {
+    await controller.startLogin(
+      email: 'agent@example.test',
+      password: 'password123',
+    );
+    await controller.submitCode('123456');
+  }
+  return controller;
+}
+
+Future<StaffSessionController> pumpCaptureApp(
+  WidgetTester tester, {
+  bool signedIn = false,
+}) async {
+  final controller = await captureController(signedIn: signedIn);
+  await tester.pumpWidget(CaptureApp(controller: controller));
+  await tester.pumpAndSettle();
+  return controller;
+}
 
 void main() {
   testWidgets('starts on the access step and declares the prototype', (
     tester,
   ) async {
-    await tester.pumpWidget(const CaptureApp());
+    await pumpCaptureApp(tester, signedIn: false);
 
     expect(find.text('Acceso del agente'), findsOneWidget);
-    expect(find.textContaining('no pide credenciales'), findsOneWidget);
+    expect(find.byKey(const ValueKey('access-email-field')), findsOneWidget);
     expect(find.textContaining('Prototipo de interfaz'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('access-continue-button')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const ValueKey('access-continue-button')), findsNothing);
   });
 
-  testWidgets(
-    'access step keeps its prototype screen and offers no credentials',
-    (tester) async {
-      await tester.pumpWidget(const CaptureApp());
+  testWidgets('access step requires credentials and the second factor', (
+    tester,
+  ) async {
+    await pumpCaptureApp(tester, signedIn: false);
 
-      expect(find.text('Acceso del agente'), findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('access-continue-button')),
-        findsOneWidget,
-      );
-      expect(find.byType(TextFormField), findsNothing);
-      expect(find.byType(TextField), findsNothing);
-      expect(find.byType(Form), findsNothing);
-    },
-  );
+    expect(find.text('Acceso del agente'), findsOneWidget);
+    expect(find.byKey(const ValueKey('access-continue-button')), findsNothing);
+    expect(find.byKey(const ValueKey('access-email-field')), findsOneWidget);
+    expect(find.byKey(const ValueKey('access-password-field')), findsOneWidget);
+  });
 
   testWidgets('continues from access to the drafts shell', (tester) async {
-    await tester.pumpWidget(const CaptureApp());
+    await pumpCaptureApp(tester, signedIn: true);
 
     await tester.tap(find.byKey(const ValueKey('access-continue-button')));
     await tester.pumpAndSettle();
@@ -50,7 +78,7 @@ void main() {
   });
 
   testWidgets('drafts shell shows no property fixture', (tester) async {
-    await tester.pumpWidget(const CaptureApp());
+    await pumpCaptureApp(tester, signedIn: true);
     await tester.tap(find.byKey(const ValueKey('access-continue-button')));
     await tester.pumpAndSettle();
 
@@ -60,7 +88,7 @@ void main() {
   });
 
   Future<void> openNewPropertyPrototype(WidgetTester tester) async {
-    await tester.pumpWidget(const CaptureApp());
+    await pumpCaptureApp(tester, signedIn: true);
     await tester.tap(find.byKey(const ValueKey('access-continue-button')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('new-property-button')));
@@ -329,6 +357,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
+    final controller = await captureController(signedIn: true);
     await tester.pumpWidget(
       MaterialApp(
         home: Builder(
@@ -336,7 +365,7 @@ void main() {
             data: MediaQuery.of(
               context,
             ).copyWith(textScaler: const TextScaler.linear(1.5)),
-            child: const AgentAccessScreen(),
+            child: AgentAccessScreen(controller: controller),
           ),
         ),
       ),
@@ -353,5 +382,100 @@ void main() {
       expect(tester.takeException(), isNull, reason: 'after $key');
     }
     expect(find.byKey(const ValueKey('review-summary-screen')), findsOneWidget);
+  });
+
+  testWidgets('walks credentials, the second factor and the private drafts', (
+    tester,
+  ) async {
+    await pumpCaptureApp(tester, signedIn: false);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('access-email-field')),
+      'agent@example.test',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('access-password-field')),
+      'password123',
+    );
+    await tester.tap(find.byKey(const ValueKey('access-credentials-submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('access-code-field')), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('access-code-field')),
+      '123456',
+    );
+    await tester.tap(find.byKey(const ValueKey('access-code-submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('agent@example.test'), findsOneWidget);
+    expect(find.byKey(const ValueKey('access-continue-button')), findsOneWidget);
+  });
+
+  testWidgets('reports rejected credentials without opening a session', (
+    tester,
+  ) async {
+    final backend = FakeStaffBackend()..loginRejected = true;
+    final controller = StaffSessionController(
+      api: StaffAuthApi(
+        baseUrl: 'https://api.example.test',
+        client: backend.client,
+      ),
+      credentialStore: InMemoryStaffCredentialStore(),
+    );
+    await controller.restore();
+    await tester.pumpWidget(CaptureApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('access-email-field')),
+      'agent@example.test',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('access-password-field')),
+      'wrong-password',
+    );
+    await tester.tap(find.byKey(const ValueKey('access-credentials-submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('access-message')), findsOneWidget);
+    expect(find.byKey(const ValueKey('access-continue-button')), findsNothing);
+  });
+
+  testWidgets('offers a retry when the stored session cannot be validated', (
+    tester,
+  ) async {
+    final backend = FakeStaffBackend()..offline = true;
+    final controller = StaffSessionController(
+      api: StaffAuthApi(
+        baseUrl: 'https://api.example.test',
+        client: backend.client,
+      ),
+      credentialStore: InMemoryStaffCredentialStore(
+        refreshCookie: 'refresh-cookie',
+        csrfToken: 'csrf-1',
+      ),
+    );
+    await controller.restore();
+    await tester.pumpWidget(CaptureApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('access-retry')), findsOneWidget);
+
+    backend.offline = false;
+    await tester.tap(find.byKey(const ValueKey('access-retry')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('access-continue-button')), findsOneWidget);
+  });
+
+  testWidgets('logs out and returns to the credentials step', (tester) async {
+    await pumpCaptureApp(tester, signedIn: true);
+
+    await tester.tap(find.byKey(const ValueKey('access-logout')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('access-email-field')), findsOneWidget);
+    expect(find.byKey(const ValueKey('access-continue-button')), findsNothing);
   });
 }
