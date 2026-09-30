@@ -132,8 +132,26 @@ Evidence recorded after the rebase, from `backend/`:
 - **Rollback boundary:** delete the four added tests; no application code changed.
 - **Runtime harness:** FastAPI TestClient with isolated SQLite fixtures; no external service.
 
-- [ ] **F03-04 — Integrate role-aware session UX.** Integrate customer auth in the client app and staff access states in the panel/capture surfaces, including secure token handling, restoration, expiry, denial, network errors, and logout. The former F02 T4 overlap is cleared: F02 T4/T6 closed at `a047a71` and the shell is committed on the rebased base, so this task must extend those surfaces rather than rewrite them. Any error-shape change from F03-01 must be reflected here.
-- [ ] **F03-05 — Verify and close the authorized F03 slice.** Run focused and full applicable backend/panel/mobile checks, record skipped/unavailable PostgreSQL/device checks, and keep the public catalog criterion visibly pending for F04.
+- [ ] **F03-04 — Integrate role-aware session UX.** Integrate customer auth in the client app and staff access states in the panel/capture surfaces, including secure token handling, restoration, expiry, denial, network errors, and logout. The former F02 T4 overlap is cleared: F02 T4/T6 closed at `a047a71` and the shell is committed on the rebased base, so this task must extend those surfaces rather than rewrite them. Any error-shape change from F03-01 must be reflected here. **Current state:** the client-app slice is delivered in six chained commits (`f7ba2e4`, `696c1a4`, `3b447ac`, `9c25b61`, `389b91d`, `24ec48a`) after the user scoped this first unit to `apps/cliente_mobile` with `flutter_secure_storage` as the token backend. Still open by that scoping: active expiry handling and a distinct 401/403/network UI in the panel, and any staff session state in `apps/captura_mobile`.
+
+### F03-04 client-app evidence
+
+- **Layers:** `lib/data/services/customer_token_store.dart` (Keychain/Keystore refresh-token store behind an interface), `lib/data/services/customer_auth_failure.dart` (shared code vocabulary plus status and envelope mapping), `lib/data/services/customer_auth_api.dart` (the five `/api/v1/customer/auth/*` calls), `lib/domain/customer_session_controller.dart` (restoration, login, registration without auto-login, logout, denial, and offline states), and `lib/ui/features/auth/views/customer_account_screen.dart` wired into the shell's Cuenta tab.
+- **Token handling:** only the opaque refresh token is persisted, through `flutter_secure_storage`; access tokens stay in memory and are requested per call. The backend base URL comes from `ROOMFORGE_API_BASE_URL`, defaulting to `http://10.0.2.2:8000` for the Android emulator.
+- **Error contract:** the client consumes the F03-01 shared envelope `{detail, code}`, keeps an unparsed body from reaching the UI, and distinguishes a retryable transport failure (`network_error`) from a rejected session.
+- **Test evidence:** `flutter test` in `apps/cliente_mobile` — **50 passed** (token store, failure mapping, API client, session controller, account screen, plus the original 11 shell tests); `flutter analyze` reports no issues. Discrimination was proven by mutation: four lifecycle mutations (rejected token not cleared, offline token discarded, registration creating a session, offline logout clearing the session) and four credential mutations (refresh token not persisted, rejected credentials kept signed in, offline sign-in reported as signed out, registration creating a session) each made the new tests fail, with every file restored byte-identically.
+- **Chained delivery:** the agreed four-unit plan needed two extra commits to stay under the 400-authored-line budget: the session controller was split into lifecycle (307 lines) and credential flows (111), and the account UI into the widget (372) and the shell wiring (68).
+- **Not run:** `flutter build apk --debug`, device, and iOS checks; they need an Android toolchain and network fetches this slice did not authorize. The panel's `npm test` could not run because `panel/staff-shell/node_modules` is absent and installing it needs the network.
+
+- [x] **F03-05 — Verify and close the authorized F03 slice.** Run focused and full applicable backend/panel/mobile checks, record skipped/unavailable PostgreSQL/device checks, and keep the public catalog criterion visibly pending for F04. **Current state:** closure verification recorded below; the public catalog criterion stays explicitly pending for F04.
+
+### F03-05 verification record
+
+- Backend, from `backend/`: `../../proyecto_final/.venv/Scripts/python.exe -m pytest tests -q` — **411 passed, 2 skipped, 4 warnings**; Ruff clean; Pyright shows only pre-existing diagnostics identical to `main`.
+- Cliente mobile, from `apps/cliente_mobile/`: `flutter test` — **50 passed**; `flutter analyze` — no issues.
+- Capture mobile, from `apps/captura_mobile/`: `flutter test` — **15 passed**; `flutter analyze` — no issues (regression check only; F03 did not change this app).
+- Not run, with reasons: the panel suite (`npm test`) because `panel/staff-shell/node_modules` is missing and installing needs the network; PostgreSQL, Docker, and the real migration chain because this slice had no such authorization; device, iOS, and `flutter build apk --debug` because they need an Android toolchain and network fetches.
+- The public catalog read API remains deferred to F04 and is **not** reported as satisfied.
 
 ## Open findings
 
@@ -143,6 +161,6 @@ Evidence recorded after the rebase, from `backend/`:
 
 The F03 worktree is on branch `feat/f03-identity-agencies`, rebased onto `7973ffa` so it now contains `main` plus all of F02. It holds the ODD task document, agent-membership tests, and implementation in the approved agency/identity files; no schema migration was added by F03. The root checkout was not modified. The worktree has no local `.venv`; use the existing root-project tooling via `../../proyecto_final/.venv/Scripts/` from the F03 `backend/`, without modifying the environment.
 
-F03-01, F03-02, and F03-03 are complete in six local commits with no push: `a9614ba` and `0251015` (agent membership), `2cec63d` (rebase record), `703186e` (absolute refresh lifetime), `a5f20e1` (shared customer envelope), and the F03-03 denial-coverage commit recorded with this document. Latest full verification: **411 passed, 2 skipped, 4 warnings**; Ruff clean; Pyright unchanged at pre-existing diagnostics identical to `main`.
+F03-01, F03-02, and F03-03 are complete in local commits with no push: `a9614ba` and `0251015` (agent membership), `2cec63d` (rebase record), `703186e` (absolute refresh lifetime), `a5f20e1` (shared customer envelope), and `e53eb59` (denial coverage). F03-04's client-app slice adds six more: `f7ba2e4`, `696c1a4`, `3b447ac`, `9c25b61`, `389b91d`, and `24ec48a`.
 
-F03-04 remains: integrate role-aware session states in the client app and the panel/capture surfaces, extending the shell handed off by F02 T4 and consuming the new customer error shape. F03-05 closes the slice and must keep the public catalog criterion marked pending for F04.
+F03-04 still owes the panel refinements (active expiry and a distinct 401/403/network UI) and any staff session state in `apps/captura_mobile`; both were excluded when the user scoped this first unit to the client app. The open reservation/quote envelope finding still needs its own authorized decision. F03-05 recorded the closure checks above and keeps the public catalog criterion marked pending for F04.
