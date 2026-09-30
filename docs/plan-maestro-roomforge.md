@@ -5,6 +5,8 @@
 > **Naturaleza:** hoja de ruta de producto y ejecución propuesta. No es evidencia de implementación, no reemplaza el backlog académico ni autoriza automáticamente tareas OpenSpec. La existencia de este plan no garantiza completar todo el alcance en un mes.
 >
 > **Regla central:** las pruebas técnicas bloquean únicamente las funciones que dependen de ellas. No es necesario terminar AR, IA o blockchain para avanzar con infraestructura, usuarios, inmobiliarias, catálogo y precios.
+>
+> **Dónde está el estado vigente:** §1.4 es el cuadro histórico de integración (corte 2026-09-26) y se conserva congelado. El **estado actual por fase y la casilla de asignación** están en **§1.4.1**, y el registro de la última integración en **§1.4.2**.
 
 ## Índice
 
@@ -65,6 +67,8 @@ La infraestructura local ya tiene configuración nueva: `infra/docker/compose.lo
 Esa evidencia cubre servicios de desarrollo, no API, panel, IA ni contratos. En el corte de integración, `origin/main` conserva `infra/docker/compose.postgres.yml`, mientras que el checkout local lo marca como eliminado; esta auditoría no resuelve esa diferencia. No restaurar archivos retirados por el reinicio ni revertir cambios locales sin autorización. El estado actual del código de producto se inspeccionará antes de cada trabajo; no se da por implementado porque lo afirme un README histórico.
 
 ### 1.4 Estado de integración comprobado (corte 2026-09-26)
+
+> ⚠️ **Cuadro histórico, congelado.** Describe el estado al 2026-09-26 y no refleja lo integrado después. Para el estado vigente por fase y la asignación de responsables, ver §1.4.1.
 
 **Criterio:** “Integrado” significa presente en `origin/main`, no solo escrito en un plan, probado en otra rama o existente como archivo sin seguimiento. Este corte usa `origin/main` en `b6a468a`; no usa el checkout local `main`, que está en `848f28c`, nueve commits detrás y con otros cambios locales. Los resultados reportados por tareas se distinguen de la integración y no se vuelven a presentar como pruebas ejecutadas en este corte.
 
