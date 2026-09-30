@@ -98,6 +98,45 @@ class StaffAuthApi {
     return _grant(response);
   }
 
+  Future<StaffAccessGrant> refresh({
+    required String csrfToken,
+    required String refreshCookie,
+  }) async {
+    final response = await _send(
+      'POST',
+      '/api/v1/auth/refresh',
+      csrfToken: csrfToken,
+      refreshCookie: refreshCookie,
+    );
+    return _grant(response);
+  }
+
+  Future<void> logout({
+    required String csrfToken,
+    required String refreshCookie,
+  }) async {
+    await _send(
+      'POST',
+      '/api/v1/auth/logout',
+      csrfToken: csrfToken,
+      refreshCookie: refreshCookie,
+    );
+  }
+
+  Future<StaffAccount> fetchAccount({required String accessToken}) async {
+    final response = await _send(
+      'GET',
+      '/api/v1/auth/me',
+      accessToken: accessToken,
+    );
+    final json = _decodeObject(response);
+    final user = json['user'];
+    if (user is! Map<String, Object?>) {
+      throw malformedResponseFailure();
+    }
+    return _account(user);
+  }
+
   Future<http.Response> _send(
     String method,
     String path, {
