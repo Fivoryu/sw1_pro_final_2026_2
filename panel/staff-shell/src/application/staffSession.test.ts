@@ -3,6 +3,7 @@ import {
   completeStaffSession,
   decodeAccessTokenExpiry,
   endStaffSession,
+  renewalDelayMs,
   renewStaffSession,
   restoreStaffSession,
   restoreStaffSessionOutcome,
@@ -350,5 +351,19 @@ describe("staff session expiry and failure classification", () => {
     const token = `header.${btoa(JSON.stringify({ sid: "session" }))}.signature`;
 
     expect(decodeAccessTokenExpiry(token)).toBeNull();
+  });
+
+  it("plans a renewal before the access token expires", () => {
+    expect(renewalDelayMs(1_000_000, 940_000, 30_000)).toBe(30_000);
+  });
+
+  it("renews immediately once the token is inside the renewal window", () => {
+    expect(renewalDelayMs(1_000_000, 999_500, 30_000)).toBe(0);
+  });
+
+  it("refuses to schedule a renewal for an unknown or already expired token", () => {
+    expect(renewalDelayMs(null, 940_000, 30_000)).toBeNull();
+    expect(renewalDelayMs(1_000_000, 1_000_000, 30_000)).toBeNull();
+    expect(renewalDelayMs(1_000_000, 1_000_500, 30_000)).toBeNull();
   });
 });

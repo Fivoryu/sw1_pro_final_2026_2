@@ -12,15 +12,20 @@ import {
 import { App } from "./App";
 import * as staffSession from "./application/staffSession";
 
-vi.mock("./application/staffAuthApi", () => ({
-  acceptStaffInvitation: vi.fn(),
-  completeStaffLogin: vi.fn(),
-  getStaffMe: vi.fn(),
-  logoutStaffSession: vi.fn(),
-  refreshStaffSession: vi.fn(),
-  startStaffLogin: vi.fn(),
-  verifyStaffEnrollment: vi.fn(),
-}));
+vi.mock("./application/staffAuthApi", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("./application/staffAuthApi")>();
+  return {
+    ...actual,
+    acceptStaffInvitation: vi.fn(),
+    completeStaffLogin: vi.fn(),
+    getStaffMe: vi.fn(),
+    logoutStaffSession: vi.fn(),
+    refreshStaffSession: vi.fn(),
+    startStaffLogin: vi.fn(),
+    verifyStaffEnrollment: vi.fn(),
+  };
+});
 
 function staffUser(role: string): StaffUser {
   return {
@@ -245,7 +250,7 @@ describe("protected staff session lifecycle", () => {
     expect(screen.getByText(viewText)).toBeVisible();
   });
 
-  it("rejects an unknown server role and falls back to login", async () => {
+  it("rejects an unknown server role with an access-denied explanation", async () => {
     sessionStorage.setItem("roomforge.staff.csrf", "stored-csrf");
     vi.mocked(refreshStaffSession).mockResolvedValue({
       access_token: "volatile-access-token",
@@ -255,9 +260,12 @@ describe("protected staff session lifecycle", () => {
 
     render(<App />);
 
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Tu cuenta no tiene permisos para este panel.",
+    );
     expect(
-      await screen.findByRole("heading", { level: 1, name: "Acceso de personal" }),
-    ).toBeVisible();
+      screen.queryByRole("heading", { level: 1, name: "Acceso de personal" }),
+    ).not.toBeInTheDocument();
     expect(sessionStorage.getItem("roomforge.staff.csrf")).toBeNull();
     expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
   });

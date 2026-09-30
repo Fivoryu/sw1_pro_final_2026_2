@@ -62,12 +62,27 @@ export function decodeAccessTokenExpiry(accessToken: string): number | null {
   }
 }
 
-/** A transport failure, as opposed to a server rejection or an unusable role. */
+/**
+ * A transport failure, as opposed to a server rejection or an unusable role.
+ * `fetch` rejects with a TypeError when the request never reached the server;
+ * any other error is treated as a rejection of the stored session.
+ */
 function isNetworkFailure(error: unknown): boolean {
-  return (
-    !(error instanceof StaffAuthApiError) &&
-    !(error instanceof UnsupportedStaffRoleError)
-  );
+  return error instanceof TypeError;
+}
+
+/**
+ * Milliseconds until a proactive renewal should run, or null when there is
+ * nothing to schedule. An already expired token is never renewed silently;
+ * the caller signs the staff member out instead.
+ */
+export function renewalDelayMs(
+  accessExpiresAt: number | null,
+  now: number,
+  skewMs: number,
+): number | null {
+  if (accessExpiresAt === null || accessExpiresAt <= now) return null;
+  return Math.max(0, accessExpiresAt - now - skewMs);
 }
 
 function failureOutcome(error: unknown): StaffRestoreOutcome {
