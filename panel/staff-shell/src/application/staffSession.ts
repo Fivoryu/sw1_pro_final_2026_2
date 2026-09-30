@@ -2,6 +2,7 @@ import {
   getStaffMe,
   logoutStaffSession,
   refreshStaffSession,
+  StaffAuthApiError,
   type LoginCompletion,
   type StaffSessionTokens,
   type StaffUser,
@@ -20,7 +21,64 @@ export interface StaffSessionStorage {
 export interface StaffSession {
   accessToken: string;
   csrfToken: string;
+  /** Milliseconds since the epoch, decoded from the access token; null when unreadable. */
+  accessExpiresAt: number | null;
   user: StaffUser & { role: StaffRole };
+}
+
+/** Result of trying to restore a stored staff session. */
+export type StaffRestoreOutcome =
+  | { kind: "session"; session: StaffSession }
+  | { kind: "signed-out" }
+  | { kind: "unavailable" }
+  | { kind: "denied" };
+
+/** Raised when the authenticated staff account holds a role the panel cannot use. */
+export class UnsupportedStaffRoleError extends Error {
+  constructor() {
+    super("The staff account has an unsupported role.");
+    this.name = "UnsupportedStaffRoleError";
+  }
+}
+
+/**
+ * Reads the `exp` claim of an access token so the panel can renew proactively.
+ * Returns null when the token is not a readable JWT or has no numeric expiry.
+ */
+export function decodeAccessTokenExpiry(accessToken: string): number | null {
+  const segments = accessToken.split(".");
+  if (segments.length !== 3) return null;
+
+  try {
+    const normalized = segments[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const payload: unknown = JSON.parse(atob(padded));
+    if (typeof payload !== "object" || payload === null) return null;
+
+    const exp = (payload as { exp?: unknown }).exp;
+    return typeof exp === "number" && Number.isFinite(exp) ? exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A transport failure, as opposed to a server rejection or an unusable role. */
+function isNetworkFailure(error: unknown): boolean {
+  return (
+    !(error instanceof StaffAuthApiError) &&
+    !(error instanceof UnsupportedStaffRoleError)
+  );
+}
+
+function failureOutcome(error: unknown): StaffRestoreOutcome {
+  if (
+    error instanceof UnsupportedStaffRoleError ||
+    (error instanceof StaffAuthApiError && error.status === 403)
+  ) {
+    return { kind: "denied" };
+  }
+
+  return { kind: "signed-out" };
 }
 
 const supportedRoles = new Set<StaffRole>([
@@ -51,17 +109,78 @@ async function resolveStaffSession(
     storage.setItem(STAFF_CSRF_STORAGE_KEY, csrfToken);
     const { user } = await getStaffMe(accessToken);
     if (!isSupportedStaffRole(user.role)) {
-      throw new Error("The staff account has an unsupported role.");
+      throw new UnsupportedStaffRoleError();
     }
 
     return {
       accessToken,
       csrfToken,
+      accessExpiresAt: decodeAccessTokenExpiry(accessToken),
       user: { ...user, role: user.role },
     };
   } catch (error) {
     storage.removeItem(STAFF_CSRF_STORAGE_KEY);
     throw error;
+  }
+}
+
+/**
+ * Restores a stored session and reports why it failed, so the UI can tell an
+ * expired session apart from a network outage or a forbidden account.
+ */
+export async function restoreStaffSessionOutcome(
+  storage: StaffSessionStorage = browserSessionStorage(),
+): Promise<StaffRestoreOutcome> {
+  const currentCsrfToken = storage.getItem(STAFF_CSRF_STORAGE_KEY);
+  if (!currentCsrfToken) return { kind: "signed-out" };
+
+  let rotatedTokens: StaffSessionTokens;
+  try {
+    rotatedTokens = await refreshStaffSession(currentCsrfToken);
+  } catch (error) {
+    if (isNetworkFailure(error)) return { kind: "unavailable" };
+
+    storage.removeItem(STAFF_CSRF_STORAGE_KEY);
+    return failureOutcome(error);
+  }
+
+  try {
+    const session = await resolveStaffSession(
+      rotatedTokens.access_token,
+      rotatedTokens.csrf_token,
+      storage,
+    );
+    return { kind: "session", session };
+  } catch (error) {
+    return failureOutcome(error);
+  }
+}
+
+/**
+ * Renews an active session before its access token expires.
+ *
+ * Returns null when renewal fails; the stored CSRF token is kept only for a
+ * transport failure, so a retry stays possible without a new login.
+ */
+export async function renewStaffSession(
+  session: StaffSession,
+  storage: StaffSessionStorage = browserSessionStorage(),
+): Promise<StaffSession | null> {
+  const csrfToken =
+    storage.getItem(STAFF_CSRF_STORAGE_KEY) ?? session.csrfToken;
+
+  try {
+    const rotatedTokens = await refreshStaffSession(csrfToken);
+    return await resolveStaffSession(
+      rotatedTokens.access_token,
+      rotatedTokens.csrf_token,
+      storage,
+    );
+  } catch (error) {
+    if (isNetworkFailure(error)) return null;
+
+    storage.removeItem(STAFF_CSRF_STORAGE_KEY);
+    return null;
   }
 }
 
