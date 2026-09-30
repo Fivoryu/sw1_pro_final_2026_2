@@ -1125,3 +1125,335 @@ def test_agency_admin_invitation_acceptance_and_totp_use_stored_role_and_tenant(
         account = session.query(StaffAccount).filter_by(email="admin@example.test").one()
         assert account.role == "agency_admin"
         assert account.tenant_id == "agency-one"
+
+
+def test_agency_admin_can_invite_agent_with_server_derived_role_and_tenant(
+    agency_api_context: AgencyApiContext,
+) -> None:
+    context = agency_api_context
+    admin_token = _seed_account(
+        context,
+        account_id="agency-admin-one",
+        role="agency_admin",
+        tenant_id="agency-one",
+    )
+    headers = _headers(admin_token)
+
+    issued = context.client.post(
+        "/api/v1/agencies/agent-invitations",
+        json={"email": "  AGENT@Example.Test  "},
+        headers=headers,
+    )
+
+    assert issued.status_code == 201
+    assert issued.json() == {"status": "sent"}
+    assert len(context.email_sender.messages) == 1
+    email, invitation_link, _ = context.email_sender.messages[0]
+    invitation_token = urlsplit(invitation_link).path.rsplit("/", 1)[-1]
+    assert email == "agent@example.test"
+    assert invitation_token not in issued.text
+    with context.session_factory() as session:
+        invitation = session.query(StaffInvitation).one()
+        assert invitation.email == email
+        assert invitation.role == "agent"
+        assert invitation.tenant_id == "agency-one"
+        assert invitation.status == "pending"
+        assert invitation.token_hash == hash_secret(invitation_token)
+
+    accepted = context.client.post(
+        "/api/v1/auth/invitations/accept",
+        json={
+            "token": invitation_token,
+            "password": "Initial-Password-42!",
+            "password_confirmation": "Initial-Password-42!",
+            "role": "platform_admin",
+            "tenant_id": "attacker-controlled-agency",
+        },
+    )
+    assert accepted.status_code == 200
+    enrollment = accepted.json()
+    verified = context.client.post(
+        "/api/v1/auth/totp/enroll/verify",
+        json={
+            "enrollment_token": enrollment["enrollment_token"],
+            "code": totp_code(enrollment["totp_secret"], context.now),
+            "role": "platform_admin",
+            "tenant_id": "attacker-controlled-agency",
+        },
+    )
+
+    assert verified.status_code == 200
+    assert verified.json()["account"]["role"] == "agent"
+    assert verified.json()["account"]["tenant_id"] == "agency-one"
+    override = context.client.post(
+        "/api/v1/agencies/agent-invitations",
+        json={
+            "email": "override@example.test",
+            "role": "agency_admin",
+            "tenant_id": "agency-two",
+        },
+        headers=headers,
+    )
+    assert override.status_code == 422
+    with context.session_factory() as session:
+        assert session.query(StaffInvitation).count() == 1
+        account = session.query(StaffAccount).filter_by(email=email).one()
+        assert account.role == "agent"
+        assert account.tenant_id == "agency-one"
+
+
+def test_agent_invitation_obeys_global_normalized_email_claims(
+    agency_api_context: AgencyApiContext,
+) -> None:
+    context = agency_api_context
+    admin_token = _seed_account(
+        context,
+        account_id="agency-admin-one",
+        role="agency_admin",
+        tenant_id="agency-one",
+    )
+    _seed_account(
+        context,
+        account_id="existing-agent-two",
+        email="claimed@example.test",
+        role="agent",
+        tenant_id="agency-two",
+    )
+
+    response = context.client.post(
+        "/api/v1/agencies/agent-invitations",
+        json={"email": "  CLAIMED@Example.Test "},
+        headers=_headers(admin_token),
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "An account or active invitation already uses this email",
+        "code": "conflict",
+    }
+    assert context.email_sender.messages == []
+    with context.session_factory() as session:
+        assert session.query(StaffInvitation).count() == 0
+
+
+def test_agency_admin_lists_only_agents_in_its_own_agency(
+    agency_api_context: AgencyApiContext,
+) -> None:
+    context = agency_api_context
+    admin_token = _seed_account(
+        context,
+        account_id="agency-admin-one",
+        role="agency_admin",
+        tenant_id="agency-one",
+    )
+    _seed_account(
+        context,
+        account_id="agent-active",
+        role="agent",
+        tenant_id="agency-one",
+    )
+    _seed_account(
+        context,
+        account_id="agent-inactive",
+        role="agent",
+        tenant_id="agency-one",
+        active=False,
+    )
+    _seed_account(
+        context,
+        account_id="agency-admin-two",
+        role="agency_admin",
+        tenant_id="agency-one",
+    )
+    _seed_account(
+        context,
+        account_id="agent-other-agency",
+        role="agent",
+        tenant_id="agency-two",
+    )
+
+    response = context.client.get(
+        "/api/v1/agencies/agents?limit=1&offset=1",
+        headers=_headers(admin_token),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "agents": [{
+            "id": "agent-inactive",
+            "email": "agent-inactive@example.test",
+            "active": False,
+        }],
+        "pagination": {"limit": 1, "offset": 1, "total": 2},
+    }
+
+
+def test_agent_deactivation_revokes_sessions_and_reactivation_requires_fresh_login(
+    agency_api_context: AgencyApiContext,
+) -> None:
+    context = agency_api_context
+    admin_token = _seed_account(
+        context,
+        account_id="agency-admin-one",
+        role="agency_admin",
+        tenant_id="agency-one",
+    )
+    agent_token = _seed_account(
+        context,
+        account_id="agent-to-deactivate",
+        role="agent",
+        tenant_id="agency-one",
+    )
+    with context.session_factory.begin() as session:
+        session.add(
+            StaffSession(
+                id="second-agent-session",
+                user_id="agent-to-deactivate",
+                refresh_hash="second-agent-refresh",
+                csrf_hash="second-agent-csrf",
+                created_at=context.now,
+                last_activity_at=context.now,
+                expires_at=context.now + timedelta(hours=1),
+            )
+        )
+
+    deactivated = context.client.post(
+        "/api/v1/agencies/agents/agent-to-deactivate/deactivate",
+        headers=_headers(admin_token),
+    )
+
+    assert deactivated.status_code == 200
+    assert deactivated.json() == {"status": "deactivated"}
+    assert context.client.get(
+        "/api/v1/auth/me", headers=_headers(agent_token)
+    ).status_code == 401
+    with context.session_factory() as session:
+        agent = session.get(StaffAccount, "agent-to-deactivate")
+        sessions = (
+            session.query(StaffSession)
+            .filter_by(user_id="agent-to-deactivate")
+            .order_by(StaffSession.id)
+            .all()
+        )
+        assert agent is not None
+        assert agent.active is False
+        assert len(sessions) == 2
+        assert all(item.revoked_at is not None for item in sessions)
+
+    reactivated = context.client.post(
+        "/api/v1/agencies/agents/agent-to-deactivate/activate",
+        headers=_headers(admin_token),
+    )
+
+    assert reactivated.status_code == 200
+    assert reactivated.json() == {"status": "activated"}
+    assert context.client.get(
+        "/api/v1/auth/me", headers=_headers(agent_token)
+    ).status_code == 401
+    with context.session_factory() as session:
+        agent = session.get(StaffAccount, "agent-to-deactivate")
+        sessions = session.query(StaffSession).filter_by(
+            user_id="agent-to-deactivate"
+        ).all()
+        assert agent is not None
+        assert agent.active is True
+        assert len(sessions) == 2
+        assert all(item.revoked_at is not None for item in sessions)
+
+
+def test_agents_cannot_manage_memberships_and_admins_cannot_change_other_accounts(
+    agency_api_context: AgencyApiContext,
+) -> None:
+    context = agency_api_context
+    admin_token = _seed_account(
+        context,
+        account_id="agency-admin-one",
+        role="agency_admin",
+        tenant_id="agency-one",
+    )
+    agent_token = _seed_account(
+        context,
+        account_id="agent-one",
+        role="agent",
+        tenant_id="agency-one",
+    )
+    _seed_account(
+        context,
+        account_id="agency-admin-target",
+        role="agency_admin",
+        tenant_id="agency-one",
+    )
+    _seed_account(
+        context,
+        account_id="agent-two",
+        role="agent",
+        tenant_id="agency-two",
+    )
+
+    agent_responses = [
+        context.client.get("/api/v1/agencies/agents", headers=_headers(agent_token)),
+        context.client.post(
+            "/api/v1/agencies/agent-invitations",
+            json={"email": "new-agent@example.test"},
+            headers=_headers(agent_token),
+        ),
+        context.client.post(
+            "/api/v1/agencies/agents/agent-one/deactivate",
+            headers=_headers(agent_token),
+        ),
+    ]
+    admin_responses = [
+        context.client.post(
+            "/api/v1/agencies/agents/agent-two/deactivate",
+            headers=_headers(admin_token),
+        ),
+        context.client.post(
+            "/api/v1/agencies/agents/agency-admin-target/deactivate",
+            headers=_headers(admin_token),
+        ),
+    ]
+
+    assert [response.status_code for response in agent_responses] == [403, 403, 403]
+    assert [response.status_code for response in admin_responses] == [404, 404]
+    with context.session_factory() as session:
+        agent_one = session.get(StaffAccount, "agent-one")
+        agent_two = session.get(StaffAccount, "agent-two")
+        agency_admin_target = session.get(StaffAccount, "agency-admin-target")
+        assert agent_one is not None
+        assert agent_two is not None
+        assert agency_admin_target is not None
+        assert agent_one.active is True
+        assert agent_two.active is True
+        assert agency_admin_target.active is True
+    assert context.email_sender.messages == []
+
+
+def test_agency_admin_cannot_activate_agent_from_another_agency(
+    agency_api_context: AgencyApiContext,
+) -> None:
+    context = agency_api_context
+    admin_token = _seed_account(
+        context,
+        account_id="agency-admin-one",
+        role="agency_admin",
+        tenant_id="agency-one",
+    )
+    _seed_account(
+        context,
+        account_id="inactive-agent-two",
+        role="agent",
+        tenant_id="agency-two",
+        active=False,
+    )
+
+    response = context.client.post(
+        "/api/v1/agencies/agents/inactive-agent-two/activate",
+        headers=_headers(admin_token),
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Agent not found", "code": "not_found"}
+    with context.session_factory() as session:
+        agent = session.get(StaffAccount, "inactive-agent-two")
+        assert agent is not None
+        assert agent.active is False

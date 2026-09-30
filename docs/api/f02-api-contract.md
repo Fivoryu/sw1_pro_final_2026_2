@@ -8,6 +8,9 @@ Códigos: `validation_error` — cuerpo/ruta/parámetros fuera del contrato (400
 `conflict` — operación incompatible con un recurso existente (409); `dependency_unavailable` — servicio requerido no disponible (502, 503, 504); `internal_error` — error interno no clasificado, otros estados no mapeados; especialmente 500.
 Todos los detalles de errores HTTP 5xx se redactan y sustituyen por mensajes genéricos; nunca se devuelven detalles de origen, excepciones, credenciales ni secretos. 502/503/504 usan `dependency_unavailable`; 500 usa `internal_error`.
 
+### Envolvente reservada de cotizaciones y reservas
+Las rutas de cotizaciones (`/api/v1/quotes`) y de reservas (`/api/v1/reservations`, `/api/v1/staff/reservations`) no usan el sobre común: responden `{"code":<str>,"message":<str>,"request_id":<uuid>,"field_errors":[{"field":<str>,"message":<str>}]}` con sus propios códigos estables (por ejemplo `validation_error`, `reservation_not_found`, `reservation_action_forbidden`). Es una decisión deliberada y documentada, no una deuda pendiente: unificar ambos sobres exigiría cambiar handlers, esquemas, pruebas y los clientes ya construidos contra esta forma. Cualquier cambio futuro debe decidirse como una unidad propia y coordinarse con los clientes móviles antes de tocar el contrato.
+
 ## Listado de inmobiliarias
 `GET /api/v1/agencies` requiere sesión autenticada de administrador de plataforma; ordena por `id` ascendente y `total` cuenta todos los resultados antes de paginar.
 Parámetros: `limit` predeterminado 20, entero entre 1 y 100 inclusive; `offset` predeterminado 0, entero mayor o igual a 0.

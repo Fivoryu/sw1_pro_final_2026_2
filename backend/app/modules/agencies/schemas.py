@@ -83,3 +83,18 @@ class AgencyWalletResponse(BaseModel):
     agency_id: str
     address: str
     linked_at: datetime
+
+
+class AgentInvitationCreate(AgencyAdminInvitationCreate):
+    pass
+
+
+class AgentListItem(BaseModel):
+    id: str
+    email: str
+    active: bool
+
+
+class AgentListResponse(BaseModel):
+    agents: list[AgentListItem]
+    pagination: AgencyPagination

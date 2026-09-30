@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
-from app.modules.customer_identity.errors import CustomerApiError
+from app.core.errors import ERROR_RESPONSES, ErrorResponse
 from app.modules.customer_identity.schemas import (
     CustomerCredentials,
-    CustomerErrorResponse,
     CustomerIdentityResponse,
     CustomerRefreshRequest,
     CustomerRegistration,
@@ -35,21 +34,16 @@ from app.modules.customer_identity.service import (
 )
 from app.modules.customer_identity.session import get_active_customer
 
-router = APIRouter(prefix="/api/v1/customer/auth", tags=["customer-auth"])
-wallet_router = APIRouter(prefix="/api/v1/customer", tags=["customer-wallets"])
-
-_CUSTOMER_401 = {
-    "model": CustomerErrorResponse,
-    "description": "Invalid customer credentials or session",
-}
-_CUSTOMER_409 = {
-    "model": CustomerErrorResponse,
-    "description": "Customer account conflict",
-}
-_CUSTOMER_422 = {
-    "model": CustomerErrorResponse,
-    "description": "Customer request validation error",
-}
+router = APIRouter(
+    prefix="/api/v1/customer/auth",
+    tags=["customer-auth"],
+    responses=ERROR_RESPONSES,
+)
+wallet_router = APIRouter(
+    prefix="/api/v1/customer",
+    tags=["customer-wallets"],
+    responses=ERROR_RESPONSES,
+)
 
 
 def _session_factory(request: Request) -> sessionmaker[Session]:
@@ -60,7 +54,7 @@ def _session_factory(request: Request) -> sessionmaker[Session]:
     "/register",
     status_code=status.HTTP_201_CREATED,
     response_model=CustomerRegistrationResponse,
-    responses={409: _CUSTOMER_409, 422: _CUSTOMER_422},
+    responses={409: {"model": ErrorResponse}},
 )
 def register(credentials: CustomerRegistration, request: Request) -> CustomerRegistrationResponse:
     try:
@@ -70,14 +64,17 @@ def register(credentials: CustomerRegistration, request: Request) -> CustomerReg
             password=credentials.password,
         )
     except DuplicateCustomerEmailError:
-        raise CustomerApiError(status_code=409, code="account_conflict") from None
+        raise HTTPException(
+            status_code=409,
+            detail="The request conflicts with existing data.",
+        ) from None
     return CustomerRegistrationResponse.model_validate(account)
 
 
 @router.post(
     "/login",
     response_model=CustomerTokenPairResponse,
-    responses={401: _CUSTOMER_401, 422: _CUSTOMER_422},
+    responses={401: {"model": ErrorResponse}},
 )
 def login(credentials: CustomerCredentials, request: Request) -> dict[str, str | int]:
     settings: Settings = request.app.state.settings
@@ -90,13 +87,13 @@ def login(credentials: CustomerCredentials, request: Request) -> dict[str, str |
             now=request.app.state.clock(),
         )
     except InvalidCustomerCredentialsError:
-        raise CustomerApiError(status_code=401, code="invalid_credentials") from None
+        raise HTTPException(status_code=401, detail="Authentication failed.") from None
 
 
 @router.post(
     "/refresh",
     response_model=CustomerTokenPairResponse,
-    responses={401: _CUSTOMER_401, 422: _CUSTOMER_422},
+    responses={401: {"model": ErrorResponse}},
 )
 def refresh(
     credentials: CustomerRefreshRequest, request: Request
@@ -110,13 +107,12 @@ def refresh(
             now=request.app.state.clock(),
         )
     except InvalidCustomerSessionError:
-        raise CustomerApiError(status_code=401, code="invalid_session") from None
+        raise HTTPException(status_code=401, detail="Authentication failed.") from None
 
 
 @router.post(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses={422: _CUSTOMER_422},
 )
 def logout(credentials: CustomerRefreshRequest, request: Request) -> Response:
     logout_customer_session(
@@ -130,7 +126,7 @@ def logout(credentials: CustomerRefreshRequest, request: Request) -> Response:
 @router.get(
     "/me",
     response_model=CustomerIdentityResponse,
-    responses={401: _CUSTOMER_401},
+    responses={401: {"model": ErrorResponse}},
 )
 def me(request: Request) -> CustomerIdentityResponse:
     return CustomerIdentityResponse.model_validate(get_active_customer(request))
@@ -140,7 +136,10 @@ def me(request: Request) -> CustomerIdentityResponse:
     "/wallet-challenges",
     status_code=status.HTTP_201_CREATED,
     response_model=CustomerWalletChallengeResponse,
-    responses={401: _CUSTOMER_401, 409: _CUSTOMER_409, 422: _CUSTOMER_422},
+    responses={
+        401: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+    },
 )
 def create_wallet_challenge(
     body: CustomerWalletChallengeRequest, request: Request
@@ -154,7 +153,10 @@ def create_wallet_challenge(
             now=request.app.state.clock(),
         )
     except CustomerWalletAlreadyLinkedError:
-        raise CustomerApiError(status_code=409, code="wallet_already_linked") from None
+        raise HTTPException(
+            status_code=409,
+            detail="The request conflicts with existing data.",
+        ) from None
     return CustomerWalletChallengeResponse.model_validate(challenge)
 
 
@@ -162,7 +164,10 @@ def create_wallet_challenge(
     "/wallets",
     status_code=status.HTTP_201_CREATED,
     response_model=CustomerWalletResponse,
-    responses={401: _CUSTOMER_401, 409: _CUSTOMER_409, 422: _CUSTOMER_422},
+    responses={
+        401: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+    },
 )
 def link_wallet(
     body: CustomerWalletVerificationRequest, request: Request
@@ -177,18 +182,24 @@ def link_wallet(
             now=request.app.state.clock(),
         )
     except InvalidCustomerWalletChallengeError:
-        raise CustomerApiError(status_code=401, code="invalid_wallet_challenge") from None
+        raise HTTPException(status_code=401, detail="Authentication failed.") from None
     except CustomerWalletAlreadyLinkedError:
-        raise CustomerApiError(status_code=409, code="wallet_already_linked") from None
+        raise HTTPException(
+            status_code=409,
+            detail="The request conflicts with existing data.",
+        ) from None
     except CustomerWalletAddressConflictError:
-        raise CustomerApiError(status_code=409, code="wallet_conflict") from None
+        raise HTTPException(
+            status_code=409,
+            detail="The request conflicts with existing data.",
+        ) from None
     return CustomerWalletResponse.model_validate(wallet)
 
 
 @wallet_router.get(
     "/wallets",
     response_model=list[CustomerWalletResponse],
-    responses={401: _CUSTOMER_401},
+    responses={401: {"model": ErrorResponse}},
 )
 def get_wallets(request: Request) -> list[CustomerWalletResponse]:
     customer = get_active_customer(request)

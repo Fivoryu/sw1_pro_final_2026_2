@@ -22,6 +22,7 @@ def _assert_error(response: Response, *, status: int, code: str) -> dict[str, st
     assert response.status_code == status
     body = response.json()
     assert set(body) == {"detail", "code"}
+    assert "error" not in body
     assert isinstance(body["detail"], str)
     assert body["code"] == code
     return body
@@ -72,6 +73,45 @@ def test_expected_api_errors_use_homogeneous_envelopes(
     _assert_error(not_found, status=404, code="not_found")
     _assert_error(conflict, status=409, code="conflict")
     _assert_error(dependency_failure, status=502, code="dependency_unavailable")
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_status", "expected_code"),
+    [
+        ("registration_conflict", 409, "conflict"),
+        ("login_failure", 401, "unauthorized"),
+        ("validation_failure", 422, "validation_error"),
+    ],
+)
+def test_customer_errors_use_shared_envelope(
+    agency_api_context: AgencyApiContext,
+    failure: str,
+    expected_status: int,
+    expected_code: str,
+) -> None:
+    context = agency_api_context
+    payload = {"email": "customer@example.test", "password": "password"}
+
+    if failure == "registration_conflict":
+        registration = context.client.post(
+            "/api/v1/customer/auth/register", json=payload
+        )
+        assert registration.status_code == 201
+        response = context.client.post("/api/v1/customer/auth/register", json=payload)
+    elif failure == "login_failure":
+        response = context.client.post(
+            "/api/v1/customer/auth/login",
+            json={"email": "unknown@example.test", "password": "password"},
+        )
+    else:
+        response = context.client.post("/api/v1/customer/auth/register", json={})
+
+    body = response.json()
+    assert response.status_code == expected_status
+    assert set(body) == {"detail", "code"}
+    assert "error" not in body
+    assert isinstance(body["detail"], str)
+    assert body["code"] == expected_code
 
 
 def test_unexpected_errors_are_generic_and_do_not_expose_exception_details(

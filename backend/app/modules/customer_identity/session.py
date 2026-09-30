@@ -4,10 +4,9 @@ from datetime import datetime, timedelta, timezone
 from typing import TypedDict
 
 import jwt
-from fastapi import Request
+from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.modules.customer_identity.errors import CustomerApiError
 from app.modules.customer_identity.models import CustomerAccount, CustomerSession
 
 _IDLE_WINDOW = timedelta(minutes=30)
@@ -24,8 +23,8 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _invalid_session() -> CustomerApiError:
-    return CustomerApiError(status_code=401, code="invalid_session")
+def _invalid_session() -> HTTPException:
+    return HTTPException(status_code=401, detail="Authentication failed.")
 
 
 def get_active_customer(request: Request) -> ActiveCustomer:

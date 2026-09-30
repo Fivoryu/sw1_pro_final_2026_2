@@ -41,15 +41,6 @@ class CustomerRegistrationResponse(BaseModel):
     email: str
 
 
-class CustomerErrorDetail(BaseModel):
-    code: str
-    fields: dict[str, str] | None = None
-
-
-class CustomerErrorResponse(BaseModel):
-    error: CustomerErrorDetail
-
-
 class CustomerTokenPairResponse(BaseModel):
     access_token: str
     refresh_token: str

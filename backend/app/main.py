@@ -19,7 +19,6 @@ from app.db.session import create_session_factory, protect_session_factory
 from app.modules.agencies.router import agency_wallet_router, router as agencies_router
 from app.modules.catalog.errors import QuoteApiError
 from app.modules.catalog.router import router as catalog_router
-from app.modules.customer_identity.errors import CustomerApiError
 from app.modules.customer_identity.router import router as customer_identity_router
 from app.modules.customer_identity.router import wallet_router as customer_wallet_router
 from app.modules.health.router import router as health_router
@@ -101,14 +100,6 @@ def create_app(
             headers=exc.headers,
         )
 
-    @app.exception_handler(CustomerApiError)
-    async def customer_api_error(request: Request, exc: CustomerApiError) -> JSONResponse:
-        del request
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"error": {"code": exc.code}},
-        )
-
     @app.exception_handler(StarletteHTTPException)
     async def safe_http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         del request
@@ -164,11 +155,6 @@ def create_app(
                     "request_id": str(uuid4()),
                     "field_errors": field_errors,
                 },
-            )
-        if request.url.path.startswith("/api/v1/customer/"):
-            return JSONResponse(
-                status_code=422,
-                content={"error": {"code": "validation_error"}},
             )
         return JSONResponse(
             status_code=422,

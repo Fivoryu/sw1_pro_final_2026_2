@@ -3,11 +3,18 @@ import type { LoginCompletion } from "../../application/staffAuthApi";
 import {
   completeStaffSession,
   endStaffSession,
-  restoreStaffSession,
+  renewalDelayMs,
+  renewStaffSession,
+  restoreStaffSessionOutcome,
   type StaffRole,
   type StaffSession,
 } from "../../application/staffSession";
 import { StaffLoginShell } from "./StaffLoginShell";
+
+const RENEWAL_SKEW_MS = 30_000;
+const EXPIRED_SESSION_NOTICE = "Tu sesión expiró. Inicia sesión nuevamente.";
+const UNAVAILABLE_NOTICE = "No se pudo contactar el servicio.";
+const DENIED_NOTICE = "Tu cuenta no tiene permisos para este panel.";
 
 const rolePresentation: Record<StaffRole, { heading: string; navigation: string }> = {
   platform_admin: {
@@ -31,25 +38,74 @@ export function ProtectedStaffShell() {
   const [loginFormKey, setLoginFormKey] = useState(0);
   const [authenticationError, setAuthenticationError] = useState<string | null>(null);
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
+  const [failure, setFailure] = useState<"unavailable" | "denied" | null>(null);
+
+  function applySession(nextSession: StaffSession | null) {
+    if (
+      nextSession !== null &&
+      nextSession.accessExpiresAt !== null &&
+      nextSession.accessExpiresAt <= Date.now()
+    ) {
+      setSession(null);
+      setSessionNotice(EXPIRED_SESSION_NOTICE);
+      return;
+    }
+
+    setSession(nextSession);
+  }
 
   useEffect(() => {
     let isMounted = true;
 
-    void restoreStaffSession()
-      .then((restoredSession) => {
-        if (isMounted) setSession(restoredSession);
-      })
-      .catch(() => {
-        if (isMounted) setSession(null);
-      })
-      .finally(() => {
-        if (isMounted) setIsRestoring(false);
-      });
+    void (async () => {
+      const outcome = await restoreStaffSessionOutcome();
+      if (!isMounted) return;
+
+      setFailure(
+        outcome.kind === "unavailable" || outcome.kind === "denied"
+          ? outcome.kind
+          : null,
+      );
+      if (outcome.kind === "session") {
+        setSessionNotice(null);
+        applySession(outcome.session);
+      } else {
+        setSession(null);
+      }
+      setIsRestoring(false);
+    })();
 
     return () => {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!session) return;
+
+    const delay = renewalDelayMs(
+      session.accessExpiresAt,
+      Date.now(),
+      RENEWAL_SKEW_MS,
+    );
+    if (delay === null) return;
+
+    const current = session;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const renewed = await renewStaffSession(current);
+        if (renewed) {
+          applySession(renewed);
+          return;
+        }
+        setSession(null);
+        setSessionNotice(EXPIRED_SESSION_NOTICE);
+      })();
+    }, delay);
+
+    return () => window.clearTimeout(timer);
+  }, [session]);
 
   async function handleAuthenticated(login: LoginCompletion) {
     setAuthenticationError(null);
@@ -62,6 +118,24 @@ export function ProtectedStaffShell() {
       );
       setLoginFormKey((key) => key + 1);
     }
+  }
+
+  async function handleRetryRestoration() {
+    setFailure(null);
+    setIsRestoring(true);
+    const outcome = await restoreStaffSessionOutcome();
+    setFailure(
+      outcome.kind === "unavailable" || outcome.kind === "denied"
+        ? outcome.kind
+        : null,
+    );
+    if (outcome.kind === "session") {
+      setSessionNotice(null);
+      applySession(outcome.session);
+    } else {
+      setSession(null);
+    }
+    setIsRestoring(false);
   }
 
   async function handleLogout() {
@@ -87,9 +161,44 @@ export function ProtectedStaffShell() {
     );
   }
 
+  if (failure === "denied") {
+    return (
+      <main className="staff-session-error" role="alert">
+        <p>{DENIED_NOTICE}</p>
+        <button
+          className="staff-logout-action"
+          onClick={() => setFailure(null)}
+          type="button"
+        >
+          Volver al inicio de sesión
+        </button>
+      </main>
+    );
+  }
+
+  if (failure === "unavailable") {
+    return (
+      <main className="staff-session-error" role="alert">
+        <p>{UNAVAILABLE_NOTICE}</p>
+        <button
+          className="staff-logout-action"
+          onClick={() => void handleRetryRestoration()}
+          type="button"
+        >
+          Reintentar
+        </button>
+      </main>
+    );
+  }
+
   if (!session) {
     return (
       <>
+        {sessionNotice ? (
+          <p className="staff-session-error" role="alert">
+            {sessionNotice}
+          </p>
+        ) : null}
         {authenticationError ? (
           <p className="staff-session-error" role="alert">
             {authenticationError}

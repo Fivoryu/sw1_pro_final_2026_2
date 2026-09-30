@@ -1,14 +1,23 @@
 import 'package:flutter/material.dart';
 
-/// Prototype-only copy shared by the capture screens. Nothing in this app
-/// authenticates, captures, persists or uploads real data.
-const _prototypeNotice =
-    'Prototipo de interfaz: no hay autenticación, API, cámara ni datos '
-    'guardados.';
+import 'data/services/staff_auth_api.dart';
+import 'data/services/staff_credential_store.dart';
+import 'domain/staff_session_controller.dart';
 
-const _accessNotice =
-    'En este prototipo el acceso no pide credenciales, no abre sesión y no '
-    'valida identidad.';
+/// Backend used by the running app. Override it per environment with
+/// `--dart-define=ROOMFORGE_API_BASE_URL=https://host`.
+const _apiBaseUrl = String.fromEnvironment(
+  'ROOMFORGE_API_BASE_URL',
+  defaultValue: 'http://10.0.2.2:8000',
+);
+
+/// Prototype-only copy shared by the capture screens. Nothing in this app
+/// captures, persists or uploads real data.
+const _prototypeNotice =
+    'Prototipo de interfaz: no hay cámara ni datos guardados.';
+
+const _credentialsNotice =
+    'El acceso valida tus credenciales y el código de tu segundo factor.';
 
 const _draftsNotice =
     'Prototipo local: los borradores se muestran solo en pantalla; no se '
@@ -20,10 +29,19 @@ const _actionMinSize = Size.fromHeight(48);
 /// Readable content width on tablets and resizable windows.
 const double _contentMaxWidth = 720;
 
-void main() => runApp(const CaptureApp());
+void main() => runApp(
+  CaptureApp(
+    controller: StaffSessionController(
+      api: StaffAuthApi(baseUrl: _apiBaseUrl),
+      credentialStore: SecureStaffCredentialStore(),
+    ),
+  ),
+);
 
 class CaptureApp extends StatelessWidget {
-  const CaptureApp({super.key});
+  const CaptureApp({super.key, required this.controller});
+
+  final StaffSessionController controller;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -32,45 +50,239 @@ class CaptureApp extends StatelessWidget {
       colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1D4ED8)),
       useMaterial3: true,
     ),
-    home: const AgentAccessScreen(),
+    home: AgentAccessScreen(controller: controller),
   );
 }
 
-/// Access step. UI only: no credential inputs, session or identity check.
-class AgentAccessScreen extends StatelessWidget {
-  const AgentAccessScreen({super.key});
+/// Access step: credentials, then the TOTP proof, then the private drafts.
+class AgentAccessScreen extends StatefulWidget {
+  const AgentAccessScreen({super.key, required this.controller});
+
+  final StaffSessionController controller;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(title: const Text('RoomForge Captura')),
-      body: _PrototypePage(
+  State<AgentAccessScreen> createState() => _AgentAccessScreenState();
+}
+
+class _AgentAccessScreenState extends State<AgentAccessScreen> {
+  final _credentialsKey = GlobalKey<FormState>();
+  final _codeKey = GlobalKey<FormState>();
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+  final _code = TextEditingController();
+  bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.restore();
+  }
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _password.dispose();
+    _code.dispose();
+    super.dispose();
+  }
+
+  Future<void> _run(Future<void> Function() action) async {
+    setState(() => _submitting = true);
+    await action();
+    if (mounted) setState(() => _submitting = false);
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('RoomForge Captura')),
+    body: ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) => _PrototypePage(
+        children: switch (widget.controller.status) {
+          StaffSessionStatus.restoring => _restoring(context),
+          StaffSessionStatus.unavailable => _unavailable(context),
+          StaffSessionStatus.awaitingCode => _codeStep(context),
+          StaffSessionStatus.signedOut => _credentialsStep(context),
+          StaffSessionStatus.signedIn => _signedIn(context),
+        },
+      ),
+    ),
+  );
+
+  List<Widget> _heading(BuildContext context, String title) => [
+    Text('Acceso del agente', style: Theme.of(context).textTheme.headlineSmall),
+    const SizedBox(height: 20),
+    const _NoticeCard(message: _prototypeNotice),
+    const SizedBox(height: 20),
+    Text(title, style: Theme.of(context).textTheme.titleLarge),
+    const SizedBox(height: 8),
+  ];
+
+  List<Widget> _restoring(BuildContext context) => [
+    ..._heading(context, 'Comprobando tu sesión'),
+    const Center(
+      key: ValueKey('access-restoring'),
+      child: CircularProgressIndicator(),
+    ),
+  ];
+
+  List<Widget> _unavailable(BuildContext context) => [
+    ..._heading(context, 'Sin conexión'),
+    _message(context, widget.controller.message),
+    const SizedBox(height: 16),
+    FilledButton(
+      key: const ValueKey('access-retry'),
+      style: FilledButton.styleFrom(minimumSize: _actionMinSize),
+      onPressed: widget.controller.restore,
+      child: const Text('Reintentar'),
+    ),
+  ];
+
+  List<Widget> _credentialsStep(BuildContext context) => [
+    ..._heading(context, 'Ingresá con tu cuenta de agente'),
+    Text(
+      _credentialsNotice,
+      style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.5),
+    ),
+    const SizedBox(height: 16),
+    if (widget.controller.message != null)
+      _message(context, widget.controller.message),
+    Form(
+      key: _credentialsKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('Acceso del agente', style: theme.textTheme.headlineSmall),
-          const SizedBox(height: 20),
-          const _NoticeCard(message: _prototypeNotice),
-          const SizedBox(height: 20),
-          Text('Acceso al prototipo', style: theme.textTheme.titleLarge),
-          const SizedBox(height: 8),
-          Text(
-            _accessNotice,
-            style: theme.textTheme.bodyLarge?.copyWith(height: 1.5),
-          ),
-          const SizedBox(height: 24),
-          FilledButton.icon(
-            key: const ValueKey('access-continue-button'),
-            style: FilledButton.styleFrom(minimumSize: _actionMinSize),
-            onPressed: () => Navigator.of(context).push<void>(
-              MaterialPageRoute<void>(builder: (_) => const DraftsScreen()),
+          TextFormField(
+            key: const ValueKey('access-email-field'),
+            controller: _email,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(
+              labelText: 'Correo electrónico',
+              border: OutlineInputBorder(),
             ),
-            icon: const Icon(Icons.arrow_forward),
-            label: const Text('Continuar al prototipo'),
+            validator: (value) => (value == null || value.trim().isEmpty)
+                ? 'Ingresá tu correo electrónico'
+                : null,
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            key: const ValueKey('access-password-field'),
+            controller: _password,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Contraseña',
+              border: OutlineInputBorder(),
+            ),
+            validator: (value) => (value == null || value.isEmpty)
+                ? 'Ingresá tu contraseña'
+                : null,
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            key: const ValueKey('access-credentials-submit'),
+            style: FilledButton.styleFrom(minimumSize: _actionMinSize),
+            onPressed: _submitting
+                ? null
+                : () {
+                    if (!(_credentialsKey.currentState?.validate() ?? false)) {
+                      return;
+                    }
+                    final email = _email.text.trim();
+                    final password = _password.text;
+                    _run(
+                      () => widget.controller.startLogin(
+                        email: email,
+                        password: password,
+                      ),
+                    );
+                  },
+            child: const Text('Continuar'),
           ),
         ],
       ),
-    );
+    ),
+  ];
+
+  List<Widget> _codeStep(BuildContext context) => [
+    ..._heading(context, 'Ingresá el código de tu segundo factor'),
+    if (widget.controller.message != null)
+      _message(context, widget.controller.message),
+    Form(
+      key: _codeKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextFormField(
+            key: const ValueKey('access-code-field'),
+            controller: _code,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Código de 6 dígitos',
+              border: OutlineInputBorder(),
+            ),
+            validator: (value) => (value == null || value.trim().isEmpty)
+                ? 'Ingresá el código'
+                : null,
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            key: const ValueKey('access-code-submit'),
+            style: FilledButton.styleFrom(minimumSize: _actionMinSize),
+            onPressed: _submitting
+                ? null
+                : () {
+                    if (!(_codeKey.currentState?.validate() ?? false)) return;
+                    final code = _code.text.trim();
+                    _run(() => widget.controller.submitCode(code));
+                  },
+            child: const Text('Verificar código'),
+          ),
+        ],
+      ),
+    ),
+  ];
+
+  List<Widget> _signedIn(BuildContext context) {
+    final account = widget.controller.account;
+    return [
+      ..._heading(context, 'Sesión iniciada'),
+      Text(
+        account?.email ?? '',
+        key: const ValueKey('access-account-email'),
+        style: Theme.of(context).textTheme.bodyLarge,
+      ),
+      if (widget.controller.message != null) ...[
+        const SizedBox(height: 16),
+        _message(context, widget.controller.message),
+      ],
+      const SizedBox(height: 24),
+      FilledButton.icon(
+        key: const ValueKey('access-continue-button'),
+        style: FilledButton.styleFrom(minimumSize: _actionMinSize),
+        onPressed: () => Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(builder: (_) => const DraftsScreen()),
+        ),
+        icon: const Icon(Icons.arrow_forward),
+        label: const Text('Continuar al prototipo'),
+      ),
+      const SizedBox(height: 8),
+      OutlinedButton(
+        key: const ValueKey('access-logout'),
+        style: OutlinedButton.styleFrom(minimumSize: _actionMinSize),
+        onPressed: _submitting ? null : () => _run(widget.controller.signOut),
+        child: const Text('Cerrar sesión'),
+      ),
+    ];
   }
+
+  Widget _message(BuildContext context, String? message) => Card(
+    key: const ValueKey('access-message'),
+    color: Theme.of(context).colorScheme.errorContainer,
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Text(message ?? ''),
+    ),
+  );
 }
 
 /// Empty drafts shell. No property fixture, price or persistence.

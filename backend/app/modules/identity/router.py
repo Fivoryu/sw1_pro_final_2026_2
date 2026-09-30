@@ -80,7 +80,7 @@ def _invitation_supports_onboarding(
     if invitation.role == "platform_admin":
         return invitation.tenant_id is None
     return (
-        invitation.role == "agency_admin"
+        invitation.role in {"agency_admin", "agent"}
         and invitation.tenant_id is not None
         and session.get(Agency, invitation.tenant_id) is not None
     )

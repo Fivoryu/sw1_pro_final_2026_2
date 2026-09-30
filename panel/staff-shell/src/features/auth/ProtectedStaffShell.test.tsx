@@ -9,15 +9,25 @@ import {
 } from "../../application/staffAuthApi";
 import { ProtectedStaffShell } from "./ProtectedStaffShell";
 
-vi.mock("../../application/staffAuthApi", () => ({
-  acceptStaffInvitation: vi.fn(),
-  completeStaffLogin: vi.fn(),
-  getStaffMe: vi.fn(),
-  logoutStaffSession: vi.fn(),
-  refreshStaffSession: vi.fn(),
-  startStaffLogin: vi.fn(),
-  verifyStaffEnrollment: vi.fn(),
-}));
+vi.mock("../../application/staffAuthApi", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../application/staffAuthApi")>();
+  return {
+    ...actual,
+    acceptStaffInvitation: vi.fn(),
+    completeStaffLogin: vi.fn(),
+    getStaffMe: vi.fn(),
+    logoutStaffSession: vi.fn(),
+    refreshStaffSession: vi.fn(),
+    startStaffLogin: vi.fn(),
+    verifyStaffEnrollment: vi.fn(),
+  };
+});
+
+function expiredAccessToken(): string {
+  const exp = Math.floor(Date.now() / 1000) - 60;
+  return `header.${btoa(JSON.stringify({ exp }))}.signature`;
+}
 
 function staffUser(role: string): StaffUser {
   return {
@@ -106,5 +116,69 @@ describe("ProtectedStaffShell", () => {
       await screen.findByRole("heading", { level: 1, name: "Acceso de personal" }),
     ).toBeVisible();
     expect(sessionStorage.getItem("roomforge.staff.csrf")).toBeNull();
+  });
+
+  it("explains an unusable role instead of returning to the login form", async () => {
+    sessionStorage.setItem("roomforge.staff.csrf", "stored-csrf");
+    vi.mocked(refreshStaffSession).mockResolvedValue({
+      access_token: "volatile-access",
+      csrf_token: "rotated-csrf",
+    });
+    vi.mocked(getStaffMe).mockResolvedValue({ user: staffUser("superuser") });
+
+    render(<ProtectedStaffShell />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Tu cuenta no tiene permisos para este panel.",
+    );
+    expect(
+      screen.queryByRole("heading", { level: 1, name: "Acceso de personal" }),
+    ).not.toBeInTheDocument();
+    expect(sessionStorage.getItem("roomforge.staff.csrf")).toBeNull();
+  });
+
+  it("offers a retry when the API is unreachable and restores on demand", async () => {
+    const user = userEvent.setup();
+    sessionStorage.setItem("roomforge.staff.csrf", "stored-csrf");
+    vi.mocked(refreshStaffSession).mockRejectedValueOnce(
+      new TypeError("Failed to fetch"),
+    );
+
+    render(<ProtectedStaffShell />);
+
+    const retry = await screen.findByRole("button", { name: "Reintentar" });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "No se pudo contactar el servicio.",
+    );
+    expect(sessionStorage.getItem("roomforge.staff.csrf")).toBe("stored-csrf");
+
+    vi.mocked(refreshStaffSession).mockResolvedValue({
+      access_token: "volatile-access",
+      csrf_token: "rotated-csrf",
+    });
+    vi.mocked(getStaffMe).mockResolvedValue({ user: staffUser("agent") });
+    await user.click(retry);
+
+    expect(
+      await screen.findByRole("heading", { name: "Área de agente" }),
+    ).toBeVisible();
+  });
+
+  it("signs out with an explanation when the access token is already expired", async () => {
+    sessionStorage.setItem("roomforge.staff.csrf", "stored-csrf");
+    vi.mocked(refreshStaffSession).mockResolvedValue({
+      access_token: expiredAccessToken(),
+      csrf_token: "rotated-csrf",
+    });
+    vi.mocked(getStaffMe).mockResolvedValue({ user: staffUser("agent") });
+
+    render(<ProtectedStaffShell />);
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Acceso de personal" }),
+    ).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Tu sesión expiró. Inicia sesión nuevamente.",
+    );
   });
 });
