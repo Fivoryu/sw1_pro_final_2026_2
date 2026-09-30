@@ -2,7 +2,23 @@ import 'dart:ui' show SemanticsAction;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:cliente_mobile/data/services/customer_auth_api.dart';
+import 'package:cliente_mobile/domain/customer_session_controller.dart';
 import 'package:cliente_mobile/main.dart';
+
+import 'support/fake_customer_backend.dart';
+
+/// The shell needs a session controller; the fake backend keeps these catalog
+/// tests independent from the network.
+CustomerSessionController testSession() => CustomerSessionController(
+  api: CustomerAuthApi(
+    baseUrl: 'https://api.example.test',
+    client: FakeCustomerBackend().client,
+  ),
+  tokenStore: InMemoryCustomerTokenStore(),
+);
+
+RoomForgeApp app() => RoomForgeApp(sessionController: testSession());
 
 Future<void> openFilters(WidgetTester tester) async {
   await tester.tap(find.byKey(const ValueKey('catalog-filter-button')));
@@ -18,7 +34,7 @@ void setNarrowViewport(WidgetTester tester) {
 
 void main() {
   testWidgets('has exactly three customer tabs', (tester) async {
-    await tester.pumpWidget(const RoomForgeApp());
+    await tester.pumpWidget(app());
     final nav = find.byType(NavigationBar);
     for (final label in ['Explorar', 'Reservas', 'Cuenta']) {
       expect(
@@ -33,7 +49,7 @@ void main() {
   });
 
   testWidgets('shows offline catalog notice', (tester) async {
-    await tester.pumpWidget(const RoomForgeApp());
+    await tester.pumpWidget(app());
     expect(find.text('Catálogo sin conexión'), findsOneWidget);
     expect(
       find.text(
@@ -46,7 +62,7 @@ void main() {
   testWidgets('offers only approved filters and keeps entries local', (
     tester,
   ) async {
-    await tester.pumpWidget(const RoomForgeApp());
+    await tester.pumpWidget(app());
     await openFilters(tester);
     expect(find.text('Filtros del catálogo'), findsOneWidget);
     for (final label in [
@@ -90,8 +106,10 @@ void main() {
     );
   });
 
-  testWidgets('reservations and account remain prototypes', (tester) async {
-    await tester.pumpWidget(const RoomForgeApp());
+  testWidgets('reservations remain a prototype and the account offers sign-in', (
+    tester,
+  ) async {
+    await tester.pumpWidget(app());
     await tester.tap(find.text('Reservas'));
     await tester.pumpAndSettle();
     expect(find.text('Prototipo de reservas'), findsOneWidget);
@@ -101,13 +119,13 @@ void main() {
     );
     await tester.tap(find.text('Cuenta'));
     await tester.pumpAndSettle();
-    expect(find.text('Prototipo de cuenta'), findsOneWidget);
-    expect(find.text('No hay datos de cuenta conectados.'), findsOneWidget);
+    expect(find.text('Iniciar sesión'), findsOneWidget);
+    expect(find.byKey(const ValueKey('account-submit')), findsOneWidget);
   });
 
   testWidgets('fits at 320 pixels wide', (tester) async {
     setNarrowViewport(tester);
-    await tester.pumpWidget(const RoomForgeApp());
+    await tester.pumpWidget(app());
     expect(tester.takeException(), isNull);
     await openFilters(tester);
     expect(find.text('Filtros del catálogo'), findsOneWidget);
@@ -118,11 +136,11 @@ void main() {
     tester,
   ) async {
     setNarrowViewport(tester);
-    await tester.pumpWidget(const RoomForgeApp());
+    await tester.pumpWidget(app());
     for (final (label, content) in [
       ('Explorar', 'Catálogo sin conexión'),
       ('Reservas', 'Prototipo de reservas'),
-      ('Cuenta', 'Prototipo de cuenta'),
+      ('Cuenta', 'Iniciar sesión'),
     ]) {
       await tester.tap(find.text(label));
       await tester.pumpAndSettle();
@@ -134,7 +152,7 @@ void main() {
   testWidgets('catalog and filter controls meet accessibility guidelines', (
     tester,
   ) async {
-    await tester.pumpWidget(const RoomForgeApp());
+    await tester.pumpWidget(app());
     final semantics = tester.ensureSemantics();
     try {
       expect(find.bySemanticsLabel('Filtrar catálogo'), findsOneWidget);
@@ -165,7 +183,7 @@ void main() {
   testWidgets('opens a synthetic listing and returns to the catalog', (
     tester,
   ) async {
-    await tester.pumpWidget(const RoomForgeApp());
+    await tester.pumpWidget(app());
     const warning = 'Muestra sintética; no es una publicación real.';
     expect(find.text(warning), findsOneWidget);
 
@@ -184,7 +202,7 @@ void main() {
   testWidgets('detail states unavailable tour and unconfirmed availability', (
     tester,
   ) async {
-    await tester.pumpWidget(const RoomForgeApp());
+    await tester.pumpWidget(app());
     await tester.tap(find.byKey(const ValueKey('catalog-synthetic-listing')));
     await tester.pumpAndSettle();
 
@@ -226,7 +244,7 @@ void main() {
     tester,
   ) async {
     setNarrowViewport(tester);
-    await tester.pumpWidget(const RoomForgeApp());
+    await tester.pumpWidget(app());
     final semantics = tester.ensureSemantics();
     try {
       final listing = find.byKey(const ValueKey('catalog-synthetic-listing'));
@@ -256,6 +274,7 @@ void main() {
     tester,
   ) async {
     setNarrowViewport(tester);
+    final session = testSession();
     await tester.pumpWidget(
       MaterialApp(
         theme: ThemeData(
@@ -267,7 +286,7 @@ void main() {
             data: MediaQuery.of(
               context,
             ).copyWith(textScaler: const TextScaler.linear(1.5)),
-            child: const CustomerShell(),
+            child: CustomerShell(sessionController: session),
           ),
         ),
       ),

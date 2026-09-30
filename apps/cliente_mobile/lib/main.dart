@@ -1,12 +1,33 @@
 import 'package:flutter/material.dart';
 
+import 'data/services/customer_auth_api.dart';
+import 'data/services/customer_token_store.dart';
+import 'domain/customer_session_controller.dart';
+import 'ui/features/auth/views/customer_account_screen.dart';
+
 const _syntheticListingWarning =
     'Muestra sintética; no es una publicación real.';
 
-void main() => runApp(const RoomForgeApp());
+/// Backend used by the running app. Override it per environment with
+/// `--dart-define=ROOMFORGE_API_BASE_URL=https://host`.
+const _apiBaseUrl = String.fromEnvironment(
+  'ROOMFORGE_API_BASE_URL',
+  defaultValue: 'http://10.0.2.2:8000',
+);
+
+void main() => runApp(
+  RoomForgeApp(
+    sessionController: CustomerSessionController(
+      api: CustomerAuthApi(baseUrl: _apiBaseUrl),
+      tokenStore: SecureCustomerTokenStore(),
+    ),
+  ),
+);
 
 class RoomForgeApp extends StatelessWidget {
-  const RoomForgeApp({super.key});
+  const RoomForgeApp({super.key, required this.sessionController});
+
+  final CustomerSessionController sessionController;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -15,12 +36,14 @@ class RoomForgeApp extends StatelessWidget {
       colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0F766E)),
       useMaterial3: true,
     ),
-    home: const CustomerShell(),
+    home: CustomerShell(sessionController: sessionController),
   );
 }
 
 class CustomerShell extends StatefulWidget {
-  const CustomerShell({super.key});
+  const CustomerShell({super.key, required this.sessionController});
+
+  final CustomerSessionController sessionController;
 
   @override
   State<CustomerShell> createState() => _CustomerShellState();
@@ -29,6 +52,12 @@ class CustomerShell extends StatefulWidget {
 class _CustomerShellState extends State<CustomerShell> {
   int _selectedIndex = 0;
   final Map<String, String> _filters = {};
+
+  @override
+  void initState() {
+    super.initState();
+    widget.sessionController.restore();
+  }
 
   Future<void> _openFilters() async {
     final result = await showModalBottomSheet<Map<String, String>>(
@@ -67,12 +96,7 @@ class _CustomerShellState extends State<CustomerShell> {
           'No hay reservas reales ni datos conectados.',
           Icons.event_note_outlined,
         ),
-        _placeholder(
-          context,
-          'Prototipo de cuenta',
-          'No hay datos de cuenta conectados.',
-          Icons.person_outline,
-        ),
+        CustomerAccountScreen(controller: widget.sessionController),
       ],
     ),
     bottomNavigationBar: NavigationBar(
