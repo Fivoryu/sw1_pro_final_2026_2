@@ -85,6 +85,53 @@ Esa evidencia cubre servicios de desarrollo, no API, panel, IA ni contratos. En 
 
 **Notas de interpretación:** el worktree móvil está en `b6a468a`, pero sus archivos Flutter sin seguimiento no pertenecen a `origin/main`; el plan local CC-01 reporta pruebas/build, no las reejecutadas aquí. `origin/main` está en `b6a468a` por la integración de AGENCY-2 (PR #3). Este cuadro es una instantánea: actualizarlo tras cada merge y conservar separados los estados integrado, local y pendiente.
 
+### 1.4.1 Estado actual y asignación por fase (corte 2026-09-30)
+
+**Criterio:** este cuadro reemplaza a §1.4 para leer el estado de hoy y conserva aquel corte como fotografía histórica. Usa la línea `main` posterior a la integración de §1.4.2 (PR #5 `f44f1a3` más el merge `14cbfe6`), que ya contiene F01 (PR de infraestructura), F02 (PRs #6–#9), F03 (PR #10), el trabajo de catálogo, cotizaciones y reservas (PR #4) y los registros pendientes de HU-007.
+
+**Leyenda de estados**
+
+- ✅ **Completa:** resultado observable presente en `main`, con evidencia enlazada en la misma fila.
+- 🟡 **Parcial:** subconjunto verificable integrado; lo que falta queda enumerado en la misma fila.
+- ⬜ **Pendiente:** sin implementación integrada.
+- ☐ **Asignación libre:** casilla que un dev completa con su nombre al tomar la fase.
+
+**Cómo se usa la casilla de asignación.** La columna *Asignación* de este cuadro y la línea `**Asignación:**` al inicio de cada fase son los únicos lugares donde se escribe un responsable. Se completan con el nombre del dev al empezar la fase, sin borrar el estado, la evidencia ni el historial de §1.4. Una fase ✅ no cierra GAPs históricos, no ejecuta casos de prueba académicos y no autoriza entrega.
+
+| Fase | Estado | Evidencia y límite | Asignación |
+|---|---|---|---|
+| F00 — Alcance y contexto | 🟡 Parcial | `docs/plan-maestro-roomforge.md`, `docs/redefinicion-roomforge.md` y `docs/propuesta-roomforge-original.md` están versionados. Confirmados COP con dos decimales, depósito fijo por inmueble, wallet externa y cadena limitada a Hardhat local. Siguen abiertos: unidades del depósito, destino del depósito aceptado, firma institucional, testnet y tolerancias AR (§6.1). | ☐ Libre |
+| F01 — Infraestructura local | ✅ Completa | `infra/docker/compose.local.yml` con `postgres`, `floci`, `api` y `panel`; `infra/docker/init-local-resources.ps1` idempotente; persistencia tras reinicio y proxies verificados en `odd/tasks/f01-infrastructure-completion.md`. Límite: no existe worker que conectar y las apps móviles no corren en Compose. | ☐ Libre |
+| F02 — Base, UX y automatización | ✅ Completa | `docs/api/f02-api-contract.md`; `docs/migrations/f02-migration-verification.md` (completo 2026-09-29: base vacía a `head` contra PostgreSQL real, actualización desde `0004` y R6 en `0011_reservation_chain_txns`); `docs/ux/f02-surface-map.md`; `.github/workflows/ci.yml` con jobs de backend, panel, app cliente y app de captura. Límite: la semántica de GitHub Actions no se validó con `actionlint` y la cobertura numérica sigue sin acordar. | ☐ Libre |
+| F03 — Identidad, roles y agencias | 🟡 Parcial | Módulos `identity`, `customer_identity`, `customer_wallet` y `agencies`; migraciones `0001`–`0006`; invitaciones y activación/desactivación de agentes; sesión de personal en la app de captura sobre cookie `HttpOnly` + CSRF. Cierre en `odd/tasks/f03-identity-agencies.md` (PR #10, `b791340`). Límite: F03.3 quedó explícitamente pendiente para F04; la lectura pública ya existe en `main`, pero no se re-verificó contra el criterio de F03.3. | ☐ Libre |
+| F04 — Inmuebles, publicaciones y catálogo | 🟡 Parcial | F04.1 🟡 (modelo `Listing` con operación, ciudad/zona, dormitorios, baños y precio base), F04.2 ⬜ (fotos en JSON, sin validación de subida ni S3), F04.3 🟡 (`approval_status` y `is_published` en el modelo, sin flujo de revisión/publicación expuesto), F04.4 ✅ API (`GET /api/v1/listings` con filtros y paginación por cursor, y detalle público), UI pendiente. El cambio OpenSpec `hu022-025-publicaciones` cubre F04.1–F04.3 y está planificado sin implementar. | ☐ Libre |
+| F05 — Mobiliario, precios y ofertas | 🟡 Parcial | F05.2–F05.4 ✅: aritmética `Decimal` exacta con dos decimales y `ROUND_HALF_UP`, `POST /api/v1/quotes` con snapshot inmutable, vencimiento a 15 minutos, invalidación por `offer_version` y límite de 10 solicitudes por IP por minuto. F05.1 🟡: `ListingExtra` con ID estable, nombre y precio, sin categoría, habitación, dimensiones/procedencia ni vínculo visual, y sin UI de selección. | ☐ Libre |
+| F06 — Modelo editable y recorrido | ⬜ Pendiente | No hay visor ni editor integrados; `docs/spikes/` conserva bitácoras exploratorias, no implementación. | ☐ Libre |
+| F07 — Captura espacial | ⬜ Pendiente | La app de captura sólo tiene el acceso de personal; no hay sesión ARCore, marcado de contornos, alturas ni borradores de escena. | ☐ Libre |
+| F08 — IA preentrenada | ⬜ Pendiente | `worker3d/` sólo contiene README; no hay detector, pesos, trabajos asíncronos ni confirmación de sugerencias. | ☐ Libre |
+| F09 — Reservas y contrato inteligente | 🟡 Parcial | Módulo `reservations` con estados `pending`, `accepted`, `rejected`, `cancelled` y `expired`, plazo de decisión, clave de idempotencia, vencimiento, permiso EIP-712 y reconciliación de cadena; migraciones `0007`–`0011`; `contracts/` con `ReservationEscrow.sol`, `RoomForgeTestToken.sol` y pruebas Hardhat; wallet de cliente verificada con EIP-191. Límite: sólo Hardhat local (sin testnet ni fondos reales), sin UI de wallet ni de reserva, y sin política de confirmaciones cerrada. F09.7 ⬜. | ☐ Libre |
+| F10 — Integración de superficies | ⬜ Pendiente | No hay recorrido extremo a extremo: el panel sólo implementa el acceso de personal y la app cliente sólo cuenta/sesión de cliente. | ☐ Libre |
+| F11 — Despliegue en AWS | ⬜ Pendiente | No se verificó despliegue en AWS; sólo existe el stack local con Floci. | ☐ Libre |
+| F12 — Calidad, seguridad y recuperación | 🟡 Parcial | CI con cuatro jobs en verde, suite backend más Flutter/panel, Pyright y Ruff sin diagnósticos nuevos frente a la línea base, y verificación real de la cadena de migraciones contra PostgreSQL. Límite: faltan pruebas integradas entre superficies, E2E de la trayectoria crítica, matriz de los siete criterios con mediciones y ensayo de fallos. | ☐ Libre |
+| F13 — Evidencia académica y entrega | 🟡 Parcial | `docs/avance/` registra seis historias con verificación técnica y mantiene los casos académicos pendientes visibles; CP-001 y CP-002 cuentan con evidencia en `docs/scrum/sprint-1/evidencia/`. Límite: sin guion de demostración, sin evidencia integral y sin inventario final de recursos. | ☐ Libre |
+
+**Nota de interpretación:** F03 en el cuadro histórico de §1.4 figura como subconjunto backend, F04–F05 y F09 como no integrados y F02 como parcial; esas filas describen el corte de 2026-09-26 y no deben leerse como estado actual. Actualizar este cuadro tras cada merge y conservar §1.4 sin ediciones.
+
+### 1.4.2 Integración de registros pendientes (2026-09-30)
+
+**Qué se integró.** Antes de este cierre, `main` estaba en `7e23ccb` y quedaban ramas con contenido fuera de la línea principal. La auditoría del 2026-09-30 las resolvió así:
+
+| Elemento | Resolución |
+|---|---|
+| PR #5 `docs/hu007-evidence-and-pending-records` (3 commits, 15 archivos, +1294/−17) | Fusionado en `main` con `gh pr merge 5 --merge --admin`, merge commit `f44f1a3`. Aporta la evidencia de HU-007, el cambio OpenSpec `openspec/changes/hu022-025-publicaciones/` y `odd/references/saas-staff-login-v1.zip`. |
+| `feat/roomforge-mobile-3d` (`94d30b1`, 1 commit de documentación) | Fusionado con `git merge --no-ff`, merge commit `14cbfe6`. Sólo actualiza el registro de promoción del PR #4 en `odd/tasks/cliente-catalog.md`. |
+| `feat/registro-cliente/t3-identity` (`404fd97`) | **Descartada y borrada** en local y en `origin`. Su único commit modificaba `backend/app/modules/identity/repository.py`, archivo que no existe en `main`; el merge conflictuaba y el contenido quedó obsoleto con el reinicio de identidad. |
+| Worktrees `f01-infrastructure-wt`, `f02-base-ux-automation-wt` y `f02-ci-review-wt` | Eliminados. Sus HEAD (`b8a07e3`, `f412f78`, `8002648`) ya estaban contenidos en `main` y no tenían cambios pendientes. |
+
+**Qué queda fuera a propósito.** Las ramas `split-backend`, `split-captura`, `split-cliente`, `split-panel` y los remotos `backend-repo`, `captura-repo`, `cliente-repo` y `frontend-repo` pertenecen al experimento de separación por submódulos, abandonado: el proyecto se mantiene como repositorio único (§1.3) y esas ramas no aportan contenido que deba entrar en `main`. No se borraron porque su eliminación es una decisión aparte y su historial no está contenido en `main`. Quedan también los worktrees `proyecto_final-roomforge-mobile-3d-wt` y `roomforge-agency-management`, ya contenidos en `main`, como candidatos a limpieza en una próxima sesión.
+
+**Nota de método.** El merge del PR #5 usó `--admin` y, por lo tanto, **salteó la regla de una aprobación** configurada en `main`; el propietario es administrador y `enforce_admins` está desactivado. Es el mismo procedimiento registrado para el PR #4 y se declara aquí para que esta evidencia no sugiera una revisión que no ocurrió.
+
 ### 1.5 Restricciones
 
 - Dos desarrolladores y un mes de plazo reportado; no se conocen horas efectivas diarias ni compromisos individuales.
@@ -232,6 +279,9 @@ Al cerrar: registrar archivos y comportamiento, ejecutar comprobaciones pertinen
 
 **Objetivo:** evitar desarrollar contra documentación desactualizada. No convertir esta fase en semanas de planificación.
 
+**Estado (corte 2026-09-30):** 🟡 Parcial — F00.1 ✅, F00.2 🟡, F00.3 🟡. Límite: siguen abiertas las decisiones de §6.1 y la trazabilidad a PB/HU/CP está registrada sólo de forma parcial en `docs/avance/`.
+**Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
+
 ### F00.1 — Inventario del estado actual
 
 - **Entrada:** repositorio y documentos actuales; trabajo concurrente preservado.
@@ -254,6 +304,9 @@ Al cerrar: registrar archivos y comportamiento, ejecutar comprobaciones pertinen
 ## F01 — Infraestructura local con Docker y Floci
 
 **Objetivo:** disponer de servicios reales de desarrollo desde el principio. Parte de este trabajo ya está reportada como realizada por otro chat.
+
+**Estado (corte 2026-09-30):** ✅ Completa — F01.1 ✅, F01.2 ✅, F01.3 ✅, F01.4 ✅ (api y panel). Límite: no existe worker que conectar y las apps móviles siguen fuera de Compose.
+**Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
 
 ### Estado local y evidencia (2026-09-26)
 
@@ -300,6 +353,9 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 
 ## F02 — Base de aplicación, UX y automatización
 
+**Estado (corte 2026-09-30):** ✅ Completa — F02.1 ✅, F02.2 ✅, F02.3 ✅, F02.4 ✅, integrada por PRs #6–#9. Límite: sin validación de `actionlint` y sin cobertura numérica acordada.
+**Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
+
 ### F02.1 — Contrato API y estructura modular
 
 - **Entrada:** baseline y configuración; no depende de AR.
@@ -326,6 +382,9 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 - **Aceptación:** un defecto introducido en una comprobación provoca fallo visible; no se registra PASS si el runner no ejecutó tests. Cobertura numérica se acordará, no se inventa aquí.
 
 ## F03 — Identidad, roles y SaaS multiinmobiliaria
+
+**Estado (corte 2026-09-30):** 🟡 Parcial — F03.1 ✅, F03.2 ✅, F03.3 🟡, F03.4 ✅. Límite: el criterio de catálogo público de F03.3 sigue sin re-verificarse contra el código de F04 ya integrado.
+**Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
 
 ### F03.1 — Autenticación y sesiones
 
@@ -354,6 +413,9 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 
 ## F04 — Inmuebles, publicaciones y catálogo
 
+**Estado (corte 2026-09-30):** 🟡 Parcial — F04.1 🟡, F04.2 ⬜, F04.3 🟡, F04.4 ✅ en API y con UI pendiente. Límite: no hay alta/edición de inmueble, subida de fotos ni flujo de envío a revisión, aprobación y publicación. El cambio OpenSpec `hu022-025-publicaciones` cubre F04.1–F04.3 y está planificado en `main` sin implementar.
+**Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
+
 ### F04.1 — Ficha del inmueble
 
 - **Acciones:** guardar ubicación de búsqueda, operación, descripción, cantidad de ambientes/baños y atributos mínimos. Definir diferencia entre habitación del modelo y conteo comercial de dormitorios.
@@ -380,6 +442,9 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 
 ## F05 — Mobiliario, precios y ofertas versionadas
 
+**Estado (corte 2026-09-30):** 🟡 Parcial — F05.1 🟡, F05.2 ✅, F05.3 ✅, F05.4 ✅. Límite: falta el inventario de mobiliario con categoría, habitación, dimensiones/procedencia y vínculo visual, junto con su UI.
+**Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
+
 ### F05.1 — Inventario confirmado
 
 - **Acciones:** crear objetos manualmente con ID estable, categoría, habitación, dimensiones/origen y vínculo visual. Separar detección IA no confirmada del inventario comercial.
@@ -405,6 +470,9 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 - **Aceptación:** editar nombre/precio del sofá después no altera lo que el cliente había reservado; definir autorizaciones de lectura y retención.
 
 ## F06 — Modelo editable y recorrido en primera persona
+
+**Estado (corte 2026-09-30):** ⬜ Pendiente — sin motor, visor ni editor integrados; `docs/spikes/` sólo conserva bitácoras exploratorias.
+**Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
 
 **Inicio paralelo:** la prueba de renderizado puede comenzar con F02 y escenas sintéticas explícitas; no espera a F07.
 
@@ -440,6 +508,9 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 
 ## F07 — Captura espacial con el teléfono
 
+**Estado (corte 2026-09-30):** ⬜ Pendiente — la app de captura sólo tiene el acceso de personal; no hay sesión ARCore, contornos, alturas ni borradores de escena.
+**Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
+
 **Alcance técnico por validar:** ARCore en S23 FE es compatible según fuente oficial, no significa medición exacta ni plano automático terminado.
 
 ### F07.1 — Integración AR y seguimiento
@@ -474,6 +545,9 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 - **Aceptación:** reconectar no crea dos inmuebles ni pierde capturas; reservar sigue requiriendo servicios/red. Inferencia offline es decisión separada.
 
 ## F08 — IA preentrenada para mobiliario
+
+**Estado (corte 2026-09-30):** ⬜ Pendiente — `worker3d/` sólo contiene README; no hay detector, pesos, trabajos asíncronos ni confirmación de sugerencias.
+**Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
 
 ### F08.1 — Selección y licencia
 
@@ -514,6 +588,9 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 - **Aceptación:** si se realiza, evaluar con datos independientes, conservar versiones y registrar calidad, errores y consumo frente a criterios acordados antes del experimento; adoptar solo si satisface esos criterios y las condiciones de licencia. Conservar el modelo base si la mejora no los cumple. Diferirla no bloquea la entrega cuando el detector base ya cumple el mínimo acordado.
 
 ## F09 — Reservas y contrato inteligente
+
+**Estado (corte 2026-09-30):** 🟡 Parcial — F09.1 🟡, F09.2 ✅ en Hardhat local, F09.3 🟡, F09.4 🟡, F09.5 🟡, F09.6 🟡, F09.7 ⬜. Límite: sin testnet, sin fondos reales, sin UI de wallet/reserva y sin política de confirmaciones cerrada.
+**Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
 
 ### F09.1 — Dominio y máquina de estados de negocio
 
@@ -561,6 +638,9 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 
 ## F10 — Integración de las tres superficies
 
+**Estado (corte 2026-09-30):** ⬜ Pendiente — no hay recorrido extremo a extremo; el panel sólo cubre acceso de personal y la app cliente sólo cuenta/sesión de cliente.
+**Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
+
 ### F10.1 — Flujo del agente y administrador
 
 - **Acciones:** crear inmueble, capturar ambientes/fotos, recibir sugerencias, corregir escena/inventario, fijar precios, enviar a revisión y publicar.
@@ -580,6 +660,9 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 - **Aceptación:** el precio mostrado para confirmar corresponde a la oferta autorizada; caché no mezcla agencias/cuentas; errores se pueden diagnosticar sin secretos.
 
 ## F11 — Despliegue real en AWS
+
+**Estado (corte 2026-09-30):** ⬜ Pendiente — no se verificó despliegue en AWS; sólo existe el stack local con Floci.
+**Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
 
 **Dos momentos:** un smoke pequeño temprano tras F02 y un despliegue integral después. No esperar la semana final para descubrir permisos o facturación.
 
@@ -608,6 +691,9 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 - **Aceptación:** reinicio conserva datos, rollback no destruye esquema, restauración comprobada. Una sola EC2 es punto único de fallo y no se presenta como alta disponibilidad.
 
 ## F12 — Calidad, seguridad y recuperación
+
+**Estado (corte 2026-09-30):** 🟡 Parcial — CI de cuatro jobs en verde, suites backend y Flutter/panel, Pyright y Ruff sin diagnósticos nuevos frente a la línea base, y cadena de migraciones verificada contra PostgreSQL real. Límite: faltan pruebas integradas entre superficies, E2E de la trayectoria crítica, matriz de los siete criterios con mediciones y ensayo de fallos.
+**Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
 
 La calidad se trabaja desde cada fase. Esta fase concentra mediciones, integra evidencia y decide si la entrega es aceptable, no añade toda la seguridad al final.
 
@@ -650,6 +736,9 @@ No se presenta esta lista como certificación ISO. Los umbrales de FPS, respuest
 - **Aceptación:** inventario/fondos no se duplican y usuario obtiene estado coherente; ningún ensayo borra datos ajenos ni usa fondos reales.
 
 ## F13 — Evidencia académica, demostración y entrega
+
+**Estado (corte 2026-09-30):** 🟡 Parcial — `docs/avance/` registra seis historias con verificación técnica y conserva visibles los casos académicos pendientes; CP-001 y CP-002 tienen evidencia en `docs/scrum/sprint-1/evidencia/`. Límite: sin guion de demostración, sin evidencia integral y sin inventario final de recursos.
+**Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
 
 ### F13.1 — Reconciliar documentación
 
