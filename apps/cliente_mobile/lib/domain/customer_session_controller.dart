@@ -73,6 +73,44 @@ class CustomerSessionController extends ChangeNotifier {
     }
   }
 
+  Future<void> signIn({required String email, required String password}) async {
+    _message = null;
+    try {
+      final tokens = await _api.login(email: email, password: password);
+      await _tokenStore.writeRefreshToken(tokens.refreshToken);
+      await _loadIdentity(tokens.accessToken);
+    } on CustomerAuthFailure catch (failure) {
+      if (failure.isNetworkFailure) {
+        _status = CustomerSessionStatus.unavailable;
+        _message = failure.detail;
+        notifyListeners();
+      } else {
+        await _discardSession(message: failure.detail);
+      }
+    }
+  }
+
+  /// Creates the account. The contract forbids an automatic login, so a
+  /// successful registration returns to [CustomerSessionStatus.signedOut]
+  /// with a notice telling the customer to sign in.
+  Future<bool> register({
+    required String email,
+    required String password,
+  }) async {
+    _message = null;
+    try {
+      final identity = await _api.register(email: email, password: password);
+      _setSignedOut(
+        message: 'Cuenta creada para ${identity.email}. Iniciá sesión.',
+      );
+      return true;
+    } on CustomerAuthFailure catch (failure) {
+      _message = failure.detail;
+      notifyListeners();
+      return false;
+    }
+  }
+
   /// Revokes the session. A rejected token still signs out locally; a network
   /// failure keeps the session so the customer can retry.
   Future<void> signOut() async {

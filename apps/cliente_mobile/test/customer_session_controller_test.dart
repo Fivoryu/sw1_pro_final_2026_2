@@ -69,6 +69,79 @@ void main() {
     });
   });
 
+  group('signIn', () {
+    test('persists the refresh token and exposes the identity', () async {
+      final harness = _build();
+
+      await harness.controller.signIn(
+        email: 'client@example.test',
+        password: 'password123',
+      );
+
+      expect(harness.controller.status, CustomerSessionStatus.signedIn);
+      expect(harness.controller.identity?.id, 'customer-1');
+      expect(harness.store.token, 'refresh-token-1');
+    });
+
+    test('signs out with a message when the credentials are rejected', () async {
+      final harness = _build();
+      harness.backend.loginRejected = true;
+
+      await harness.controller.signIn(
+        email: 'client@example.test',
+        password: 'wrong-password',
+      );
+
+      expect(harness.controller.status, CustomerSessionStatus.signedOut);
+      expect(harness.controller.message, 'Rejected by the API.');
+      expect(harness.store.token, isNull);
+    });
+
+    test('reports an unavailable session when the transport fails', () async {
+      final harness = _build();
+      harness.backend.offline = true;
+
+      await harness.controller.signIn(
+        email: 'client@example.test',
+        password: 'password123',
+      );
+
+      expect(harness.controller.status, CustomerSessionStatus.unavailable);
+      expect(harness.store.token, isNull);
+    });
+  });
+
+  group('register', () {
+    test('never signs in automatically after creating the account', () async {
+      final harness = _build();
+
+      final created = await harness.controller.register(
+        email: 'client@example.test',
+        password: 'password123',
+      );
+
+      expect(created, isTrue);
+      expect(harness.controller.status, CustomerSessionStatus.signedOut);
+      expect(harness.controller.identity, isNull);
+      expect(harness.store.token, isNull);
+      expect(harness.controller.message, contains('client@example.test'));
+    });
+
+    test('surfaces a conflicting account without creating a session', () async {
+      final harness = _build();
+      harness.backend.registerConflict = true;
+
+      final created = await harness.controller.register(
+        email: 'client@example.test',
+        password: 'password123',
+      );
+
+      expect(created, isFalse);
+      expect(harness.controller.message, 'Rejected by the API.');
+      expect(harness.store.token, isNull);
+    });
+  });
+
   group('signOut', () {
     test('revokes the session and clears the stored token', () async {
       final harness = _build(storedToken: 'stored-refresh');
