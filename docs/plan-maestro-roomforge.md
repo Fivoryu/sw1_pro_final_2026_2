@@ -102,22 +102,22 @@ Esa evidencia cubre servicios de desarrollo, no API, panel, IA ni contratos. En 
 
 **Cómo se usa la casilla de asignación.** La columna *Asignación* de este cuadro y la línea `**Asignación:**` al inicio de cada fase son los únicos lugares donde se escribe un responsable. Se completan con el nombre del dev al empezar la fase, sin borrar el estado, la evidencia ni el historial de §1.4. Una fase ✅ no cierra GAPs históricos, no ejecuta casos de prueba académicos y no autoriza entrega.
 
-| Fase | Estado | Evidencia y límite | Asignación |
-|---|---|---|---|
-| F00 — Alcance y contexto | 🟡 Parcial | `docs/plan-maestro-roomforge.md`, `docs/redefinicion-roomforge.md` y `docs/propuesta-roomforge-original.md` están versionados. Confirmados COP con dos decimales, depósito fijo por inmueble, wallet externa y cadena limitada a Hardhat local. Siguen abiertos: unidades del depósito, destino del depósito aceptado, firma institucional, testnet y tolerancias AR (§6.1). | ☐ Libre |
-| F01 — Infraestructura local | ✅ Completa | `infra/docker/compose.local.yml` con `postgres`, `floci`, `api` y `panel`; `infra/docker/init-local-resources.ps1` idempotente; persistencia tras reinicio y proxies verificados en `odd/tasks/f01-infrastructure-completion.md`. Límite: no existe worker que conectar y las apps móviles no corren en Compose. | ☐ Libre |
-| F02 — Base, UX y automatización | ✅ Completa | `docs/api/f02-api-contract.md`; `docs/migrations/f02-migration-verification.md` (completo 2026-09-29: base vacía a `head` contra PostgreSQL real, actualización desde `0004` y R6 en `0011_reservation_chain_txns`); `docs/ux/f02-surface-map.md`; `.github/workflows/ci.yml` con jobs de backend, panel, app cliente y app de captura. Límite: la semántica de GitHub Actions no se validó con `actionlint` y la cobertura numérica sigue sin acordar. | ☐ Libre |
-| F03 — Identidad, roles y agencias | 🟡 Parcial | Módulos `identity`, `customer_identity`, `customer_wallet` y `agencies`; migraciones `0001`–`0006`; invitaciones y activación/desactivación de agentes; sesión de personal en la app de captura sobre cookie `HttpOnly` + CSRF. Cierre en `odd/tasks/f03-identity-agencies.md` (PR #10, `b791340`). Límite: F03.3 quedó explícitamente pendiente para F04; la lectura pública ya existe en `main`, pero no se re-verificó contra el criterio de F03.3. | ☐ Libre |
-| F04 — Inmuebles, publicaciones y catálogo | 🟡 Parcial, integrado | **Integrado en `main`** con el commit `6cb8ea8` (fast-forward sobre `45ca956`). F04.1 ✅ alta/edición de inmueble con propietario y validación; F04.3 ✅ borrador → en revisión → aprobación/rechazo con motivo → publicar/despublicar, con autorización server-owned e historial append-only; F04.4 ✅ API. F04.2 ⬜ **diferida por decisión del usuario**. Límites: sin UI de panel ni de catálogo; la migración `0012_listing_transitions` no se aplicó contra PostgreSQL; `pyright` mantiene 18 diagnósticos preexistentes en archivos no tocados (las dependencias sí están instaladas: la causa está sin explicar). Contrato en `docs/api/f04-publications-v1.md`; registro en `odd/tasks/f04-publications.md`. | ☐ Libre |
-| F05 — Mobiliario, precios y ofertas | 🟡 Parcial | F05.2–F05.4 ✅: aritmética `Decimal` exacta con dos decimales y `ROUND_HALF_UP`, `POST /api/v1/quotes` con snapshot inmutable, vencimiento a 15 minutos, invalidación por `offer_version` y límite de 10 solicitudes por IP por minuto. F05.1 🟡: `ListingExtra` con ID estable, nombre y precio, sin categoría, habitación, dimensiones/procedencia ni vínculo visual, y sin UI de selección. | ☐ Libre |
-| F06 — Modelo editable y recorrido | ⬜ Pendiente | No hay visor ni editor integrados; `docs/spikes/` conserva bitácoras exploratorias, no implementación. | ☐ Libre |
-| F07 — Captura espacial | ⬜ Pendiente | La app de captura sólo tiene el acceso de personal; no hay sesión ARCore, marcado de contornos, alturas ni borradores de escena. | ☐ Libre |
-| F08 — IA preentrenada | ⬜ Pendiente | `worker3d/` sólo contiene README; no hay detector, pesos, trabajos asíncronos ni confirmación de sugerencias. | ☐ Libre |
-| F09 — Reservas y contrato inteligente | 🟡 Parcial | Módulo `reservations` con estados `pending`, `accepted`, `rejected`, `cancelled` y `expired`, plazo de decisión, clave de idempotencia, vencimiento, permiso EIP-712 y reconciliación de cadena; migraciones `0007`–`0011`; `contracts/` con `ReservationEscrow.sol`, `RoomForgeTestToken.sol` y pruebas Hardhat; wallet de cliente verificada con EIP-191. Límite: sólo Hardhat local (sin testnet ni fondos reales), sin UI de wallet ni de reserva, y sin política de confirmaciones cerrada. F09.7 ⬜. | ☐ Libre |
-| F10 — Integración de superficies | ⬜ Pendiente | No hay recorrido extremo a extremo: el panel sólo implementa el acceso de personal y la app cliente sólo cuenta/sesión de cliente. | ☐ Libre |
-| F11 — Despliegue en AWS | ⬜ Pendiente | No se verificó despliegue en AWS; sólo existe el stack local con Floci. | ☐ Libre |
-| F12 — Calidad, seguridad y recuperación | 🟡 Parcial | CI con cuatro jobs en verde, suite backend más Flutter/panel, Pyright y Ruff sin diagnósticos nuevos frente a la línea base, y verificación real de la cadena de migraciones contra PostgreSQL. Límite: faltan pruebas integradas entre superficies, E2E de la trayectoria crítica, matriz de los siete criterios con mediciones y ensayo de fallos. | ☐ Libre |
-| F13 — Evidencia académica y entrega | 🟡 Parcial | `docs/avance/` registra seis historias con verificación técnica y mantiene los casos académicos pendientes visibles; CP-001 y CP-002 cuentan con evidencia en `docs/scrum/sprint-1/evidencia/`. Límite: sin guion de demostración, sin evidencia integral y sin inventario final de recursos. | ☐ Libre |
+| Fase | Depende de | Estado | Evidencia y límite | Asignación |
+|---|---|---|---|---|
+| F00 — Alcance y contexto | — | 🟡 Parcial | `docs/plan-maestro-roomforge.md`, `docs/redefinicion-roomforge.md` y `docs/propuesta-roomforge-original.md` están versionados. Confirmados COP con dos decimales, depósito fijo por inmueble, wallet externa y cadena limitada a Hardhat local. Siguen abiertos: unidades del depósito, destino del depósito aceptado, firma institucional, testnet y tolerancias AR (§6.1). | ☐ Libre |
+| F01 — Infraestructura local | — | ✅ Completa | `infra/docker/compose.local.yml` con `postgres`, `floci`, `api` y `panel`; `infra/docker/init-local-resources.ps1` idempotente; persistencia tras reinicio y proxies verificados en `odd/tasks/f01-infrastructure-completion.md`. Límite: no existe worker que conectar y las apps móviles no corren en Compose. | ☐ Libre |
+| F02 — Base, UX y automatización | F01 | ✅ Completa | `docs/api/f02-api-contract.md`; `docs/migrations/f02-migration-verification.md` (completo 2026-09-29: base vacía a `head` contra PostgreSQL real, actualización desde `0004` y R6 en `0011_reservation_chain_txns`); `docs/ux/f02-surface-map.md`; `.github/workflows/ci.yml` con jobs de backend, panel, app cliente y app de captura. Límite: la semántica de GitHub Actions no se validó con `actionlint` y la cobertura numérica sigue sin acordar. | ☐ Libre |
+| F03 — Identidad, roles y agencias | F02 | 🟡 Parcial | Módulos `identity`, `customer_identity`, `customer_wallet` y `agencies`; migraciones `0001`–`0006`; invitaciones y activación/desactivación de agentes; sesión de personal en la app de captura sobre cookie `HttpOnly` + CSRF. Cierre en `odd/tasks/f03-identity-agencies.md` (PR #10, `b791340`). Límite: F03.3 quedó explícitamente pendiente para F04; la lectura pública ya existe en `main`, pero no se re-verificó contra el criterio de F03.3. | ☐ Libre |
+| F04 — Inmuebles, publicaciones y catálogo | F03 | 🟡 Parcial, integrado | **Integrado en `main`** con el commit `6cb8ea8` (fast-forward sobre `45ca956`). F04.1 ✅ alta/edición de inmueble con propietario y validación; F04.3 ✅ borrador → en revisión → aprobación/rechazo con motivo → publicar/despublicar, con autorización server-owned e historial append-only; F04.4 ✅ API. F04.2 ⬜ **diferida por decisión del usuario**. Límites: sin UI de panel ni de catálogo; la migración `0012_listing_transitions` no se aplicó contra PostgreSQL; `pyright` mantiene 18 diagnósticos preexistentes en archivos no tocados (las dependencias sí están instaladas: la causa está sin explicar). Contrato en `docs/api/f04-publications-v1.md`; registro en `odd/tasks/f04-publications.md`. | ☐ Libre |
+| F05 — Mobiliario, precios y ofertas | F04 | 🟡 Parcial | F05.2–F05.4 ✅: aritmética `Decimal` exacta con dos decimales y `ROUND_HALF_UP`, `POST /api/v1/quotes` con snapshot inmutable, vencimiento a 15 minutos, invalidación por `offer_version` y límite de 10 solicitudes por IP por minuto. F05.1 🟡: `ListingExtra` con ID estable, nombre y precio, sin categoría, habitación, dimensiones/procedencia ni vínculo visual, y sin UI de selección. | ☐ Libre |
+| F06 — Modelo editable y recorrido | F02 | ⬜ Pendiente | No hay visor ni editor integrados; `docs/spikes/` conserva bitácoras exploratorias, no implementación. | ☐ Libre |
+| F07 — Captura espacial | F06 | ⬜ Pendiente | La app de captura sólo tiene el acceso de personal; no hay sesión ARCore, marcado de contornos, alturas ni borradores de escena. | ☐ Libre |
+| F08 — IA preentrenada | F05, F06 | ⬜ Pendiente | `worker3d/` sólo contiene README; no hay detector, pesos, trabajos asíncronos ni confirmación de sugerencias. | ☐ Libre |
+| F09 — Reservas y contrato inteligente | F05 | 🟡 Parcial | Módulo `reservations` con estados `pending`, `accepted`, `rejected`, `cancelled` y `expired`, plazo de decisión, clave de idempotencia, vencimiento, permiso EIP-712 y reconciliación de cadena; migraciones `0007`–`0011`; `contracts/` con `ReservationEscrow.sol`, `RoomForgeTestToken.sol` y pruebas Hardhat; wallet de cliente verificada con EIP-191. Límite: sólo Hardhat local (sin testnet ni fondos reales), sin UI de wallet ni de reserva, y sin política de confirmaciones cerrada. F09.7 ⬜. | ☐ Libre |
+| F10 — Integración de superficies | F03–F09 | ⬜ Pendiente | No hay recorrido extremo a extremo: el panel sólo implementa el acceso de personal y la app cliente sólo cuenta/sesión de cliente. | ☐ Libre |
+| F11 — Despliegue en AWS | F02 | ⬜ Pendiente | No se verificó despliegue en AWS; sólo existe el stack local con Floci. | ☐ Libre |
+| F12 — Calidad, seguridad y recuperación | transversal | 🟡 Parcial | CI con cuatro jobs en verde, suite backend más Flutter/panel, Pyright y Ruff sin diagnósticos nuevos frente a la línea base, y verificación real de la cadena de migraciones contra PostgreSQL. Límite: faltan pruebas integradas entre superficies, E2E de la trayectoria crítica, matriz de los siete criterios con mediciones y ensayo de fallos. | ☐ Libre |
+| F13 — Evidencia académica y entrega | F12 | 🟡 Parcial | `docs/avance/` registra seis historias con verificación técnica y mantiene los casos académicos pendientes visibles; CP-001 y CP-002 cuentan con evidencia en `docs/scrum/sprint-1/evidencia/`. Límite: sin guion de demostración, sin evidencia integral y sin inventario final de recursos. | ☐ Libre |
 
 **Nota de interpretación:** F03 en el cuadro histórico de §1.4 figura como subconjunto backend, F04–F05 y F09 como no integrados y F02 como parcial; esas filas describen el corte de 2026-09-26 y no deben leerse como estado actual. Actualizar este cuadro tras cada merge y conservar §1.4 sin ediciones.
 
@@ -151,6 +151,37 @@ Esa evidencia cubre servicios de desarrollo, no API, panel, IA ni contratos. En 
 - Plan, F04.1–F04.4: ficha del inmueble con propietario inmobiliario y validación de entradas; fotografías y privacidad; revisión y publicación con historial mínimo; catálogo y detalle del cliente.
 
 El plan de trabajo de F04 vive en [`odd/tasks/f04-publications.md`](../odd/tasks/f04-publications.md).
+
+### 1.4.4 Superficies por fase y reglas para trabajar en paralelo
+
+**Para qué sirve.** La columna *Depende de* de §1.4.1 da el **orden mínimo**: una fase no arranca hasta que sus dependencias estén integradas en `main`. Esta sección agrega lo que de verdad evita que dos devs se pisen: **qué archivos toca cada fase**. El orden conceptual de §5.1 sigue vigente y no se duplica acá.
+
+Las superficies son las rutas que existen hoy (corte 2026-09-30). Una fase que necesite una ruta nueva la declara antes de escribir.
+
+| Fase | Superficie principal | Se cruza con |
+|---|---|---|
+| F00 | `docs/` (plan maestro y redefinición) | — |
+| F01 | `infra/docker/*`, `infra/README.md`, `*/Dockerfile` | F11 (Dockerfiles) |
+| F02 | `backend/app/{main.py,core/,db/}`, `backend/alembic/versions/`, `.github/workflows/ci.yml`, `docs/api/`, `docs/ci/`, `docs/ux/` | base de todas |
+| F03 | `backend/app/modules/{identity,agencies,customer_identity}/`, `apps/cliente_mobile/lib/{data,domain}/`, `apps/captura_mobile/lib/{data,domain}/` | F07 y F09 (apps móviles) |
+| F04 | `backend/app/modules/catalog/{router,schemas,service,models,errors}.py`, `backend/alembic/versions/`, `backend/tests/` | **F05: mismo módulo `catalog`** |
+| F05 | `backend/app/modules/catalog/` (mobiliario y cotizaciones), `backend/alembic/versions/` | **F04: mismo módulo `catalog`** |
+| F06 | módulo nuevo de visor/editor, `panel/staff-shell/src/features/`, `apps/*_mobile/lib/ui/` | F07 (contrato de escena), F10 (`panel`) |
+| F07 | `apps/captura_mobile/lib/`, `apps/captura_mobile/android/` | F06 (contrato de escena), F03 (`captura_mobile`) |
+| F08 | `worker3d/`, módulo nuevo de sugerencias y trabajos, `backend/alembic/versions/` | F04/F05/F09 (cadena de migraciones) |
+| F09 | `backend/app/modules/reservations/`, `contracts/`, `apps/cliente_mobile/lib/` | F03 y F06 (app cliente) |
+| F10 | todas las anteriores | **todas: no se paraleliza** |
+| F11 | `infra/`, Dockerfiles, configuración de despliegue nueva | F01 (Dockerfiles) |
+| F12 | `backend/tests/`, `.github/workflows/`, `docs/ci/` | todo lo que se prueba |
+| F13 | `docs/`, `odd/tasks/`, evidencia académica | F12 |
+
+**Reglas de convivencia**
+
+1. **Una fila de la columna *Superficie principal* admite un dev a la vez.** F04 y F05 comparten `backend/app/modules/catalog/`: si van a tocarlo dos personas, coordinan antes de empezar o lo toma una sola.
+2. **`backend/alembic/versions/` es recurso compartido.** Una migración nueva por rama, con `down_revision` sobre el head real del momento; verificar el head antes de crearla para que la cadena no se bifurque.
+3. **Ramas separadas por fase.** Dos ramas que tocan el mismo módulo se integran de a una, no en paralelo.
+4. **F10, F12 y F13 son transversales.** F10 no se paraleliza porque toca todas las superficies; cuando F12 o F13 estén activas, son el punto de coordinación antes de tocar `backend/tests/` y `docs/`.
+5. **Excepciones de arranque anticipado ya declaradas en el plan**, y solo esas: F06 puede empezar con escenas sintéticas antes de F07; F08 puede empezar con el piloto de inferencia antes de F05/F06; F11 admite un smoke temprano después de F02.
 
 ### 1.5 Restricciones
 
