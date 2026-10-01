@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHmac, randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 import { createRequire } from "node:module";
@@ -12,6 +12,10 @@ import { chromium } from "playwright";
 const shellDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = resolve(shellDirectory, "../..");
 const backendDirectory = resolve(repositoryRoot, "backend");
+const captureDirectory = resolve(
+  repositoryRoot,
+  process.env.ROOMFORGE_CAPTURE_DIR || "docs/capturas",
+);
 let webOrigin;
 const postgresImage = "postgres:16-alpine";
 const pythonExecutable =
@@ -333,6 +337,103 @@ async function assertVisible(locator, message) {
   }
 }
 
+async function captureScreenshot(page, filename) {
+  mkdirSync(captureDirectory, { recursive: true });
+  await page.screenshot({
+    path: resolve(captureDirectory, filename),
+    fullPage: true,
+  });
+}
+
+async function captureAuthenticatedScreenshot(
+  page,
+  filename,
+  loginPayload,
+  additionalSensitiveValues = [],
+) {
+  const content = await page.content();
+  assert.equal(
+    content.includes(loginPayload.access_token),
+    false,
+    "Authenticated screenshots must not expose the access token from the login response.",
+  );
+  for (const value of [loginPayload.csrf_token, ...additionalSensitiveValues].filter(Boolean)) {
+    assert.equal(
+      content.includes(value),
+      false,
+      "Authenticated screenshots must not expose CSRF or refreshed token values.",
+    );
+  }
+  await captureScreenshot(page, filename);
+}
+
+async function captureApiDocumentation(context, backendOrigin) {
+  let docsPage;
+  try {
+    docsPage = await context.newPage();
+    const response = await docsPage.goto(`${backendOrigin}/docs`, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+    if (!response?.ok()) {
+      throw new Error(`The API documentation page returned HTTP ${response?.status() ?? "no response"}.`);
+    }
+
+    await docsPage.locator("#swagger-ui .opblock-tag").first().waitFor({
+      state: "visible",
+      timeout: 15_000,
+    });
+    const relevantOperations = await docsPage.evaluate(async () => {
+      const schemaResponse = await fetch("/openapi.json");
+      if (!schemaResponse.ok) {
+        throw new Error(`OpenAPI schema returned HTTP ${schemaResponse.status}.`);
+      }
+      const schema = await schemaResponse.json();
+      const routePattern = /catalog|publication|property|listing|inmueble/i;
+      return Object.entries(schema.paths ?? {}).flatMap(([path, methods]) =>
+        Object.entries(methods).flatMap(([method, operation]) => {
+          if (!/^(get|post|put|patch|delete)$/i.test(method)) return [];
+          const tags = operation.tags ?? [];
+          const routeDescription = `${path} ${operation.summary ?? ""} ${tags.join(" ")}`;
+          const isStaffRoute = /\/staff(?:\/|$)/i.test(path) || tags.some((tag) => /staff/i.test(tag));
+          return isStaffRoute && routePattern.test(routeDescription) ? [{ path, tags }] : [];
+        }),
+      );
+    });
+    if (relevantOperations.length === 0) {
+      throw new Error("No staff catalogue or publication operations were found in the OpenAPI schema.");
+    }
+
+    const relevantTags = [
+      ...new Set(relevantOperations.flatMap(({ tags }) => (tags.length > 0 ? tags : ["default"]))),
+    ];
+    if (relevantTags.length === 0) {
+      throw new Error("The matching OpenAPI operations have no Swagger UI tags to expand.");
+    }
+    for (const tag of relevantTags) {
+      const tagButton = docsPage.locator("#swagger-ui .opblock-tag").filter({ hasText: tag }).first();
+      await tagButton.waitFor({ state: "visible", timeout: 10_000 });
+      if ((await tagButton.getAttribute("aria-expanded")) !== "true") {
+        await tagButton.click();
+      }
+    }
+    const renderedDocumentation = (await docsPage.locator("#swagger-ui").innerText()).replace(/\s+/g, "");
+    for (const { path } of relevantOperations) {
+      if (!renderedDocumentation.includes(path.replace(/\s+/g, ""))) {
+        throw new Error(`The Swagger UI did not render the OpenAPI route ${path}.`);
+      }
+    }
+
+    await captureScreenshot(docsPage, "f04-staff-publication-api-docs.png");
+    console.log("API documentation capture produced: f04-staff-publication-api-docs.png.");
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "The API documentation page could not be rendered.";
+    console.log(`API documentation capture unavailable: ${reason}`);
+  } finally {
+    if (docsPage) await docsPage.close().catch(() => {});
+  }
+}
+
 function waitForApiResponse(page, pathname, method) {
   return page.waitForResponse(
     (response) => {
@@ -347,9 +448,12 @@ function waitForApiResponse(page, pathname, method) {
   );
 }
 
-async function runBrowserFlow() {
+async function runBrowserFlow(backendOrigin) {
   browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext();
+  const context = await browser.newContext({
+    viewport: { width: 1600, height: 1000 },
+    deviceScaleFactor: 2,
+  });
   const page = await context.newPage();
   const observedApiRequests = [];
 
@@ -365,6 +469,7 @@ async function runBrowserFlow() {
     page.getByRole("heading", { level: 1, name: "Acceso de personal" }),
     "The staff login screen should be visible before authentication.",
   );
+  await captureScreenshot(page, "f02-staff-login-initial.png");
 
   const unauthenticatedMeStatus = await page.evaluate(async () => {
     const response = await fetch("/api/v1/auth/me");
@@ -374,11 +479,13 @@ async function runBrowserFlow() {
 
   await page.getByLabel("Correo electrónico").fill(staffEmail);
   await page.getByLabel("Contraseña", { exact: true }).fill(staffPassword);
+  await captureScreenshot(page, "f02-staff-login-filled.png");
   await page.getByRole("button", { name: "Continuar" }).click();
   await assertVisible(
     page.getByRole("heading", { level: 1, name: "Verificación en dos pasos" }),
     "Valid staff credentials should advance to the TOTP challenge.",
   );
+  await captureScreenshot(page, "f03-staff-totp-verification.png");
 
   await page.getByLabel("Código de autenticación").fill(createTotp(totpSecret));
   const loginResponsePromise = waitForApiResponse(page, "/api/v1/auth/login/totp", "POST");
@@ -396,6 +503,11 @@ async function runBrowserFlow() {
     "A successful login should display the protected staff view.",
   );
   assert.equal(await page.getByText(staffEmail).isVisible(), true, "The protected view should show the authenticated identity.");
+  await captureAuthenticatedScreenshot(
+    page,
+    "f03-staff-protected-view-login.png",
+    loginPayload,
+  );
 
   const initialStorage = await page.evaluate(() => ({
     localStorageKeys: Object.keys(localStorage),
@@ -434,6 +546,12 @@ async function runBrowserFlow() {
   await assertVisible(
     page.getByRole("heading", { level: 1, name: "Administración de plataforma" }),
     "The protected staff view should be restored after a page reload.",
+  );
+  await captureAuthenticatedScreenshot(
+    page,
+    "f03-staff-protected-view-reload.png",
+    loginPayload,
+    [refreshPayload.access_token, refreshPayload.csrf_token],
   );
   const restoredStorage = await page.evaluate(() => ({
     csrfToken: sessionStorage.getItem("roomforge.staff.csrf"),
@@ -485,6 +603,7 @@ async function runBrowserFlow() {
     assert.ok(observedApiRequests.includes(endpoint), `${endpoint} should be sent by the browser through Vite's /api proxy.`);
   }
 
+  await captureApiDocumentation(context, backendOrigin);
   await context.close();
   await browser.close();
   browser = null;
@@ -630,7 +749,7 @@ async function main() {
       backendPort,
     );
 
-    await runBrowserFlow();
+    await runBrowserFlow(backendOrigin);
     statusMessage = "Staff login browser E2E passed: login, TOTP, /me, reload/restore, logout/revocation, and auth/CSRF negatives.";
   } finally {
     await cleanup();

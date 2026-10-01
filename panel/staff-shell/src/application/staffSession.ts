@@ -4,7 +4,6 @@ import {
   refreshStaffSession,
   StaffAuthApiError,
   type LoginCompletion,
-  type StaffSessionTokens,
   type StaffUser,
 } from "./staffAuthApi";
 
@@ -104,7 +103,7 @@ const supportedRoles = new Set<StaffRole>([
 
 const inFlightRestorations = new WeakMap<
   StaffSessionStorage,
-  Promise<StaffSession | null>
+  Promise<StaffRestoreOutcome>
 >();
 
 export function isSupportedStaffRole(role: string): role is StaffRole {
@@ -143,13 +142,13 @@ async function resolveStaffSession(
  * Restores a stored session and reports why it failed, so the UI can tell an
  * expired session apart from a network outage or a forbidden account.
  */
-export async function restoreStaffSessionOutcome(
-  storage: StaffSessionStorage = browserSessionStorage(),
+async function restoreStaffSessionFromStorage(
+  storage: StaffSessionStorage,
 ): Promise<StaffRestoreOutcome> {
   const currentCsrfToken = storage.getItem(STAFF_CSRF_STORAGE_KEY);
   if (!currentCsrfToken) return { kind: "signed-out" };
 
-  let rotatedTokens: StaffSessionTokens;
+  let rotatedTokens;
   try {
     rotatedTokens = await refreshStaffSession(currentCsrfToken);
   } catch (error) {
@@ -169,6 +168,28 @@ export async function restoreStaffSessionOutcome(
   } catch (error) {
     return failureOutcome(error);
   }
+}
+
+/**
+ * Restores a stored session once per storage object and reports why it failed.
+ */
+export function restoreStaffSessionOutcome(
+  storage: StaffSessionStorage = browserSessionStorage(),
+): Promise<StaffRestoreOutcome> {
+  const existingRestoration = inFlightRestorations.get(storage);
+  if (existingRestoration) return existingRestoration;
+
+  const restoration = restoreStaffSessionFromStorage(storage);
+  inFlightRestorations.set(storage, restoration);
+
+  const clearRestoration = () => {
+    if (inFlightRestorations.get(storage) === restoration) {
+      inFlightRestorations.delete(storage);
+    }
+  };
+  void restoration.then(clearRestoration, clearRestoration);
+
+  return restoration;
 }
 
 /**
@@ -199,48 +220,12 @@ export async function renewStaffSession(
   }
 }
 
-async function restoreStaffSessionFromStorage(
-  storage: StaffSessionStorage,
-): Promise<StaffSession | null> {
-  const currentCsrfToken = storage.getItem(STAFF_CSRF_STORAGE_KEY);
-  if (!currentCsrfToken) return null;
-
-  let rotatedTokens: StaffSessionTokens;
-  try {
-    rotatedTokens = await refreshStaffSession(currentCsrfToken);
-  } catch {
-    storage.removeItem(STAFF_CSRF_STORAGE_KEY);
-    return null;
-  }
-
-  try {
-    return await resolveStaffSession(
-      rotatedTokens.access_token,
-      rotatedTokens.csrf_token,
-      storage,
-    );
-  } catch {
-    return null;
-  }
-}
-
 export function restoreStaffSession(
   storage: StaffSessionStorage = browserSessionStorage(),
 ): Promise<StaffSession | null> {
-  const existingRestoration = inFlightRestorations.get(storage);
-  if (existingRestoration) return existingRestoration;
-
-  const restoration = restoreStaffSessionFromStorage(storage);
-  inFlightRestorations.set(storage, restoration);
-
-  const clearRestoration = () => {
-    if (inFlightRestorations.get(storage) === restoration) {
-      inFlightRestorations.delete(storage);
-    }
-  };
-  void restoration.then(clearRestoration, clearRestoration);
-
-  return restoration;
+  return restoreStaffSessionOutcome(storage).then((outcome) =>
+    outcome.kind === "session" ? outcome.session : null,
+  );
 }
 
 export function completeStaffSession(

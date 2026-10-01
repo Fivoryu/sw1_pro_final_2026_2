@@ -276,6 +276,46 @@ describe("staff session expiry and failure classification", () => {
     });
   });
 
+  it("shares one outcome across concurrent outcome restorations", async () => {
+    const { storage } = createStorage({ [STAFF_CSRF_STORAGE_KEY]: "stored-csrf" });
+    vi.mocked(refreshStaffSession)
+      .mockResolvedValueOnce({
+        access_token: fakeAccessToken(1_800_000_000),
+        csrf_token: "rotated-csrf",
+      })
+      .mockRejectedValueOnce(
+        new StaffAuthApiError(401, "Session is invalid or expired"),
+      );
+    vi.mocked(getStaffMe).mockResolvedValue({ user: staffUser("agency_admin") });
+
+    const outcomes = await Promise.all([
+      restoreStaffSessionOutcome(storage),
+      restoreStaffSessionOutcome(storage),
+    ]);
+
+    expect(refreshStaffSession).toHaveBeenCalledTimes(1);
+    expect(outcomes).toEqual([
+      {
+        kind: "session",
+        session: {
+          accessToken: fakeAccessToken(1_800_000_000),
+          csrfToken: "rotated-csrf",
+          accessExpiresAt: 1_800_000_000_000,
+          user: staffUser("agency_admin"),
+        },
+      },
+      {
+        kind: "session",
+        session: {
+          accessToken: fakeAccessToken(1_800_000_000),
+          csrfToken: "rotated-csrf",
+          accessExpiresAt: 1_800_000_000_000,
+          user: staffUser("agency_admin"),
+        },
+      },
+    ]);
+  });
+
   it("returns the resolved session on a successful restoration", async () => {
     const { storage } = createStorage({ [STAFF_CSRF_STORAGE_KEY]: "stored-csrf" });
     vi.mocked(refreshStaffSession).mockResolvedValue({
