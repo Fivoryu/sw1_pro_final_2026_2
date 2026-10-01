@@ -64,6 +64,7 @@ services:
       STAFF_TOTP_ENCRYPTION_KEY: ${STAFF_TOTP_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
       STAFF_WEB_ORIGIN: "http://127.0.0.1:${PANEL_PORT:-5173}"
       STAFF_SECURE_COOKIES: "false"
+      STAFF_EMAIL_SENDER_FACTORY: app.core.dev_email:create_dev_outbox_sender
       AWS_ACCESS_KEY_ID: local-test-key
       AWS_SECRET_ACCESS_KEY: local-test-secret
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}

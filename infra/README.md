@@ -98,6 +98,35 @@ Al finalizar, los cuatro contenedores de prueba quedaron detenidos y se retuvier
 
 Esta evidencia confirma probes/configuración y persistencia directa de datos en Floci, no operaciones S3/SQS a nivel de la aplicación FastAPI. Floci es emulación local, no AWS ni una garantía de paridad completa.
 
+## Acceso local de personal
+
+El backend no incluye un transporte de correo real. En este stack, el servicio `api` usa `STAFF_EMAIL_SENDER_FACTORY=app.core.dev_email:create_dev_outbox_sender`: cada invitación de personal (administrador de plataforma, administrador de agencia o agente) se guarda como un archivo JSON en `/tmp/roomforge-dev-outbox/` dentro del contenedor `api`, en lugar de enviarse por correo. El enlace contiene un token de un solo uso, por eso no se escribe en logs. El transporte se niega a cargar si `STAFF_WEB_ORIGIN` no es un origen local (`127.0.0.1` o `localhost`); no debe usarse fuera de desarrollo.
+
+Crear el primer administrador de plataforma, con el stack iniciado:
+
+1. Aplicar las migraciones (la imagen de la API no las ejecuta al arrancar). Desde `backend/`, con el entorno Python del proyecto:
+
+   ```powershell
+   $env:DATABASE_URL = "postgresql+psycopg://roomforge_local:local-postgres-only@127.0.0.1:5434/roomforge_local"
+   ..\.venv\Scripts\python.exe -m alembic upgrade head
+   ```
+
+2. Emitir la invitación (sustituir el correo):
+
+   ```powershell
+   docker compose --env-file infra/docker/local-env.example -f infra/docker/compose.local.yml exec -T api python -m app.modules.identity.bootstrap --email admin@example.test
+   ```
+
+3. Leer la invitación desde la bandeja de salida:
+
+   ```powershell
+   docker compose --env-file infra/docker/local-env.example -f infra/docker/compose.local.yml exec -T api sh -c "cat /tmp/roomforge-dev-outbox/*.json"
+   ```
+
+4. Abrir el valor `link` en el navegador (`http://127.0.0.1:5173/invitations/accept/...`), definir la contraseña, registrar el código TOTP en una app autenticadora y guardar los códigos de recuperación.
+
+Las invitaciones que después emita el panel o la API (administradores de agencia y agentes) llegan a la misma bandeja. Solo puede haber una invitación de administrador de plataforma pendiente a la vez. La bandeja vive en el sistema de archivos del contenedor: se pierde al recrearlo, así que conviene leer cada enlace al emitirlo.
+
 ## Comprobar PostgreSQL
 
 El healthcheck de PostgreSQL usa `pg_isready`. También se puede ejecutar explícitamente y realizar una consulta SQL dentro del contenedor:
