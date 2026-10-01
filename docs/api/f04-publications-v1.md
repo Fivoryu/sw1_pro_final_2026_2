@@ -24,6 +24,8 @@ Todas las rutas nuevas son de personal y requieren una sesión autenticada media
 | Método y ruta | Resultado |
 |---|---|
 | `POST /api/v1/staff/agencies/{agency_id}/listings` | Crea un borrador (`201`). |
+| `GET /api/v1/staff/agencies/{agency_id}/listings` | Lista los inmuebles de la agencia, paginados y filtrables (`200`). |
+| `GET /api/v1/staff/agencies/{agency_id}/listings/{listing_id}` | Devuelve un inmueble de la agencia con sus campos privados (`200`). |
 | `PUT /api/v1/staff/agencies/{agency_id}/listings/{listing_id}` | Reemplaza el contenido y reabre el borrador (`200`). |
 | `POST /api/v1/staff/agencies/{agency_id}/listings/{listing_id}/submit` | Envía a revisión (`200`). |
 | `POST /api/v1/staff/agencies/{agency_id}/listings/{listing_id}/approve` | Aprueba una solicitud pendiente (`200`). |
@@ -51,11 +53,51 @@ El cuerpo de alta y reemplazo admite únicamente estos campos:
 
 Los esquemas rechazan campos adicionales. No se aceptan autoridad, estado ni valores derivados del cliente, incluidos `tenant_id`, actor, rol, `status`, `is_published`, `offer_version`, timestamps, `city_key`, `zone_key` y `photos`.
 
+### Listado y consulta de personal
+
+`GET /api/v1/staff/agencies/{agency_id}/listings` admite estos parámetros de consulta, todos opcionales:
+
+| Parámetro | Valores | Efecto |
+|---|---|---|
+| `status` | `draft`, `pending`, `approved`, `rejected` | Filtra por estado de revisión. |
+| `published` | `true`, `false` | Filtra por visibilidad en el catálogo público. |
+| `limit` | Entero de 1 a 100; predeterminado 20 | Tamaño de la página. |
+| `offset` | Entero mayor o igual a 0; predeterminado 0 | Posición de inicio. |
+
+Ordena del más reciente al más antiguo (`created_at` descendente, luego `id` descendente) y responde con la misma forma de paginación que el listado de inmobiliarias de `docs/api/f02-api-contract.md`; `total` cuenta los resultados filtrados antes de paginar:
+
+```json
+{
+  "listings": [
+    {
+      "listing_id": "…",
+      "agency_id": "…",
+      "operation": "sale",
+      "base_price": "125000.00",
+      "city": "Medellín",
+      "zone": "El Poblado",
+      "bedrooms": 3,
+      "bathrooms": 2,
+      "description": "Descripción opcional",
+      "exact_address": "Dirección opcional",
+      "approval_status": "pending",
+      "is_published": false,
+      "offer_version": 1,
+      "created_at": "2026-10-01T12:00:00Z"
+    }
+  ],
+  "pagination": {"limit": 20, "offset": 0, "total": 1}
+}
+```
+
+Un parámetro fuera de contrato responde `422`; un `offset` posterior al último elemento devuelve `listings: []` con el `total` real. `GET /api/v1/staff/agencies/{agency_id}/listings/{listing_id}` devuelve un único elemento con la misma forma. Ambas rutas exponen `description` y `exact_address`, que el catálogo público omite, y nunca incluyen el historial ni las fotografías.
+
 ## Autorización
 
 | Operación | `agency_admin` de la agencia | `agent` de la agencia | Otro tenant | `platform_admin` |
 |---|---:|---:|---:|---:|
 | Crear, editar, enviar a revisión, leer transiciones | Sí | Sí | `403` | `403` |
+| Listar y consultar inmuebles de la agencia | Sí | Sí, todos los de su agencia | `403` | `403` |
 | Aprobar, rechazar, publicar, retirar | Sí | `403` | `403` | `403` |
 
 La agencia y el actor se obtienen de la sesión de personal. Un inmueble inexistente dentro de la agencia autorizada responde `404`; no se consultan recursos de otra agencia para determinar su existencia. El catálogo público sigue siendo transversal entre agencias, sin exponer el historial privado.
@@ -81,5 +123,6 @@ La versión comercial comienza en `1` y la controlan los disparadores existentes
 
 - F04.2, fotografías: diferido. No se implementan carga, almacenamiento, validación ni estados; tampoco se acepta `photos` en estos cuerpos.
 - No se crean revisiones inmutables versionadas del inmueble. La edición modifica el registro existente y una publicación vuelve a requerir aprobación.
-- La migración `0012_listing_transitions.py` no se aplicó contra PostgreSQL.
+- La migración `0012_listing_transitions.py` se verificó después contra un PostgreSQL descartable (`docs/plan-maestro-roomforge.md` §1.4.2.bis) y el 2026-10-01 se aplicó en el PostgreSQL del stack local de desarrollo; no hay verificación en un entorno desplegado.
+- Las rutas de listado y consulta de personal no requieren migración: usan columnas existentes.
 - No se ejecutó ningún caso académico CP; la suite técnica no es evidencia de ejecución académica.

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Annotated, Literal, cast
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy.exc import SQLAlchemyError
@@ -23,6 +23,7 @@ from app.modules.catalog.schemas import (
     CatalogListingItem,
     CatalogListingPage,
     CatalogMoney,
+    ListingApprovalStatus,
     ListingOperation,
     QuoteCreateRequest,
     QuoteErrorResponse,
@@ -34,6 +35,8 @@ from app.modules.catalog.schemas import (
     ListingAuthoringResponse,
     ListingTransitionRequest,
     ListingTransitionResponse,
+    StaffListingPage,
+    StaffListingPagination,
 )
 from app.modules.catalog.errors import InvalidListingTransitionError
 from app.modules.catalog.service import (
@@ -42,6 +45,7 @@ from app.modules.catalog.service import (
     edit_staff_listing,
     get_staff_listing,
     list_listing_transitions,
+    list_staff_listings,
     InvalidCursorError,
     consume_quote_rate_limit,
     create_quote_snapshot,
@@ -333,9 +337,7 @@ def _authoring_response(listing: Listing) -> ListingAuthoringResponse:
         bathrooms=listing.bathrooms,
         description=listing.description,
         exact_address=listing.exact_address,
-        approval_status=cast(
-            Literal["draft", "pending", "approved", "rejected"], listing.approval_status
-        ),
+        approval_status=cast(ListingApprovalStatus, listing.approval_status),
         is_published=listing.is_published,
         offer_version=listing.offer_version,
         created_at=listing.created_at,
@@ -364,6 +366,55 @@ def create_agency_listing(
             actor_role=staff["role"],
             now=request.app.state.clock(),
         )
+        return _authoring_response(listing)
+
+
+@router.get(
+    "/api/v1/staff/agencies/{agency_id}/listings",
+    response_model=StaffListingPage,
+)
+def list_agency_listings(
+    agency_id: str,
+    request: Request,
+    status: Annotated[ListingApprovalStatus | None, Query()] = None,
+    published: Annotated[bool | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> StaffListingPage:
+    _require_listing_editor(staff, agency_id)
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    with session_factory() as session:
+        listings, total = list_staff_listings(
+            session,
+            agency_id=agency_id,
+            approval_status=status,
+            is_published=published,
+            limit=limit,
+            offset=offset,
+        )
+        return StaffListingPage(
+            listings=[_authoring_response(listing) for listing in listings],
+            pagination=StaffListingPagination(limit=limit, offset=offset, total=total),
+        )
+
+
+@router.get(
+    "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}",
+    response_model=ListingAuthoringResponse,
+)
+def get_agency_listing(
+    agency_id: str,
+    listing_id: str,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> ListingAuthoringResponse:
+    _require_listing_editor(staff, agency_id)
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    with session_factory() as session:
+        listing = get_staff_listing(session, agency_id=agency_id, listing_id=listing_id)
+        if listing is None:
+            raise HTTPException(status_code=404, detail="Listing not found")
         return _authoring_response(listing)
 
 

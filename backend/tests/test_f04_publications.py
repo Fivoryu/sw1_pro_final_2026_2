@@ -123,26 +123,28 @@ def _seed_listing(
     approval_status: str = "draft",
     is_published: bool = False,
     base_price: str = "100000.00",
+    created_at: datetime | None = None,
 ) -> None:
     with context.session_factory.begin() as session:
         if session.get(Agency, agency_id) is None:
             session.add(Agency(id=agency_id))
             session.flush()
-        session.add(
-            Listing(
-                id=listing_id,
-                agency_id=agency_id,
-                approval_status=approval_status,
-                is_published=is_published,
-                operation="sale",
-                base_price=Decimal(base_price),
-                offer_version=1,
-                city="Córdoba",
-                zone="Centro",
-                bedrooms=2,
-                bathrooms=1,
-            )
+        listing = Listing(
+            id=listing_id,
+            agency_id=agency_id,
+            approval_status=approval_status,
+            is_published=is_published,
+            operation="sale",
+            base_price=Decimal(base_price),
+            offer_version=1,
+            city="Córdoba",
+            zone="Centro",
+            bedrooms=2,
+            bathrooms=1,
         )
+        if created_at is not None:
+            listing.created_at = created_at
+        session.add(listing)
 
 
 def _create_quote(context: F04Context, listing_id: str) -> str:
@@ -471,3 +473,166 @@ def test_transition_history_is_staff_only_append_ordered_and_absent_from_catalog
     assert all(item["actor_id"] == "history-actor" for item in history.json())
     public = context.client.get("/api/v1/listings")
     assert "transitions" not in public.text and "history-actor" not in public.text
+
+
+def _at(day: int) -> datetime:
+    return datetime(2026, 9, day, 12, 0, tzinfo=timezone.utc)
+
+
+def _listed_ids(response: Any) -> list[str]:
+    return [item["listing_id"] for item in response.json()["listings"]]
+
+
+def test_staff_list_returns_only_own_agency_listings_newest_first(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    _seed_listing(context, "older-draft", created_at=_at(1))
+    _seed_listing(context, "newer-pending", approval_status="pending", created_at=_at(3))
+    _seed_listing(
+        context, "middle-published", approval_status="approved", is_published=True, created_at=_at(2)
+    )
+    _seed_listing(context, "foreign", agency_id="agency-two", created_at=_at(4))
+    _staff(context)
+
+    response = context.client.get(_collection_url("agency-one"))
+
+    assert response.status_code == 200, response.text
+    assert _listed_ids(response) == ["newer-pending", "middle-published", "older-draft"]
+    assert response.json()["pagination"] == {"limit": 20, "offset": 0, "total": 3}
+    item = response.json()["listings"][0]
+    assert item["agency_id"] == "agency-one"
+    assert item["approval_status"] == "pending" and item["is_published"] is False
+
+
+def test_staff_list_filters_by_review_status_and_publication(f04_context: F04Context) -> None:
+    context = f04_context
+    _seed_listing(context, "draft", created_at=_at(1))
+    _seed_listing(context, "pending-a", approval_status="pending", created_at=_at(2))
+    _seed_listing(context, "pending-b", approval_status="pending", created_at=_at(3))
+    _seed_listing(context, "rejected", approval_status="rejected", created_at=_at(4))
+    _seed_listing(context, "approved-hidden", approval_status="approved", created_at=_at(5))
+    _seed_listing(
+        context, "approved-live", approval_status="approved", is_published=True, created_at=_at(6)
+    )
+    _staff(context)
+
+    pending = context.client.get(_collection_url("agency-one"), params={"status": "pending"})
+    approved_hidden = context.client.get(
+        _collection_url("agency-one"), params={"status": "approved", "published": "false"}
+    )
+    live = context.client.get(_collection_url("agency-one"), params={"published": "true"})
+
+    assert _listed_ids(pending) == ["pending-b", "pending-a"]
+    assert pending.json()["pagination"]["total"] == 2
+    assert _listed_ids(approved_hidden) == ["approved-hidden"]
+    assert _listed_ids(live) == ["approved-live"]
+
+
+def test_staff_list_paginates_with_limit_offset_and_total(f04_context: F04Context) -> None:
+    context = f04_context
+    for day in range(1, 6):
+        _seed_listing(context, f"listing-{day}", created_at=_at(day))
+    _staff(context)
+
+    page = context.client.get(_collection_url("agency-one"), params={"limit": 2, "offset": 1})
+    past_end = context.client.get(_collection_url("agency-one"), params={"offset": 10})
+
+    assert _listed_ids(page) == ["listing-4", "listing-3"]
+    assert page.json()["pagination"] == {"limit": 2, "offset": 1, "total": 5}
+    assert past_end.status_code == 200
+    assert _listed_ids(past_end) == []
+    assert past_end.json()["pagination"]["total"] == 5
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"limit": 0},
+        {"limit": 101},
+        {"offset": -1},
+        {"status": "published"},
+        {"published": "maybe"},
+    ],
+)
+def test_staff_list_rejects_out_of_contract_query_parameters(
+    f04_context: F04Context, params: dict[str, Any]
+) -> None:
+    context = f04_context
+    _staff(context)
+
+    response = context.client.get(_collection_url("agency-one"), params=params)
+
+    assert response.status_code == 422, response.text
+
+
+def test_agent_lists_every_listing_of_their_agency(f04_context: F04Context) -> None:
+    context = f04_context
+    _seed_listing(context, "from-admin", created_at=_at(1))
+    _seed_listing(context, "from-other-agent", approval_status="pending", created_at=_at(2))
+    _staff(context, role="agent", actor_id="some-agent")
+
+    response = context.client.get(_collection_url("agency-one"))
+
+    assert response.status_code == 200, response.text
+    assert _listed_ids(response) == ["from-other-agent", "from-admin"]
+
+
+@pytest.mark.parametrize(
+    ("role", "tenant_id"),
+    [("agency_admin", "agency-two"), ("agent", "agency-two"), ("platform_admin", None)],
+)
+def test_staff_list_and_detail_forbid_other_tenants_and_platform_admin(
+    f04_context: F04Context, role: str, tenant_id: str | None
+) -> None:
+    context = f04_context
+    _seed_listing(context, "private-listing")
+    _staff(context, role=role, tenant_id=tenant_id)
+
+    listed = context.client.get(_collection_url("agency-one"))
+    detail = context.client.get(_url("agency-one", "private-listing"))
+
+    assert listed.status_code == detail.status_code == 403
+    assert "private-listing" not in listed.text + detail.text
+
+
+def test_staff_detail_returns_private_listing_fields(f04_context: F04Context) -> None:
+    context = f04_context
+    _staff(context, role="agent")
+    created = context.client.post(_collection_url("agency-one"), json=_payload())
+    assert created.status_code == 201, created.text
+    listing_id = created.json()["listing_id"]
+
+    response = context.client.get(_url("agency-one", listing_id))
+
+    assert response.status_code == 200, response.text
+    assert response.json() == created.json()
+    assert response.json()["exact_address"] == "Private address"
+    assert response.json()["description"] == "A bright apartment"
+
+
+def test_staff_detail_of_foreign_or_missing_listing_is_an_identical_404(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    _seed_listing(context, "foreign-listing", agency_id="agency-two")
+    _staff(context, tenant_id="agency-one")
+
+    foreign = context.client.get(_url("agency-one", "foreign-listing"))
+    missing = context.client.get(_url("agency-one", "missing-listing"))
+
+    assert foreign.status_code == missing.status_code == 404
+    assert foreign.json() == missing.json()
+
+
+def test_staff_read_routes_are_documented_and_public_catalog_still_hides_drafts(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    _seed_listing(context, "hidden-draft")
+    paths = context.client.get("/openapi.json").json()["paths"]
+
+    assert "get" in paths["/api/v1/staff/agencies/{agency_id}/listings"]
+    assert "get" in paths["/api/v1/staff/agencies/{agency_id}/listings/{listing_id}"]
+    public = context.client.get("/api/v1/listings")
+    assert "hidden-draft" not in public.text

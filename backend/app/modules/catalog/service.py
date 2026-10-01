@@ -347,6 +347,31 @@ def get_staff_listing(
     )
 
 
+def list_staff_listings(
+    session: Session,
+    *,
+    agency_id: str,
+    approval_status: str | None,
+    is_published: bool | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[Listing], int]:
+    """Return one page of an agency's listings, newest first, and the filtered total."""
+    query = session.query(Listing).filter(Listing.agency_id == agency_id)
+    if approval_status is not None:
+        query = query.filter(Listing.approval_status == approval_status)
+    if is_published is not None:
+        query = query.filter(Listing.is_published == is_published)
+    total = query.count()
+    listings = (
+        query.order_by(Listing.created_at.desc(), Listing.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return listings, total
+
+
 def list_listing_transitions(session: Session, listing_id: str) -> list[ListingTransition]:
     return (
         session.query(ListingTransition)
