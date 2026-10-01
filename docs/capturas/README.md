@@ -6,11 +6,11 @@ Estas imágenes se generan durante una ejecución real del E2E del panel de pers
 
 | Archivo | Qué muestra | Fase del plan | Reproducción exacta | Dimensiones |
 | --- | --- | --- | --- | --- |
-| `f02-staff-login-initial.png` | Pantalla de acceso de personal antes de ingresar datos. | F02 — base y experiencia de usuario del panel. | `cd panel/staff-shell && npm run test:e2e` | 3200 × 2012 px |
-| `f02-staff-login-filled.png` | Formulario con el correo ficticio de la prueba y la contraseña todavía enmascarada, justo antes de enviarlo. | F02 — base y experiencia de usuario del panel. | `cd panel/staff-shell && npm run test:e2e` | 3200 × 2012 px |
-| `f03-staff-totp-verification.png` | Pantalla del segundo paso de verificación, antes de ingresar el código TOTP. | F03 — identidad y sesión. | `cd panel/staff-shell && npm run test:e2e` | 3200 × 2000 px |
-| `f03-staff-protected-view-login.png` | Vista protegida de administración inmediatamente después de iniciar sesión. | F03 — identidad y sesión. | `cd panel/staff-shell && npm run test:e2e` | 3200 × 2000 px |
-| `f03-staff-protected-view-reload.png` | La misma vista protegida luego de recargar la página; evidencia visual de la restauración de sesión. | F03 — identidad y sesión. | `cd panel/staff-shell && npm run test:e2e` | 3200 × 2000 px |
+| `f02-staff-login-initial.png` | Pantalla de acceso de personal antes de ingresar datos. | F02 — base y experiencia de usuario del panel. | `cd panel/staff-shell && npm run test:e2e` | 1600 × 1006 px |
+| `f02-staff-login-filled.png` | Formulario con el correo ficticio de la prueba y la contraseña todavía enmascarada, justo antes de enviarlo. | F02 — base y experiencia de usuario del panel. | `cd panel/staff-shell && npm run test:e2e` | 1600 × 1006 px |
+| `f03-staff-totp-verification.png` | Pantalla del segundo paso de verificación, antes de ingresar el código TOTP. | F03 — identidad y sesión. | `cd panel/staff-shell && npm run test:e2e` | 1600 × 1000 px |
+| `f03-staff-protected-view-login.png` | Vista protegida de administración inmediatamente después de iniciar sesión. | F03 — identidad y sesión. | `cd panel/staff-shell && npm run test:e2e` | 1600 × 1000 px |
+| `f03-staff-protected-view-reload.png` | La misma vista protegida luego de recargar la página; evidencia visual de la restauración de sesión. | F03 — identidad y sesión. | `cd panel/staff-shell && npm run test:e2e` | 1600 × 1000 px |
 | `f04-staff-publication-api-docs.png` | **No disponible: no se generó PNG.** El intento contra `/docs` no logró mostrar en Swagger UI la ruta OpenAPI `/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/deposit`, por lo que no se guardó una captura incompleta. | F04 — publicación de inmuebles (API, sin UI propia). | `cd panel/staff-shell && npm run test:e2e` | No aplica |
 
 Desde la raíz del repositorio, el comando exacto de reproducción es:

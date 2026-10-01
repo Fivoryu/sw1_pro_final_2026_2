@@ -146,7 +146,7 @@ El único E2E del repositorio (`panel/staff-shell/e2e/staff-login.e2e.test.mjs`)
 
 La misma corrida produce las capturas de `docs/capturas/` (cinco PNG del panel que evidencian F02 y F03) y se agregó un E2E de F04 contra PostgreSQL descartable que aplica la cadena completa de migraciones y verifica `alembic current` = `0012_listing_transitions (head)`.
 
-**Límites de esta unidad.** Las dos capturas del panel protegido (antes y después del reload) son **byte-idénticas**, porque la UI restaurada es exactamente la misma: la evidencia de la restauración es la aserción del E2E, no el píxel. La captura de la documentación de la API de F04 **no se pudo producir** (Swagger UI no renderizó la ruta) y no se inventó ninguna imagen. Las apps móviles no tienen capturas por falta de dispositivo o emulador. Los cinco PNG suman ~5 MB, y el E2E los reescribe en `docs/capturas/` en cada corrida salvo que se cambie `ROOMFORGE_CAPTURE_DIR`.
+**Límites de esta unidad.** Las dos capturas del panel protegido (antes y después del reload) son **byte-idénticas**, porque la UI restaurada es exactamente la misma: la evidencia de la restauración es la aserción del E2E, no el píxel. La captura de la documentación de la API de F04 **no se pudo producir** (Swagger UI no renderizó la ruta) y no se inventó ninguna imagen. Las apps móviles no tienen capturas por falta de dispositivo o emulador. Los cinco PNG suman ~1,6 MB (a escala 1x; a 2x eran ~4,8 MB), y el E2E los reescribe en `docs/capturas/` en cada corrida salvo que se cambie `ROOMFORGE_CAPTURE_DIR`.
 
 ### 1.4.3 Fuentes canónicas y material no canónico
 

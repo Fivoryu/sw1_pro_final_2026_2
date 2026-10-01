@@ -452,7 +452,7 @@ async function runBrowserFlow(backendOrigin) {
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     viewport: { width: 1600, height: 1000 },
-    deviceScaleFactor: 2,
+    deviceScaleFactor: 1,
   });
   const page = await context.newPage();
   const observedApiRequests = [];
