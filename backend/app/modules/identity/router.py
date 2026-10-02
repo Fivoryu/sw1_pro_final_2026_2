@@ -129,6 +129,19 @@ def _is_concurrent_conflict(error: IntegrityError | OperationalError) -> bool:
     return bool(original_args) and original_args[0] in {1205, 1213}
 
 
+def _reject_foreign_origin(request: Request, settings: Settings) -> None:
+    """Reject a browser request from another origin.
+
+    Browsers send ``Origin`` on every cross-site POST, so a present value must match
+    the trusted panel origin (``null`` included as a mismatch). Native clients such
+    as the capture app send no ``Origin``; they still need the challenge and TOTP
+    proof to log in, or the refresh cookie plus the CSRF token to refresh or log out.
+    """
+    origin = request.headers.get("origin")
+    if origin is not None and origin != settings.web_origin:
+        raise HTTPException(status_code=403, detail="Origin is not allowed")
+
+
 @router.post("/invitations/accept", response_model=None)
 def accept_invitation(
     acceptance: InvitationAcceptance, request: Request
@@ -405,8 +418,7 @@ def complete_login_challenge(
         raise HTTPException(status_code=422, detail="Provide exactly one login proof")
 
     settings: Settings = request.app.state.settings
-    if request.headers.get("origin") != settings.web_origin:
-        raise HTTPException(status_code=403, detail="Origin is not allowed")
+    _reject_foreign_origin(request, settings)
 
     session_factory: sessionmaker[Session] = request.app.state.session_factory
     now = _as_utc(request.app.state.clock())
@@ -528,8 +540,7 @@ def complete_login_challenge(
 @router.post("/refresh", response_model=None)
 def refresh_session(request: Request, response: Response) -> dict[str, str]:
     settings: Settings = request.app.state.settings
-    if request.headers.get("origin") != settings.web_origin:
-        raise HTTPException(status_code=403, detail="Origin is not allowed")
+    _reject_foreign_origin(request, settings)
 
     csrf_token = request.headers.get("x-csrf-token")
     if not csrf_token:
@@ -618,8 +629,7 @@ def refresh_session(request: Request, response: Response) -> dict[str, str]:
 @router.post("/logout", response_model=None)
 def logout(request: Request, response: Response) -> Response:
     settings: Settings = request.app.state.settings
-    if request.headers.get("origin") != settings.web_origin:
-        raise HTTPException(status_code=403, detail="Origin is not allowed")
+    _reject_foreign_origin(request, settings)
 
     refresh_token = request.cookies.get("roomforge_refresh")
     if refresh_token is not None:

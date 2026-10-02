@@ -187,3 +187,7 @@ Everything above was written while the work was still local. What actually happe
 - PR #10 merged into `main` as the merge commit `b791340`. `main` requires one approving review and the pull request belonged to the repository owner, so the merge used the administrator override with the owner's explicit authorization: the required review was **not** obtained and the merge is recorded as an administrator action.
 - `main` now holds exactly the CI-verified tree (empty diff against `31d92f2`). The remote branch `feat/f03-identity-agencies` and the dedicated worktree were deleted afterwards, once both were confirmed fully contained in `main`.
 - Still true: the public catalog read API is deferred to F04 and is not reported as satisfied.
+
+## Nota posterior (2026-10-01): acceso de la app de captura contra la API real
+
+Lo registrado arriba como completo para `apps/captura_mobile` se verificó solo contra `test/support/fake_staff_backend.dart`. Contra la API real, `login/totp`, `refresh` y `logout` respondían `403 Origin is not allowed` porque la app, como cliente nativo, no envía `Origin`, y el controlador descartaba el token de acceso tras el login. Ambos defectos se corrigen en `odd/tasks/f03-capture-staff-origin.md`; este registro no se reescribe.

@@ -24,8 +24,9 @@ enum StaffSessionStatus {
 /// Owns the staff session: two-step login, restoration, denial, network
 /// failures, and logout.
 ///
-/// The access token is never stored; only the refresh cookie value and the CSRF
-/// token are persisted, because the API refreshes through them.
+/// The access token lives only in memory, for authenticated API calls; only the
+/// refresh cookie value and the CSRF token are persisted, because the API
+/// refreshes through them.
 class StaffSessionController extends ChangeNotifier {
   StaffSessionController({
     required StaffAuthApi api,
@@ -38,11 +39,15 @@ class StaffSessionController extends ChangeNotifier {
 
   StaffSessionStatus _status = StaffSessionStatus.restoring;
   StaffAccount? _account;
+  String? _accessToken;
   StaffAccessChallenge? _challenge;
   String? _message;
 
   StaffSessionStatus get status => _status;
   StaffAccount? get account => _account;
+
+  /// Bearer token of the current session, held in memory only.
+  String? get accessToken => _accessToken;
 
   /// User-facing notice for the last failure, if any.
   String? get message => _message;
@@ -153,6 +158,7 @@ class StaffSessionController extends ChangeNotifier {
     }
 
     _account = grant.account;
+    _accessToken = grant.accessToken;
     _status = StaffSessionStatus.signedIn;
     _message = null;
     notifyListeners();
@@ -171,6 +177,7 @@ class StaffSessionController extends ChangeNotifier {
   Future<void> _discardSession({String? message}) async {
     await _credentialStore.clear();
     _account = null;
+    _accessToken = null;
     _challenge = null;
     _status = StaffSessionStatus.signedOut;
     _message = message;
@@ -179,6 +186,7 @@ class StaffSessionController extends ChangeNotifier {
 
   void _setSignedOut({String? message}) {
     _account = null;
+    _accessToken = null;
     _challenge = null;
     _status = StaffSessionStatus.signedOut;
     _message = message;

@@ -2015,3 +2015,91 @@ def test_me_slides_activity_and_expires_after_thirty_minutes_idle(
         expired_session = session.get(StaffSession, session_id)
         assert expired_session is not None
         assert expired_session.revoked_at is not None
+
+
+def _complete_totp_login(
+    context: StaffIdentityContext, *, account_id: str, headers: dict[str, str]
+) -> Any:
+    from app.core.security import totp_code
+
+    password, totp_secret = _seed_login_admin(context, account_id=account_id)
+    challenge_token = _start_login_challenge(context, password=password)
+    return context.client.post(
+        "/api/v1/auth/login/totp",
+        json={
+            "challenge_token": challenge_token,
+            "code": totp_code(totp_secret, context.clock()),
+        },
+        headers=headers,
+    )
+
+
+def test_native_client_without_origin_completes_totp_login(
+    staff_identity_context: StaffIdentityContext,
+) -> None:
+    context = staff_identity_context
+
+    response = _complete_totp_login(
+        context, account_id="platform-admin-native-login-account", headers={}
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["access_token"]
+    assert response.cookies.get("roomforge_refresh")
+    with context.session_factory() as session:
+        assert session.query(StaffSession).count() == 1
+
+
+@pytest.mark.parametrize("origin", ["null", "https://attacker.example.test"])
+def test_totp_login_rejects_a_present_foreign_origin_without_a_session(
+    staff_identity_context: StaffIdentityContext, origin: str
+) -> None:
+    context = staff_identity_context
+
+    response = _complete_totp_login(
+        context,
+        account_id="platform-admin-foreign-origin-account",
+        headers={"Origin": origin},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Origin is not allowed"
+    with context.session_factory() as session:
+        assert session.query(StaffSession).count() == 0
+
+
+@pytest.mark.parametrize("path", ["/api/v1/auth/refresh", "/api/v1/auth/logout"])
+def test_native_refresh_and_logout_without_origin_still_require_csrf(
+    staff_identity_context: StaffIdentityContext, path: str
+) -> None:
+    context = staff_identity_context
+    login_payload, refresh_token = _authenticate_staff_admin(
+        context, account_id="platform-admin-native-csrf-account"
+    )
+    cookie = {"Cookie": f"roomforge_refresh={refresh_token}"}
+    with context.session_factory() as session:
+        original = session.query(StaffSession).one()
+        original_refresh_hash = original.refresh_hash
+
+    for headers in ({}, {"X-CSRF-Token": "incorrect-csrf-token"}, {"Origin": "null"}):
+        rejected = context.client.post(path, headers={**cookie, **headers})
+        assert rejected.status_code == 403, (headers, rejected.text)
+        with context.session_factory() as session:
+            unchanged = session.query(StaffSession).one()
+            assert unchanged.refresh_hash == original_refresh_hash
+            assert unchanged.revoked_at is None
+
+    accepted = context.client.post(
+        path, headers={**cookie, "X-CSRF-Token": login_payload["csrf_token"]}
+    )
+
+    with context.session_factory() as session:
+        persisted = session.query(StaffSession).one()
+        if path.endswith("/refresh"):
+            assert accepted.status_code == 200, accepted.text
+            assert accepted.json()["access_token"]
+            assert persisted.refresh_hash != original_refresh_hash
+            assert persisted.revoked_at is None
+        else:
+            assert accepted.status_code == 204, accepted.text
+            assert persisted.revoked_at is not None
