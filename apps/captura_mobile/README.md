@@ -16,7 +16,7 @@ Prototipo local de interfaz para la app de captura del agente inmobiliario.
 - La captura de fotos, los permisos y la conectividad son estados simulados rotulados; las formas de geometría son ilustrativas y no provienen de fotos, medición ni reconstrucción.
 - La preparación de oferta muestra solo la estructura conceptual aprobada (precio base, ajustes seleccionados y total con dos decimales) sin precio, moneda, impuestos, cargos, descuentos ni vigencia, y el envío a revisión exige confirmación explícita antes de un estado pendiente simulado.
 - El prototipo no guarda, no sincroniza y no envía nada: no hay persistencia, carga ni notificación real.
-- Sin directorios Android/iOS generados, sin plugins nativos, sin dependencias externas y sin `pubspec.lock` versionado.
+- Runner Android generado con `flutter create --platforms=android --org com.example` (sin iOS). Solo la variante de depuración permite HTTP sin cifrar (`android/app/src/debug/AndroidManifest.xml`) para llegar a la API local; `pubspec.lock` no se versiona.
 
 ## Verificación
 
@@ -27,3 +27,13 @@ dart format --output=none --set-exit-if-changed lib/main.dart test/widget_test.d
 ```
 
 Estos comandos requieren un checkout Flutter con las dependencias resueltas (`flutter pub get`); el repositorio no versiona `pubspec.lock`.
+
+## Ejecutar en el emulador
+
+Con el stack local levantado (`infra/README.md`) y un emulador Android iniciado:
+
+```bash
+flutter run
+```
+
+La app usa `http://10.0.2.2:8000` por defecto, que desde el emulador apunta a la API del equipo anfitrión; otro backend se indica con `--dart-define=ROOMFORGE_API_BASE_URL=https://host`.

@@ -31,7 +31,7 @@ Fuera de superficie: el resto de `identity`, sesiones de cliente, CORS, panel, m
 
 - [x] **F03O-T1 — Regla de `Origin` en el backend.** TDD: sin `Origin` se completa el login TOTP; `refresh`/`logout` sin `Origin` siguen exigiendo CSRF válido; `Origin: null` y `Origin` ajeno → `403` sin efectos.
 - [x] **F03O-T2 — Token de acceso en la app de captura.** TDD: el controlador conserva el token de acceso en memoria (nunca en almacenamiento) y lo actualiza al restaurar la sesión.
-- [ ] **F03O-T3 — Verificación.** Suite backend, Ruff, Pyright; `flutter test`/`flutter analyze` de la app; acceso real desde el emulador.
+- [x] **F03O-T3 — Verificación.** Suite backend, Ruff, Pyright; `flutter test`/`flutter analyze` de la app; acceso real desde el emulador.
 
 ## Registro de ejecución
 
@@ -48,3 +48,13 @@ Fuera de superficie: el resto de `identity`, sesiones de cliente, CORS, panel, m
 - Entorno: Flutter 3.41.8 (Dart 3.11.5, misma versión que el CI) instalado en `D:\tools\flutter` desde el archivo oficial, con SHA-256 verificado contra `releases_windows.json`; `PUB_CACHE`, `GRADLE_USER_HOME` y `ANDROID_HOME` como variables de usuario. `flutter doctor`: Flutter, Android toolchain y dispositivos correctos; el aviso de Visual Studio solo afecta a apps de escritorio Windows. Línea base de la app antes del cambio: `flutter test` 45/45 y `flutter analyze` sin problemas.
 - `staff_session_controller.dart`: expone `accessToken`, asignado al aceptar el grant (login TOTP y restauración) y borrado al cerrar sesión o al descartar la sesión; nunca pasa por el almacén seguro.
 - TDD en `staff_session_controller_test.dart` (4 pruebas nuevas): RED por compilación (`The getter 'accessToken' isn't defined`); GREEN 15/15 en el archivo; app completa 49/49; `flutter analyze` sin problemas; `dart format` sin cambios.
+
+### F03O-T3 — Verificación en el emulador (2026-10-01/02)
+
+- Commit de la corrección: `261590f` (`fix(identity): accept native staff clients without an Origin header`). Imagen `api` del stack local reconstruida; contra la API real, `login/totp` con un challenge inválido responde `401` sin `Origin` (antes `403`) y `403` con `Origin: null` o ajeno.
+- Runner Android de la app generado con `flutter create --platforms=android --org com.example --project-name captura_mobile .` (misma estructura que `apps/cliente_mobile/android`; `flutter create` no sobrescribió `lib/`, `test/` ni el README). Solo `android/app/src/debug/AndroidManifest.xml` habilita `usesCleartextTraffic` para llegar a `http://10.0.2.2:8000`; las variantes `main` y `profile` conservan el bloqueo por defecto. `pubspec.lock` no se versiona, según el README de la app.
+- `flutter build apk --debug` correcto (primera compilación de Gradle, ~29 min). APK instalada en el emulador `ShareGrams_Test` (Android 37); desde el emulador, `http://10.0.2.2:8000/health/live` respondió `200`.
+- Primer intento del usuario: la app mostró «sin conexión». Los logs muestran un `POST /login` con `500` por `QueryCanceled: canceling statement due to statement timeout` esperando el bloqueo de la fila en `staff_account`, con saltos de tiempo en el log de la API propios de un proceso sin CPU/memoria; el equipo tenía 1,3 GB de RAM libres (emulador 2,4 GB y daemon de Gradle inactivo 1,8 GB). La app trata como fallo de red cualquier respuesta que supere su límite de 15 s. Se detuvo el daemon de Gradle (`gradlew --stop`, 3,1 GB libres) y no se cambió código. No se identificó con certeza qué transacción retuvo la fila; no quedaron bloqueos ni transacciones abiertas en `pg_stat_activity`/`pg_locks`.
+- Segundo intento, confirmado por el usuario y contrastado con los logs de la API (peticiones desde el emulador, sin `Origin`): `POST /login` `200`, `POST /login/totp` `200`, `POST /logout` `204`; un intento posterior quedó en `login/totp` `401` (código TOTP rechazado).
+- **No ejercitado a mano:** la restauración de sesión al reabrir la app (`refresh`); no aparece ningún `POST /refresh` en los logs. Queda cubierta por las pruebas automáticas del backend (refresh sin `Origin`) y del controlador.
+- Mejora anotada, no implementada: la app muestra «sin conexión» también ante un tiempo de espera agotado o un `500`, lo que dificulta el diagnóstico.
