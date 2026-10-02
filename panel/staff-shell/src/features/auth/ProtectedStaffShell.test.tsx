@@ -7,7 +7,14 @@ import {
   refreshStaffSession,
   type StaffUser,
 } from "../../application/staffAuthApi";
+import { listAgencyListings } from "../../application/staffListingsApi";
 import { ProtectedStaffShell } from "./ProtectedStaffShell";
+
+vi.mock("../../application/staffListingsApi", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../application/staffListingsApi")>();
+  return { ...actual, listAgencyListings: vi.fn() };
+});
 
 vi.mock("../../application/staffAuthApi", async (importOriginal) => {
   const actual =
@@ -43,6 +50,9 @@ beforeEach(() => {
   vi.mocked(getStaffMe).mockReset();
   vi.mocked(logoutStaffSession).mockReset();
   vi.mocked(refreshStaffSession).mockReset();
+  vi.mocked(listAgencyListings)
+    .mockReset()
+    .mockResolvedValue({ listings: [], pagination: { limit: 50, offset: 0, total: 0 } });
 });
 
 describe("ProtectedStaffShell", () => {
@@ -55,26 +65,46 @@ describe("ProtectedStaffShell", () => {
     expect(refreshStaffSession).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["platform_admin", "Administración de plataforma", "Inicio de plataforma"],
-    ["agent", "Área de agente", "Inicio del agente"],
-  ])("shows a minimal role-aware shell for %s", async (role, heading, navigation) => {
+  it("shows a minimal role-aware shell for platform admins", async () => {
     sessionStorage.setItem("roomforge.staff.csrf", "stored-csrf");
     vi.mocked(refreshStaffSession).mockResolvedValue({
       access_token: "volatile-access",
       csrf_token: "rotated-csrf",
     });
-    vi.mocked(getStaffMe).mockResolvedValue({ user: staffUser(role) });
+    vi.mocked(getStaffMe).mockResolvedValue({ user: staffUser("platform_admin") });
 
     render(<ProtectedStaffShell />);
 
-    expect(await screen.findByRole("heading", { name: heading })).toBeVisible();
-    expect(screen.getByRole("navigation")).toHaveTextContent(navigation);
+    expect(
+      await screen.findByRole("heading", { name: "Administración de plataforma" }),
+    ).toBeVisible();
+    expect(screen.getByRole("navigation")).toHaveTextContent("Inicio de plataforma");
     expect(screen.getByText("El espacio protegido está listo.")).toBeVisible();
-    expect(screen.queryByText(/crear|editar|eliminar|publicar/i)).not.toBeInTheDocument();
+    expect(listAgencyListings).not.toHaveBeenCalled();
   });
 
-  it("shows an honest prototype review queue for agency admins", async () => {
+  it("points agents to the capture app instead of editing listings on the web", async () => {
+    sessionStorage.setItem("roomforge.staff.csrf", "stored-csrf");
+    vi.mocked(refreshStaffSession).mockResolvedValue({
+      access_token: "volatile-access",
+      csrf_token: "rotated-csrf",
+    });
+    vi.mocked(getStaffMe).mockResolvedValue({ user: staffUser("agent") });
+
+    render(<ProtectedStaffShell />);
+
+    expect(await screen.findByRole("heading", { name: "Área de agente" })).toBeVisible();
+    expect(screen.getByRole("navigation")).toHaveTextContent("Inicio del agente");
+    expect(
+      screen.getByText(
+        "Los borradores de inmuebles se crean y editan en la app RoomForge Captura.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: /crear|editar|aprobar|publicar/i })).not.toBeInTheDocument();
+    expect(listAgencyListings).not.toHaveBeenCalled();
+  });
+
+  it("shows the live review queue of the agency admin's own agency", async () => {
     sessionStorage.setItem("roomforge.staff.csrf", "stored-csrf");
     vi.mocked(refreshStaffSession).mockResolvedValue({
       access_token: "volatile-access",
@@ -88,13 +118,13 @@ describe("ProtectedStaffShell", () => {
       await screen.findByRole("heading", { level: 2, name: "Cola de revisión" }),
     ).toBeVisible();
     expect(screen.getByRole("navigation")).toHaveTextContent("Inicio de inmobiliaria");
-    expect(screen.getByText("No se muestran solicitudes en este prototipo.")).toBeVisible();
     expect(
-      screen.getByText("Esta vista no está conectada a solicitudes reales."),
+      await screen.findByText("No hay inmuebles esperando revisión."),
     ).toBeVisible();
-    expect(screen.queryByText("El espacio protegido está listo.")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /aprobar|rechazar/i })).not.toBeInTheDocument();
-    expect(screen.queryByText(/precio|disponibilidad/i)).not.toBeInTheDocument();
+    expect(listAgencyListings).toHaveBeenCalledWith("volatile-access", "agency-1", {
+      status: "pending",
+    });
+    expect(screen.queryByText(/prototipo/i)).not.toBeInTheDocument();
   });
 
   it("returns to login after a successful API logout", async () => {

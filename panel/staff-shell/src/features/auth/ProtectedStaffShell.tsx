@@ -9,6 +9,7 @@ import {
   type StaffRole,
   type StaffSession,
 } from "../../application/staffSession";
+import { AgencyReviewQueue } from "../listings/AgencyReviewQueue";
 import { StaffLoginShell } from "./StaffLoginShell";
 
 const RENEWAL_SKEW_MS = 30_000;
@@ -210,7 +211,7 @@ export function ProtectedStaffShell() {
   }
 
   const presentation = rolePresentation[session.user.role];
-  const isAgencyAdmin = session.user.role === "agency_admin";
+  const agencyId = session.user.tenant_id;
 
   return (
     <div className="protected-staff-workspace">
@@ -247,25 +248,15 @@ export function ProtectedStaffShell() {
               {logoutError}
             </p>
           ) : null}
-          {isAgencyAdmin ? (
-            <section
-              aria-labelledby="agency-review-queue-heading"
-              className="protected-staff-review-queue"
-            >
-              <div className="protected-staff-review-queue__heading">
-                <span className="protected-staff-review-queue__eyebrow">
-                  PROTOTIPO · SIN CONEXIÓN
-                </span>
-                <h2 id="agency-review-queue-heading">Cola de revisión</h2>
-              </div>
-              <div className="protected-staff-review-queue__empty-state">
-                <p className="protected-staff-review-queue__empty" role="status">
-                  No se muestran solicitudes en este prototipo.
-                </p>
-                <p className="protected-staff-review-queue__note">
-                  Esta vista no está conectada a solicitudes reales.
-                </p>
-              </div>
+          {session.user.role === "agency_admin" && agencyId ? (
+            <AgencyReviewQueue accessToken={session.accessToken} agencyId={agencyId} />
+          ) : session.user.role === "agent" ? (
+            <section className="protected-staff-placeholder" aria-label="Vista inicial">
+              <span className="protected-staff-placeholder__eyebrow">
+                ROOMFORGE · CAPTURA
+              </span>
+              <p>Los borradores de inmuebles se crean y editan en la app RoomForge Captura.</p>
+              <p>Desde allí envías cada inmueble a revisión de tu inmobiliaria.</p>
             </section>
           ) : (
             <section className="protected-staff-placeholder" aria-label="Vista inicial">
