@@ -66,6 +66,8 @@ Fuera de superficie: `identity`, `agencies`, `customer_identity`, `reservations`
 
 - [x] **F04C-T6 — Aislamiento entre agencias (F03.3).** Matriz de autorización por actor en el contrato y pruebas de acceso cruzado para cada ruta de inmueble: personal de otra agencia y `platform_admin` (`403`), ID ajeno en la ruta propia (`404` idéntico a inexistente), sesión real requerida (`401`) y catálogo público transversal. Agregada el 2026-10-02 con aprobación del usuario.
 
+- [x] **F04C-T7 — PostgreSQL real.** Ejecutar `test_f04_publications_postgres.py` contra un PostgreSQL descartable y extenderlo con el listado y la consulta de personal, que solo estaban probados con SQLite. Ampliación de superficie aprobada por el usuario el 2026-10-02: `backend/tests/test_f04_publications_postgres.py`.
+
 ## Registro de ejecución
 
 ### F04C-T1 — Transporte de correo de desarrollo (2026-10-01)
@@ -97,7 +99,7 @@ Fuera de superficie: `identity`, `agencies`, `customer_identity`, `reservations`
 - Verificación en contenedor desechable `python:3.12-slim`: suite backend 461 aprobadas, 3 omitidas, 4 advertencias; `test_f04_publications.py` + `test_catalog.py` 82 aprobadas; Ruff `All checks passed!`; Pyright `0 errors, 0 warnings, 0 informations`.
 - Stack local: imagen `api` reconstruida y `healthy`; el OpenAPI publica `GET` en ambas rutas y la ruta de listado sin sesión responde `401`.
 - Prueba manual de punta a punta en el stack local (2026-10-01), ejecutada por el usuario desde PowerShell contra la API real con PostgreSQL y sesiones TOTP reales; los resultados se contrastaron con los logs de acceso del contenedor `api`. Como `platform_admin` (`admin@example.test`): `POST /api/v1/agencies` (`agencia-demo`) `201` y `POST .../admin-invitations` `201`; la invitación llegó a la bandeja de desarrollo y el usuario la aceptó con TOTP. Como `agency_admin` (`agencia@example.test`): dos `POST .../listings` `201` y un `submit` `200`; `GET .../listings` `200`, `GET .../listings?status=pending` `200` y `GET .../listings/{listing_id}` `200`, con los valores que el usuario confirmó como esperados. Negativos: otra agencia `403`, `platform_admin` sobre la agencia `403`, inmueble inexistente `404` y sin sesión `401`; el catálogo público respondió `200` sin los inmuebles en borrador o revisión. Durante la prueba, un login construido con JSON literal en PowerShell 5.1 devolvió `422` por cuerpo mal formado; se resolvió serializando con `ConvertTo-Json` y enviando bytes UTF-8, sin cambios de código. Son datos de desarrollo locales, no evidencia académica.
-- Sin ejecutar: `test_f04_publications_postgres.py` (se omite sin `ROOMFORGE_POSTGRES_DATABASE_URL` y requiere una base descartable); casos académicos CP-009 a CP-012.
+- Sin ejecutar: `test_f04_publications_postgres.py` (se omite sin `ROOMFORGE_POSTGRES_DATABASE_URL` y requiere una base descartable; ejecutada después en F04C-T7); casos académicos CP-009 a CP-012.
 
 ### F04C-T6 — Aislamiento entre agencias, F03.3 (2026-10-02)
 
@@ -108,3 +110,12 @@ Fuera de superficie: `identity`, `agencies`, `customer_identity`, `reservations`
 - `docs/api/f04-publications-v1.md`: matriz con columna de cliente o anónimo y filas de depósito y catálogo público, reglas de ID ajeno y de sesión, y tabla que asocia cada regla con sus pruebas; errores `401` y `404` precisados.
 - Verificación en `roomforge-backend-dev:local`: suite backend 506 aprobadas, 3 omitidas, 4 advertencias; Ruff `All checks passed!`; Pyright `0 errors, 0 warnings, 0 informations`.
 - Límite: el criterio de F03.3 queda verificado en la rama; el estado de F03.3 en el plan y la nota de `f03-identity-agencies.md` se actualizan al integrar en `main`. Fotografías originales privadas (F04.2) siguen diferidas.
+
+### F04C-T7 — PostgreSQL real (2026-10-02)
+
+- Entorno: contenedor `postgres:16-alpine` (PostgreSQL 16.15) descartable y aparte del stack, base nueva `roomforge_f04_check`; la prueba corrió en `roomforge-backend-dev:local` compartiendo la red del contenedor para cumplir sus guardas (driver `postgresql+psycopg`, host loopback con puerto explícito, prefijo `roomforge_f04_`, base vacía). Cada contenedor se eliminó al terminar.
+- Primera corrida, prueba sin cambios: `1 passed`. Aplicó la cadena completa de migraciones hasta `0012_listing_transitions` y recorrió alta, edición descriptiva y de precio (disparador real de `offer_version`), envío, aprobación, publicación, historial, retiro, rechazo con motivo, publicación de un rechazado `409`, agente `403`, otra agencia `403` e ID ajeno `404`. Estado final: 3 inmuebles y 11 transiciones.
+- Hueco: el listado y la consulta de personal (`F04C-T3/T4`) solo estaban probados con SQLite, donde `created_at` (`server_default=func.now()`) tiene precisión de segundos; en PostgreSQL es `now()` de la transacción, con microsegundos. Orden, total y filtros no se habían comprobado contra la base real.
+- Extensión de la misma prueba: tres borradores más en la agencia uno; listado completo en orden exacto de creación inverso con `total` 5 y sin el inmueble de la otra agencia; filtros `status=draft` (3), `status=approved&published=false` (1) y `published=true` (0); paginación `limit=2&offset=1`; el agente ve los mismos 5; consulta con campos privados `200`; ID ajeno `404` con cuerpo idéntico al inexistente.
+- Segunda corrida con base nueva: `1 passed`; estado final 6 inmuebles y 14 transiciones; Ruff y Pyright limpios en el archivo. Sin fase RED: la extensión verifica comportamiento existente. Sabotaje sobre una copia descartable (orden ascendente en `list_staff_listings`): la prueba falla en la nueva aserción del listado (línea 367).
+- Límite: sigue sin haber verificación en un entorno desplegado.
