@@ -60,15 +60,17 @@ Fuera de superficie: backend, panel, app de captura, cuenta de cliente (`custome
 
 ## Tareas
 
-- [x] **F04C-T1 — Modelos y cliente HTTP.** Búsqueda con filtros, cursor y límite; detalle; errores del vocabulario compartido.
-- [x] **F04C-T2 — Controlador del catálogo.** Filtros activos, primera página, «cargar más», estados de carga/vacío/error y detalle.
-- [x] **F04C-T3 — Pantallas.** Lista con tarjetas reales, hoja de filtros con validación equivalente a la API, detalle con precio y periodicidad, opcionales, recorrido 3D y disponibilidad honestos.
-- [x] **F04C-T4 — Integración.** «Explorar» usa el catálogo real; se retiran el listado, el detalle y la hoja sintéticos; las pruebas del shell se actualizan.
-- [x] **F04C-T5 — Verificación.** Suite, análisis y formato; recorrido en el emulador con inmuebles publicados desde el panel.
+Los códigos usan el prefijo `F04K` para no repetir los `F04C-T*` de `odd/tasks/f04-listings-completion.md`; se renombraron el 2026-10-02 (antes figuraban como `F04C-T1` a `F04C-T5`).
+
+- [x] **F04K-T1 — Modelos y cliente HTTP.** Búsqueda con filtros, cursor y límite; detalle; errores del vocabulario compartido.
+- [x] **F04K-T2 — Controlador del catálogo.** Filtros activos, primera página, «cargar más», estados de carga/vacío/error y detalle.
+- [x] **F04K-T3 — Pantallas.** Lista con tarjetas reales, hoja de filtros con validación equivalente a la API, detalle con precio y periodicidad, opcionales, recorrido 3D y disponibilidad honestos.
+- [x] **F04K-T4 — Integración.** «Explorar» usa el catálogo real; se retiran el listado, el detalle y la hoja sintéticos; las pruebas del shell se actualizan.
+- [x] **F04K-T5 — Verificación.** Suite, análisis y formato; recorrido en el emulador con inmuebles publicados desde el panel.
 
 ## Registro de ejecución
 
-### 2026-10-02 — F04C-T1 a F04C-T4
+### 2026-10-02 — F04K-T1 a F04K-T4
 
 - **T1:** `test/catalog_api_test.dart` (7 pruebas) falló antes de existir `catalog_models.dart` y `catalog_api.dart` (RED) y pasó después (GREEN). El cliente no envía credenciales, decodifica UTF-8 explícito y rechaza respuestas que no cumplen el contrato (por ejemplo una operación desconocida).
 - **T2:** `test/catalog_controller_test.dart` (9 pruebas, con `test/support/fake_catalog_backend.dart`) falló antes de existir el controlador (RED) y pasó después (GREEN). Un fallo al cargar más conserva lo ya cargado.
@@ -82,7 +84,7 @@ Fuera de superficie: backend, panel, app de captura, cuenta de cliente (`custome
 - La app cliente no podía llegar a la API local desde el emulador: su manifiesto de depuración no permitía tráfico sin cifrar y Android 9+ lo bloquea por defecto, así que el login de cliente (F03) y el catálogo fallarían como «sin conexión». Con aprobación del usuario se agregó `<application android:usesCleartextTraffic="true"/>` solo en `android/app/src/debug/AndroidManifest.xml`, igual que la app de captura (`a415a65`). La versión de lanzamiento sigue rechazando HTTP.
 
 
-### 2026-10-02 — F04C-T5
+### 2026-10-02 — F04K-T5
 
 - APK de depuración de la app cliente compilado con el manifiesto corregido, instalado en el emulador y Gradle detenido después.
 - La API local devolvió un inmueble aprobado y publicado desde el panel (`GET /api/v1/listings` → 1 ítem).
