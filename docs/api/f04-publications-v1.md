@@ -94,20 +94,40 @@ Un parámetro fuera de contrato responde `422`; un `offset` posterior al último
 
 ## Autorización
 
-| Operación | `agency_admin` de la agencia | `agent` de la agencia | Otro tenant | `platform_admin` |
-|---|---:|---:|---:|---:|
-| Crear, editar, enviar a revisión, leer transiciones | Sí | Sí | `403` | `403` |
-| Listar y consultar inmuebles de la agencia | Sí | Sí, todos los de su agencia | `403` | `403` |
-| Aprobar, rechazar, publicar, retirar | Sí | `403` | `403` | `403` |
+Matriz por actor (F03.3). «Agencia» es la agencia de la URL; la del actor sale siempre de su sesión de personal.
 
-La agencia y el actor se obtienen de la sesión de personal. Un inmueble inexistente dentro de la agencia autorizada responde `404`; no se consultan recursos de otra agencia para determinar su existencia. El catálogo público sigue siendo transversal entre agencias, sin exponer el historial privado.
+| Operación | `agency_admin` de la agencia | `agent` de la agencia | Personal de otra agencia | `platform_admin` | Cliente o anónimo |
+|---|---:|---:|---:|---:|---:|
+| Crear, editar, enviar a revisión, leer transiciones | Sí | Sí | `403` | `403` | `401` |
+| Listar y consultar inmuebles de la agencia | Sí | Sí, todos los de su agencia | `403` | `403` | `401` |
+| Aprobar, rechazar, publicar, retirar | Sí | `403` | `403` | `403` | `401` |
+| Configurar el depósito (`PATCH .../deposit`) | Sí | `403` | `403` | `403` | `401` |
+| Catálogo público (`GET /api/v1/listings` y detalle) | Sí | Sí | Sí | Sí | Sí, sin sesión |
+
+- **ID ajeno en la ruta propia:** un inmueble de otra agencia pedido con la URL de la agencia autorizada responde `404`, con el mismo cuerpo que un inmueble inexistente, en todas las rutas de inmueble (consulta, edición, envío, aprobación, rechazo, publicación, retiro, historial y depósito). No se modifica el inmueble ni se agrega historial.
+- **Sesión:** sin `Authorization`, con un token mal formado o con un token de cliente (`aud=roomforge-customer`), las rutas de personal responden `401`.
+- **Catálogo público:** solo inmuebles aprobados y publicados, de todas las agencias; un inmueble no visible responde `404` igual que uno inexistente, y el detalle no expone dirección exacta, descripción ni historial.
+
+Pruebas que respaldan cada fila:
+
+| Regla | Pruebas |
+|---|---|
+| Personal de otra agencia y `platform_admin` en cada ruta de inmueble, listado y alta | `test_actors_outside_the_agency_are_forbidden_on_every_listing_route`, `test_actors_outside_the_agency_cannot_list_or_create_its_listings`, `test_staff_list_and_detail_forbid_other_tenants_and_platform_admin`, `test_cross_tenant_listing_access_is_forbidden_without_mutation`, `test_platform_admin_is_forbidden_from_tenant_listing_routes` (`backend/tests/test_f04_publications.py`) |
+| ID ajeno en la ruta propia | `test_foreign_listing_id_under_own_agency_path_is_indistinguishable_from_missing`, `test_staff_detail_of_foreign_or_missing_listing_is_an_identical_404` |
+| El agente no aprueba, rechaza, publica ni retira | `test_agent_cannot_self_approve_or_run_admin_only_transitions` |
+| Depósito solo para el `agency_admin` dueño | `test_only_owning_agency_admin_can_configure_listing_deposit` (`backend/tests/test_catalog.py`) |
+| Sesión real requerida (anónimo, token inválido, token de cliente) | `test_staff_listing_routes_require_a_staff_session_with_real_authentication` |
+| Catálogo público transversal y sin privados | `test_public_list_is_approved_published_and_cross_agency`, `test_missing_and_non_visible_listing_detail_return_same_404`, `test_detail_has_minimal_public_schema_and_hides_private_fields` (`backend/tests/test_catalog.py`) |
+
+El catálogo público sigue siendo transversal entre agencias, sin exponer el historial privado.
 
 ## Errores
 
 | HTTP | Uso |
 |---:|---|
+| `401` | Sin sesión de personal válida (incluye tokens de cliente). |
 | `403` | Rol no autorizado, `platform_admin` o tenant distinto. |
-| `404` | Inmueble inexistente dentro de la agencia autorizada. |
+| `404` | Inmueble inexistente o de otra agencia, pedido con la ruta de la agencia autorizada. |
 | `409` | Acción incompatible con el estado actual. |
 | `422` | Cuerpo inválido, campo extra, precio no positivo o motivo de rechazo vacío. |
 

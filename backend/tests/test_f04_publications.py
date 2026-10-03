@@ -4,7 +4,7 @@ import base64
 import importlib.util
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -17,12 +17,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.config import Settings
+from app.core.security import create_access_token
 from app.db.base import Base
 from app.main import create_app
 from app.modules.catalog.errors import QuoteOfferVersionMismatchError
 from app.modules.catalog.models import Listing
 from app.modules.catalog.service import validate_quote_for_use
-from app.modules.identity.models import Agency
+from app.modules.identity.models import Agency, StaffAccount, StaffSession
 from app.modules.identity.session import get_active_staff
 
 
@@ -636,3 +637,212 @@ def test_staff_read_routes_are_documented_and_public_catalog_still_hides_drafts(
     assert "get" in paths["/api/v1/staff/agencies/{agency_id}/listings/{listing_id}"]
     public = context.client.get("/api/v1/listings")
     assert "hidden-draft" not in public.text
+
+
+# F03.3 isolation matrix: every staff listing route, one actor at a time. Each row
+# names the route, its HTTP method and suffix, a valid body and a seed state in
+# which the action would succeed for an authorized actor, so a rejection proves
+# the guard and not an incidental state conflict.
+_LISTING_ROUTES: list[tuple[str, str, str, dict[str, Any] | None, tuple[str, bool]]] = [
+    ("detail", "GET", "", None, ("draft", False)),
+    ("edit", "PUT", "", _payload(), ("draft", False)),
+    ("submit", "POST", "/submit", None, ("draft", False)),
+    ("approve", "POST", "/approve", None, ("pending", False)),
+    ("reject", "POST", "/reject", {"observation": "Reason"}, ("pending", False)),
+    ("publish", "POST", "/publish", None, ("approved", False)),
+    ("unpublish", "POST", "/unpublish", None, ("approved", True)),
+    ("transitions", "GET", "/transitions", None, ("draft", False)),
+    ("deposit", "PATCH", "/deposit", {"deposit_amount_cop": "100.00"}, ("approved", False)),
+]
+_ROUTE_IDS = [route[0] for route in _LISTING_ROUTES]
+
+
+def _call(
+    context: F04Context, method: str, url: str, body: dict[str, Any] | None
+) -> Any:
+    return context.client.request(method, url, json=body)
+
+
+def _listing_state(context: F04Context, listing_id: str) -> tuple[Any, ...]:
+    with context.session_factory() as session:
+        listing = session.get(Listing, listing_id)
+        assert listing is not None
+        return (
+            listing.approval_status,
+            listing.is_published,
+            listing.base_price,
+            listing.city,
+            listing.offer_version,
+            listing.deposit_amount_cop,
+        )
+
+
+@pytest.mark.parametrize(
+    ("name", "method", "suffix", "body", "state"), _LISTING_ROUTES, ids=_ROUTE_IDS
+)
+def test_foreign_listing_id_under_own_agency_path_is_indistinguishable_from_missing(
+    f04_context: F04Context,
+    name: str,
+    method: str,
+    suffix: str,
+    body: dict[str, Any] | None,
+    state: tuple[str, bool],
+) -> None:
+    context = f04_context
+    status, published = state
+    _seed_listing(
+        context,
+        "foreign-listing",
+        agency_id="agency-two",
+        approval_status=status,
+        is_published=published,
+    )
+    before = _listing_state(context, "foreign-listing")
+    _staff(context, role="agency_admin", tenant_id="agency-one")
+
+    foreign = _call(context, method, _url("agency-one", "foreign-listing") + suffix, body)
+    missing = _call(context, method, _url("agency-one", "missing-listing") + suffix, body)
+
+    assert foreign.status_code == missing.status_code == 404, name
+    assert foreign.json() == missing.json()
+    assert _listing_state(context, "foreign-listing") == before
+    assert not _history(context, "foreign-listing")
+
+
+@pytest.mark.parametrize(
+    ("role", "tenant_id"),
+    [("agency_admin", "agency-two"), ("agent", "agency-two"), ("platform_admin", None)],
+    ids=["other-agency-admin", "other-agency-agent", "platform-admin"],
+)
+@pytest.mark.parametrize(
+    ("name", "method", "suffix", "body", "state"), _LISTING_ROUTES, ids=_ROUTE_IDS
+)
+def test_actors_outside_the_agency_are_forbidden_on_every_listing_route(
+    f04_context: F04Context,
+    role: str,
+    tenant_id: str | None,
+    name: str,
+    method: str,
+    suffix: str,
+    body: dict[str, Any] | None,
+    state: tuple[str, bool],
+) -> None:
+    context = f04_context
+    status, published = state
+    _seed_listing(
+        context, "private-listing", approval_status=status, is_published=published
+    )
+    before = _listing_state(context, "private-listing")
+    _staff(context, role=role, tenant_id=tenant_id)
+
+    response = _call(context, method, _url("agency-one", "private-listing") + suffix, body)
+
+    assert response.status_code == 403, name
+    assert "private-listing" not in response.text
+    assert _listing_state(context, "private-listing") == before
+    assert not _history(context, "private-listing")
+
+
+@pytest.mark.parametrize(
+    ("role", "tenant_id"),
+    [("agency_admin", "agency-two"), ("agent", "agency-two"), ("platform_admin", None)],
+    ids=["other-agency-admin", "other-agency-agent", "platform-admin"],
+)
+def test_actors_outside_the_agency_cannot_list_or_create_its_listings(
+    f04_context: F04Context, role: str, tenant_id: str | None
+) -> None:
+    context = f04_context
+    _seed_listing(context, "private-listing")
+    _staff(context, role=role, tenant_id=tenant_id)
+
+    listed = context.client.get(_collection_url("agency-one"))
+    created = context.client.post(_collection_url("agency-one"), json=_payload())
+
+    assert listed.status_code == created.status_code == 403
+    assert "private-listing" not in listed.text
+    with context.session_factory() as session:
+        assert session.query(Listing).count() == 1
+
+
+def _real_staff_headers(context: F04Context) -> dict[str, str]:
+    """Bearer token of a real agency-one admin session, without overrides."""
+    now = datetime.now(timezone.utc)
+    with context.session_factory.begin() as session:
+        if session.get(Agency, "agency-one") is None:
+            session.add(Agency(id="agency-one"))
+            session.flush()
+        session.add(
+            StaffAccount(
+                id="real-admin",
+                email="real-admin@example.test",
+                password_hash="test-password-hash",
+                role="agency_admin",
+                tenant_id="agency-one",
+                active=True,
+                totp_secret_encrypted="encrypted-test-secret",
+                totp_enabled=True,
+                created_at=now,
+            )
+        )
+        session.add(
+            StaffSession(
+                id="real-admin-session",
+                user_id="real-admin",
+                refresh_hash="refresh-real-admin",
+                csrf_hash="csrf-real-admin",
+                created_at=now,
+                last_activity_at=now,
+                expires_at=now + timedelta(hours=1),
+            )
+        )
+    token = create_access_token(
+        user_id="real-admin",
+        session_id="real-admin-session",
+        signing_key=context.app.state.settings.jwt_secret,
+        now=now,
+        lifetime_minutes=15,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _customer_headers(context: F04Context) -> dict[str, str]:
+    """Bearer token of a real customer session, issued by the customer API."""
+    credentials = {"email": "customer@example.test", "password": "password"}
+    registered = context.client.post("/api/v1/customer/auth/register", json=credentials)
+    assert registered.status_code == 201, registered.text
+    login = context.client.post("/api/v1/customer/auth/login", json=credentials)
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
+def test_staff_listing_routes_require_a_staff_session_with_real_authentication(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    for status, published in {route[4] for route in _LISTING_ROUTES}:
+        _seed_listing(
+            context,
+            f"listing-{status}-{published}".lower(),
+            approval_status=status,
+            is_published=published,
+        )
+    staff_headers = _real_staff_headers(context)
+    credentials = {
+        "no credentials": {},
+        "malformed": {"Authorization": "Bearer not-a-token"},
+        "customer session": _customer_headers(context),
+    }
+    requests = [("GET", _collection_url("agency-one"), None), ("POST", _collection_url("agency-one"), _payload())]
+    for _name, method, suffix, body, (status, published) in _LISTING_ROUTES:
+        listing_id = f"listing-{status}-{published}".lower()
+        requests.append((method, _url("agency-one", listing_id) + suffix, body))
+
+    for label, headers in credentials.items():
+        for method, url, body in requests:
+            response = context.client.request(method, url, json=body, headers=headers)
+            assert response.status_code == 401, f"{label}: {method} {url}"
+
+    with context.session_factory() as session:
+        assert session.query(Listing).count() == len({route[4] for route in _LISTING_ROUTES})
+    control = context.client.get(_collection_url("agency-one"), headers=staff_headers)
+    assert control.status_code == 200, control.text
