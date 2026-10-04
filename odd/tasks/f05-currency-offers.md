@@ -40,7 +40,7 @@ Fuera de superficie: `docs/diagramas/Diagrama1.eapx`, `openspec/`, identidad de 
 ## Tareas
 
 - [x] **F05M-T1 — Núcleo de moneda (backend).** Enum tipado `Currency` (`BOB`, `USD`, `USDT`), reemplazo del `Literal["COP"]` en catálogo y del campo moneda en cotizaciones/reservas; validación de formato `.2f` por moneda; migración Alembic que reescribe datos `COP` a `BOB` (datos de desarrollo, decidir y registrar el mapeo) o los invalida; regresión completa de suites.
-- [ ] **F05M-T2 — Tasas administradas (backend).** Tabla de tasas (base USD) con vigencia y autoría; rutas de plataforma para crear/listar tasas; lectura pública de la tasa vigente; matriz de conversión por cruce (`BOB→USD→X`); pruebas de autorización (`platform_admin` escribe, otros `403`).
+- [x] **F05M-T2 — Tasas administradas (backend).** Tabla de tasas (base USD) con vigencia y autoría; rutas de plataforma para crear/listar tasas; lectura pública de la tasa vigente; matriz de conversión por cruce (`BOB→USD→X`); pruebas de autorización (`platform_admin` escribe, otros `403`).
 - [ ] **F05M-T3 — Cotización en moneda elegida (backend).** `POST /quotes` (y equivalente vigente) acepta `target_currency`; total convertido con la tasa vigente y congelado en la instantánea con su tasa; validación de que la reserva usa la moneda de la instantánea; contrato documentado.
 - [ ] **F05M-T4 — F05.1 mobiliario completo (backend).** Categoría, habitación, dimensiones/origen y vínculo visual en `ListingExtra`; gestión de referencias al eliminar/reemplazar; contrato documentado.
 - [ ] **F05M-T5 — Panel (moneda + tasas).** Selector de moneda en autoría de inmueble; pantalla de administración de tasas para `platform_admin`; desglose convertido en la bandeja/visión de cotizaciones.
@@ -62,3 +62,13 @@ Fuera de superficie: `docs/diagramas/Diagrama1.eapx`, `openspec/`, identidad de 
 - Lección registrada: la corrección debía commitearse para que el proveedor reconociera el candidato corregido (`corrected_candidate_unavailable` con el fix sin commit).
 
 (aún sin más entradas)
+
+### F05M-T2 — Tasas administradas (2026-10-04)
+
+- Nuevo módulo `backend/app/modules/exchange_rates/`: tabla `exchange_rate` con `currency` (BOB/USDT; USD fijo en 1.0 y nunca almacenado), `units_per_usd Numeric(18,8) > 0`, `created_by String(36)` FK a `staff_account.id` (corrección del orquestador: la especificación inicial pedía entero y la PK de staff es UUID — el escritor detectó la incompatibilidad y frenó antes de escribir). Migración `0014_exchange_rates` con patrón batch compatible con SQLite.
+- Rutas: `POST /api/v1/platform/exchange-rates` (solo `platform_admin`, 201/401/403), `GET /api/v1/platform/exchange-rates` (historial, más nuevo primero) y `GET /api/v1/exchange-rates/current` (público, incluye USD fijo `1.00000000`). Tasas vigentes = última fila; el historial queda para auditoría; sin pos-fechado en esta unidad.
+- Conversión exacta en `Decimal` (nunca flotante): origen → USD → destino, cuantizada a 2 decimales con `ROUND_HALF_UP` solo al final; identidad misma moneda; falla cerrada si falta la tasa de una moneda.
+- El escritor registró el router en `app/main.py` (superficie autorizada en la delegación) y documentó los tres endpoints en `docs/api/f02-api-contract.md`.
+- TDD: RED observado (`ModuleNotFoundError` del módulo nuevo) y luego GREEN 23/23 enfocadas; suite completa 554 aprobadas / 3 omitidas, Ruff limpio, Pyright sin diagnósticos nuevos.
+- Commit de work unit `3714b67` (`feat(exchange-rates): administer BOB/USDT rates against USD with public read`), sin push.
+- Del review de T1 quedó un hallazgo informativo no bloqueante (`R3-001`, WARNING, `reservations/service.py:99`): trabajo posterior, se atiende en una unidad propia.
