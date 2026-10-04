@@ -191,3 +191,7 @@ Everything above was written while the work was still local. What actually happe
 ## Nota posterior (2026-10-01): acceso de la app de captura contra la API real
 
 Lo registrado arriba como completo para `apps/captura_mobile` se verificó solo contra `test/support/fake_staff_backend.dart`. Contra la API real, `login/totp`, `refresh` y `logout` respondían `403 Origin is not allowed` porque la app, como cliente nativo, no envía `Origin`, y el controlador descartaba el token de acceso tras el login. Ambos defectos se corrigen en `odd/tasks/f03-capture-staff-origin.md`; este registro no se reescribe.
+
+## Nota posterior (2026-10-03): cierre de F03.3 con PR #12
+
+El límite registrado arriba («the public catalog read API remains deferred to F04») quedó resuelto con la integración de `feat/f04-listings-completion` como PR #12 (merge `6541b1a`): la tarea F04C-T6 de `odd/tasks/f04-listings-completion.md` verificó el aislamiento entre agencias de F03.3 sobre las 9 rutas de inmueble — otra agencia y `platform_admin` `403`, ID ajeno en la ruta propia `404` idéntico a inexistente, sesión real requerida `401` y catálogo público transversal — con la matriz por actor en `docs/api/f04-publications-v1.md` y la suite backend en 506 aprobadas / 3 omitidas, Ruff y Pyright limpios. El plan maestro (§1.4.1 y sección F03) marca F03.3 ✅ y la fase F03 ✅ Completa con ese registro como evidencia. Este registro no se reescribe.
