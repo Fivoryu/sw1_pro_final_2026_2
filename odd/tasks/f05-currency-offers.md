@@ -41,7 +41,7 @@ Fuera de superficie: `docs/diagramas/Diagrama1.eapx`, `openspec/`, identidad de 
 
 - [x] **F05M-T1 — Núcleo de moneda (backend).** Enum tipado `Currency` (`BOB`, `USD`, `USDT`), reemplazo del `Literal["COP"]` en catálogo y del campo moneda en cotizaciones/reservas; validación de formato `.2f` por moneda; migración Alembic que reescribe datos `COP` a `BOB` (datos de desarrollo, decidir y registrar el mapeo) o los invalida; regresión completa de suites.
 - [x] **F05M-T2 — Tasas administradas (backend).** Tabla de tasas (base USD) con vigencia y autoría; rutas de plataforma para crear/listar tasas; lectura pública de la tasa vigente; matriz de conversión por cruce (`BOB→USD→X`); pruebas de autorización (`platform_admin` escribe, otros `403`).
-- [ ] **F05M-T3 — Cotización en moneda elegida (backend).** `POST /quotes` (y equivalente vigente) acepta `target_currency`; total convertido con la tasa vigente y congelado en la instantánea con su tasa; validación de que la reserva usa la moneda de la instantánea; contrato documentado.
+- [x] **F05M-T3 — Cotización en moneda elegida (backend).** `POST /quotes` (y equivalente vigente) acepta `target_currency`; total convertido con la tasa vigente y congelado en la instantánea con su tasa; validación de que la reserva usa la moneda de la instantánea; contrato documentado.
 - [ ] **F05M-T4 — F05.1 mobiliario completo (backend).** Categoría, habitación, dimensiones/origen y vínculo visual en `ListingExtra`; gestión de referencias al eliminar/reemplazar; contrato documentado.
 - [ ] **F05M-T5 — Panel (moneda + tasas).** Selector de moneda en autoría de inmueble; pantalla de administración de tasas para `platform_admin`; desglose convertido en la bandeja/visión de cotizaciones.
 - [ ] **F05M-T6 — App cliente (moneda elegida).** Selector de moneda de visualización persistente; precio convertido junto al original; cotización en la moneda elegida con aviso de tasa congelada.
@@ -62,6 +62,16 @@ Fuera de superficie: `docs/diagramas/Diagrama1.eapx`, `openspec/`, identidad de 
 - Lección registrada: la corrección debía commitearse para que el proveedor reconociera el candidato corregido (`corrected_candidate_unavailable` con el fix sin commit).
 
 (aún sin más entradas)
+
+### F05M-T3 — Cotización multi-moneda (2026-10-04)
+
+- `POST /api/v1/quotes` acepta `target_currency` opcional (BOB/USD/USDT). Si falta o coincide con la moneda del inmueble, la cotización se comporta como antes. Si difiere: conversión origen → USD → destino en `Decimal` exacto (cuantizada a 2 decimales con `ROUND_HALF_UP` solo al final), usando las tasas vigentes administradas.
+- La instantánea congela la conversión: nuevas columnas `display_currency`, `display_one_time_total`, `display_monthly_total`, `base_units_per_usd`, `display_units_per_usd` con CHECK todo-o-nada; la fila es inmutable — un cambio de tasa posterior no altera una cotización existente (probado) y las nuevas usan la tasa nueva.
+- Respuesta: bloque `display_totals` + `display_rate` solo cuando hay conversión (omitido con `exclude_unset`, que preserva los `extra_id: null` explícitos de las líneas — defecto detectado y corregido en refactor). Tasa faltante → falla cerrada `503 exchange_rate_unavailable`; nunca se inventa una tasa.
+- Reservas y depósitos fuera de alcance: el depósito sigue en la moneda del inmueble (escala por `TOKEN_UNIT_SCALES` ya cubierta en T1).
+- Migración `0015_quote_display_currency` (patrón batch SQLite; PostgreSQL queda para T9).
+- TDD: RED observado (5 fallos: campo rechazado, migración ausente) → GREEN 6/6 → 84/84 enfocadas; suite completa 561 aprobadas / 3 omitidas, Ruff limpio, Pyright sin diagnósticos nuevos en módulos tocados.
+- Commit de work unit `5f059f2` (`feat(catalog): quote conversion with frozen display rates`), sin push.
 
 ### F05M-T2 — Tasas administradas (2026-10-04)
 
