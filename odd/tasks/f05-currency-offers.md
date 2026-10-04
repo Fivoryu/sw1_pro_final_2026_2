@@ -89,7 +89,18 @@ Fuera de superficie: `docs/diagramas/Diagrama1.eapx`, `openspec/`, identidad de 
 - Pruebas: flujo completo de reserva (depósito → aceptar, rechazo con reembolso, cancelación con reembolso, expiración permisionless) con el mock de 6 decimales y montos escalados (1.00 USDT = 1.000.000 unidades), más rechazo de token de 1 decimal; los 34 tests previos con el token de 2 decimales siguen en verde.
 - TDD: RED observado (6 fallos por artefacto `MockUSDT` inexistente) → GREEN 40/40; `hardhat compile` limpio. El escritor instaló `node_modules` con `npm ci --ignore-scripts` (lockfile pinned) para poder verificar; sin cambios en package.json/lockfile.
 - Commit de work unit (ver git log), sin push.
-- [ ] **F05M-T9 — Verificación integrada.** Suites completas de las cuatro superficies; PostgreSQL descartable con la migración de moneda; recorrido manual: publicar en BOB, cotizar en USD y en USDT, reservar contra el escrow; actualización del plan maestro al integrar.
+- [x] **F05M-T9 — Verificación integrada.** Suites completas de las cuatro superficies; PostgreSQL descartable con la migración de moneda; recorrido manual: publicar en BOB, cotizar en USD y en USDT, reservar contra el escrow; actualización del plan maestro al integrar.
+
+## Registro de ejecución (continuación)
+
+### F05M-T9 — Verificación integrada (2026-10-04)
+
+- Batería completa en verde (ejecutada por `gentle-ai-verify`): backend 579/3 + Ruff + Pyright; panel 116/116 + build; cliente 83/83 + analyze; captura 86/86 + format + analyze; Hardhat 40/40.
+- **PostgreSQL 16 real (desechable):** cadena completa `alembic upgrade head` hasta `0016_listing_extra_details (head)` — migraciones 0013–0016 verificadas en PostgreSQL; pruebas con guardas en verde (`test_f04_publications_postgres` con `ROOMFORGE_POSTGRES_DATABASE_URL`, `test_staff_identity_postgres` con su guarda `ROOMFORGE_R6_DATABASE_URL`). Contenedor y volumen descartados al terminar.
+- **Defecto encontrado y corregido:** T4 había dejado un diagnóstico Pyright nuevo (`test_catalog.py:953`, `dbapi_connection` posiblemente sin asignar en el `finally`) que su registro no detectó; corregido con commit propio (`test(catalog): bind the guard connection before the try block`) y Pyright de vuelta al baseline exacto (18 preexistentes, 0 nuevos).
+- Plan maestro: párrafo de avance en rama agregado a la sección F05 (con la decisión de moneda que sustituye a la de F00); las filas de §1.4.1 se actualizan al integrar en `main`, según convención del documento.
+- **Pendiente del usuario (recorrido manual):** publicar en BOB desde el panel/captura, cotizar en USD y USDT desde la app cliente, y reservar contra el escrow con USDT en el stack local. La batería automatizada no lo cubre.
+- Nota de infraestructura para futuras corridas: la guarda de PostgreSQL varía entre archivos (`ROOMFORGE_POSTGRES_DATABASE_URL` vs `ROOMFORGE_R6_DATABASE_URL`).
 
 ## Registro de ejecución
 
