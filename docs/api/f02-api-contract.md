@@ -26,14 +26,14 @@ Cada proveedor implementa `EmailSender.send_invitation(..., *, timeout_seconds)`
 
 Las tasas se administran en la plataforma. `units_per_usd` expresa cuántas unidades de la moneda indicada equivalen a 1 USD. Solo se almacenan filas BOB y USDT: USD es fija en `1.00000000` y no se puede crear como tasa. Cada alta se aplica inmediatamente, conserva el historial y registra `created_by` como el identificador UUID del personal que la creó.
 
-Cada fila lleva además el campo `source`, que indica su origen: `manual` para tasas creadas desde el panel, `coinbase` para la ingesta automática de USDT y `bcb-static` para la de BOB.
+Cada fila lleva además el campo `source`, que indica su origen: `manual` para tasas creadas desde el panel, `coinbase` para la ingesta automática de USDT, `bcb` para la ingesta automática de BOB vía la API pública del BCB y `bcb-static` para el valor estático de respaldo de BOB.
 
 ### Ingesta automática de tasas oficiales (F05M-T10)
 
 Dos monedas se ingieren automáticamente en segundo plano; USD nunca se ingiere (referencia fija 1.0):
 
 - **USDT — `coinbase`**: precio spot público de Coinbase (`GET https://api.coinbase.com/v2/prices/USDT-USD/spot`, sin API key). Es un punto medio de exchange de un par de stablecoin, **no una tasa FX oficial**; la etiqueta `coinbase` existe precisamente para presentarlo con honestidad.
-- **BOB — `bcb-static`**: la tasa oficial boliviana es fijada administrativamente por el BCB, así que se modela como fuente estática oficial leída de `ROOMFORGE_OFFICIAL_BOB_RATE` (por defecto `6.96`); no hay llamada HTTP.
+- **BOB — `bcb`**: la tasa oficial boliviana se obtiene de la API pública que republica las cifras del BCB (`GET https://apibcb.cucu.bo/api/v1/tc/oficial`, sin API key; el BCB rige bajo régimen flexible desde la RD 142/2026 y el TCO se publica cada día hábil). Si la API falla, se usa el respaldo estático de `ROOMFORGE_OFFICIAL_BOB_RATE` (por defecto `12.0`) con etiqueta `bcb-static`; si ambos fallan, la corrida reporta error y no se inventa ninguna tasa.
 
 El refresher corre como tarea de fondo del API: usa `ROOMFORGE_RATE_REFRESH_SECONDS` (entero, por defecto `21600` = 6 h); valores `<= 0` lo deshabilitan por completo, y la primera ejecución ocurre solo tras el primer intervalo (nunca en el arranque). En cada corrida, por moneda: si el valor obtenido difiere de la última fila almacenada, se crea una fila nueva con la etiqueta de fuente y `created_by` nulo (las filas del sistema no tienen autor); si coincide, la corrida es un no-op. Las filas manuales nunca se sobrescriben: se sustituyen por la fila oficial nueva. Cada ingesta corre en una única transacción y los fallos de la fuente fallan cerrados (sin tasa inventada).
 

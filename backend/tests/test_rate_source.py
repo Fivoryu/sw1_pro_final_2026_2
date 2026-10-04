@@ -1,4 +1,4 @@
-"""Tests for official exchange-rate ingestion (Coinbase USDT + static BCB BOB)."""
+"""Tests for official exchange-rate ingestion (Coinbase USDT + BCB BOB)."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from app.core.config import Settings
 from app.core.rate_source import (
     RateSourceError,
     RateSuggestion,
+    _fetch_bob_suggestion,
     fetch_official_rates,
     official_rate_refresh_interval_seconds,
 )
@@ -158,7 +159,7 @@ def test_coinbase_failures_fail_closed(
     )
 
     with pytest.raises(RateSourceError):
-        fetch_official_rates()
+        fetch_official_rates()["USDT"]
 
 
 @pytest.mark.parametrize("error", [TimeoutError("timed out"), OSError("unreachable")])
@@ -171,7 +172,7 @@ def test_coinbase_transport_failures_fail_closed(
     monkeypatch.setattr("app.core.rate_source.urlopen", _raise)
 
     with pytest.raises(RateSourceError):
-        fetch_official_rates()
+        fetch_official_rates()["USDT"]
 
 
 def test_coinbase_non_positive_amounts_fail_closed(
@@ -185,40 +186,75 @@ def test_coinbase_non_positive_amounts_fail_closed(
             ),
         )
         with pytest.raises(RateSourceError):
-            fetch_official_rates()
+            fetch_official_rates()["USDT"]
 
 
-def test_bob_official_rate_defaults_to_the_static_bcb_value() -> None:
-    monkeypatch = pytest.MonkeyPatch()
+def test_bob_official_rate_comes_from_the_bcb_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.core.rate_source.urlopen",
+        lambda request, timeout: _FakeResponse(
+            status=200,
+            payload={
+                "tc_oficial": {
+                    "regimen": "flexible",
+                    "valor": 12.0,
+                    "moneda": "USD/BOB",
+                    "fecha": "2026-10-04",
+                }
+            },
+        ),
+    )
+
+    suggestion = _fetch_bob_suggestion()
+
+    assert suggestion.currency == "BOB"
+    assert suggestion.units_per_usd == Decimal("12.00000000")
+    assert suggestion.source == "bcb"
+
+
+def test_bob_falls_back_to_the_static_value_when_the_bcb_api_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.core.rate_source.urlopen",
+        lambda request, timeout: _FakeResponse(status=500, payload={"error": "boom"}),
+    )
+    monkeypatch.setenv("ROOMFORGE_OFFICIAL_BOB_RATE", "12.5")
+
+    suggestion = _fetch_bob_suggestion()
+
+    assert suggestion.units_per_usd == Decimal("12.50000000")
+    assert suggestion.source == "bcb-static"
+
+
+def test_bob_fallback_defaults_to_the_flexible_regime_value_without_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.core.rate_source.urlopen",
+        lambda request, timeout: _FakeResponse(status=500, payload={"error": "boom"}),
+    )
     monkeypatch.delenv("ROOMFORGE_OFFICIAL_BOB_RATE", raising=False)
-    try:
-        rates = fetch_official_rates()
-    finally:
-        monkeypatch.undo()
 
-    assert rates["BOB"].currency == "BOB"
-    assert rates["BOB"].units_per_usd == Decimal("6.96000000")
-    assert rates["BOB"].source == "bcb-static"
+    suggestion = _fetch_bob_suggestion()
+
+    assert suggestion.units_per_usd == Decimal("12.00000000")
+    assert suggestion.source == "bcb-static"
 
 
-def test_bob_official_rate_honors_the_environment_override(
+def test_bob_fallback_fails_closed_on_a_malformed_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("ROOMFORGE_OFFICIAL_BOB_RATE", "6.97")
-
-    rates = fetch_official_rates()
-
-    assert rates["BOB"].units_per_usd == Decimal("6.97000000")
-    assert rates["BOB"].source == "bcb-static"
-
-
-def test_bob_official_rate_fails_closed_on_a_malformed_override(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("ROOMFORGE_OFFICIAL_BOB_RATE", "six-ninety-six")
+    monkeypatch.setattr(
+        "app.core.rate_source.urlopen",
+        lambda request, timeout: _FakeResponse(status=500, payload={"error": "boom"}),
+    )
+    monkeypatch.setenv("ROOMFORGE_OFFICIAL_BOB_RATE", "twelve")
 
     with pytest.raises(RateSourceError):
-        fetch_official_rates()
+        _fetch_bob_suggestion()
 
 
 def test_suggestions_carry_the_currency_and_source_labels() -> None:
