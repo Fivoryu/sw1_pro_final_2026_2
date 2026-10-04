@@ -8,7 +8,10 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-/// @notice Local-only escrow for fixed COP-denominated test-token reservation deposits.
+/// @notice Local-only escrow for signed reservation deposits in a configurable ERC-20 asset.
+/// @dev Deposit amounts are expressed in the token's own base units. The caller (backend)
+///      is responsible for scaling a displayed commercial amount to those units per
+///      currency (off-chain `TOKEN_UNIT_SCALES`; e.g. BOB/USD x100, USDT x1e6).
 contract ReservationEscrow is EIP712, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -55,7 +58,7 @@ contract ReservationEscrow is EIP712, ReentrancyGuard {
     );
 
     error InvalidAddress();
-    error InvalidTokenConfiguration();
+    error InvalidTokenConfiguration(); // token must report at least 2 decimals
     error InexactTokenTransfer();
     error InvalidAction();
     error UnauthorizedActor();
@@ -117,7 +120,10 @@ contract ReservationEscrow is EIP712, ReentrancyGuard {
             revert InvalidAddress();
         }
         try IERC20Metadata(tokenAddress).decimals() returns (uint8 tokenDecimals) {
-            if (tokenDecimals != 2) revert InvalidTokenConfiguration();
+            // Commercial money is expressed with 2 decimals; the unit scale per currency
+            // lives off-chain (backend TOKEN_UNIT_SCALES), so any token with at least 2
+            // decimals is accepted and only raw units are moved.
+            if (tokenDecimals < 2) revert InvalidTokenConfiguration();
         } catch {
             revert InvalidTokenConfiguration();
         }

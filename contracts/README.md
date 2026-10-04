@@ -1,6 +1,6 @@
 # RoomForge local reservation escrow
 
-This package contains a local Hardhat demonstration of a fixed-COP-deposit escrow. It is not a payment system, does not represent a real-world token value, and must not be deployed to a testnet or used with real funds. The only configured network is Hardhat's ephemeral local network (`chainId: 31337`). There is no RPC client or relayer in this package.
+This package contains a local Hardhat demonstration of a reservation escrow that moves a configurable ERC-20 test asset. It is not a payment system, does not represent a real-world token value, and must not be deployed to a testnet or used with real funds. The only configured network is Hardhat's ephemeral local network (`chainId: 31337`). There is no RPC client or relayer in this package.
 
 The API remains authoritative for reservation records. The escrow validates signed actions and moves the local test token; backend event/receipt reconciliation is outside this work unit. The broader API document remains a proposal and is not approved by this implementation.
 
@@ -24,9 +24,14 @@ Hardhat test runs use an ephemeral local chain and deploy fixtures only inside t
 
 ## Token units
 
-`RoomForgeTestToken` is an OpenZeppelin ERC-20 with **2 decimals**. Only its owner can mint. For local fixtures, one displayed token unit represents one COP solely as a test convention; this does not imply parity or valuation outside this local demonstration.
+Two local-only OpenZeppelin ERC-20 test assets are provided; only their owner can mint:
 
-Convert an exact COP `Decimal(2)` amount to ERC-20 base units by multiplying by 100 (or parsing the decimal string with 2 token decimals). For example, `COP 38.42` is `3,842` base units. Do not use floating-point arithmetic.
+- `RoomForgeTestToken` (`RFT`), with **2 decimals**, following the commercial money convention.
+- `MockUSDT` (`USDT`), with **6 decimals**, mirroring a USDT-like stablecoin asset.
+
+The escrow constructor accepts any token reporting **at least 2 decimals** and reverts with `InvalidTokenConfiguration` for fewer (commercial money is expressed with 2 decimals, so nothing below that floor is admitted).
+
+The escrow only moves raw base units in the token's own scale. Converting a displayed commercial amount to base units is the **caller's responsibility** (the backend, via `TOKEN_UNIT_SCALES` in `backend/app/core/money.py`: BOB/USD ×100, USDT ×1e6). For example, `BOB 38.42` is `3,842` base units of the 2-decimal token, and `USDT 1.00` is `1,000,000` base units of `MockUSDT`. Do not use floating-point arithmetic.
 
 ## EIP-712 action
 
@@ -93,4 +98,4 @@ Decision, cancellation, and expiry events are emitted even when the refunded/tra
 
 ## Local test coverage
 
-The Hardhat suite covers token decimals/mint access, exact COP scaling, EIP-712 domain/signer/actor/deadline/nonce checks, reservation isolation and immutable terms, deposit/allowance/replay rules, first-action zero-deposit transitions, positive-deposit accept/reject/cancel/expiry, exact refunds and payouts, accepted-state locking, atomic rollback on transfer failure, and a token-callback reentrancy attempt.
+The Hardhat suite covers token decimals/mint access for both test assets, the token-configuration floor (deployment rejects tokens below 2 decimals), exact scaling with the 2-decimal token and the 6-decimal USDT-like token (deposit/accept/reject/cancel/expiry in exact base units), EIP-712 domain/signer/actor/deadline/nonce checks, reservation isolation and immutable terms, deposit/allowance/replay rules, first-action zero-deposit transitions, positive-deposit accept/reject/cancel/expiry, exact refunds and payouts, accepted-state locking, atomic rollback on transfer failure, and a token-callback reentrancy attempt.
