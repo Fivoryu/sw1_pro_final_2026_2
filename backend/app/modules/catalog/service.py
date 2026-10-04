@@ -20,6 +20,7 @@ from sqlalchemy import and_, delete, or_, text, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from app.core.money import SupportedCurrency
 from app.modules.catalog.errors import (
     InvalidListingTransitionError,
     InvalidQuoteExtrasError,
@@ -36,6 +37,7 @@ from app.modules.catalog.models import (
     QuoteSnapshot,
 )
 from app.modules.catalog.schemas import ListingAuthoringRequest
+from app.modules.exchange_rates.service import convert, current_conversion_rates
 
 
 _CURSOR_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,512}\Z")
@@ -424,6 +426,7 @@ def create_quote_snapshot(
     expected_offer_version: int,
     selected_extra_ids: list[str],
     clock: Callable[[], datetime],
+    target_currency: SupportedCurrency | None = None,
 ) -> QuoteSnapshot:
     """Calculate and persist a new quote from the current public offer."""
     if session.get_bind().dialect.name == "sqlite":
@@ -483,6 +486,34 @@ def create_quote_snapshot(
     )
     one_time_total = total if listing.operation == "sale" else Decimal("0.00")
     monthly_total = total if listing.operation == "rent" else Decimal("0.00")
+
+    display_currency: str | None = None
+    display_one_time_total: Decimal | None = None
+    display_monthly_total: Decimal | None = None
+    base_units_per_usd: Decimal | None = None
+    display_units_per_usd: Decimal | None = None
+    if target_currency is not None and target_currency != listing.currency:
+        rates = current_conversion_rates(session=session)
+        display_one_time_total = convert(
+            one_time_total, listing.currency, target_currency, rates=rates
+        )
+        display_monthly_total = convert(
+            monthly_total, listing.currency, target_currency, rates=rates
+        )
+        base_units_per_usd = (
+            Decimal("1.00000000")
+            if listing.currency == "USD"
+            else rates[listing.currency]
+        )
+        display_units_per_usd = (
+            Decimal("1.00000000")
+            if target_currency == "USD"
+            else rates[target_currency]
+        )
+        assert base_units_per_usd is not None
+        assert display_units_per_usd is not None
+        display_currency = target_currency
+
     created_at = _as_utc(clock())
     quote = QuoteSnapshot(
         listing_id=listing.id,
@@ -492,6 +523,11 @@ def create_quote_snapshot(
         lines=lines,
         one_time_total=one_time_total,
         monthly_total=monthly_total,
+        display_currency=display_currency,
+        display_one_time_total=display_one_time_total,
+        display_monthly_total=display_monthly_total,
+        base_units_per_usd=base_units_per_usd,
+        display_units_per_usd=display_units_per_usd,
         created_at=created_at,
         expires_at=created_at + timedelta(minutes=15),
     )

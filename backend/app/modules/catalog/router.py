@@ -18,6 +18,7 @@ from app.modules.catalog.errors import (
     UnsupportedRateLimitDialectError,
 )
 from app.modules.catalog.models import Listing, QuoteSnapshot
+from app.modules.exchange_rates.errors import MissingExchangeRateError
 from app.modules.catalog.schemas import (
     CatalogExtraItem,
     CatalogListingDetail,
@@ -27,6 +28,8 @@ from app.modules.catalog.schemas import (
     ListingApprovalStatus,
     ListingOperation,
     QuoteCreateRequest,
+    QuoteDisplayRate,
+    QuoteDisplayTotals,
     QuoteErrorResponse,
     QuoteLine,
     QuoteSnapshotResponse,
@@ -171,7 +174,7 @@ def get_public_listing_detail(
 
 
 def _quote_response(quote: QuoteSnapshot) -> QuoteSnapshotResponse:
-    return QuoteSnapshotResponse(
+    response = QuoteSnapshotResponse(
         quote_id=quote.id,
         listing_id=quote.listing_id,
         offer_version=quote.offer_version,
@@ -185,12 +188,34 @@ def _quote_response(quote: QuoteSnapshot) -> QuoteSnapshotResponse:
         created_at=quote.created_at,
         expires_at=quote.expires_at,
     )
+    if quote.display_currency is None:
+        return response
+
+    assert quote.display_one_time_total is not None
+    assert quote.display_monthly_total is not None
+    assert quote.base_units_per_usd is not None
+    assert quote.display_units_per_usd is not None
+    return response.model_copy(
+        update={
+            "display_totals": QuoteDisplayTotals(
+                one_time_total=_money(quote.display_one_time_total, quote.display_currency),
+                monthly_total=_money(quote.display_monthly_total, quote.display_currency),
+            ),
+            "display_rate": QuoteDisplayRate(
+                base_currency=cast(SupportedCurrency, quote.currency),
+                display_currency=cast(SupportedCurrency, quote.display_currency),
+                base_units_per_usd=format(quote.base_units_per_usd, ".8f"),
+                display_units_per_usd=format(quote.display_units_per_usd, ".8f"),
+            ),
+        }
+    )
 
 
 @quotes_router.post(
     "",
     status_code=201,
     response_model=QuoteSnapshotResponse,
+    response_model_exclude_unset=True,
     responses={
         404: {"model": QuoteErrorResponse, "description": "Listing not found"},
         409: {"model": QuoteErrorResponse, "description": "Offer version mismatch"},
@@ -205,7 +230,10 @@ def _quote_response(quote: QuoteSnapshot) -> QuoteSnapshotResponse:
                 }
             },
         },
-        503: {"model": QuoteErrorResponse, "description": "Quote service unavailable"},
+        503: {
+            "model": QuoteErrorResponse,
+            "description": "Quote service or required exchange rate unavailable",
+        },
     },
 )
 def create_public_quote(body: QuoteCreateRequest, request: Request) -> QuoteSnapshotResponse:
@@ -256,6 +284,7 @@ def create_public_quote(body: QuoteCreateRequest, request: Request) -> QuoteSnap
                 expected_offer_version=body.offer_version,
                 selected_extra_ids=body.selected_extra_ids,
                 clock=request.app.state.clock,
+                target_currency=body.target_currency,
             )
             return _quote_response(quote)
     except QuoteNotFoundError:
@@ -278,6 +307,12 @@ def create_public_quote(body: QuoteCreateRequest, request: Request) -> QuoteSnap
             field_errors=[
                 {"field": "selected_extra_ids", "message": "Invalid extra selection."}
             ],
+        ) from None
+    except MissingExchangeRateError:
+        raise QuoteApiError(
+            503,
+            "exchange_rate_unavailable",
+            "A required exchange rate is not available for this quote.",
         ) from None
     except SQLAlchemyError:
         raise QuoteApiError(

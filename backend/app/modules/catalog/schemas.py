@@ -63,6 +63,7 @@ class QuoteCreateRequest(BaseModel):
     selected_extra_ids: list[Annotated[str, Field(min_length=1, max_length=36)]] = Field(
         default_factory=list
     )
+    target_currency: SupportedCurrency | None = None
 
 
 class QuoteLine(BaseModel):
@@ -75,6 +76,22 @@ class QuoteLine(BaseModel):
     charge_period: Literal["one_time", "monthly"]
 
 
+class QuoteDisplayTotals(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    one_time_total: CatalogMoney
+    monthly_total: CatalogMoney
+
+
+class QuoteDisplayRate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base_currency: SupportedCurrency
+    display_currency: SupportedCurrency
+    base_units_per_usd: str
+    display_units_per_usd: str
+
+
 class QuoteSnapshotResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -85,6 +102,8 @@ class QuoteSnapshotResponse(BaseModel):
     lines: list[QuoteLine]
     one_time_total: CatalogMoney
     monthly_total: CatalogMoney
+    display_totals: QuoteDisplayTotals | None = None
+    display_rate: QuoteDisplayRate | None = None
     created_at: datetime
     expires_at: datetime
 

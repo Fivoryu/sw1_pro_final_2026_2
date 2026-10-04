@@ -149,6 +149,24 @@ def current_rates(
     return current
 
 
+def current_conversion_rates(*, session: Session) -> dict[str, Decimal | None]:
+    """Return rates usable by a quote, reading the latest values in its transaction."""
+    rows = (
+        session.query(ExchangeRate)
+        .order_by(ExchangeRate.created_at.desc(), ExchangeRate.id.desc())
+        .all()
+    )
+    current: dict[str, Decimal | None] = {
+        "BOB": None,
+        "USD": Decimal("1.00000000"),
+        "USDT": None,
+    }
+    for rate in rows:
+        if current[rate.currency] is None:
+            current[rate.currency] = rate.units_per_usd
+    return current
+
+
 def rate_history(
     *, session_factory: sessionmaker[Session], currency: str
 ) -> list[ExchangeRateRecord]:

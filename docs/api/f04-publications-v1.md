@@ -50,9 +50,47 @@ El cuerpo de alta y reemplazo admite únicamente estos campos:
 }
 ```
 
-`operation` es `sale` o `rent`; `base_price` debe ser decimal positivo con hasta 18 dígitos y 2 decimales. `currency` es opcional y acepta exactamente `BOB`, `USD` o `USDT`; si se omite, el servidor usa `BOB`. La moneda queda asociada al inmueble y se conserva en las cotizaciones. El catálogo público representa sus importes como `{ "amount": "125000.00", "currency": "BOB" }`, y las cotizaciones incluyen la moneda en cada línea y total. Los importes comerciales se representan con dos decimales. Esta unidad no convierte importes entre monedas. `city` y `zone` son textos no vacíos de hasta 120 caracteres; `bedrooms` y `bathrooms` son enteros no negativos. El servidor deriva `city_key` y `zone_key` con `normalize_geo_key`. En `reject`, el cuerpo contiene `observation`, obligatoria y no vacía después de quitar espacios. Las demás acciones pueden omitirla o incluirla para el historial.
+`operation` es `sale` o `rent`; `base_price` debe ser decimal positivo con hasta 18 dígitos y 2 decimales. `currency` es opcional y acepta exactamente `BOB`, `USD` o `USDT`; si se omite, el servidor usa `BOB`. La moneda queda asociada al inmueble y se conserva en las cotizaciones. El catálogo público representa sus importes como `{ "amount": "125000.00", "currency": "BOB" }`, y las cotizaciones incluyen la moneda del inmueble en cada línea y total. Los importes comerciales se representan con dos decimales. La cotización puede incluir, además, un desglose convertido según `target_currency`, descrito abajo. `city` y `zone` son textos no vacíos de hasta 120 caracteres; `bedrooms` y `bathrooms` son enteros no negativos. El servidor deriva `city_key` y `zone_key` con `normalize_geo_key`. En `reject`, el cuerpo contiene `observation`, obligatoria y no vacía después de quitar espacios. Las demás acciones pueden omitirla o incluirla para el historial.
 
 Los esquemas rechazan campos adicionales. No se aceptan autoridad, estado ni valores derivados del cliente, incluidos `tenant_id`, actor, rol, `status`, `is_published`, `offer_version`, timestamps, `city_key`, `zone_key` y `photos`.
+
+### Cotización pública en la moneda elegida
+
+`POST /api/v1/quotes` acepta `listing_id`, `offer_version` y `selected_extra_ids`, además del campo opcional `target_currency`. Este campo admite exactamente `BOB`, `USD` o `USDT`. El servidor calcula siempre la cotización original en la moneda del inmueble; el cliente no envía totales ni tasas.
+
+Si `target_currency` se omite o coincide con la moneda del inmueble, la respuesta conserva el comportamiento existente: `lines`, `one_time_total` y `monthly_total` se expresan en la moneda del inmueble y no incluye `display_totals` ni `display_rate`. Si es diferente, el servidor convierte ambos totales desde la moneda del inmueble a USD y luego a la moneda elegida, usando las tasas administradas vigentes (`units_per_usd`). El cálculo usa `Decimal` exacto y redondea una sola vez el resultado final a dos decimales con `ROUND_HALF_UP`.
+
+Ejemplo de solicitud para cotizar un inmueble publicado en BOB en USD:
+
+```json
+{
+  "listing_id": "listing-id",
+  "offer_version": 1,
+  "selected_extra_ids": [],
+  "target_currency": "USD"
+}
+```
+
+Cuando se aplica la conversión, la respuesta agrega los siguientes bloques; los totales originales continúan en BOB:
+
+```json
+{
+  "one_time_total": {"amount": "100.00", "currency": "BOB"},
+  "monthly_total": {"amount": "0.00", "currency": "BOB"},
+  "display_totals": {
+    "one_time_total": {"amount": "14.37", "currency": "USD"},
+    "monthly_total": {"amount": "0.00", "currency": "USD"}
+  },
+  "display_rate": {
+    "base_currency": "BOB",
+    "display_currency": "USD",
+    "base_units_per_usd": "6.96000000",
+    "display_units_per_usd": "1.00000000"
+  }
+}
+```
+
+La instantánea guarda los importes convertidos y las dos tasas usadas con ocho decimales, junto con la moneda de presentación. Estos valores quedan congelados e inmutables: una tasa administrada posterior solo afecta cotizaciones nuevas y no reescribe una cotización existente. Si falta una tasa necesaria para cualquiera de las monedas del cruce, la solicitud falla de forma cerrada con HTTP `503` y código `exchange_rate_unavailable`, usando la envolvente de errores propia de cotizaciones; no se supone paridad ni se consulta una fuente externa.
 
 ### Listado y consulta de personal
 

@@ -149,6 +149,15 @@ class QuoteSnapshot(Base):
         CheckConstraint("operation IN ('sale', 'rent')", name="ck_quote_snapshot_operation"),
         CheckConstraint("one_time_total >= 0", name="ck_quote_snapshot_one_time_nonnegative"),
         CheckConstraint("monthly_total >= 0", name="ck_quote_snapshot_monthly_nonnegative"),
+        CheckConstraint(
+            "(display_currency IS NULL AND display_one_time_total IS NULL "
+            "AND display_monthly_total IS NULL AND base_units_per_usd IS NULL "
+            "AND display_units_per_usd IS NULL) OR "
+            "(display_currency IS NOT NULL AND display_one_time_total IS NOT NULL "
+            "AND display_monthly_total IS NOT NULL AND base_units_per_usd IS NOT NULL "
+            "AND display_units_per_usd IS NOT NULL)",
+            name="ck_quote_snapshot_display_fields_all_or_none",
+        ),
         CheckConstraint("expires_at > created_at", name="ck_quote_snapshot_expiry_after_creation"),
         Index("ix_quote_snapshot_listing_version", "listing_id", "offer_version"),
     )
@@ -163,6 +172,11 @@ class QuoteSnapshot(Base):
     lines: Mapped[list[dict[str, str | None]]] = mapped_column(JSON, nullable=False)
     one_time_total: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     monthly_total: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    display_currency: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    display_one_time_total: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    display_monthly_total: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    base_units_per_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
+    display_units_per_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

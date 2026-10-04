@@ -1347,6 +1347,7 @@ def test_quote_openapi_and_public_creation_make_a_new_snapshot_per_post(
         "listing_id",
         "offer_version",
         "selected_extra_ids",
+        "target_currency",
     }
     assert request_schema["properties"]["offer_version"]["type"] == "integer"
     assert operation["responses"]["201"]["content"]["application/json"]["schema"][
@@ -1658,6 +1659,280 @@ def test_quote_rate_limit_is_per_direct_peer_ip_and_stores_only_hmac_key(
         assert {len(event.client_key) for event in events} == {64}
         assert all("127.0.0.1" not in event.client_key for event in events)
         assert all("192.0.2.44" not in event.client_key for event in events)
+
+
+def _quote_fx_admin_headers(context: CatalogApiContext) -> dict[str, str]:
+    return _staff_headers(
+        context,
+        account_id="quote-fx-admin",
+        role="platform_admin",
+        tenant_id=None,
+    )
+
+
+def _create_quote_bob_rate(
+    context: CatalogApiContext, headers: dict[str, str], units_per_usd: str
+) -> Any:
+    response = context.client.post(
+        "/api/v1/platform/exchange-rates",
+        json={"currency": "BOB", "units_per_usd": units_per_usd},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    return response
+
+
+def test_quote_target_currency_converts_totals_and_freezes_rate_values(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    context = catalog_api_context
+    _seed_listing(context, listing_id="display-quote", base_price="100.00")
+    admin_headers = _quote_fx_admin_headers(context)
+    _create_quote_bob_rate(context, admin_headers, "6.96000000")
+
+    response = context.client.post(
+        "/api/v1/quotes",
+        json={
+            **_quote_payload(listing_id="display-quote", offer_version=1),
+            "target_currency": "USD",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    quote = response.json()
+    assert quote["one_time_total"] == {"amount": "100.00", "currency": "BOB"}
+    assert quote["monthly_total"] == {"amount": "0.00", "currency": "BOB"}
+    assert quote["display_totals"] == {
+        "one_time_total": {"amount": "14.37", "currency": "USD"},
+        "monthly_total": {"amount": "0.00", "currency": "USD"},
+    }
+    assert quote["display_rate"] == {
+        "base_currency": "BOB",
+        "display_currency": "USD",
+        "base_units_per_usd": "6.96000000",
+        "display_units_per_usd": "1.00000000",
+    }
+
+
+def test_quote_snapshots_keep_old_rates_while_new_quotes_use_current_rates(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    from app.modules.catalog.models import QuoteSnapshot
+    from app.modules.catalog.router import _quote_response
+
+    context = catalog_api_context
+    _seed_listing(context, listing_id="frozen-rate-quote", base_price="100.00")
+    admin_headers = _quote_fx_admin_headers(context)
+    _create_quote_bob_rate(context, admin_headers, "6.96000000")
+    payload = {
+        **_quote_payload(listing_id="frozen-rate-quote", offer_version=1),
+        "target_currency": "USD",
+    }
+    first = context.client.post("/api/v1/quotes", json=payload)
+    assert first.status_code == 201, first.text
+    first_body = first.json()
+
+    _create_quote_bob_rate(context, admin_headers, "8.00000000")
+
+    with context.session_factory() as session:
+        snapshot = session.get(QuoteSnapshot, first_body["quote_id"])
+        assert snapshot is not None
+        reserialized = _quote_response(snapshot).model_dump(mode="json")
+    assert reserialized["display_totals"] == first_body["display_totals"]
+    assert reserialized["display_rate"] == first_body["display_rate"]
+
+    second = context.client.post("/api/v1/quotes", json=payload)
+    assert second.status_code == 201, second.text
+    assert second.json()["display_totals"]["one_time_total"] == {
+        "amount": "12.50",
+        "currency": "USD",
+    }
+    assert second.json()["display_rate"]["base_units_per_usd"] == "8.00000000"
+
+
+def test_quote_target_currency_omitted_or_same_as_listing_omits_display_blocks(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    context = catalog_api_context
+    _seed_listing(context, listing_id="bob-quote", base_price="100.00")
+
+    omitted = context.client.post(
+        "/api/v1/quotes",
+        json=_quote_payload(listing_id="bob-quote", offer_version=1),
+    )
+    same_currency = context.client.post(
+        "/api/v1/quotes",
+        json={
+            **_quote_payload(listing_id="bob-quote", offer_version=1),
+            "target_currency": "BOB",
+        },
+    )
+
+    assert omitted.status_code == same_currency.status_code == 201
+    for response in (omitted, same_currency):
+        assert response.json()["one_time_total"] == {"amount": "100.00", "currency": "BOB"}
+        assert "display_totals" not in response.json()
+        assert "display_rate" not in response.json()
+
+
+def test_quote_rejects_unsupported_target_currency(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    response = catalog_api_context.client.post(
+        "/api/v1/quotes",
+        json={
+            **_quote_payload(listing_id="display-quote", offer_version=1),
+            "target_currency": "EUR",
+        },
+    )
+
+    _assert_quote_error(response, status_code=422, code="validation_error")
+
+
+def test_quote_target_currency_fails_closed_when_a_rate_is_missing(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    context = catalog_api_context
+    _seed_listing(context, listing_id="missing-fx-quote", base_price="100.00")
+
+    response = context.client.post(
+        "/api/v1/quotes",
+        json={
+            **_quote_payload(listing_id="missing-fx-quote", offer_version=1),
+            "target_currency": "USD",
+        },
+    )
+
+    _assert_quote_error(response, status_code=503, code="exchange_rate_unavailable")
+
+
+def test_quote_cross_conversion_uses_both_current_usd_relative_rates(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    context = catalog_api_context
+    _seed_listing(context, listing_id="cross-fx-quote", base_price="100.00")
+    admin_headers = _quote_fx_admin_headers(context)
+    _create_quote_bob_rate(context, admin_headers, "6.96000000")
+    usdt_rate = context.client.post(
+        "/api/v1/platform/exchange-rates",
+        json={"currency": "USDT", "units_per_usd": "1.01000000"},
+        headers=admin_headers,
+    )
+    assert usdt_rate.status_code == 201, usdt_rate.text
+
+    response = context.client.post(
+        "/api/v1/quotes",
+        json={
+            **_quote_payload(listing_id="cross-fx-quote", offer_version=1),
+            "target_currency": "USDT",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    quote = response.json()
+    assert quote["display_totals"]["one_time_total"] == {
+        "amount": "14.51",
+        "currency": "USDT",
+    }
+    assert quote["display_rate"] == {
+        "base_currency": "BOB",
+        "display_currency": "USDT",
+        "base_units_per_usd": "6.96000000",
+        "display_units_per_usd": "1.01000000",
+    }
+
+
+def test_quote_display_currency_migration_adds_all_or_nothing_columns() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "0015_quote_display_currency.py"
+    )
+    migration_spec = importlib.util.spec_from_file_location(
+        "quote_display_currency_0015_test", migration_path
+    )
+    assert migration_spec is not None and migration_spec.loader is not None
+    migration = importlib.util.module_from_spec(migration_spec)
+    migration_spec.loader.exec_module(migration)
+    assert migration.revision == "0015_quote_display_currency"
+    assert migration.down_revision == "0014_exchange_rates"
+
+    from sqlalchemy import inspect
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("CREATE TABLE quote_snapshot (id VARCHAR(36) PRIMARY KEY)")
+            )
+            connection.execute(
+                text(
+                    "CREATE TRIGGER trg_quote_snapshot_immutable_update "
+                    "BEFORE UPDATE ON quote_snapshot BEGIN "
+                    "SELECT RAISE(ABORT, 'quote snapshots are immutable'); END"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE TRIGGER trg_quote_snapshot_immutable_delete "
+                    "BEFORE DELETE ON quote_snapshot BEGIN "
+                    "SELECT RAISE(ABORT, 'quote snapshots are immutable'); END"
+                )
+            )
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.upgrade()
+
+            inspector = inspect(connection)
+            columns = {column["name"] for column in inspector.get_columns("quote_snapshot")}
+            display_columns = {
+                "display_currency",
+                "display_one_time_total",
+                "display_monthly_total",
+                "base_units_per_usd",
+                "display_units_per_usd",
+            }
+            assert display_columns <= columns
+            checks = {
+                check["name"] for check in inspector.get_check_constraints("quote_snapshot")
+            }
+            assert "ck_quote_snapshot_display_fields_all_or_none" in checks
+
+            connection.execute(text("INSERT INTO quote_snapshot (id) VALUES ('legacy')"))
+            with connection.begin_nested():
+                with pytest.raises(IntegrityError):
+                    connection.execute(
+                        text(
+                            "INSERT INTO quote_snapshot (id, display_currency) "
+                            "VALUES ('partial', 'USD')"
+                        )
+                    )
+            connection.execute(
+                text(
+                    "INSERT INTO quote_snapshot (id, display_currency, display_one_time_total, "
+                    "display_monthly_total, base_units_per_usd, display_units_per_usd) "
+                    "VALUES ('complete', 'USD', 10.00, 0.00, 6.96000000, 1.00000000)"
+                )
+            )
+            trigger_names = {
+                row[0]
+                for row in connection.execute(
+                    text("SELECT name FROM sqlite_master WHERE type = 'trigger'")
+                )
+            }
+            assert {
+                "trg_quote_snapshot_immutable_update",
+                "trg_quote_snapshot_immutable_delete",
+            } <= trigger_names
+
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.downgrade()
+            downgraded_columns = {
+                column["name"] for column in inspect(connection).get_columns("quote_snapshot")
+            }
+            assert not display_columns & downgraded_columns
+    finally:
+        engine.dispose()
 
 
 def test_quote_validation_envelope_is_quote_specific(
