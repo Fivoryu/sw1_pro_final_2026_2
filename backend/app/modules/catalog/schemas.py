@@ -40,6 +40,14 @@ class CatalogExtraItem(BaseModel):
     extra_id: str
     name: str
     price: CatalogMoney
+    category: str | None
+    room: str | None
+    width_cm: int | None
+    height_cm: int | None
+    depth_cm: int | None
+    origin: str | None
+    visual_reference: str | None
+    quantity: int
 
 
 class CatalogListingDetail(CatalogListingItem):
@@ -141,6 +149,43 @@ class ListingDepositResponse(BaseModel):
     offer_version: int
 
 
+class ExtraPayload(BaseModel):
+    """One furniture extra in listing authoring; `extra_id` targets an existing row."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    extra_id: Annotated[str, Field(min_length=1, max_length=36)] | None = None
+    name: Annotated[str, Field(min_length=1, max_length=120)]
+    price: Annotated[
+        Decimal,
+        Field(ge=Decimal("0"), max_digits=18, decimal_places=2),
+    ]
+    category: Annotated[str, Field(min_length=1, max_length=32)] | None = None
+    room: Annotated[str, Field(min_length=1, max_length=32)] | None = None
+    width_cm: Annotated[StrictInt, Field(ge=1)] | None = None
+    height_cm: Annotated[StrictInt, Field(ge=1)] | None = None
+    depth_cm: Annotated[StrictInt, Field(ge=1)] | None = None
+    origin: Annotated[str, Field(min_length=1, max_length=120)] | None = None
+    visual_reference: Annotated[str, Field(min_length=1, max_length=255)] | None = None
+    quantity: Annotated[StrictInt, Field(ge=1)] = 1
+
+
+class ExtraAuthoringResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    extra_id: str
+    name: str
+    price: str
+    category: str | None
+    room: str | None
+    width_cm: int | None
+    height_cm: int | None
+    depth_cm: int | None
+    origin: str | None
+    visual_reference: str | None
+    quantity: int
+
+
 class ListingAuthoringRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -156,6 +201,7 @@ class ListingAuthoringRequest(BaseModel):
     bathrooms: Annotated[StrictInt, Field(ge=0)]
     description: str | None = None
     exact_address: str | None = None
+    extras: list[ExtraPayload] | None = None
 
 
 class ListingTransitionRequest(BaseModel):
@@ -182,6 +228,7 @@ class ListingAuthoringResponse(BaseModel):
     is_published: bool
     offer_version: int
     created_at: datetime
+    extras: list[ExtraAuthoringResponse] = Field(default_factory=list)
 
 
 class StaffListingPagination(BaseModel):

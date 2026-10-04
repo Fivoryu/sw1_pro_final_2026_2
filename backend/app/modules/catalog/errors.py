@@ -41,3 +41,7 @@ class UnsupportedRateLimitDialectError(Exception):
 
 class InvalidListingTransitionError(Exception):
     """The requested listing action does not match its current state."""
+
+
+class InvalidExtraReferenceError(Exception):
+    """An extras payload references an extra that does not belong to the listing."""

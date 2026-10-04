@@ -514,3 +514,99 @@ def test_quote_snapshot_migration_upgrades_and_downgrades_sqlite() -> None:
             assert "listing" in inspect(connection).get_table_names()
     finally:
         engine.dispose()
+
+
+def test_listing_extra_details_migration_upgrades_and_downgrades_sqlite() -> None:
+    offers = _load_migration(
+        _MIGRATIONS / "0007_catalog_offers.py", "catalog_offers_0007_for_extra_details"
+    )
+    migration_path = _MIGRATIONS / "0016_listing_extra_details.py"
+    assert migration_path.is_file(), "F05.1 must add the 0016 extra details migration"
+    migration = _load_migration(migration_path, "listing_extra_details_0016_for_test")
+    assert migration.revision == "0016_listing_extra_details"
+    assert migration.down_revision == "0015_quote_display_currency"
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+            connection.execute(text("CREATE TABLE agency (id VARCHAR(36) PRIMARY KEY)"))
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                offers.upgrade()
+                migration.upgrade()
+
+            extra_columns = {
+                column["name"]: column for column in inspect(connection).get_columns("listing_extra")
+            }
+            assert {
+                "category",
+                "room",
+                "width_cm",
+                "height_cm",
+                "depth_cm",
+                "origin",
+                "visual_reference",
+                "quantity",
+            }.issubset(extra_columns)
+
+            connection.execute(text("INSERT INTO agency (id) VALUES ('agency-one')"))
+            _insert_listing(connection)
+            connection.execute(
+                text(
+                    "INSERT INTO listing_extra (id, listing_id, name, price) "
+                    "VALUES ('extra-one', 'listing-one', 'Cama', '10.00')"
+                )
+            )
+            assert connection.scalar(
+                text("SELECT quantity FROM listing_extra WHERE id = 'extra-one'")
+            ) == 1
+            for statement in (
+                "UPDATE listing_extra SET quantity = 0 WHERE id = 'extra-one'",
+                "UPDATE listing_extra SET width_cm = 0 WHERE id = 'extra-one'",
+                "UPDATE listing_extra SET height_cm = -5 WHERE id = 'extra-one'",
+                "UPDATE listing_extra SET category = '   ' WHERE id = 'extra-one'",
+                "UPDATE listing_extra SET visual_reference = ' ' WHERE id = 'extra-one'",
+            ):
+                _assert_integrity_error(connection, statement, {})
+
+            # Quantity is an offer field: changing it advances the offer version.
+            # The insert itself already advanced it once (1 -> 2 -> 3).
+            connection.execute(
+                text("UPDATE listing_extra SET quantity = 3 WHERE id = 'extra-one'")
+            )
+            assert connection.scalar(
+                text("SELECT offer_version FROM listing WHERE id = 'listing-one'")
+            ) == 3
+            connection.execute(
+                text("UPDATE listing_extra SET category = 'bed' WHERE id = 'extra-one'")
+            )
+            assert connection.scalar(
+                text("SELECT offer_version FROM listing WHERE id = 'listing-one'")
+            ) == 3
+
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.downgrade()
+            downgraded = {
+                column["name"] for column in inspect(connection).get_columns("listing_extra")
+            }
+            assert not downgraded & {
+                "category",
+                "room",
+                "width_cm",
+                "height_cm",
+                "depth_cm",
+                "origin",
+                "visual_reference",
+                "quantity",
+            }
+            connection.execute(
+                text(
+                    "UPDATE listing_extra SET price = '12.00' WHERE id = 'extra-one'"
+                )
+            )
+            assert connection.scalar(
+                text("SELECT offer_version FROM listing WHERE id = 'listing-one'")
+            ) == 4
+    finally:
+        engine.dispose()

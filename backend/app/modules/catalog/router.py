@@ -11,13 +11,15 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.money import SupportedCurrency, format_money_amount
 from app.modules.catalog.errors import (
+    InvalidExtraReferenceError,
+    InvalidListingTransitionError,
     InvalidQuoteExtrasError,
     QuoteApiError,
     QuoteNotFoundError,
     QuoteOfferVersionMismatchError,
     UnsupportedRateLimitDialectError,
 )
-from app.modules.catalog.models import Listing, QuoteSnapshot
+from app.modules.catalog.models import Listing, ListingExtra, QuoteSnapshot
 from app.modules.exchange_rates.errors import MissingExchangeRateError
 from app.modules.catalog.schemas import (
     CatalogExtraItem,
@@ -35,6 +37,7 @@ from app.modules.catalog.schemas import (
     QuoteSnapshotResponse,
     ListingDepositResponse,
     ListingDepositUpdateRequest,
+    ExtraAuthoringResponse,
     ListingAuthoringRequest,
     ListingAuthoringResponse,
     ListingTransitionRequest,
@@ -42,7 +45,6 @@ from app.modules.catalog.schemas import (
     StaffListingPage,
     StaffListingPagination,
 )
-from app.modules.catalog.errors import InvalidListingTransitionError
 from app.modules.catalog.service import (
     configure_listing_deposit,
     create_staff_listing,
@@ -144,6 +146,22 @@ def list_public_listings(
     )
 
 
+def _public_extra_item(extra: ListingExtra, currency: str) -> CatalogExtraItem:
+    return CatalogExtraItem(
+        extra_id=extra.id,
+        name=extra.name,
+        price=_money(extra.price, currency),
+        category=extra.category,
+        room=extra.room,
+        width_cm=extra.width_cm,
+        height_cm=extra.height_cm,
+        depth_cm=extra.depth_cm,
+        origin=extra.origin,
+        visual_reference=extra.visual_reference,
+        quantity=extra.quantity,
+    )
+
+
 @listings_router.get(
     "/{listing_id}",
     response_model=CatalogListingDetail,
@@ -162,14 +180,7 @@ def get_public_listing_detail(
             **_listing_item(listing).model_dump(),
             bedrooms=listing.bedrooms,
             bathrooms=listing.bathrooms,
-            extras=[
-                CatalogExtraItem(
-                    extra_id=extra.id,
-                    name=extra.name,
-                    price=_money(extra.price, listing.currency),
-                )
-                for extra in extras
-            ],
+            extras=[_public_extra_item(extra, listing.currency) for extra in extras],
         )
 
 
@@ -364,7 +375,9 @@ def _require_listing_admin(staff: ActiveStaff, agency_id: str) -> None:
         raise HTTPException(status_code=403, detail="Agency-admin tenant access is required")
 
 
-def _authoring_response(listing: Listing) -> ListingAuthoringResponse:
+def _authoring_response(
+    listing: Listing, extras: list[ListingExtra]
+) -> ListingAuthoringResponse:
     return ListingAuthoringResponse(
         listing_id=listing.id,
         agency_id=listing.agency_id,
@@ -381,6 +394,22 @@ def _authoring_response(listing: Listing) -> ListingAuthoringResponse:
         is_published=listing.is_published,
         offer_version=listing.offer_version,
         created_at=listing.created_at,
+        extras=[
+            ExtraAuthoringResponse(
+                extra_id=extra.id,
+                name=extra.name,
+                price=format_money_amount(extra.price),
+                category=extra.category,
+                room=extra.room,
+                width_cm=extra.width_cm,
+                height_cm=extra.height_cm,
+                depth_cm=extra.depth_cm,
+                origin=extra.origin,
+                visual_reference=extra.visual_reference,
+                quantity=extra.quantity,
+            )
+            for extra in extras
+        ],
     )
 
 
@@ -398,15 +427,20 @@ def create_agency_listing(
     _require_listing_editor(staff, agency_id)
     session_factory: sessionmaker[Session] = request.app.state.session_factory
     with session_factory.begin() as session:
-        listing = create_staff_listing(
-            session,
-            agency_id=agency_id,
-            content=body,
-            actor_id=staff["id"],
-            actor_role=staff["role"],
-            now=request.app.state.clock(),
-        )
-        return _authoring_response(listing)
+        try:
+            listing = create_staff_listing(
+                session,
+                agency_id=agency_id,
+                content=body,
+                actor_id=staff["id"],
+                actor_role=staff["role"],
+                now=request.app.state.clock(),
+            )
+        except InvalidExtraReferenceError:
+            raise HTTPException(
+                status_code=422, detail="Unknown or duplicated extra reference"
+            ) from None
+        return _authoring_response(listing, list_listing_extras(session, listing.id))
 
 
 @router.get(
@@ -434,7 +468,10 @@ def list_agency_listings(
             offset=offset,
         )
         return StaffListingPage(
-            listings=[_authoring_response(listing) for listing in listings],
+            listings=[
+                _authoring_response(listing, list_listing_extras(session, listing.id))
+                for listing in listings
+            ],
             pagination=StaffListingPagination(limit=limit, offset=offset, total=total),
         )
 
@@ -455,7 +492,7 @@ def get_agency_listing(
         listing = get_staff_listing(session, agency_id=agency_id, listing_id=listing_id)
         if listing is None:
             raise HTTPException(status_code=404, detail="Listing not found")
-        return _authoring_response(listing)
+        return _authoring_response(listing, list_listing_extras(session, listing.id))
 
 
 @router.put(
@@ -472,18 +509,23 @@ def replace_agency_listing(
     _require_listing_editor(staff, agency_id)
     session_factory: sessionmaker[Session] = request.app.state.session_factory
     with session_factory.begin() as session:
-        listing = edit_staff_listing(
-            session,
-            agency_id=agency_id,
-            listing_id=listing_id,
-            content=body,
-            actor_id=staff["id"],
-            actor_role=staff["role"],
-            now=request.app.state.clock(),
-        )
+        try:
+            listing = edit_staff_listing(
+                session,
+                agency_id=agency_id,
+                listing_id=listing_id,
+                content=body,
+                actor_id=staff["id"],
+                actor_role=staff["role"],
+                now=request.app.state.clock(),
+            )
+        except InvalidExtraReferenceError:
+            raise HTTPException(
+                status_code=422, detail="Unknown or duplicated extra reference"
+            ) from None
         if listing is None:
             raise HTTPException(status_code=404, detail="Listing not found")
-        return _authoring_response(listing)
+        return _authoring_response(listing, list_listing_extras(session, listing.id))
 
 
 def _apply_listing_transition(
@@ -519,7 +561,7 @@ def _apply_listing_transition(
             )
             if listing is None:
                 raise HTTPException(status_code=404, detail="Listing not found")
-            return _authoring_response(listing)
+            return _authoring_response(listing, list_listing_extras(session, listing.id))
     except InvalidListingTransitionError:
         raise HTTPException(
             status_code=409, detail="Listing cannot be changed from its current state"

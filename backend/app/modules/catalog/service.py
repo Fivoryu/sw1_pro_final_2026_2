@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.core.money import SupportedCurrency
 from app.modules.catalog.errors import (
+    InvalidExtraReferenceError,
     InvalidListingTransitionError,
     InvalidQuoteExtrasError,
     QuoteExpiredError,
@@ -36,7 +37,7 @@ from app.modules.catalog.models import (
     QuoteRateLimitEvent,
     QuoteSnapshot,
 )
-from app.modules.catalog.schemas import ListingAuthoringRequest
+from app.modules.catalog.schemas import ExtraPayload, ListingAuthoringRequest
 from app.modules.exchange_rates.service import convert, current_conversion_rates
 
 
@@ -180,6 +181,69 @@ def configure_listing_deposit(
     return listing
 
 
+def _extra_values(payload: ExtraPayload) -> dict[str, object]:
+    return {
+        "name": payload.name,
+        "price": payload.price,
+        "category": payload.category,
+        "room": payload.room,
+        "width_cm": payload.width_cm,
+        "height_cm": payload.height_cm,
+        "depth_cm": payload.depth_cm,
+        "origin": payload.origin,
+        "visual_reference": payload.visual_reference,
+        "quantity": payload.quantity,
+    }
+
+
+def _apply_extras_diff(
+    session: Session,
+    *,
+    listing_id: str,
+    payloads: list[ExtraPayload],
+) -> None:
+    """Diff the payload against stored extras by stable ID.
+
+    Payload rows carrying a known `extra_id` update that row in place; rows
+    without one are inserted with a fresh stable ID; stored extras missing from
+    the payload are deleted. Rows whose values are identical are left untouched
+    so the offer-version triggers do not fire for a semantically equal set.
+    """
+    existing: dict[str, ListingExtra] = {
+        extra.id: extra
+        for extra in session.query(ListingExtra)
+        .filter(ListingExtra.listing_id == listing_id)
+        .all()
+    }
+    referenced = [payload.extra_id for payload in payloads if payload.extra_id is not None]
+    if len(referenced) != len(set(referenced)):
+        raise InvalidExtraReferenceError
+    for extra_id in referenced:
+        if extra_id not in existing:
+            raise InvalidExtraReferenceError
+
+    removed_ids = existing.keys() - set(referenced)
+    if removed_ids:
+        session.query(ListingExtra).filter(
+            ListingExtra.listing_id == listing_id,
+            ListingExtra.id.in_(removed_ids),
+        ).delete(synchronize_session=False)
+
+    for payload in payloads:
+        if payload.extra_id is None:
+            session.add(ListingExtra(listing_id=listing_id, **_extra_values(payload)))
+            continue
+        extra = existing[payload.extra_id]
+        values = _extra_values(payload)
+        if any(getattr(extra, field) != value for field, value in values.items()):
+            for field, value in values.items():
+                setattr(extra, field, value)
+
+    # Flush so the offer-version triggers run before the caller refreshes the
+    # listing; sessions may be built with autoflush disabled.
+    session.flush()
+
+
 def create_staff_listing(
     session: Session,
     *,
@@ -209,6 +273,13 @@ def create_staff_listing(
     )
     session.add(listing)
     session.flush()
+    if content.extras:
+        session.add_all(
+            ListingExtra(listing_id=listing.id, **_extra_values(payload))
+            for payload in content.extras
+        )
+        session.flush()
+        session.refresh(listing)
     session.add(
         ListingTransition(
             agency_id=agency_id,
@@ -269,6 +340,9 @@ def edit_staff_listing(
     )
     session.flush()
     session.refresh(listing)
+    if content.extras is not None:
+        _apply_extras_diff(session, listing_id=listing_id, payloads=content.extras)
+        session.refresh(listing)
     session.add(
         ListingTransition(
             agency_id=agency_id,
@@ -475,14 +549,18 @@ def create_quote_snapshot(
         {
             "kind": "extra",
             "extra_id": extra.id,
-            "amount": format(_quote_money(extra.price), ".2f"),
+            "amount": format(_quote_money(extra.price * extra.quantity), ".2f"),
             "currency": listing.currency,
             "charge_period": period,
         }
         for extra in extras
     )
     total = _quote_money(
-        listing.base_price + sum((extra.price for extra in extras), start=Decimal("0.00"))
+        listing.base_price
+        + sum(
+            (extra.price * extra.quantity for extra in extras),
+            start=Decimal("0.00"),
+        )
     )
     one_time_total = total if listing.operation == "sale" else Decimal("0.00")
     monthly_total = total if listing.operation == "rent" else Decimal("0.00")

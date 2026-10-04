@@ -369,6 +369,14 @@ def test_detail_has_minimal_public_schema_and_hides_private_fields(
                 "extra_id": "extra-stable-id",
                 "name": "Amoblamiento",
                 "price": {"amount": "1234.50", "currency": "BOB"},
+                "category": None,
+                "room": None,
+                "width_cm": None,
+                "height_cm": None,
+                "depth_cm": None,
+                "origin": None,
+                "visual_reference": None,
+                "quantity": 1,
             }
         ],
     }
@@ -376,7 +384,19 @@ def test_detail_has_minimal_public_schema_and_hides_private_fields(
     assert "private description" not in serialized
     assert "private exact address" not in serialized
     assert "private-photo.jpg" not in serialized
-    assert set(response.json()["extras"][0]) == {"extra_id", "name", "price"}
+    assert set(response.json()["extras"][0]) == {
+        "extra_id",
+        "name",
+        "price",
+        "category",
+        "room",
+        "width_cm",
+        "height_cm",
+        "depth_cm",
+        "origin",
+        "visual_reference",
+        "quantity",
+    }
 
 
 @pytest.mark.parametrize("currency", ["USD", "USDT"])
@@ -1275,6 +1295,14 @@ def test_openapi_and_validation_preserve_staff_customer_namespaces(
         "extra_id",
         "name",
         "price",
+        "category",
+        "room",
+        "width_cm",
+        "height_cm",
+        "depth_cm",
+        "origin",
+        "visual_reference",
+        "quantity",
     }
 
     catalog_invalid = context.client.get("/api/v1/listings", params={"limit": 0})

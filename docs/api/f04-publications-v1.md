@@ -46,7 +46,8 @@ El cuerpo de alta y reemplazo admite únicamente estos campos:
   "bedrooms": 3,
   "bathrooms": 2,
   "description": "Descripción opcional",
-  "exact_address": "Dirección opcional"
+  "exact_address": "Dirección opcional",
+  "extras": []
 }
 ```
 
@@ -123,7 +124,8 @@ Ordena del más reciente al más antiguo (`created_at` descendente, luego `id` d
       "approval_status": "pending",
       "is_published": false,
       "offer_version": 1,
-      "created_at": "2026-10-01T12:00:00Z"
+      "created_at": "2026-10-01T12:00:00Z",
+      "extras": []
     }
   ],
   "pagination": {"limit": 20, "offset": 0, "total": 1}
@@ -177,7 +179,49 @@ Las rutas utilizan el formato de error HTTP existente; no cambian el manejador g
 
 Cada creación, edición o transición exitosa agrega una fila en `listing_transition`, con actor y rol resueltos por el servidor, estados anterior y nuevo, observación y fecha. La mutación del inmueble y su fila de historial se confirman en una misma transacción. El historial solo está disponible en la ruta de personal.
 
-La versión comercial comienza en `1` y la controlan los disparadores existentes de la migración `0007_catalog_offers.py`: cambia cuando cambia `base_price`, `operation` o los extras del inmueble. Una edición descriptiva (por ejemplo, de `description`) no cambia `offer_version` ni invalida una cotización; un cambio comercial sí. La API F04 no modifica extras. Una reserva aceptada conserva su instantánea comercial.
+## Extras administrados desde la API (extensión F05.1, 2026-10-04)
+
+**Regla histórica y su reemplazo.** El contrato original de F04 establecía que «La API F04 no modifica extras»: los extras se registraban solo por vías internas y quedaban fuera de la autoría. Esa regla quedó **sin efecto a partir del 2026-10-04** con la extensión F05.1 de mobiliario completo, registrada en el ODD de la fase 5: la API de autoría acepta y administra el conjunto completo de extras, con categoría, habitación, dimensiones, procedencia, vínculo visual y cantidad.
+
+### Campos de cada extra
+
+El campo `extras` es una lista opcional del cuerpo de alta (`POST`) y de reemplazo (`PUT`). Cada elemento admite:
+
+| Campo | Tipo | Obligatorio | Validación |
+|---|---|---|---|
+| `extra_id` | string ≤ 36 | No (solo `PUT`) | Debe identificar un extra existente del inmueble; si falta, se crea uno nuevo. |
+| `name` | string ≤ 120 | Sí | No vacío después de recortar espacios. |
+| `price` | decimal ≥ 0 | Sí | Hasta 18 dígitos y 2 decimales, en la moneda del inmueble. |
+| `category` | string ≤ 32 | No | No vacío cuando está presente. |
+| `room` | string ≤ 32 | No | No vacío cuando está presente. |
+| `width_cm`, `height_cm`, `depth_cm` | entero ≥ 1 | No | Dimensiones en centímetros; se rechazan valores cero o negativos. |
+| `origin` | string ≤ 120 | No | Procedencia; no vacía cuando está presente. |
+| `visual_reference` | string ≤ 255 | No | Vínculo visual; no vacío cuando está presente. |
+| `quantity` | entero ≥ 1 | No (predeterminado 1) | Participa en la oferta; se rechazan valores menores que 1. |
+
+El cuerpo rechaza campos adicionales y responde `422` con `validation_error` ante cualquier valor fuera de contrato.
+
+### Semántica de alta y de reemplazo
+
+- **Alta (`POST`):** cada elemento de `extras` se inserta con un nuevo identificador estable generado por el servidor. La respuesta `201` devuelve el conjunto completo con sus `extra_id`.
+- **Reemplazo (`PUT`):** el conjunto se concilia por identificador estable, no se reemplaza a ciegas:
+  - Elementos del cuerpo **con** `extra_id` existente del inmueble se actualizan en el lugar, conservando el mismo identificador.
+  - Elementos **sin** `extra_id` se insertan con un nuevo identificador estable.
+  - Extras existentes **ausentes** del cuerpo se eliminan.
+  - Un `extra_id` desconocido o duplicado en el cuerpo responde `422` y no modifica el inmueble.
+  - Si `extras` se omite por completo, el conjunto existente queda intacto; una lista vacía elimina todos los extras.
+
+### `offer_version` y cotizaciones
+
+La versión comercial sigue controlada por los disparadores de la migración `0007_catalog_offers.py`, extendidos por `0016_listing_extra_details.py`: cada inserción o eliminación de un extra, y todo cambio de `name`, `price` o `quantity`, avanza `offer_version` una vez por cambio. Una edición que deja el conjunto de extras semánticamente idéntico (mismos identificadores y valores) no toca filas y **no** avanza `offer_version`; los cambios descriptivos de un extra (categoría, habitación, dimensiones, procedencia o vínculo visual) tampoco la avanzan. La respuesta de autoría devuelve el `offer_version` resultante.
+
+Las líneas de cotización de un extra importan `price × quantity`, y los totales suman ese importe. Las instantáneas de cotización permanecen inmutables: un cambio comercial produce nuevas versiones y las cotizaciones previas quedan vencidas por `offer_version`.
+
+### Lecturas
+
+- Las respuestas de personal (`POST`, `GET` individual, `GET` listado, `PUT` y transiciones) incluyen `extras`: el conjunto completo y vigente con todos los campos anteriores, ordenado por `extra_id`.
+- El detalle del catálogo público (`GET /api/v1/listings/{listing_id}`) devuelve cada extra con `extra_id`, `name`, `price` (como `CatalogMoney`), `category`, `room`, `width_cm`, `height_cm`, `depth_cm`, `origin`, `visual_reference` y `quantity`.
+
 
 ## Límites y estado de validación
 

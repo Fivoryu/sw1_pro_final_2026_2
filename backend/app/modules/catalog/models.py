@@ -95,6 +95,7 @@ class Listing(Base):
         back_populates="listing",
         cascade="all, delete-orphan",
         passive_deletes=True,
+        order_by="ListingExtra.id",
     )
 
 
@@ -128,6 +129,19 @@ class ListingExtra(Base):
     __table_args__ = (
         CheckConstraint("price >= 0", name="ck_listing_extra_price_nonnegative"),
         CheckConstraint("length(trim(name)) > 0", name="ck_listing_extra_name_nonblank"),
+        CheckConstraint("quantity >= 1", name="ck_listing_extra_quantity_positive"),
+        CheckConstraint(
+            "(width_cm IS NULL OR width_cm > 0) AND (height_cm IS NULL OR height_cm > 0) "
+            "AND (depth_cm IS NULL OR depth_cm > 0)",
+            name="ck_listing_extra_dimensions_positive",
+        ),
+        CheckConstraint(
+            "(category IS NULL OR length(trim(category)) > 0) "
+            "AND (room IS NULL OR length(trim(room)) > 0) "
+            "AND (origin IS NULL OR length(trim(origin)) > 0) "
+            "AND (visual_reference IS NULL OR length(trim(visual_reference)) > 0)",
+            name="ck_listing_extra_optional_text_nonblank",
+        ),
         Index("ix_listing_extra_listing_id", "listing_id"),
     )
 
@@ -137,6 +151,16 @@ class ListingExtra(Base):
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     price: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    category: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    room: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    width_cm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height_cm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    depth_cm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    origin: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    visual_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    quantity: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
     listing: Mapped[Listing] = relationship(back_populates="extras")
 
 
