@@ -36,6 +36,7 @@ function listing(overrides: Partial<StaffListing> = {}): StaffListing {
     bathrooms: 2,
     description: "Casa luminosa",
     exact_address: "Calle privada 123",
+    currency: "BOB",
     approval_status: "pending",
     is_published: false,
     offer_version: 1,
@@ -110,7 +111,7 @@ describe("AgencyReviewQueue", () => {
     );
     expect(item).toHaveTextContent("Venta");
     expect(item).toHaveTextContent("El Poblado");
-    expect(item).toHaveTextContent("COP 350.000.000,00");
+    expect(item).toHaveTextContent("BOB 350.000.000,00");
     expect(item).toHaveTextContent("3 dormitorios · 2 baños");
   });
 
@@ -123,7 +124,23 @@ describe("AgencyReviewQueue", () => {
 
     const item = await screen.findByRole("button", { name: /Revisar .*Medellín/ });
     expect(item).toHaveTextContent("Alquiler");
-    expect(item).toHaveTextContent("COP 2.500.000,00 por mes");
+    expect(item).toHaveTextContent("BOB 2.500.000,00 por mes");
+  });
+
+  it("shows the listing currency alongside the amounts in the row and the detail", async () => {
+    const user = userEvent.setup();
+    const usdListing = listing({ currency: "USD", base_price: "250000.00" });
+    vi.mocked(listAgencyListings).mockResolvedValue(page([usdListing]));
+
+    renderQueue();
+
+    const item = await screen.findByRole("button", { name: /Revisar .*Medellín/ });
+    expect(item).toHaveTextContent("USD 250.000,00");
+
+    await openDetail(user, usdListing);
+    expect(screen.getByText("Moneda")).toBeVisible();
+    expect(screen.getByText("USD")).toBeVisible();
+    expect(screen.getByText("USD 250.000,00")).toBeVisible();
   });
 
   it("explains an empty review queue", async () => {

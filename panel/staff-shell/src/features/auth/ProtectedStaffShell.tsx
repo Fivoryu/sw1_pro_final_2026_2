@@ -10,6 +10,7 @@ import {
   type StaffSession,
 } from "../../application/staffSession";
 import { AgencyReviewQueue } from "../listings/AgencyReviewQueue";
+import { ExchangeRatesAdmin } from "../rates/ExchangeRatesAdmin";
 import { StaffLoginShell } from "./StaffLoginShell";
 
 const RENEWAL_SKEW_MS = 30_000;
@@ -250,6 +251,8 @@ export function ProtectedStaffShell() {
           ) : null}
           {session.user.role === "agency_admin" && agencyId ? (
             <AgencyReviewQueue accessToken={session.accessToken} agencyId={agencyId} />
+          ) : session.user.role === "platform_admin" ? (
+            <ExchangeRatesAdmin accessToken={session.accessToken} />
           ) : session.user.role === "agent" ? (
             <section className="protected-staff-placeholder" aria-label="Vista inicial">
               <span className="protected-staff-placeholder__eyebrow">

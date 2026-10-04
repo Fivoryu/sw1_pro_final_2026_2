@@ -23,6 +23,7 @@ const listing: StaffListing = {
   agency_id: "agency-1",
   operation: "sale",
   base_price: "350000000.00",
+  currency: "BOB",
   city: "Medellín",
   zone: "El Poblado",
   bedrooms: 3,
