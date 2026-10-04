@@ -153,6 +153,7 @@ def _seed_listing(
     is_published: bool = False,
     base_price: str = "100000.00",
     created_at: datetime | None = None,
+    currency: str = "BOB",
 ) -> None:
     with context.session_factory.begin() as session:
         if session.get(Agency, agency_id) is None:
@@ -173,6 +174,7 @@ def _seed_listing(
         )
         if created_at is not None:
             listing.created_at = created_at
+        listing.currency = currency
         session.add(listing)
 
 
@@ -253,6 +255,22 @@ def test_client_cannot_supply_authority_or_server_derived_fields(f04_context: F0
     assert response.status_code == 422
     with context.session_factory() as session:
         assert session.query(Listing).count() == 0
+
+
+def test_edit_keeps_the_stored_currency_regardless_of_the_payload(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    _seed_listing(context, "usd-listing", currency="USD")
+    _staff(context, role="agent")
+
+    response = context.client.put(
+        _url("agency-one", "usd-listing"),
+        json=_payload(currency="BOB"),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["currency"] == "USD"
 
 
 def test_editing_published_listing_reopens_it_and_hides_it_immediately(

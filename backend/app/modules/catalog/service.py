@@ -324,7 +324,6 @@ def edit_staff_listing(
         .values(
             operation=content.operation,
             base_price=content.base_price,
-            currency=content.currency,
             city=content.city,
             city_key=normalize_geo_key(content.city),
             zone=content.zone,
