@@ -178,7 +178,7 @@ class _CatalogFiltersSheetState extends State<CatalogFiltersSheet> {
           ),
           const SizedBox(height: 12),
           _field(
-            'Precio mínimo (COP)',
+            'Precio mínimo',
             _minPrice,
             'filter-min-price',
             _validatePrice,
@@ -186,7 +186,7 @@ class _CatalogFiltersSheetState extends State<CatalogFiltersSheet> {
           ),
           const SizedBox(height: 12),
           _field(
-            'Precio máximo (COP)',
+            'Precio máximo',
             _maxPrice,
             'filter-max-price',
             _validateMaxPrice,

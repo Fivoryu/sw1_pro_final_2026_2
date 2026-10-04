@@ -107,6 +107,11 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
         ),
         const SizedBox(height: 4),
         Text(basePriceNote(listing.operation)),
+        if (listing.basePrice.currency !=
+          widget.controller.displayCurrency.code) ...[
+          const SizedBox(height: 4),
+          Text(cotizableNote(widget.controller.displayCurrency.code)),
+        ],
         const SizedBox(height: 24),
         Text('Opcionales', style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),

@@ -6,6 +6,20 @@ import '../data/services/catalog_api.dart';
 /// Loading state of the first page of a catalog search.
 enum CatalogLoadState { loading, ready, failed }
 
+/// Display currency the customer chose for prices.
+///
+/// The server is the only converter: this choice affects which currency a
+/// quote is requested in, never a client-side conversion of listing prices.
+enum DisplayCurrency {
+  bob('BOB'),
+  usd('USD'),
+  usdt('USDT');
+
+  const DisplayCurrency(this.code);
+
+  final String code;
+}
+
 /// Owns the public catalog search: the active filters, the loaded pages and
 /// the detail of one listing.
 class CatalogController extends ChangeNotifier {
@@ -14,6 +28,7 @@ class CatalogController extends ChangeNotifier {
   final CatalogApi _api;
 
   CatalogFilters _filters = const CatalogFilters();
+  DisplayCurrency _displayCurrency = DisplayCurrency.bob;
   CatalogLoadState _loadState = CatalogLoadState.loading;
   List<CatalogListing> _items = const [];
   String? _nextCursor;
@@ -23,6 +38,10 @@ class CatalogController extends ChangeNotifier {
   int _generation = 0;
 
   CatalogFilters get filters => _filters;
+
+  /// Display currency the customer chose; BOB until they change it. Without a
+  /// preferences dependency, the choice lives in this controller's state.
+  DisplayCurrency get displayCurrency => _displayCurrency;
   CatalogLoadState get loadState => _loadState;
   List<CatalogListing> get items => _items;
   bool get hasMore => _nextCursor != null;
@@ -33,6 +52,14 @@ class CatalogController extends ChangeNotifier {
 
   /// User-facing notice when a later page failed; loaded items are kept.
   String? get loadMoreMessage => _loadMoreMessage;
+
+  /// Chooses the display currency and notifies listeners; no-op when the
+  /// currency is already the chosen one.
+  void setDisplayCurrency(DisplayCurrency currency) {
+    if (currency == _displayCurrency) return;
+    _displayCurrency = currency;
+    notifyListeners();
+  }
 
   /// Loads the first page for [filters], or again for the current filters.
   Future<void> search([CatalogFilters? filters]) async {

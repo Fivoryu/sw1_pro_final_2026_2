@@ -62,6 +62,24 @@ class _CatalogScreenState extends State<CatalogScreen> {
               'Explorar inmuebles',
               style: Theme.of(context).textTheme.headlineSmall,
             ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<DisplayCurrency>(
+              key: const ValueKey('catalog-currency-selector'),
+              initialValue: _controller.displayCurrency,
+              decoration: const InputDecoration(
+                labelText: 'Moneda de visualización',
+                border: OutlineInputBorder(),
+              ),
+              items: [
+                for (final currency in DisplayCurrency.values)
+                  DropdownMenuItem(value: currency, child: Text(currency.code)),
+              ],
+              onChanged: (currency) {
+                if (currency != null) {
+                  _controller.setDisplayCurrency(currency);
+                }
+              },
+            ),
             const SizedBox(height: 20),
             FilledButton.icon(
               key: const ValueKey('catalog-filter-button'),

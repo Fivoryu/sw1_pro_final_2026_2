@@ -128,6 +128,30 @@ void main() {
     });
   });
 
+  group('display currency', () {
+    test('defaults to BOB', () {
+      final harness = _build();
+
+      expect(harness.controller.displayCurrency, DisplayCurrency.bob);
+    });
+
+    test('updates the chosen currency and notifies listeners once', () {
+      final harness = _build();
+      var notifications = 0;
+      harness.controller.addListener(() => notifications++);
+
+      harness.controller.setDisplayCurrency(DisplayCurrency.usdt);
+
+      expect(harness.controller.displayCurrency, DisplayCurrency.usdt);
+      expect(notifications, 1);
+
+      harness.controller.setDisplayCurrency(DisplayCurrency.usdt);
+
+      expect(harness.controller.displayCurrency, DisplayCurrency.usdt);
+      expect(notifications, 1);
+    });
+  });
+
   group('detail', () {
     test('loads one published listing', () async {
       final harness = _build();
