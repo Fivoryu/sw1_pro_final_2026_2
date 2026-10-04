@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -9,12 +11,14 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import StatelessLifespan
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
 from app.core.errors import ErrorResponse, error_code_for_status
+from app.core.rate_source import official_rate_refresh_interval_seconds
 from app.db.session import create_session_factory, protect_session_factory
 from app.modules.agencies.router import agency_wallet_router, router as agencies_router
 from app.modules.catalog.errors import QuoteApiError
@@ -26,10 +30,59 @@ from app.modules.exchange_rates.router import (
     platform_router as platform_exchange_rates_router,
     public_router as public_exchange_rates_router,
 )
+from app.modules.exchange_rates.service import refresh_official_rates
 from app.modules.identity.router import router as identity_router
 from app.modules.reservations.errors import ReservationApiError
 from app.modules.reservations.router import router as reservations_router
 from app.modules.reservations.router import staff_router as staff_reservations_router
+
+
+def _run_official_rate_refresh(session_factory: sessionmaker[Session]) -> None:
+    """Run one official-rate ingestion inside its own transaction."""
+    with session_factory.begin() as session:
+        refresh_official_rates(session)
+
+
+async def _official_rate_refresh_loop(
+    session_factory: sessionmaker[Session],
+    *,
+    interval_seconds: float,
+) -> None:
+    """Refresh official rates after every interval; never crash the task."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await asyncio.to_thread(_run_official_rate_refresh, session_factory)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - the refresher must keep running
+            continue
+
+
+def _build_lifespan(
+    session_factory: sessionmaker[Session],
+) -> StatelessLifespan[FastAPI]:
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        interval = official_rate_refresh_interval_seconds()
+        refresher: asyncio.Task[None] | None = None
+        if interval > 0:
+            # The first run happens only after the first full interval, so startup
+            # never touches the network and the test suite never fetches.
+            refresher = asyncio.create_task(
+                _official_rate_refresh_loop(
+                    session_factory, interval_seconds=interval
+                )
+            )
+        try:
+            yield
+        finally:
+            if refresher is not None:
+                refresher.cancel()
+                with suppress(asyncio.CancelledError):
+                    await refresher
+
+    return lifespan
 
 
 def create_app(
@@ -52,7 +105,11 @@ def create_app(
         )
     protect_session_factory(session_factory)
 
-    app = FastAPI(title="RoomForge Staff API", version="1.0.0")
+    app = FastAPI(
+        title="RoomForge Staff API",
+        version="1.0.0",
+        lifespan=_build_lifespan(session_factory),
+    )
     app.state.settings = resolved_settings
     app.state.session_factory = session_factory
     app.state.email_sender = email_sender

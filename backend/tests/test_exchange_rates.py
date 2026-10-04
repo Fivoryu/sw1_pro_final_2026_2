@@ -245,9 +245,24 @@ def test_public_current_rates_include_fixed_usd_and_unset_rates(
     assert response.status_code == 200
     assert response.json() == {
         "rates": [
-            {"currency": "BOB", "units_per_usd": None, "created_at": None},
-            {"currency": "USD", "units_per_usd": "1.00000000", "created_at": None},
-            {"currency": "USDT", "units_per_usd": None, "created_at": None},
+            {
+                "currency": "BOB",
+                "units_per_usd": None,
+                "created_at": None,
+                "source": None,
+            },
+            {
+                "currency": "USD",
+                "units_per_usd": "1.00000000",
+                "created_at": None,
+                "source": None,
+            },
+            {
+                "currency": "USDT",
+                "units_per_usd": None,
+                "created_at": None,
+                "source": None,
+            },
         ]
     }
 
@@ -373,6 +388,27 @@ def test_convert_usdt_to_bob_crosses_usd_exactly() -> None:
 def test_convert_fails_closed_when_a_required_rate_is_missing() -> None:
     with pytest.raises(MissingExchangeRateError):
         convert(Decimal("1"), "BOB", "USD", rates={})
+
+
+def test_manual_rates_are_labeled_with_the_manual_source(
+    exchange_rate_context: ExchangeRateContext,
+) -> None:
+    context = exchange_rate_context
+    token = _seed_staff(context)
+    created = _create_rate(context, token=token, currency="BOB", units_per_usd="6.96")
+
+    current = context.client.get("/api/v1/exchange-rates/current")
+    history = context.client.get(
+        "/api/v1/platform/exchange-rates", headers=_headers(token)
+    )
+
+    assert created.status_code == 201
+    assert created.json()["source"] == "manual"
+    rates = {rate["currency"]: rate for rate in current.json()["rates"]}
+    assert rates["BOB"]["source"] == "manual"
+    assert rates["USD"]["source"] is None
+    assert rates["USDT"]["source"] is None
+    assert [rate["source"] for rate in history.json()["rates"]] == ["manual"]
 
 
 def test_exchange_rate_database_checks_reject_unsupported_currency_and_nonpositive_rate(

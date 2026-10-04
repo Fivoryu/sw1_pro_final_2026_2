@@ -7,6 +7,8 @@ export interface CurrentExchangeRate {
   /** Server decimal string; never recomputed here. Null when no rate is administered yet. */
   units_per_usd: string | null;
   created_at: string | null;
+  /** Ingestion origin: "bcb-static", "coinbase" or "manual". Null when no rate exists. */
+  source: string | null;
 }
 
 export interface CurrentExchangeRatesResponse {
@@ -18,7 +20,9 @@ export interface ExchangeRateRecord {
   currency: CurrentRateCurrency;
   units_per_usd: string;
   created_at: string;
-  created_by: string;
+  /** System-ingested rows have no authoring staff account. */
+  created_by: string | null;
+  source: string;
 }
 
 export interface ExchangeRateHistoryResponse {

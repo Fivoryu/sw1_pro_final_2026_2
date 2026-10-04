@@ -23,8 +23,9 @@ class ExchangeRateResponse(BaseModel):
     id: int
     currency: SupportedCurrency
     units_per_usd: str
+    source: str
     created_at: datetime
-    created_by: str
+    created_by: str | None
 
 
 class ExchangeRateHistoryResponse(BaseModel):
@@ -39,6 +40,7 @@ class CurrentExchangeRateResponse(BaseModel):
     currency: SupportedCurrency
     units_per_usd: str | None
     created_at: datetime | None
+    source: str | None
 
 
 class CurrentExchangeRatesResponse(BaseModel):

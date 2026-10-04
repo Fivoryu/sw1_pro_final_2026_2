@@ -11,6 +11,7 @@ from typing import TypedDict
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.money import SUPPORTED_CURRENCIES, SupportedCurrency, validate_currency
+from app.core.rate_source import RateSourceError, fetch_official_rates
 from app.modules.exchange_rates.errors import (
     InvalidConversionError,
     InvalidExchangeRateError,
@@ -29,14 +30,19 @@ class ExchangeRateRecord(TypedDict):
     id: int
     currency: str
     units_per_usd: str
+    source: str
     created_at: datetime
-    created_by: str
+    created_by: str | None
 
 
 class CurrentExchangeRateRecord(TypedDict):
     currency: SupportedCurrency
     units_per_usd: str | None
     created_at: datetime | None
+    source: str | None
+
+
+_OFFICIAL_CURRENCIES = ("BOB", "USDT")
 
 
 def _parse_units_per_usd(value: object) -> Decimal:
@@ -76,6 +82,7 @@ def _rate_record(rate: ExchangeRate) -> ExchangeRateRecord:
         "id": rate.id,
         "currency": rate.currency,
         "units_per_usd": _format_rate(rate.units_per_usd),
+        "source": rate.source,
         "created_at": rate.created_at,
         "created_by": rate.created_by,
     }
@@ -103,6 +110,7 @@ def create_rate(
         rate = ExchangeRate(
             currency=supported_currency,
             units_per_usd=value,
+            source="manual",
             created_by=created_by,
         )
         session.add(rate)
@@ -133,6 +141,7 @@ def current_rates(
                     "currency": currency,
                     "units_per_usd": "1.00000000",
                     "created_at": None,
+                    "source": None,
                 }
             )
             continue
@@ -144,9 +153,52 @@ def current_rates(
                     _format_rate(rate.units_per_usd) if rate is not None else None
                 ),
                 "created_at": rate.created_at if rate is not None else None,
+                "source": rate.source if rate is not None else None,
             }
         )
     return current
+
+
+def refresh_official_rates(session: Session) -> dict[str, str]:
+    """Ingest official rates into new rows, per currency, in the caller's transaction.
+
+    A new rate row (carrying the official source label) is appended only when the
+    fetched value differs from the latest stored value for that currency; otherwise
+    the run is a no-op. Manual rows are never overwritten — they are superseded.
+    """
+    try:
+        suggestions = fetch_official_rates()
+    except RateSourceError as error:
+        reason = str(error)
+        return {currency: f"error: {reason}" for currency in _OFFICIAL_CURRENCIES}
+
+    latest: dict[str, ExchangeRate] = {}
+    rows = (
+        session.query(ExchangeRate)
+        .order_by(ExchangeRate.created_at.desc(), ExchangeRate.id.desc())
+        .all()
+    )
+    for row in rows:
+        latest.setdefault(row.currency, row)
+
+    outcomes: dict[str, str] = {}
+    for currency in _OFFICIAL_CURRENCIES:
+        suggestion = suggestions[currency]
+        current = latest.get(currency)
+        if current is not None and current.units_per_usd == suggestion.units_per_usd:
+            outcomes[currency] = "unchanged"
+            continue
+        session.add(
+            ExchangeRate(
+                currency=currency,
+                units_per_usd=suggestion.units_per_usd,
+                source=suggestion.source,
+                created_by=None,
+            )
+        )
+        outcomes[currency] = "created"
+    session.flush()
+    return outcomes
 
 
 def current_conversion_rates(*, session: Session) -> dict[str, Decimal | None]:

@@ -28,9 +28,19 @@ function currentRates(
 ): CurrentExchangeRatesResponse {
   return {
     rates: [
-      { currency: "BOB", units_per_usd: "6.96000000", created_at: "2026-10-03T12:00:00Z" },
-      { currency: "USD", units_per_usd: "1.00000000", created_at: null },
-      { currency: "USDT", units_per_usd: null, created_at: null },
+      {
+        currency: "BOB",
+        units_per_usd: "6.96000000",
+        created_at: "2026-10-03T12:00:00Z",
+        source: "bcb-static",
+      },
+      { currency: "USD", units_per_usd: "1.00000000", created_at: null, source: null },
+      {
+        currency: "USDT",
+        units_per_usd: null,
+        created_at: null,
+        source: null,
+      },
       ...overrides,
     ],
   };
@@ -40,11 +50,20 @@ function history(): ExchangeRateHistoryResponse {
   return {
     rates: [
       {
-        id: 2,
+        id: 3,
         currency: "USDT",
         units_per_usd: "1.00050000",
         created_at: "2026-10-04T09:30:00Z",
         created_by: "550e8400-e29b-41d4-a716-446655440000",
+        source: "coinbase",
+      },
+      {
+        id: 2,
+        currency: "BOB",
+        units_per_usd: "6.96000000",
+        created_at: "2026-10-03T18:00:00Z",
+        created_by: "550e8400-e29b-41d4-a716-446655440000",
+        source: "manual",
       },
       {
         id: 1,
@@ -52,6 +71,7 @@ function history(): ExchangeRateHistoryResponse {
         units_per_usd: "6.90000000",
         created_at: "2026-10-03T12:00:00Z",
         created_by: "550e8400-e29b-41d4-a716-446655440000",
+        source: "manual",
       },
     ],
   };
@@ -80,9 +100,43 @@ describe("ExchangeRatesAdmin", () => {
 
     const historyList = screen.getByRole("list", { name: "Historial de tasas" });
     const entries = within(historyList).getAllByRole("listitem");
-    expect(entries).toHaveLength(2);
+    expect(entries).toHaveLength(3);
     expect(entries[0]).toHaveTextContent("USDT 1.00050000");
-    expect(entries[1]).toHaveTextContent("BOB 6.90000000");
+    expect(entries[0]).toHaveTextContent("Coinbase");
+    expect(entries[1]).toHaveTextContent("BOB 6.96000000");
+    expect(entries[1]).toHaveTextContent("Manual");
+    expect(entries[2]).toHaveTextContent("BOB 6.90000000");
+  });
+
+  it("labels the current rates with their ingestion source", async () => {
+    // The default fixture has no USDT rate; one arrives ingested from Coinbase.
+    vi.mocked(getCurrentExchangeRates).mockResolvedValue(
+      currentRates([
+        {
+          currency: "USDT",
+          units_per_usd: "1.00050000",
+          created_at: "2026-10-04T09:30:00Z",
+          source: "coinbase",
+        },
+      ]),
+    );
+    renderAdmin();
+
+    const currentSection = await screen.findByRole("list", { name: "Tasas vigentes" });
+    expect(within(currentSection).getByText("BCB oficial")).toBeVisible();
+    expect(within(currentSection).getByText("Coinbase")).toBeVisible();
+  });
+
+  it("does not render a source label for rates without a source", async () => {
+    renderAdmin();
+
+    const currentSection = await screen.findByRole("list", { name: "Tasas vigentes" });
+    const usdtEntry = within(currentSection).getByText("Sin tasa administrada")
+      .closest("li");
+    expect(usdtEntry).not.toBeNull();
+    expect(usdtEntry).not.toHaveTextContent("Manual");
+    expect(usdtEntry).not.toHaveTextContent("Coinbase");
+    expect(usdtEntry).not.toHaveTextContent("BCB oficial");
   });
 
   it.each([

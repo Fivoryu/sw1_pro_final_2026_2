@@ -24,7 +24,18 @@ Cada proveedor implementa `EmailSender.send_invitation(..., *, timeout_seconds)`
 
 ## Tasas de cambio administradas (F05M-T2)
 
-Las tasas se administran en la plataforma; no se consultan APIs externas. `units_per_usd` expresa cuántas unidades de la moneda indicada equivalen a 1 USD. Solo se almacenan filas BOB y USDT: USD es fija en `1.00000000` y no se puede crear como tasa. Cada alta se aplica inmediatamente, conserva el historial y registra `created_by` como el identificador UUID del personal que la creó.
+Las tasas se administran en la plataforma. `units_per_usd` expresa cuántas unidades de la moneda indicada equivalen a 1 USD. Solo se almacenan filas BOB y USDT: USD es fija en `1.00000000` y no se puede crear como tasa. Cada alta se aplica inmediatamente, conserva el historial y registra `created_by` como el identificador UUID del personal que la creó.
+
+Cada fila lleva además el campo `source`, que indica su origen: `manual` para tasas creadas desde el panel, `coinbase` para la ingesta automática de USDT y `bcb-static` para la de BOB.
+
+### Ingesta automática de tasas oficiales (F05M-T10)
+
+Dos monedas se ingieren automáticamente en segundo plano; USD nunca se ingiere (referencia fija 1.0):
+
+- **USDT — `coinbase`**: precio spot público de Coinbase (`GET https://api.coinbase.com/v2/prices/USDT-USD/spot`, sin API key). Es un punto medio de exchange de un par de stablecoin, **no una tasa FX oficial**; la etiqueta `coinbase` existe precisamente para presentarlo con honestidad.
+- **BOB — `bcb-static`**: la tasa oficial boliviana es fijada administrativamente por el BCB, así que se modela como fuente estática oficial leída de `ROOMFORGE_OFFICIAL_BOB_RATE` (por defecto `6.96`); no hay llamada HTTP.
+
+El refresher corre como tarea de fondo del API: usa `ROOMFORGE_RATE_REFRESH_SECONDS` (entero, por defecto `21600` = 6 h); valores `<= 0` lo deshabilitan por completo, y la primera ejecución ocurre solo tras el primer intervalo (nunca en el arranque). En cada corrida, por moneda: si el valor obtenido difiere de la última fila almacenada, se crea una fila nueva con la etiqueta de fuente y `created_by` nulo (las filas del sistema no tienen autor); si coincide, la corrida es un no-op. Las filas manuales nunca se sobrescriben: se sustituyen por la fila oficial nueva. Cada ingesta corre en una única transacción y los fallos de la fuente fallan cerrados (sin tasa inventada).
 
 ### Crear una tasa
 
@@ -41,6 +52,7 @@ Responde 201 con el registro creado:
   "id": 1,
   "currency": "BOB",
   "units_per_usd": "6.96000000",
+  "source": "manual",
   "created_at": "2026-10-03T12:00:00Z",
   "created_by": "550e8400-e29b-41d4-a716-446655440000"
 }
@@ -50,9 +62,9 @@ Rechaza USD, tasas cero o negativas, entradas que no sean cadenas decimales y va
 
 ### Consultar historial y tasa vigente
 
-`GET /api/v1/platform/exchange-rates` requiere `platform_admin` y devuelve `{"rates":[...]}` con el historial completo en orden descendente por `created_at` y, para empates, por `id`. Cada fila incluye `id`, `currency`, `units_per_usd`, `created_at` y `created_by`.
+`GET /api/v1/platform/exchange-rates` requiere `platform_admin` y devuelve `{"rates":[...]}` con el historial completo en orden descendente por `created_at` y, para empates, por `id`. Cada fila incluye `id`, `currency`, `units_per_usd`, `source`, `created_at` y `created_by` (`null` en filas del sistema).
 
-`GET /api/v1/exchange-rates/current` es pública y devuelve `{"rates":[...]}` con una entrada por BOB, USD y USDT. Cada entrada incluye `currency`, `units_per_usd` y `created_at`. Para USD, `units_per_usd` es siempre `"1.00000000"` y `created_at` es `null`; si BOB o USDT aún no tienen una tasa administrada, ambos campos son `null`. La tasa actual es la fila más reciente según `created_at DESC, id DESC`.
+`GET /api/v1/exchange-rates/current` es pública y devuelve `{"rates":[...]}` con una entrada por BOB, USD y USDT. Cada entrada incluye `currency`, `units_per_usd`, `created_at` y `source`. Para USD, `units_per_usd` es siempre `"1.00000000"` y `created_at` y `source` son `null`; si BOB o USDT aún no tienen una tasa administrada, los tres campos son `null`. La tasa actual es la fila más reciente según `created_at DESC, id DESC`.
 
 | Actor | Crear tasa | Consultar historial de plataforma | Consultar tasas actuales |
 | --- | --- | --- | --- |

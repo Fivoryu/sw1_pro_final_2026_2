@@ -32,6 +32,16 @@ const CURRENCY_LABELS: Record<CurrentExchangeRate["currency"], string> = {
 };
 
 const NO_ADMINISTERED_RATE = "Sin tasa administrada";
+const SOURCE_LABELS: Record<string, string> = {
+  "bcb-static": "BCB oficial",
+  coinbase: "Coinbase",
+  manual: "Manual",
+};
+
+function sourceLabel(source: string | null): string {
+  if (source === null) return "";
+  return SOURCE_LABELS[source] ?? source;
+}
 const SESSION_EXPIRED = "Tu sesión expiró. Cierra sesión y vuelve a ingresar.";
 const FORBIDDEN = "Tu cuenta no tiene permisos para administrar las tasas de cambio.";
 const VALIDATION_MESSAGE =
@@ -194,6 +204,9 @@ export function ExchangeRatesAdmin({ accessToken }: ExchangeRatesAdminProps) {
                       ? "Referencia fija de conversión"
                       : formatDate(rate.created_at)}
                   </span>
+                  {rate.currency === "USD" ? null : (
+                    <span className="rates-admin__source">{sourceLabel(rate.source)}</span>
+                  )}
                 </li>
               ))}
             </ul>
@@ -210,6 +223,7 @@ export function ExchangeRatesAdmin({ accessToken }: ExchangeRatesAdminProps) {
                     <span className="rates-admin__value">
                       {rate.currency} {rate.units_per_usd}
                     </span>
+                    <span className="rates-admin__source">{sourceLabel(rate.source)}</span>
                     <span className="rates-admin__date">
                       Vigente desde {formatDate(rate.created_at)}
                     </span>

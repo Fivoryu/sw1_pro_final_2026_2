@@ -27,9 +27,14 @@ class ExchangeRate(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     currency: Mapped[str] = mapped_column(String(4), nullable=False)
     units_per_usd: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="manual"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    created_by: Mapped[str] = mapped_column(
-        String(36), ForeignKey("staff_account.id"), nullable=False
+    # Null for rows ingested automatically from official sources; manual rows
+    # always reference the staff account that authored them.
+    created_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("staff_account.id"), nullable=True
     )

@@ -21,9 +21,14 @@ const bearer = { Authorization: "Bearer volatile-access" };
 
 const currentRates = {
   rates: [
-    { currency: "BOB", units_per_usd: "6.96000000", created_at: "2026-10-03T12:00:00Z" },
-    { currency: "USD", units_per_usd: "1.00000000", created_at: null },
-    { currency: "USDT", units_per_usd: null, created_at: null },
+    {
+      currency: "BOB",
+      units_per_usd: "6.96000000",
+      created_at: "2026-10-03T12:00:00Z",
+      source: "manual",
+    },
+    { currency: "USD", units_per_usd: "1.00000000", created_at: null, source: null },
+    { currency: "USDT", units_per_usd: null, created_at: null, source: null },
   ],
 };
 
@@ -31,6 +36,7 @@ const rateRecord: ExchangeRateRecord = {
   id: 1,
   currency: "BOB",
   units_per_usd: "6.96000000",
+  source: "manual",
   created_at: "2026-10-03T12:00:00Z",
   created_by: "550e8400-e29b-41d4-a716-446655440000",
 };
