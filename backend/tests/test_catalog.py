@@ -938,8 +938,8 @@ def test_untrusted_sqlite_trigger_cannot_spoof_offer_version_guard_marker(
     _seed_listing(context, listing_id="untrusted-trigger-offer")
 
     raw_connection = context.session_factory.kw["bind"].raw_connection()
+    dbapi_connection = raw_connection.driver_connection
     try:
-        dbapi_connection = raw_connection.driver_connection
         # Model a trigger installed before application connections are protected.
         dbapi_connection.set_authorizer(None)
         dbapi_connection.execute(
