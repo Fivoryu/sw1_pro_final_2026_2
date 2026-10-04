@@ -1120,6 +1120,137 @@ a {
   opacity: 0.55;
 }
 
+.rates-admin {
+  display: grid;
+  min-width: 0;
+  gap: 1.5rem;
+  padding: clamp(1.25rem, 3vw, 2.4rem);
+  border: 1px solid var(--line);
+  border-radius: 1.4rem;
+  background: var(--surface);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.rates-admin__intro {
+  max-width: 60ch;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.rates-admin h3 {
+  margin: 0 0 0.75rem;
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.rates-admin__current,
+.rates-admin__history {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rates-admin__current li,
+.rates-admin__history li {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: #fff;
+}
+
+.rates-admin__currency {
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.rates-admin__value {
+  color: var(--forest);
+  font-family: ui-monospace, "Cascadia Code", monospace;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.rates-admin__date {
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+}
+
+.rates-admin__empty {
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+
+.rates-admin__form {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: #fff;
+}
+
+.rates-admin__form-intro {
+  max-width: 60ch;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.rates-admin__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+.rates-admin__field {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.rates-admin__field label {
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.rates-admin__field select,
+.rates-admin__field input {
+  min-height: 2.9rem;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid #d7d6cb;
+  border-radius: 0.7rem;
+  outline: none;
+  background: #fffefa;
+  color: var(--ink);
+  transition:
+    border-color 220ms var(--curve),
+    box-shadow 220ms var(--curve);
+}
+
+.rates-admin__field input {
+  width: 12rem;
+}
+
+.rates-admin__field select:focus-visible,
+.rates-admin__field input:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.15);
+}
+
+.rates-admin__controls .review-button {
+  align-self: flex-end;
+}
+
 @media (max-width: 740px) {
   .protected-staff-header {
     flex-wrap: wrap;

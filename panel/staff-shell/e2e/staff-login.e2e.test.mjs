@@ -566,6 +566,24 @@ async function runBrowserFlow(backendOrigin) {
   assert.notEqual(rotatedCookie.value, initialRefreshCookieValue, "Session restoration should rotate the HttpOnly refresh cookie.");
   assert.deepEqual(restoredStorage.localStorageKeys, [], "Reload must not persist access or refresh tokens in localStorage.");
 
+  await assertVisible(
+    page.getByRole("heading", { level: 2, name: "Tasas de cambio" }),
+    "A platform_admin session should render the exchange-rate administration screen.",
+  );
+  await captureScreenshot(page, "f05-platform-rates-admin.png");
+
+  await page.getByLabel("Moneda").selectOption("BOB");
+  await page.getByLabel("Unidades por USD").fill("6.96000000");
+  const createRateResponsePromise = waitForApiResponse(page, "/api/v1/platform/exchange-rates", "POST");
+  await page.getByRole("button", { name: "Registrar tasa" }).click();
+  const createRateResponse = await createRateResponsePromise;
+  assert.equal(createRateResponse.status(), 201, "A platform_admin should register an exchange rate through the panel.");
+  await assertVisible(
+    page.getByRole("list", { name: "Historial de tasas" }).getByText("6.96000000"),
+    "The registered BOB rate should appear in the rate history.",
+  );
+  await captureScreenshot(page, "f05-platform-rates-admin-created.png");
+
   const logoutResponsePromise = waitForApiResponse(page, "/api/v1/auth/logout", "POST");
   await page.getByRole("button", { name: "Cerrar sesión" }).click();
   const logoutResponse = await logoutResponsePromise;

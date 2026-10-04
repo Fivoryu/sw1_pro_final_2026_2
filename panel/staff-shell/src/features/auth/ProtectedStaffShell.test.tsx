@@ -7,6 +7,7 @@ import {
   refreshStaffSession,
   type StaffUser,
 } from "../../application/staffAuthApi";
+import { getCurrentExchangeRates, getExchangeRateHistory } from "../../application/exchangeRatesApi";
 import { listAgencyListings } from "../../application/staffListingsApi";
 import { ProtectedStaffShell } from "./ProtectedStaffShell";
 
@@ -14,6 +15,17 @@ vi.mock("../../application/staffListingsApi", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../application/staffListingsApi")>();
   return { ...actual, listAgencyListings: vi.fn() };
+});
+
+vi.mock("../../application/exchangeRatesApi", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../application/exchangeRatesApi")>();
+  return {
+    ...actual,
+    createExchangeRate: vi.fn(),
+    getCurrentExchangeRates: vi.fn().mockResolvedValue({ rates: [] }),
+    getExchangeRateHistory: vi.fn().mockResolvedValue({ rates: [] }),
+  };
 });
 
 vi.mock("../../application/staffAuthApi", async (importOriginal) => {
@@ -50,6 +62,12 @@ beforeEach(() => {
   vi.mocked(getStaffMe).mockReset();
   vi.mocked(logoutStaffSession).mockReset();
   vi.mocked(refreshStaffSession).mockReset();
+  vi.mocked(getCurrentExchangeRates)
+    .mockReset()
+    .mockResolvedValue({ rates: [] });
+  vi.mocked(getExchangeRateHistory)
+    .mockReset()
+    .mockResolvedValue({ rates: [] });
   vi.mocked(listAgencyListings)
     .mockReset()
     .mockResolvedValue({ listings: [], pagination: { limit: 50, offset: 0, total: 0 } });
@@ -79,7 +97,9 @@ describe("ProtectedStaffShell", () => {
       await screen.findByRole("heading", { name: "Administración de plataforma" }),
     ).toBeVisible();
     expect(screen.getByRole("navigation")).toHaveTextContent("Inicio de plataforma");
-    expect(screen.getByText("El espacio protegido está listo.")).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "Tasas de cambio" }),
+    ).toBeVisible();
     expect(listAgencyListings).not.toHaveBeenCalled();
   });
 
@@ -100,6 +120,7 @@ describe("ProtectedStaffShell", () => {
         "Los borradores de inmuebles se crean y editan en la app RoomForge Captura.",
       ),
     ).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Tasas de cambio" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /crear|editar|aprobar|publicar/i })).not.toBeInTheDocument();
     expect(listAgencyListings).not.toHaveBeenCalled();
   });
@@ -121,6 +142,7 @@ describe("ProtectedStaffShell", () => {
     expect(
       await screen.findByText("No hay inmuebles esperando revisión."),
     ).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Tasas de cambio" })).not.toBeInTheDocument();
     expect(listAgencyListings).toHaveBeenCalledWith("volatile-access", "agency-1", {
       status: "pending",
     });

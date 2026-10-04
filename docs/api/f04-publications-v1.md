@@ -40,18 +40,58 @@ El cuerpo de alta y reemplazo admite únicamente estos campos:
 {
   "operation": "sale",
   "base_price": "125000.00",
+  "currency": "BOB",
   "city": "Medellín",
   "zone": "El Poblado",
   "bedrooms": 3,
   "bathrooms": 2,
   "description": "Descripción opcional",
-  "exact_address": "Dirección opcional"
+  "exact_address": "Dirección opcional",
+  "extras": []
 }
 ```
 
-`operation` es `sale` o `rent`; `base_price` debe ser decimal positivo con hasta 18 dígitos y 2 decimales; `city` y `zone` son textos no vacíos de hasta 120 caracteres; `bedrooms` y `bathrooms` son enteros no negativos. El servidor deriva `city_key` y `zone_key` con `normalize_geo_key`. En `reject`, el cuerpo contiene `observation`, obligatoria y no vacía después de quitar espacios. Las demás acciones pueden omitirla o incluirla para el historial.
+`operation` es `sale` o `rent`; `base_price` debe ser decimal positivo con hasta 18 dígitos y 2 decimales. `currency` es opcional y acepta exactamente `BOB`, `USD` o `USDT`; si se omite, el servidor usa `BOB`. La moneda se fija al crear el inmueble y es inmutable en la edición: el campo `currency` de una solicitud de edición se ignora y el inmueble conserva el suyo (desde el 2026-10-04; antes la edición lo sobrescribía y un cliente que omitiera el campo reseteaba el inmueble a `BOB`). La moneda queda asociada al inmueble y se conserva en las cotizaciones. El catálogo público representa sus importes como `{ "amount": "125000.00", "currency": "BOB" }`, y las cotizaciones incluyen la moneda del inmueble en cada línea y total. Los importes comerciales se representan con dos decimales. La cotización puede incluir, además, un desglose convertido según `target_currency`, descrito abajo. `city` y `zone` son textos no vacíos de hasta 120 caracteres; `bedrooms` y `bathrooms` son enteros no negativos. El servidor deriva `city_key` y `zone_key` con `normalize_geo_key`. En `reject`, el cuerpo contiene `observation`, obligatoria y no vacía después de quitar espacios. Las demás acciones pueden omitirla o incluirla para el historial.
 
 Los esquemas rechazan campos adicionales. No se aceptan autoridad, estado ni valores derivados del cliente, incluidos `tenant_id`, actor, rol, `status`, `is_published`, `offer_version`, timestamps, `city_key`, `zone_key` y `photos`.
+
+### Cotización pública en la moneda elegida
+
+`POST /api/v1/quotes` acepta `listing_id`, `offer_version` y `selected_extra_ids`, además del campo opcional `target_currency`. Este campo admite exactamente `BOB`, `USD` o `USDT`. El servidor calcula siempre la cotización original en la moneda del inmueble; el cliente no envía totales ni tasas.
+
+Si `target_currency` se omite o coincide con la moneda del inmueble, la respuesta conserva el comportamiento existente: `lines`, `one_time_total` y `monthly_total` se expresan en la moneda del inmueble y no incluye `display_totals` ni `display_rate`. Si es diferente, el servidor convierte ambos totales desde la moneda del inmueble a USD y luego a la moneda elegida, usando las tasas administradas vigentes (`units_per_usd`). El cálculo usa `Decimal` exacto y redondea una sola vez el resultado final a dos decimales con `ROUND_HALF_UP`.
+
+Ejemplo de solicitud para cotizar un inmueble publicado en BOB en USD:
+
+```json
+{
+  "listing_id": "listing-id",
+  "offer_version": 1,
+  "selected_extra_ids": [],
+  "target_currency": "USD"
+}
+```
+
+Cuando se aplica la conversión, la respuesta agrega los siguientes bloques; los totales originales continúan en BOB:
+
+```json
+{
+  "one_time_total": {"amount": "100.00", "currency": "BOB"},
+  "monthly_total": {"amount": "0.00", "currency": "BOB"},
+  "display_totals": {
+    "one_time_total": {"amount": "14.37", "currency": "USD"},
+    "monthly_total": {"amount": "0.00", "currency": "USD"}
+  },
+  "display_rate": {
+    "base_currency": "BOB",
+    "display_currency": "USD",
+    "base_units_per_usd": "6.96000000",
+    "display_units_per_usd": "1.00000000"
+  }
+}
+```
+
+La instantánea guarda los importes convertidos y las dos tasas usadas con ocho decimales, junto con la moneda de presentación. Estos valores quedan congelados e inmutables: una tasa administrada posterior solo afecta cotizaciones nuevas y no reescribe una cotización existente. Si falta una tasa necesaria para cualquiera de las monedas del cruce, la solicitud falla de forma cerrada con HTTP `503` y código `exchange_rate_unavailable`, usando la envolvente de errores propia de cotizaciones; no se supone paridad ni se consulta una fuente externa.
 
 ### Listado y consulta de personal
 
@@ -74,6 +114,7 @@ Ordena del más reciente al más antiguo (`created_at` descendente, luego `id` d
       "agency_id": "…",
       "operation": "sale",
       "base_price": "125000.00",
+      "currency": "BOB",
       "city": "Medellín",
       "zone": "El Poblado",
       "bedrooms": 3,
@@ -83,7 +124,8 @@ Ordena del más reciente al más antiguo (`created_at` descendente, luego `id` d
       "approval_status": "pending",
       "is_published": false,
       "offer_version": 1,
-      "created_at": "2026-10-01T12:00:00Z"
+      "created_at": "2026-10-01T12:00:00Z",
+      "extras": []
     }
   ],
   "pagination": {"limit": 20, "offset": 0, "total": 1}
@@ -101,7 +143,7 @@ Matriz por actor (F03.3). «Agencia» es la agencia de la URL; la del actor sale
 | Crear, editar, enviar a revisión, leer transiciones | Sí | Sí | `403` | `403` | `401` |
 | Listar y consultar inmuebles de la agencia | Sí | Sí, todos los de su agencia | `403` | `403` | `401` |
 | Aprobar, rechazar, publicar, retirar | Sí | `403` | `403` | `403` | `401` |
-| Configurar el depósito (`PATCH .../deposit`) | Sí | `403` | `403` | `403` | `401` |
+| Configurar el depósito (`PATCH .../deposit`, cuerpo `{"deposit_amount":"5000.00"}`) | Sí | `403` | `403` | `403` | `401` |
 | Catálogo público (`GET /api/v1/listings` y detalle) | Sí | Sí | Sí | Sí | Sí, sin sesión |
 
 - **ID ajeno en la ruta propia:** un inmueble de otra agencia pedido con la URL de la agencia autorizada responde `404`, con el mismo cuerpo que un inmueble inexistente, en todas las rutas de inmueble (consulta, edición, envío, aprobación, rechazo, publicación, retiro, historial y depósito). No se modifica el inmueble ni se agrega historial.
@@ -137,7 +179,49 @@ Las rutas utilizan el formato de error HTTP existente; no cambian el manejador g
 
 Cada creación, edición o transición exitosa agrega una fila en `listing_transition`, con actor y rol resueltos por el servidor, estados anterior y nuevo, observación y fecha. La mutación del inmueble y su fila de historial se confirman en una misma transacción. El historial solo está disponible en la ruta de personal.
 
-La versión comercial comienza en `1` y la controlan los disparadores existentes de la migración `0007_catalog_offers.py`: cambia cuando cambia `base_price`, `operation` o los extras del inmueble. Una edición descriptiva (por ejemplo, de `description`) no cambia `offer_version` ni invalida una cotización; un cambio comercial sí. La API F04 no modifica extras. Una reserva aceptada conserva su instantánea comercial.
+## Extras administrados desde la API (extensión F05.1, 2026-10-04)
+
+**Regla histórica y su reemplazo.** El contrato original de F04 establecía que «La API F04 no modifica extras»: los extras se registraban solo por vías internas y quedaban fuera de la autoría. Esa regla quedó **sin efecto a partir del 2026-10-04** con la extensión F05.1 de mobiliario completo, registrada en el ODD de la fase 5: la API de autoría acepta y administra el conjunto completo de extras, con categoría, habitación, dimensiones, procedencia, vínculo visual y cantidad.
+
+### Campos de cada extra
+
+El campo `extras` es una lista opcional del cuerpo de alta (`POST`) y de reemplazo (`PUT`). Cada elemento admite:
+
+| Campo | Tipo | Obligatorio | Validación |
+|---|---|---|---|
+| `extra_id` | string ≤ 36 | No (solo `PUT`) | Debe identificar un extra existente del inmueble; si falta, se crea uno nuevo. |
+| `name` | string ≤ 120 | Sí | No vacío después de recortar espacios. |
+| `price` | decimal ≥ 0 | Sí | Hasta 18 dígitos y 2 decimales, en la moneda del inmueble. |
+| `category` | string ≤ 32 | No | No vacío cuando está presente. |
+| `room` | string ≤ 32 | No | No vacío cuando está presente. |
+| `width_cm`, `height_cm`, `depth_cm` | entero ≥ 1 | No | Dimensiones en centímetros; se rechazan valores cero o negativos. |
+| `origin` | string ≤ 120 | No | Procedencia; no vacía cuando está presente. |
+| `visual_reference` | string ≤ 255 | No | Vínculo visual; no vacío cuando está presente. |
+| `quantity` | entero ≥ 1 | No (predeterminado 1) | Participa en la oferta; se rechazan valores menores que 1. |
+
+El cuerpo rechaza campos adicionales y responde `422` con `validation_error` ante cualquier valor fuera de contrato.
+
+### Semántica de alta y de reemplazo
+
+- **Alta (`POST`):** cada elemento de `extras` se inserta con un nuevo identificador estable generado por el servidor. La respuesta `201` devuelve el conjunto completo con sus `extra_id`.
+- **Reemplazo (`PUT`):** el conjunto se concilia por identificador estable, no se reemplaza a ciegas:
+  - Elementos del cuerpo **con** `extra_id` existente del inmueble se actualizan en el lugar, conservando el mismo identificador.
+  - Elementos **sin** `extra_id` se insertan con un nuevo identificador estable.
+  - Extras existentes **ausentes** del cuerpo se eliminan.
+  - Un `extra_id` desconocido o duplicado en el cuerpo responde `422` y no modifica el inmueble.
+  - Si `extras` se omite por completo, el conjunto existente queda intacto; una lista vacía elimina todos los extras.
+
+### `offer_version` y cotizaciones
+
+La versión comercial sigue controlada por los disparadores de la migración `0007_catalog_offers.py`, extendidos por `0016_listing_extra_details.py`: cada inserción o eliminación de un extra, y todo cambio de `name`, `price` o `quantity`, avanza `offer_version` una vez por cambio. Una edición que deja el conjunto de extras semánticamente idéntico (mismos identificadores y valores) no toca filas y **no** avanza `offer_version`; los cambios descriptivos de un extra (categoría, habitación, dimensiones, procedencia o vínculo visual) tampoco la avanzan. La respuesta de autoría devuelve el `offer_version` resultante.
+
+Las líneas de cotización de un extra importan `price × quantity`, y los totales suman ese importe. Las instantáneas de cotización permanecen inmutables: un cambio comercial produce nuevas versiones y las cotizaciones previas quedan vencidas por `offer_version`.
+
+### Lecturas
+
+- Las respuestas de personal (`POST`, `GET` individual, `GET` listado, `PUT` y transiciones) incluyen `extras`: el conjunto completo y vigente con todos los campos anteriores, ordenado por `extra_id`.
+- El detalle del catálogo público (`GET /api/v1/listings/{listing_id}`) devuelve cada extra con `extra_id`, `name`, `price` (como `CatalogMoney`), `category`, `room`, `width_cm`, `height_cm`, `depth_cm`, `origin`, `visual_reference` y `quantity`.
+
 
 ## Límites y estado de validación
 

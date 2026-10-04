@@ -6,6 +6,7 @@ import solc from "solc";
 
 const ZERO = ethers.ZeroAddress;
 const COP_TOKEN_UNITS = 100n;
+const USDT_TOKEN_UNITS = 1_000_000n;
 const DEFAULT_DEADLINE = 4_000_000_000n;
 
 type Fixture = {
@@ -58,6 +59,17 @@ function idHash(value: string): string {
 async function deployFixture(): Promise<Fixture> {
   const [owner, signer, customer, agency, other] = await ethers.getSigners();
   const Token = await ethers.getContractFactory("RoomForgeTestToken");
+  const token = await Token.deploy(owner.address);
+  await token.waitForDeployment();
+  const Escrow = await ethers.getContractFactory("ReservationEscrow");
+  const escrow = await Escrow.deploy(await token.getAddress(), signer.address);
+  await escrow.waitForDeployment();
+  return { owner, signer, customer, agency, other, token, escrow };
+}
+
+async function deployUsdtFixture(): Promise<Fixture> {
+  const [owner, signer, customer, agency, other] = await ethers.getSigners();
+  const Token = await ethers.getContractFactory("MockUSDT");
   const token = await Token.deploy(owner.address);
   await token.waitForDeployment();
   const Escrow = await ethers.getContractFactory("ReservationEscrow");
@@ -283,6 +295,117 @@ describe("RoomForgeTestToken", function () {
     await expect(
       fixture.token.connect(fixture.other).mint(fixture.customer.address, 100n),
     ).to.be.revertedWithCustomError(fixture.token, "OwnableUnauthorizedAccount");
+  });
+});
+
+describe("MockUSDT", function () {
+  it("uses six decimals and mints USDT-like base units", async function () {
+    const fixture = await deployUsdtFixture();
+    const amount = ethers.parseUnits("1.50", 6);
+    await fixture.token.connect(fixture.owner).mint(fixture.customer.address, amount);
+
+    expect(await fixture.token.decimals()).to.equal(6);
+    expect(await fixture.token.balanceOf(fixture.customer.address)).to.equal(1_500_000n);
+    expect(ethers.parseUnits("1.50", 6)).to.equal(USDT_TOKEN_UNITS + 500_000n);
+  });
+
+  it("allows only the owner to mint USDT-like tokens", async function () {
+    const fixture = await deployUsdtFixture();
+    await expect(
+      fixture.token.connect(fixture.other).mint(fixture.customer.address, 1_000_000n),
+    ).to.be.revertedWithCustomError(fixture.token, "OwnableUnauthorizedAccount");
+  });
+});
+
+describe("ReservationEscrow with a USDT-like six-decimal token", function () {
+  it("deposits and accepts a 1.00 USDT reservation moving exact base units", async function () {
+    const fixture = await deployUsdtFixture();
+    const amount = ethers.parseUnits("1.00", 6);
+    await fundAndApprove(fixture, amount);
+    const signed = await makePermit(fixture, { amount });
+
+    await expect(
+      fixture.escrow.connect(fixture.customer).deposit(signed.permit, signed.signature),
+    ).to.emit(fixture.escrow, "Deposited").withArgs(
+      signed.permit.reservationId,
+      signed.permit.listingId,
+      fixture.customer.address,
+      amount,
+      0n,
+    );
+    expect(await fixture.token.balanceOf(await fixture.escrow.getAddress())).to.equal(1_000_000n);
+
+    const accept = await makePermit(fixture, { action: 1, amount });
+    await expect(
+      fixture.escrow.connect(fixture.agency).accept(accept.permit, accept.signature),
+    ).to.emit(fixture.escrow, "Accepted").withArgs(
+      accept.permit.reservationId,
+      accept.permit.listingId,
+      fixture.agency.address,
+      amount,
+      1n,
+    );
+    expect(await fixture.token.balanceOf(fixture.agency.address)).to.equal(1_000_000n);
+    expect(await fixture.token.balanceOf(await fixture.escrow.getAddress())).to.equal(0n);
+    expect((await fixture.escrow.reservation(accept.permit.reservationId)).status).to.equal(2n);
+  });
+
+  it("refunds the exact USDT deposit to the customer on reject", async function () {
+    const fixture = await deployUsdtFixture();
+    const amount = ethers.parseUnits("2.25", 6);
+    await deposit(fixture, { amount });
+    const signed = await makePermit(fixture, { action: 2, amount });
+
+    await expect(
+      fixture.escrow.connect(fixture.agency).reject(signed.permit, signed.signature),
+    ).to.emit(fixture.escrow, "Rejected").withArgs(
+      signed.permit.reservationId,
+      signed.permit.listingId,
+      fixture.customer.address,
+      amount,
+      1n,
+    );
+    expect(await fixture.token.balanceOf(fixture.customer.address)).to.equal(amount);
+    expect(await fixture.token.balanceOf(await fixture.escrow.getAddress())).to.equal(0n);
+  });
+
+  it("refunds the exact USDT deposit when the customer cancels", async function () {
+    const fixture = await deployUsdtFixture();
+    const amount = ethers.parseUnits("0.75", 6);
+    await deposit(fixture, { amount });
+    const signed = await makePermit(fixture, { action: 3, amount, actor: fixture.customer.address });
+
+    await expect(
+      fixture.escrow.connect(fixture.customer).cancel(signed.permit, signed.signature),
+    ).to.emit(fixture.escrow, "Cancelled").withArgs(
+      signed.permit.reservationId,
+      signed.permit.listingId,
+      fixture.customer.address,
+      amount,
+      1n,
+    );
+    expect(await fixture.token.balanceOf(fixture.customer.address)).to.equal(amount);
+  });
+
+  it("expires at the deadline and permissionlessly refunds the USDT deposit", async function () {
+    const fixture = await deployUsdtFixture();
+    const deadline = (await currentTime()) + 100n;
+    const amount = ethers.parseUnits("3.10", 6);
+    await deposit(fixture, { amount, deadline });
+
+    await expect(fixture.escrow.connect(fixture.other).expire(idHash("reservation-1")))
+      .to.be.revertedWithCustomError(fixture.escrow, "NotExpirable");
+    await setTime(deadline);
+    await expect(fixture.escrow.connect(fixture.other).expire(idHash("reservation-1")))
+      .to.emit(fixture.escrow, "Expired").withArgs(
+        idHash("reservation-1"),
+        idHash("listing-1"),
+        fixture.customer.address,
+        amount,
+        1n,
+      );
+    expect(await fixture.token.balanceOf(fixture.customer.address)).to.equal(amount);
+    expect((await fixture.escrow.reservation(idHash("reservation-1"))).status).to.equal(5n);
   });
 });
 
@@ -699,9 +822,9 @@ describe("ReservationEscrow token configuration and exact transfers", function (
     return { owner, signer, customer, agency, other, token, escrow };
   }
 
-  it("rejects a token whose metadata does not report exactly two decimals", async function () {
+  it("rejects a token whose metadata reports fewer than two decimals", async function () {
     const [owner, signer] = await ethers.getSigners();
-    const token = await deployConfigurableFeeToken(owner, 6);
+    const token = await deployConfigurableFeeToken(owner, 1);
     const Escrow = await ethers.getContractFactory("ReservationEscrow");
 
     await expect(Escrow.deploy(await token.getAddress(), signer.address)).to.be.revertedWithCustomError(

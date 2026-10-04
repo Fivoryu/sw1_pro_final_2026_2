@@ -57,12 +57,51 @@ void _setNarrowViewport(WidgetTester tester) {
 
 void main() {
   group('formatting', () {
-    test('formats COP amounts without floating point', () {
-      expect(formatCop('2500000.00'), 'COP 2.500.000,00');
-      expect(formatCop('999.5'), 'COP 999,50');
+    test('formats amounts with the server currency code', () {
+      expect(formatMoney('1750000.00', 'BOB'), 'BOB 1.750.000,00');
+      expect(formatMoney('250000.00', 'USD'), 'USD 250.000,00');
+      expect(formatMoney('999.5', 'USDT'), 'USDT 999,50');
       expect(
-        formatCop('12345678901234567.89'),
-        'COP 12.345.678.901.234.567,89',
+        formatMoney('12345678901234567.89', 'USD'),
+        'USD 12.345.678.901.234.567,89',
+      );
+    });
+  });
+
+  group('display currency', () {
+    testWidgets('offers the selector defaulting to BOB', (tester) async {
+      final harness = _build();
+
+      await _pumpCatalog(tester, harness.controller);
+
+      expect(
+        find.byKey(const ValueKey('catalog-currency-selector')),
+        findsOneWidget,
+      );
+      expect(harness.controller.displayCurrency, DisplayCurrency.bob);
+    });
+
+    testWidgets('updates the chosen display currency from the selector', (
+      tester,
+    ) async {
+      final harness = _build();
+      harness.backend.seed(id: 'sale-1');
+
+      await _pumpCatalog(tester, harness.controller);
+      await _tap(
+        tester,
+        find.byKey(const ValueKey('catalog-currency-selector')),
+      );
+      await tester.tap(find.text('USD').last);
+      await tester.pumpAndSettle();
+
+      expect(harness.controller.displayCurrency, DisplayCurrency.usd);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('catalog-listing-sale-1')),
+          matching: find.text('BOB 350.000.000,00'),
+        ),
+        findsOneWidget,
       );
     });
   });
@@ -95,13 +134,13 @@ void main() {
       expect(
         find.descendant(
           of: rent,
-          matching: find.text('COP 2.500.000,00 por mes'),
+          matching: find.text('BOB 2.500.000,00 por mes'),
         ),
         findsOneWidget,
       );
       final sale = find.byKey(const ValueKey('catalog-listing-sale-1'));
       expect(
-        find.descendant(of: sale, matching: find.text('COP 350.000.000,00')),
+        find.descendant(of: sale, matching: find.text('BOB 350.000.000,00')),
         findsOneWidget,
       );
       expect(find.textContaining('por mes'), findsOneWidget);
@@ -191,8 +230,8 @@ void main() {
         'Ciudad',
         'Zona',
         'Operación',
-        'Precio mínimo (COP)',
-        'Precio máximo (COP)',
+        'Precio mínimo',
+        'Precio máximo',
         'Dormitorios mínimos',
         'Baños mínimos',
       ]) {
@@ -295,11 +334,11 @@ void main() {
       final detail = find.byKey(const ValueKey('property-detail-content'));
       for (final text in [
         'Medellín, El Poblado',
-        'COP 2.500.000,00 por mes',
+        'BOB 2.500.000,00 por mes',
         'Precio base mensual. No incluye los opcionales.',
         '3 dormitorios · 1 baño',
         'Sofá en L',
-        'COP 150.000,00 por mes',
+        'BOB 150.000,00 por mes',
         'Recorrido 3D no disponible.',
         'Disponibilidad no consultada ni confirmada.',
       ]) {
@@ -335,6 +374,41 @@ void main() {
       expect(find.text('1 dormitorio · 2 baños'), findsOneWidget);
       expect(find.text('Este inmueble no tiene opcionales.'), findsOneWidget);
       expect(find.textContaining('por mes'), findsNothing);
+    });
+
+    testWidgets('notes that a foreign-currency listing is quotable in the chosen one', (
+      tester,
+    ) async {
+      final harness = _build();
+      harness.backend.seed(id: 'usd-1', currency: 'USD');
+
+      await _pumpCatalog(tester, harness.controller);
+      await _tap(tester, find.byKey(const ValueKey('catalog-listing-usd-1')));
+
+      final detail = find.byKey(const ValueKey('property-detail-content'));
+      expect(
+        find.descendant(
+          of: detail,
+          matching: find.text('USD 350.000.000,00'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: detail, matching: find.text('Cotizable en BOB')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('adds no quotable note when the currencies already match', (
+      tester,
+    ) async {
+      final harness = _build();
+      harness.backend.seed(id: 'bob-1');
+
+      await _pumpCatalog(tester, harness.controller);
+      await _tap(tester, find.byKey(const ValueKey('catalog-listing-bob-1')));
+
+      expect(find.textContaining('Cotizable'), findsNothing);
     });
 
     testWidgets('explains a listing that was withdrawn meanwhile', (

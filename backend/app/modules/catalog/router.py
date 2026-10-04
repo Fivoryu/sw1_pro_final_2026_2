@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.core.money import SupportedCurrency, format_money_amount
 from app.modules.catalog.errors import (
+    InvalidExtraReferenceError,
+    InvalidListingTransitionError,
     InvalidQuoteExtrasError,
     QuoteApiError,
     QuoteNotFoundError,
     QuoteOfferVersionMismatchError,
     UnsupportedRateLimitDialectError,
 )
-from app.modules.catalog.models import Listing, QuoteSnapshot
+from app.modules.catalog.models import Listing, ListingExtra, QuoteSnapshot
+from app.modules.exchange_rates.errors import MissingExchangeRateError
 from app.modules.catalog.schemas import (
     CatalogExtraItem,
     CatalogListingDetail,
@@ -26,11 +30,14 @@ from app.modules.catalog.schemas import (
     ListingApprovalStatus,
     ListingOperation,
     QuoteCreateRequest,
+    QuoteDisplayRate,
+    QuoteDisplayTotals,
     QuoteErrorResponse,
     QuoteLine,
     QuoteSnapshotResponse,
     ListingDepositResponse,
     ListingDepositUpdateRequest,
+    ExtraAuthoringResponse,
     ListingAuthoringRequest,
     ListingAuthoringResponse,
     ListingTransitionRequest,
@@ -38,7 +45,6 @@ from app.modules.catalog.schemas import (
     StaffListingPage,
     StaffListingPagination,
 )
-from app.modules.catalog.errors import InvalidListingTransitionError
 from app.modules.catalog.service import (
     configure_listing_deposit,
     create_staff_listing,
@@ -62,12 +68,12 @@ from app.modules.identity.session import ActiveStaff, get_active_staff
 router = APIRouter()
 listings_router = APIRouter(prefix="/api/v1/listings", tags=["catalog"])
 quotes_router = APIRouter(prefix="/api/v1/quotes", tags=["quotes"])
-_MONEY_QUANTUM = Decimal("0.01")
 
 
-def _money(amount: Decimal) -> CatalogMoney:
-    exact_amount = amount.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_UP)
-    return CatalogMoney(amount=format(exact_amount, ".2f"), currency="COP")
+def _money(amount: Decimal, currency: str) -> CatalogMoney:
+    return CatalogMoney(
+        amount=format_money_amount(amount), currency=cast(SupportedCurrency, currency)
+    )
 
 
 def _listing_item(listing: Listing) -> CatalogListingItem:
@@ -75,7 +81,7 @@ def _listing_item(listing: Listing) -> CatalogListingItem:
         listing_id=listing.id,
         offer_version=listing.offer_version,
         operation=cast(ListingOperation, listing.operation),
-        base_price=_money(listing.base_price),
+        base_price=_money(listing.base_price, listing.currency),
         city=listing.city,
         zone=listing.zone,
     )
@@ -140,6 +146,22 @@ def list_public_listings(
     )
 
 
+def _public_extra_item(extra: ListingExtra, currency: str) -> CatalogExtraItem:
+    return CatalogExtraItem(
+        extra_id=extra.id,
+        name=extra.name,
+        price=_money(extra.price, currency),
+        category=extra.category,
+        room=extra.room,
+        width_cm=extra.width_cm,
+        height_cm=extra.height_cm,
+        depth_cm=extra.depth_cm,
+        origin=extra.origin,
+        visual_reference=extra.visual_reference,
+        quantity=extra.quantity,
+    )
+
+
 @listings_router.get(
     "/{listing_id}",
     response_model=CatalogListingDetail,
@@ -158,28 +180,45 @@ def get_public_listing_detail(
             **_listing_item(listing).model_dump(),
             bedrooms=listing.bedrooms,
             bathrooms=listing.bathrooms,
-            extras=[
-                CatalogExtraItem(
-                    extra_id=extra.id,
-                    name=extra.name,
-                    price=_money(extra.price),
-                )
-                for extra in extras
-            ],
+            extras=[_public_extra_item(extra, listing.currency) for extra in extras],
         )
 
 
 def _quote_response(quote: QuoteSnapshot) -> QuoteSnapshotResponse:
-    return QuoteSnapshotResponse(
+    response = QuoteSnapshotResponse(
         quote_id=quote.id,
         listing_id=quote.listing_id,
         offer_version=quote.offer_version,
         operation=cast(ListingOperation, quote.operation),
-        lines=[QuoteLine.model_validate(line) for line in quote.lines],
-        one_time_total=_money(quote.one_time_total),
-        monthly_total=_money(quote.monthly_total),
+        lines=[
+            QuoteLine.model_validate({**line, "currency": quote.currency})
+            for line in quote.lines
+        ],
+        one_time_total=_money(quote.one_time_total, quote.currency),
+        monthly_total=_money(quote.monthly_total, quote.currency),
         created_at=quote.created_at,
         expires_at=quote.expires_at,
+    )
+    if quote.display_currency is None:
+        return response
+
+    assert quote.display_one_time_total is not None
+    assert quote.display_monthly_total is not None
+    assert quote.base_units_per_usd is not None
+    assert quote.display_units_per_usd is not None
+    return response.model_copy(
+        update={
+            "display_totals": QuoteDisplayTotals(
+                one_time_total=_money(quote.display_one_time_total, quote.display_currency),
+                monthly_total=_money(quote.display_monthly_total, quote.display_currency),
+            ),
+            "display_rate": QuoteDisplayRate(
+                base_currency=cast(SupportedCurrency, quote.currency),
+                display_currency=cast(SupportedCurrency, quote.display_currency),
+                base_units_per_usd=format(quote.base_units_per_usd, ".8f"),
+                display_units_per_usd=format(quote.display_units_per_usd, ".8f"),
+            ),
+        }
     )
 
 
@@ -187,6 +226,7 @@ def _quote_response(quote: QuoteSnapshot) -> QuoteSnapshotResponse:
     "",
     status_code=201,
     response_model=QuoteSnapshotResponse,
+    response_model_exclude_unset=True,
     responses={
         404: {"model": QuoteErrorResponse, "description": "Listing not found"},
         409: {"model": QuoteErrorResponse, "description": "Offer version mismatch"},
@@ -201,7 +241,10 @@ def _quote_response(quote: QuoteSnapshot) -> QuoteSnapshotResponse:
                 }
             },
         },
-        503: {"model": QuoteErrorResponse, "description": "Quote service unavailable"},
+        503: {
+            "model": QuoteErrorResponse,
+            "description": "Quote service or required exchange rate unavailable",
+        },
     },
 )
 def create_public_quote(body: QuoteCreateRequest, request: Request) -> QuoteSnapshotResponse:
@@ -252,6 +295,7 @@ def create_public_quote(body: QuoteCreateRequest, request: Request) -> QuoteSnap
                 expected_offer_version=body.offer_version,
                 selected_extra_ids=body.selected_extra_ids,
                 clock=request.app.state.clock,
+                target_currency=body.target_currency,
             )
             return _quote_response(quote)
     except QuoteNotFoundError:
@@ -274,6 +318,12 @@ def create_public_quote(body: QuoteCreateRequest, request: Request) -> QuoteSnap
             field_errors=[
                 {"field": "selected_extra_ids", "message": "Invalid extra selection."}
             ],
+        ) from None
+    except MissingExchangeRateError:
+        raise QuoteApiError(
+            503,
+            "exchange_rate_unavailable",
+            "A required exchange rate is not available for this quote.",
         ) from None
     except SQLAlchemyError:
         raise QuoteApiError(
@@ -303,14 +353,14 @@ def set_listing_deposit(
             session,
             agency_id=agency_id,
             listing_id=listing_id,
-            deposit_amount_cop=body.deposit_amount_cop,
+            deposit_amount=body.deposit_amount,
         )
         if listing is None:
             raise HTTPException(status_code=404, detail="Listing not found")
-        assert listing.deposit_amount_cop is not None
+        assert listing.deposit_amount is not None
         return ListingDepositResponse(
             listing_id=listing.id,
-            deposit_amount_cop=format(listing.deposit_amount_cop, ".2f"),
+            deposit_amount=format_money_amount(listing.deposit_amount),
             offer_version=listing.offer_version,
         )
 
@@ -325,12 +375,15 @@ def _require_listing_admin(staff: ActiveStaff, agency_id: str) -> None:
         raise HTTPException(status_code=403, detail="Agency-admin tenant access is required")
 
 
-def _authoring_response(listing: Listing) -> ListingAuthoringResponse:
+def _authoring_response(
+    listing: Listing, extras: list[ListingExtra]
+) -> ListingAuthoringResponse:
     return ListingAuthoringResponse(
         listing_id=listing.id,
         agency_id=listing.agency_id,
         operation=cast(ListingOperation, listing.operation),
         base_price=listing.base_price,
+        currency=cast(SupportedCurrency, listing.currency),
         city=listing.city,
         zone=listing.zone,
         bedrooms=listing.bedrooms,
@@ -341,6 +394,22 @@ def _authoring_response(listing: Listing) -> ListingAuthoringResponse:
         is_published=listing.is_published,
         offer_version=listing.offer_version,
         created_at=listing.created_at,
+        extras=[
+            ExtraAuthoringResponse(
+                extra_id=extra.id,
+                name=extra.name,
+                price=format_money_amount(extra.price),
+                category=extra.category,
+                room=extra.room,
+                width_cm=extra.width_cm,
+                height_cm=extra.height_cm,
+                depth_cm=extra.depth_cm,
+                origin=extra.origin,
+                visual_reference=extra.visual_reference,
+                quantity=extra.quantity,
+            )
+            for extra in extras
+        ],
     )
 
 
@@ -358,15 +427,20 @@ def create_agency_listing(
     _require_listing_editor(staff, agency_id)
     session_factory: sessionmaker[Session] = request.app.state.session_factory
     with session_factory.begin() as session:
-        listing = create_staff_listing(
-            session,
-            agency_id=agency_id,
-            content=body,
-            actor_id=staff["id"],
-            actor_role=staff["role"],
-            now=request.app.state.clock(),
-        )
-        return _authoring_response(listing)
+        try:
+            listing = create_staff_listing(
+                session,
+                agency_id=agency_id,
+                content=body,
+                actor_id=staff["id"],
+                actor_role=staff["role"],
+                now=request.app.state.clock(),
+            )
+        except InvalidExtraReferenceError:
+            raise HTTPException(
+                status_code=422, detail="Unknown or duplicated extra reference"
+            ) from None
+        return _authoring_response(listing, list_listing_extras(session, listing.id))
 
 
 @router.get(
@@ -394,7 +468,10 @@ def list_agency_listings(
             offset=offset,
         )
         return StaffListingPage(
-            listings=[_authoring_response(listing) for listing in listings],
+            listings=[
+                _authoring_response(listing, list_listing_extras(session, listing.id))
+                for listing in listings
+            ],
             pagination=StaffListingPagination(limit=limit, offset=offset, total=total),
         )
 
@@ -415,7 +492,7 @@ def get_agency_listing(
         listing = get_staff_listing(session, agency_id=agency_id, listing_id=listing_id)
         if listing is None:
             raise HTTPException(status_code=404, detail="Listing not found")
-        return _authoring_response(listing)
+        return _authoring_response(listing, list_listing_extras(session, listing.id))
 
 
 @router.put(
@@ -432,18 +509,23 @@ def replace_agency_listing(
     _require_listing_editor(staff, agency_id)
     session_factory: sessionmaker[Session] = request.app.state.session_factory
     with session_factory.begin() as session:
-        listing = edit_staff_listing(
-            session,
-            agency_id=agency_id,
-            listing_id=listing_id,
-            content=body,
-            actor_id=staff["id"],
-            actor_role=staff["role"],
-            now=request.app.state.clock(),
-        )
+        try:
+            listing = edit_staff_listing(
+                session,
+                agency_id=agency_id,
+                listing_id=listing_id,
+                content=body,
+                actor_id=staff["id"],
+                actor_role=staff["role"],
+                now=request.app.state.clock(),
+            )
+        except InvalidExtraReferenceError:
+            raise HTTPException(
+                status_code=422, detail="Unknown or duplicated extra reference"
+            ) from None
         if listing is None:
             raise HTTPException(status_code=404, detail="Listing not found")
-        return _authoring_response(listing)
+        return _authoring_response(listing, list_listing_extras(session, listing.id))
 
 
 def _apply_listing_transition(
@@ -479,7 +561,7 @@ def _apply_listing_transition(
             )
             if listing is None:
                 raise HTTPException(status_code=404, detail="Listing not found")
-            return _authoring_response(listing)
+            return _authoring_response(listing, list_listing_extras(session, listing.id))
     except InvalidListingTransitionError:
         raise HTTPException(
             status_code=409, detail="Listing cannot be changed from its current state"

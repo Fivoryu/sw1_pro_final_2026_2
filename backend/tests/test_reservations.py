@@ -63,9 +63,9 @@ def reservations_context() -> Iterator[ReservationsContext]:
         ("0007_catalog_offers.py", "reservation_catalog_0007", "_install_offer_version_triggers"),
         ("0008_quote_snapshots.py", "reservation_quotes_0008", "_install_snapshot_immutability"),
         (
-            "0009_agency_wallets_deposit.py",
-            "reservation_deposits_0009",
-            "_install_listing_deposit_offer_version_triggers",
+            "0013_listing_currency.py",
+            "reservation_currency_0013",
+            "_install_listing_currency_triggers",
         ),
     ):
         spec = importlib.util.spec_from_file_location(module_name, migrations / filename)
@@ -168,7 +168,8 @@ def _seed_reservation_inputs(
     *,
     listing_id: str,
     agency_id: str = "agency-one",
-    deposit_amount_cop: Decimal | None = None,
+    deposit_amount: Decimal | None = None,
+    currency: str = "BOB",
     with_agency_wallet: bool = True,
     with_customer_wallet: bool = True,
     quote_id: str | None = None,
@@ -196,7 +197,8 @@ def _seed_reservation_inputs(
                 is_published=True,
                 operation="sale",
                 base_price=Decimal("100000.00"),
-                deposit_amount_cop=deposit_amount_cop,
+                deposit_amount=deposit_amount,
+                currency=currency,
                 offer_version=1,
                 city="Córdoba",
                 city_key="córdoba",
@@ -224,12 +226,13 @@ def _seed_reservation_inputs(
                 listing_id=listing_id,
                 offer_version=1,
                 operation="sale",
+                currency=currency,
                 lines=[
                     {
                         "kind": "base",
                         "extra_id": None,
                         "amount": "100000.00",
-                        "currency": "COP",
+                        "currency": currency,
                         "charge_period": "one_time",
                     }
                 ],
@@ -267,14 +270,14 @@ def _create_test_reservation(
     *,
     listing_id: str,
     email: str = "permit-customer@example.test",
-    deposit_amount_cop: Decimal | None = Decimal("1000.00"),
+    deposit_amount: Decimal | None = Decimal("1000.00"),
 ):
     customer_id, auth = _customer_auth(context, email=email)
     quote_id, wallet_id = _seed_reservation_inputs(
         context,
         customer_id,
         listing_id=listing_id,
-        deposit_amount_cop=deposit_amount_cop,
+        deposit_amount=deposit_amount,
     )
     response = _create_reservation(
         context,
@@ -296,7 +299,7 @@ def test_create_snapshots_quote_deposit_and_both_linked_wallet_addresses(
         context,
         customer_id,
         listing_id="listing-with-deposit",
-        deposit_amount_cop=Decimal("25000.00"),
+        deposit_amount=Decimal("25000.00"),
     )
     response = _create_reservation(
         context,
@@ -315,13 +318,13 @@ def test_create_snapshots_quote_deposit_and_both_linked_wallet_addresses(
         created["decision_deadline_at"].replace("Z", "+00:00")
     ) == context.clock() + timedelta(hours=24)
     assert created["quote_snapshot"]["quote_id"] == quote_id
-    assert created["deposit_amount_cop"] == "25000.00"
+    assert created["deposit_amount"] == "25000.00"
 
     nullable_quote, nullable_wallet = _seed_reservation_inputs(
         context,
         customer_id,
         listing_id="listing-without-deposit",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     nullable = _create_reservation(
         context,
@@ -332,7 +335,7 @@ def test_create_snapshots_quote_deposit_and_both_linked_wallet_addresses(
         key="request-null-deposit",
     )
     assert nullable.status_code == 201, nullable.text
-    assert nullable.json()["deposit_amount_cop"] is None
+    assert nullable.json()["deposit_amount"] is None
 
     from app.modules.reservations.models import Reservation
 
@@ -343,7 +346,36 @@ def test_create_snapshots_quote_deposit_and_both_linked_wallet_addresses(
             f"0x{hashlib.sha256(customer_id.encode()).hexdigest()[:40]}"
         )
         assert stored.agency_wallet_address == f"0x{'a' * 40}"
-        assert stored.deposit_amount_cop == Decimal("25000.00")
+        assert stored.deposit_amount == Decimal("25000.00")
+
+
+@pytest.mark.parametrize("currency", ["USD", "USDT"])
+def test_reservation_echoes_the_listing_currency_snapshot(
+    reservations_context: ReservationsContext, currency: str
+) -> None:
+    context = reservations_context
+    customer_id, auth = _customer_auth(context)
+    listing_id = f"currency-{currency.lower()}-listing"
+    quote_id, wallet_id = _seed_reservation_inputs(
+        context,
+        customer_id,
+        listing_id=listing_id,
+        currency=currency,
+    )
+
+    response = _create_reservation(
+        context,
+        auth,
+        listing_id=listing_id,
+        quote_id=quote_id,
+        wallet_id=wallet_id,
+    )
+
+    assert response.status_code == 201, response.text
+    snapshot = response.json()["quote_snapshot"]
+    assert snapshot["one_time_total"]["currency"] == currency
+    assert snapshot["monthly_total"]["currency"] == currency
+    assert all(line["currency"] == currency for line in snapshot["lines"])
 
 
 def test_rejects_missing_or_foreign_stale_and_expired_quotes_and_unlinked_wallets(
@@ -355,19 +387,19 @@ def test_rejects_missing_or_foreign_stale_and_expired_quotes_and_unlinked_wallet
         context,
         customer_id,
         listing_id="quote-owner-listing",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     _seed_reservation_inputs(
         context,
         customer_id,
         listing_id="different-listing",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     expiry_quote, _ = _seed_reservation_inputs(
         context,
         customer_id,
         listing_id="expiry-listing",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
 
     missing = _create_reservation(
@@ -427,7 +459,7 @@ def test_rejects_missing_or_foreign_stale_and_expired_quotes_and_unlinked_wallet
         context,
         unlinked_customer_id,
         listing_id="customer-wallet-required",
-        deposit_amount_cop=None,
+        deposit_amount=None,
         with_customer_wallet=False,
     )
     no_customer_wallet = _create_reservation(
@@ -450,7 +482,7 @@ def test_rejects_missing_or_foreign_stale_and_expired_quotes_and_unlinked_wallet
         context,
         foreign_customer_id,
         listing_id="foreign-wallet-listing",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     foreign_wallet = _create_reservation(
         context,
@@ -470,7 +502,7 @@ def test_rejects_missing_or_foreign_stale_and_expired_quotes_and_unlinked_wallet
         customer_id,
         listing_id="agency-wallet-required",
         agency_id="agency-without-wallet",
-        deposit_amount_cop=None,
+        deposit_amount=None,
         with_agency_wallet=False,
     )
     no_agency_wallet = _create_reservation(
@@ -496,13 +528,13 @@ def test_idempotency_replays_same_body_and_rejects_key_reuse_with_different_body
         context,
         customer_id,
         listing_id="idempotent-listing-one",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     second_quote, _ = _seed_reservation_inputs(
         context,
         customer_id,
         listing_id="idempotent-listing-two",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     first = _create_reservation(
         context,
@@ -550,7 +582,7 @@ def test_active_listing_lock_reusable_quote_and_unpaid_deadline_expiry(
         context,
         customer_id,
         listing_id="locked-listing",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     first = _create_reservation(
         context,
@@ -629,7 +661,7 @@ def test_active_listing_lock_reusable_quote_and_unpaid_deadline_expiry(
         context,
         customer_id,
         listing_id="deposit-confirmed-listing",
-        deposit_amount_cop=Decimal("1000.00"),
+        deposit_amount=Decimal("1000.00"),
     )
     paid = _create_reservation(
         context,
@@ -680,13 +712,13 @@ def test_customer_can_only_read_and_list_own_reservations(
         context,
         owner_id,
         listing_id="owner-listing",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     other_quote, other_wallet = _seed_reservation_inputs(
         context,
         other_id,
         listing_id="other-listing",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     own = _create_reservation(
         context,
@@ -753,7 +785,7 @@ def test_required_idempotency_key_is_validated_as_a_header(
         context,
         customer_id,
         listing_id="header-required-listing",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     response = context.client.post(
         "/api/v1/reservations",
@@ -778,7 +810,7 @@ def test_whitespace_only_idempotency_key_is_rejected_before_persistence(
         context,
         customer_id,
         listing_id="blank-key-listing",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
 
     response = _create_reservation(
@@ -807,13 +839,13 @@ def test_create_expires_due_reservations_only_for_requested_listing(
         context,
         customer_id,
         listing_id="due-target-listing",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     unrelated_quote, _ = _seed_reservation_inputs(
         context,
         customer_id,
         listing_id="due-unrelated-listing",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     target_original = _create_reservation(
         context,
@@ -847,7 +879,7 @@ def test_create_expires_due_reservations_only_for_requested_listing(
                         "kind": "base",
                         "extra_id": None,
                         "amount": "100000.00",
-                        "currency": "COP",
+                        "currency": "BOB",
                         "charge_period": "one_time",
                     }
                 ],
@@ -892,7 +924,7 @@ def test_customer_permit_route_fails_closed_when_escrow_is_not_configured(
         context,
         customer_id,
         listing_id="permit-config-listing",
-        deposit_amount_cop=Decimal("1000.00"),
+        deposit_amount=Decimal("1000.00"),
     )
     reservation = _create_reservation(
         context,
@@ -922,7 +954,7 @@ def test_list_route_expires_overdue_pending_reservation_and_allows_new_creation(
         context,
         customer_id,
         listing_id="list-expiry-listing",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     original = _create_reservation(
         context,
@@ -964,7 +996,7 @@ def test_list_route_expires_overdue_pending_reservation_and_allows_new_creation(
                         "kind": "base",
                         "extra_id": None,
                         "amount": "100000.00",
-                        "currency": "COP",
+                        "currency": "BOB",
                         "charge_period": "one_time",
                     }
                 ],
@@ -1001,7 +1033,7 @@ def test_customer_permit_uses_persisted_snapshot_without_mutation_or_transaction
             stored.deposit_confirmed_at,
             stored.customer_wallet_address,
             stored.agency_wallet_address,
-            stored.deposit_amount_cop,
+            stored.deposit_amount,
         )
 
     response = context.client.post(
@@ -1044,7 +1076,7 @@ def test_customer_permit_uses_persisted_snapshot_without_mutation_or_transaction
             stored.deposit_confirmed_at,
             stored.customer_wallet_address,
             stored.agency_wallet_address,
-            stored.deposit_amount_cop,
+            stored.deposit_amount,
         ) == before
         assert stored.customer_id == customer_id
 
@@ -1184,7 +1216,7 @@ def test_nullable_deposit_allows_agency_decision_and_deadline_is_exclusive(
         context,
         listing_id="nullable-permit-listing",
         email="nullable-permit@example.test",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     rpc = _configure_fake_escrow(context)
     _use_staff_principal(context)

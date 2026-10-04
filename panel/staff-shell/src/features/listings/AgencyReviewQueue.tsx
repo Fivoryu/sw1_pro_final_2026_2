@@ -84,15 +84,20 @@ const SESSION_EXPIRED = "Tu sesión expiró. Cierra sesión y vuelve a ingresar.
 const CONFLICT =
   "El inmueble cambió de estado mientras lo revisabas. Se cargó su estado actual.";
 
-/** Formats a server decimal string as COP without passing through floating point. */
-export function formatCop(amount: string): string {
+/** Formats a server decimal string as money without passing through floating point. */
+export function formatMoney(amount: string, currency: string): string {
   const [integerPart, fractionPart = ""] = amount.trim().split(".");
   const grouped = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  return `COP ${grouped},${fractionPart.padEnd(2, "0").slice(0, 2)}`;
+  return `${currency} ${grouped},${fractionPart.padEnd(2, "0").slice(0, 2)}`;
+}
+
+/** Formats a server decimal string as COP without passing through floating point. */
+export function formatCop(amount: string): string {
+  return formatMoney(amount, "COP");
 }
 
 function priceLabel(listing: StaffListing): string {
-  const price = formatCop(listing.base_price);
+  const price = formatMoney(listing.base_price, listing.currency);
   return listing.operation === "rent" ? `${price} por mes` : price;
 }
 
@@ -417,6 +422,10 @@ function ListingReviewDetail({
             <div>
               <dt>Operación</dt>
               <dd>{operationLabel(detail.value.listing)}</dd>
+            </div>
+            <div>
+              <dt>Moneda</dt>
+              <dd>{detail.value.listing.currency}</dd>
             </div>
             <div>
               <dt>Ambientes</dt>

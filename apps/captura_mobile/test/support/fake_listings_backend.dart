@@ -29,6 +29,7 @@ class FakeListingsBackend {
     String status = 'draft',
     String city = 'Medellín',
     String zone = 'El Poblado',
+    String currency = 'BOB',
     String? rejectionReason,
   }) {
     listings[id] = _body(
@@ -37,6 +38,7 @@ class FakeListingsBackend {
       fields: {
         'operation': 'sale',
         'base_price': '350000000.00',
+        'currency': currency,
         'city': city,
         'zone': zone,
         'bedrooms': 3,

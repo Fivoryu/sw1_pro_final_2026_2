@@ -73,14 +73,16 @@ def contract_deadline_seconds(deadline: datetime) -> int:
     return whole_seconds if elapsed.microseconds == 0 else whole_seconds + 1
 
 
-def cop_to_token_units(amount: Decimal | None) -> int:
+def money_to_token_units(amount: Decimal | None, *, token_scale: int) -> int:
+    if not isinstance(token_scale, int) or isinstance(token_scale, bool) or token_scale <= 0:
+        raise ValueError("Token scale must be a positive integer")
     if amount is None:
         return 0
     if not isinstance(amount, Decimal) or not amount.is_finite() or amount < 0:
-        raise ValueError("COP amount must be a finite non-negative Decimal")
-    scaled = amount * 100
+        raise ValueError("Money amount must be a finite non-negative Decimal")
+    scaled = amount * token_scale
     if scaled != scaled.to_integral_value():
-        raise ValueError("COP amount must have at most two decimal places")
+        raise ValueError("Money amount has more precision than the token scale allows")
     return int(scaled)
 
 

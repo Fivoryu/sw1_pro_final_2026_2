@@ -11,12 +11,24 @@ import {
 } from "./application/staffAuthApi";
 import { App } from "./App";
 import { listAgencyListings } from "./application/staffListingsApi";
+import { getCurrentExchangeRates, getExchangeRateHistory } from "./application/exchangeRatesApi";
 import * as staffSession from "./application/staffSession";
 
 vi.mock("./application/staffListingsApi", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("./application/staffListingsApi")>();
   return { ...actual, listAgencyListings: vi.fn() };
+});
+
+vi.mock("./application/exchangeRatesApi", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("./application/exchangeRatesApi")>();
+  return {
+    ...actual,
+    createExchangeRate: vi.fn(),
+    getCurrentExchangeRates: vi.fn(),
+    getExchangeRateHistory: vi.fn(),
+  };
 });
 
 vi.mock("./application/staffAuthApi", async (importOriginal) => {
@@ -52,6 +64,12 @@ beforeEach(() => {
   vi.mocked(logoutStaffSession).mockReset();
   vi.mocked(refreshStaffSession).mockReset();
   vi.mocked(startStaffLogin).mockReset();
+  vi.mocked(getCurrentExchangeRates)
+    .mockReset()
+    .mockResolvedValue({ rates: [] });
+  vi.mocked(getExchangeRateHistory)
+    .mockReset()
+    .mockResolvedValue({ rates: [] });
   vi.mocked(listAgencyListings)
     .mockReset()
     .mockResolvedValue({ listings: [], pagination: { limit: 50, offset: 0, total: 0 } });
@@ -242,10 +260,10 @@ describe("protected staff session lifecycle", () => {
   });
 
   it.each([
-    ["platform_admin", "Administración de plataforma", "Inicio de plataforma", "El espacio protegido está listo."],
-    ["agency_admin", "Administración de inmobiliaria", "Inicio de inmobiliaria", "Cola de revisión"],
-    ["agent", "Área de agente", "Inicio del agente", "Los borradores de inmuebles se crean y editan en la app RoomForge Captura."],
-  ])("renders only the supported %s role in its placeholder shell", async (role, heading, navigation, viewText) => {
+    ["platform_admin", "Administración de plataforma", "Inicio de plataforma", "Tasas de cambio", true],
+    ["agency_admin", "Administración de inmobiliaria", "Inicio de inmobiliaria", "Cola de revisión", true],
+    ["agent", "Área de agente", "Inicio del agente", "Los borradores de inmuebles se crean y editan en la app RoomForge Captura.", false],
+  ] as const)("renders only the supported %s role in its placeholder shell", async (role, heading, navigation, viewText, isSectionHeading) => {
     sessionStorage.setItem("roomforge.staff.csrf", "stored-csrf");
     vi.mocked(refreshStaffSession).mockResolvedValue({
       access_token: "volatile-access-token",
@@ -257,7 +275,13 @@ describe("protected staff session lifecycle", () => {
 
     expect(await screen.findByRole("heading", { name: heading })).toBeVisible();
     expect(screen.getByRole("navigation")).toHaveTextContent(navigation);
-    expect(screen.getByText(viewText)).toBeVisible();
+    if (isSectionHeading) {
+      expect(
+        await screen.findByRole("heading", { level: 2, name: viewText }),
+      ).toBeVisible();
+    } else {
+      expect(await screen.findByText(viewText)).toBeVisible();
+    }
   });
 
   it("rejects an unknown server role with an access-denied explanation", async () => {

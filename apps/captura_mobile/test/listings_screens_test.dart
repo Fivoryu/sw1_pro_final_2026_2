@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:captura_mobile/data/models/staff_listing.dart';
 import 'package:captura_mobile/data/services/staff_auth_api.dart';
 import 'package:captura_mobile/data/services/staff_listings_api.dart';
 import 'package:captura_mobile/domain/listing_drafts_controller.dart';
@@ -87,11 +88,17 @@ Future<void> _fillValidListing(WidgetTester tester) async {
 }
 
 void main() {
-  group('formatCop', () {
-    test('groups the server decimal string without floating point', () {
-      expect(formatCop('350000000.00'), 'COP 350.000.000,00');
-      expect(formatCop('1234.5'), 'COP 1.234,50');
-      expect(formatCop('9999999999999999.99'), 'COP 9.999.999.999.999.999,99');
+  group('formatMoney', () {
+    test('labels the amount with the currency of the listing', () {
+      expect(
+        formatMoney('350000000.00', ListingCurrency.bob),
+        'BOB 350.000.000,00',
+      );
+      expect(formatMoney('1234.5', ListingCurrency.usd), 'USD 1.234,50');
+      expect(
+        formatMoney('9999999999999999.99', ListingCurrency.usdt),
+        'USDT 9.999.999.999.999.999,99',
+      );
     });
   });
 
@@ -109,7 +116,24 @@ void main() {
       expect(
         find.descendant(
           of: item,
-          matching: find.textContaining('COP 350.000.000,00'),
+          matching: find.textContaining('BOB 350.000.000,00'),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('shows the listing currency next to the price', (tester) async {
+      await _pumpListings(
+        tester,
+        seed: (backend) => backend.seed(id: 'u-1', currency: 'USD'),
+      );
+
+      final item = find.byKey(const ValueKey('listing-item-u-1'));
+      expect(item, findsOneWidget);
+      expect(
+        find.descendant(
+          of: item,
+          matching: find.textContaining('USD 350.000.000,00'),
         ),
         findsOneWidget,
       );
@@ -219,6 +243,7 @@ void main() {
       expect(jsonDecode(post.body), {
         'operation': 'sale',
         'base_price': '350000000.5',
+        'currency': 'BOB',
         'city': 'Medellín',
         'zone': 'El Poblado',
         'bedrooms': 3,
@@ -300,6 +325,79 @@ void main() {
 
       expect(backend.listings['p-1']!['approval_status'], 'draft');
       expect(backend.listings['p-1']!['zone'], 'Laureles');
+    });
+
+    testWidgets(
+      'defaults the currency to BOB and offers exactly three choices',
+      (tester) async {
+        final backend = await _pumpListings(tester);
+        await _tapVisible(tester, 'new-listing-button');
+
+        final field = find.byKey(const ValueKey('listing-currency-field'));
+        expect(field, findsOneWidget);
+        expect(find.text('Boliviano (BOB)'), findsOneWidget);
+
+        await tester.tap(field);
+        await tester.pumpAndSettle();
+        expect(find.text('Boliviano (BOB)'), findsNWidgets(2));
+        expect(find.text('Dólar estadounidense (USD)'), findsOneWidget);
+        expect(find.text('Tether (USDT)'), findsOneWidget);
+
+        await tester.tap(find.text('Boliviano (BOB)').last);
+        await tester.pumpAndSettle();
+        await _fillValidListing(tester);
+        await _tapVisible(tester, 'listing-save-button');
+
+        final post = backend.requests.lastWhere((r) => r.method == 'POST');
+        expect(jsonDecode(post.body)['currency'], 'BOB');
+      },
+    );
+
+    testWidgets('sends the selected currency when creating a listing', (
+      tester,
+    ) async {
+      final backend = await _pumpListings(tester);
+      await _tapVisible(tester, 'new-listing-button');
+
+      await tester.tap(find.byKey(const ValueKey('listing-currency-field')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Dólar estadounidense (USD)').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Precio base (USD)'), findsOneWidget);
+
+      await _fillValidListing(tester);
+      await _tapVisible(tester, 'listing-save-button');
+
+      final post = backend.requests.lastWhere((r) => r.method == 'POST');
+      expect(jsonDecode(post.body)['currency'], 'USD');
+    });
+
+    testWidgets('shows the currency read-only when editing and echoes it', (
+      tester,
+    ) async {
+      final backend = await _pumpListings(
+        tester,
+        seed: (backend) => backend.seed(id: 'u-1', currency: 'USDT'),
+      );
+      await _tapVisible(tester, 'listing-item-u-1');
+
+      final field = find.byKey(const ValueKey('listing-currency-field'));
+      expect(
+        tester
+            .widget<DropdownButtonFormField<ListingCurrency>>(field)
+            .onChanged,
+        isNull,
+      );
+      expect(find.text('Tether (USDT)'), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('listing-zone-field')),
+        'Laureles',
+      );
+      await _tapVisible(tester, 'listing-save-button');
+
+      final put = backend.requests.lastWhere((r) => r.method == 'PUT');
+      expect(jsonDecode(put.body)['currency'], 'USDT');
     });
 
     testWidgets('meets touch target guidelines', (tester) async {

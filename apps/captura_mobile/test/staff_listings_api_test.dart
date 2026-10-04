@@ -22,11 +22,13 @@ Map<String, Object?> _listingBody({
   String id = 'listing-1',
   String status = 'draft',
   String city = 'Medellín',
+  String currency = 'BOB',
 }) => {
   'listing_id': id,
   'agency_id': 'agency-1',
   'operation': 'rent',
   'base_price': '2500000.00',
+  'currency': currency,
   'city': city,
   'zone': 'El Poblado',
   'bedrooms': 3,
@@ -42,6 +44,7 @@ Map<String, Object?> _listingBody({
 const _input = ListingDraftInput(
   operation: ListingOperation.rent,
   basePrice: '2500000.00',
+  currency: ListingCurrency.bob,
   city: 'Medellín',
   zone: 'El Poblado',
   bedrooms: 3,
@@ -90,6 +93,7 @@ void main() {
       expect(listings.single.listingId, 'listing-1');
       expect(listings.single.operation, ListingOperation.rent);
       expect(listings.single.basePrice, '2500000.00');
+      expect(listings.single.currency, ListingCurrency.bob);
       expect(listings.single.city, 'Medellín');
       expect(listings.single.status, ListingStatus.draft);
       expect(listings.single.exactAddress, 'Calle privada 123');
@@ -178,6 +182,7 @@ void main() {
       expect(jsonDecode(request.body), {
         'operation': 'rent',
         'base_price': '2500000.00',
+        'currency': 'BOB',
         'city': 'Medellín',
         'zone': 'El Poblado',
         'bedrooms': 3,
@@ -186,6 +191,72 @@ void main() {
         'exact_address': null,
       });
       expect(listing.status, ListingStatus.draft);
+    });
+
+    test('sends the chosen currency when creating', () async {
+      final harness = _build(
+        (_) async => _json(_listingBody(currency: 'USDT'), 201),
+      );
+      const usdtInput = ListingDraftInput(
+        operation: ListingOperation.rent,
+        basePrice: '2500000.00',
+        currency: ListingCurrency.usdt,
+        city: 'Medellín',
+        zone: 'El Poblado',
+        bedrooms: 3,
+        bathrooms: 2,
+        description: 'Casa luminosa',
+        exactAddress: null,
+      );
+
+      final listing = await harness.api.createListing(
+        accessToken: 'access-token',
+        agencyId: 'agency-1',
+        input: usdtInput,
+      );
+
+      expect(jsonDecode(harness.requests.single.body)['currency'], 'USDT');
+      expect(listing.currency, ListingCurrency.usdt);
+    });
+
+    test('parses the currency of every supported code', () async {
+      for (final (wire, expected) in [
+        ('BOB', ListingCurrency.bob),
+        ('USD', ListingCurrency.usd),
+        ('USDT', ListingCurrency.usdt),
+      ]) {
+        final harness = _build(
+          (_) async => _json(_listingBody(currency: wire), 200),
+        );
+
+        final listing = await harness.api.getListing(
+          accessToken: 'access-token',
+          agencyId: 'agency-1',
+          listingId: 'listing-1',
+        );
+
+        expect(listing.currency, expected);
+      }
+    });
+
+    test('rejects a listing body without the currency field', () async {
+      final body = _listingBody()..remove('currency');
+      final harness = _build((_) async => _json(body, 200));
+
+      await expectLater(
+        harness.api.getListing(
+          accessToken: 'access-token',
+          agencyId: 'agency-1',
+          listingId: 'listing-1',
+        ),
+        throwsA(
+          isA<StaffAuthFailure>().having(
+            (failure) => failure.code,
+            'code',
+            kInternalError,
+          ),
+        ),
+      );
     });
 
     test('replaces a listing with PUT', () async {

@@ -105,7 +105,7 @@ class ReservationResponse(BaseModel):
     api_created_at: datetime
     decision_deadline_at: datetime
     quote_snapshot: ReservationQuoteSnapshotResponse
-    deposit_amount_cop: str | None
+    deposit_amount: str | None
 
 
 class ReservationErrorField(BaseModel):

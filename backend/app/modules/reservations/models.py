@@ -37,12 +37,12 @@ class Reservation(Base):
             name="ck_reservation_deadline_after_creation",
         ),
         CheckConstraint(
-            "deposit_amount_cop IS NULL OR deposit_amount_cop > 0",
-            name="ck_reservation_deposit_amount_cop_positive",
+            "deposit_amount IS NULL OR deposit_amount > 0",
+            name="ck_reservation_deposit_amount_positive",
         ),
         CheckConstraint(
-            "deposit_amount_cop IS NULL OR deposit_amount_cop = round(deposit_amount_cop, 2)",
-            name="ck_reservation_deposit_amount_cop_scale",
+            "deposit_amount IS NULL OR deposit_amount = round(deposit_amount, 2)",
+            name="ck_reservation_deposit_amount_scale",
         ),
         CheckConstraint("one_time_total >= 0", name="ck_reservation_one_time_total_nonnegative"),
         CheckConstraint("monthly_total >= 0", name="ck_reservation_monthly_total_nonnegative"),
@@ -97,7 +97,7 @@ class Reservation(Base):
     quote_lines: Mapped[list[dict[str, str | None]]] = mapped_column(JSON, nullable=False)
     one_time_total: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     monthly_total: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    deposit_amount_cop: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    deposit_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     api_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     decision_deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")

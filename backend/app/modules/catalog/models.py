@@ -37,12 +37,16 @@ class Listing(Base):
         CheckConstraint("operation IN ('sale', 'rent')", name="ck_listing_operation"),
         CheckConstraint("base_price >= 0", name="ck_listing_base_price_nonnegative"),
         CheckConstraint(
-            "deposit_amount_cop IS NULL OR deposit_amount_cop > 0",
-            name="ck_listing_deposit_amount_cop_positive",
+            "currency IN ('BOB', 'USD', 'USDT')",
+            name="ck_listing_currency_supported",
         ),
         CheckConstraint(
-            "deposit_amount_cop IS NULL OR deposit_amount_cop = round(deposit_amount_cop, 2)",
-            name="ck_listing_deposit_amount_cop_scale",
+            "deposit_amount IS NULL OR deposit_amount > 0",
+            name="ck_listing_deposit_amount_positive",
+        ),
+        CheckConstraint(
+            "deposit_amount IS NULL OR deposit_amount = round(deposit_amount, 2)",
+            name="ck_listing_deposit_amount_scale",
         ),
         CheckConstraint("offer_version >= 1", name="ck_listing_offer_version_positive"),
         CheckConstraint("bedrooms >= 0", name="ck_listing_bedrooms_nonnegative"),
@@ -68,7 +72,10 @@ class Listing(Base):
     )
     operation: Mapped[str] = mapped_column(String(8), nullable=False)
     base_price: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    deposit_amount_cop: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    currency: Mapped[str] = mapped_column(
+        String(4), nullable=False, default="BOB", server_default=text("'BOB'")
+    )
+    deposit_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     offer_version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default=text("1")
     )
@@ -88,6 +95,7 @@ class Listing(Base):
         back_populates="listing",
         cascade="all, delete-orphan",
         passive_deletes=True,
+        order_by="ListingExtra.id",
     )
 
 
@@ -121,6 +129,19 @@ class ListingExtra(Base):
     __table_args__ = (
         CheckConstraint("price >= 0", name="ck_listing_extra_price_nonnegative"),
         CheckConstraint("length(trim(name)) > 0", name="ck_listing_extra_name_nonblank"),
+        CheckConstraint("quantity >= 1", name="ck_listing_extra_quantity_positive"),
+        CheckConstraint(
+            "(width_cm IS NULL OR width_cm > 0) AND (height_cm IS NULL OR height_cm > 0) "
+            "AND (depth_cm IS NULL OR depth_cm > 0)",
+            name="ck_listing_extra_dimensions_positive",
+        ),
+        CheckConstraint(
+            "(category IS NULL OR length(trim(category)) > 0) "
+            "AND (room IS NULL OR length(trim(room)) > 0) "
+            "AND (origin IS NULL OR length(trim(origin)) > 0) "
+            "AND (visual_reference IS NULL OR length(trim(visual_reference)) > 0)",
+            name="ck_listing_extra_optional_text_nonblank",
+        ),
         Index("ix_listing_extra_listing_id", "listing_id"),
     )
 
@@ -130,6 +151,16 @@ class ListingExtra(Base):
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     price: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    category: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    room: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    width_cm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height_cm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    depth_cm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    origin: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    visual_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    quantity: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
     listing: Mapped[Listing] = relationship(back_populates="extras")
 
 
@@ -142,6 +173,15 @@ class QuoteSnapshot(Base):
         CheckConstraint("operation IN ('sale', 'rent')", name="ck_quote_snapshot_operation"),
         CheckConstraint("one_time_total >= 0", name="ck_quote_snapshot_one_time_nonnegative"),
         CheckConstraint("monthly_total >= 0", name="ck_quote_snapshot_monthly_nonnegative"),
+        CheckConstraint(
+            "(display_currency IS NULL AND display_one_time_total IS NULL "
+            "AND display_monthly_total IS NULL AND base_units_per_usd IS NULL "
+            "AND display_units_per_usd IS NULL) OR "
+            "(display_currency IS NOT NULL AND display_one_time_total IS NOT NULL "
+            "AND display_monthly_total IS NOT NULL AND base_units_per_usd IS NOT NULL "
+            "AND display_units_per_usd IS NOT NULL)",
+            name="ck_quote_snapshot_display_fields_all_or_none",
+        ),
         CheckConstraint("expires_at > created_at", name="ck_quote_snapshot_expiry_after_creation"),
         Index("ix_quote_snapshot_listing_version", "listing_id", "offer_version"),
     )
@@ -150,9 +190,17 @@ class QuoteSnapshot(Base):
     listing_id: Mapped[str] = mapped_column(String(36), nullable=False)
     offer_version: Mapped[int] = mapped_column(Integer, nullable=False)
     operation: Mapped[str] = mapped_column(String(8), nullable=False)
+    currency: Mapped[str] = mapped_column(
+        String(4), nullable=False, default="BOB", server_default=text("'BOB'")
+    )
     lines: Mapped[list[dict[str, str | None]]] = mapped_column(JSON, nullable=False)
     one_time_total: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     monthly_total: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    display_currency: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    display_one_time_total: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    display_monthly_total: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    base_units_per_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
+    display_units_per_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

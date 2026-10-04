@@ -8,6 +8,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
+from app.core.money import SupportedCurrency
+
 # Single source of truth for the listing operation domain; the ORM stores it as a plain
 # string guarded by a CHECK constraint, so routers cast database values to this alias.
 ListingOperation = Literal["sale", "rent"]
@@ -18,7 +20,7 @@ class CatalogMoney(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     amount: str
-    currency: Literal["COP"]
+    currency: SupportedCurrency
 
 
 class CatalogListingItem(BaseModel):
@@ -38,6 +40,14 @@ class CatalogExtraItem(BaseModel):
     extra_id: str
     name: str
     price: CatalogMoney
+    category: str | None
+    room: str | None
+    width_cm: int | None
+    height_cm: int | None
+    depth_cm: int | None
+    origin: str | None
+    visual_reference: str | None
+    quantity: int
 
 
 class CatalogListingDetail(CatalogListingItem):
@@ -61,6 +71,7 @@ class QuoteCreateRequest(BaseModel):
     selected_extra_ids: list[Annotated[str, Field(min_length=1, max_length=36)]] = Field(
         default_factory=list
     )
+    target_currency: SupportedCurrency | None = None
 
 
 class QuoteLine(BaseModel):
@@ -69,8 +80,24 @@ class QuoteLine(BaseModel):
     kind: Literal["base", "extra"]
     extra_id: str | None
     amount: str
-    currency: Literal["COP"]
+    currency: SupportedCurrency
     charge_period: Literal["one_time", "monthly"]
+
+
+class QuoteDisplayTotals(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    one_time_total: CatalogMoney
+    monthly_total: CatalogMoney
+
+
+class QuoteDisplayRate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base_currency: SupportedCurrency
+    display_currency: SupportedCurrency
+    base_units_per_usd: str
+    display_units_per_usd: str
 
 
 class QuoteSnapshotResponse(BaseModel):
@@ -83,6 +110,8 @@ class QuoteSnapshotResponse(BaseModel):
     lines: list[QuoteLine]
     one_time_total: CatalogMoney
     monthly_total: CatalogMoney
+    display_totals: QuoteDisplayTotals | None = None
+    display_rate: QuoteDisplayRate | None = None
     created_at: datetime
     expires_at: datetime
 
@@ -106,7 +135,7 @@ class QuoteErrorResponse(BaseModel):
 class ListingDepositUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    deposit_amount_cop: Annotated[
+    deposit_amount: Annotated[
         Decimal,
         Field(gt=Decimal("0"), max_digits=18, decimal_places=2),
     ]
@@ -116,8 +145,45 @@ class ListingDepositResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     listing_id: str
-    deposit_amount_cop: str
+    deposit_amount: str
     offer_version: int
+
+
+class ExtraPayload(BaseModel):
+    """One furniture extra in listing authoring; `extra_id` targets an existing row."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    extra_id: Annotated[str, Field(min_length=1, max_length=36)] | None = None
+    name: Annotated[str, Field(min_length=1, max_length=120)]
+    price: Annotated[
+        Decimal,
+        Field(ge=Decimal("0"), max_digits=18, decimal_places=2),
+    ]
+    category: Annotated[str, Field(min_length=1, max_length=32)] | None = None
+    room: Annotated[str, Field(min_length=1, max_length=32)] | None = None
+    width_cm: Annotated[StrictInt, Field(ge=1)] | None = None
+    height_cm: Annotated[StrictInt, Field(ge=1)] | None = None
+    depth_cm: Annotated[StrictInt, Field(ge=1)] | None = None
+    origin: Annotated[str, Field(min_length=1, max_length=120)] | None = None
+    visual_reference: Annotated[str, Field(min_length=1, max_length=255)] | None = None
+    quantity: Annotated[StrictInt, Field(ge=1)] = 1
+
+
+class ExtraAuthoringResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    extra_id: str
+    name: str
+    price: str
+    category: str | None
+    room: str | None
+    width_cm: int | None
+    height_cm: int | None
+    depth_cm: int | None
+    origin: str | None
+    visual_reference: str | None
+    quantity: int
 
 
 class ListingAuthoringRequest(BaseModel):
@@ -128,12 +194,14 @@ class ListingAuthoringRequest(BaseModel):
         Decimal,
         Field(gt=Decimal("0"), max_digits=18, decimal_places=2),
     ]
+    currency: SupportedCurrency = "BOB"
     city: Annotated[str, Field(min_length=1, max_length=120)]
     zone: Annotated[str, Field(min_length=1, max_length=120)]
     bedrooms: Annotated[StrictInt, Field(ge=0)]
     bathrooms: Annotated[StrictInt, Field(ge=0)]
     description: str | None = None
     exact_address: str | None = None
+    extras: list[ExtraPayload] | None = None
 
 
 class ListingTransitionRequest(BaseModel):
@@ -149,6 +217,7 @@ class ListingAuthoringResponse(BaseModel):
     agency_id: str
     operation: ListingOperation
     base_price: Decimal
+    currency: SupportedCurrency
     city: str
     zone: str
     bedrooms: int
@@ -159,6 +228,7 @@ class ListingAuthoringResponse(BaseModel):
     is_published: bool
     offer_version: int
     created_at: datetime
+    extras: list[ExtraAuthoringResponse] = Field(default_factory=list)
 
 
 class StaffListingPagination(BaseModel):

@@ -6,8 +6,9 @@ export interface StaffListing {
   listing_id: string;
   agency_id: string;
   operation: "sale" | "rent";
-  /** Decimal amount in COP as serialized by the server; never recomputed here. */
+  /** Decimal amount as serialized by the server; never recomputed here. */
   base_price: string;
+  currency: "BOB" | "USD" | "USDT";
   city: string;
   zone: string;
   bedrooms: number;

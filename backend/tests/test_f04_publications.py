@@ -57,9 +57,37 @@ def f04_context() -> Iterator[F04Context]:
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
 
+    currency_migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "0013_listing_currency.py"
+    )
+    currency_spec = importlib.util.spec_from_file_location(
+        "f04_listing_currency", currency_migration_path
+    )
+    assert currency_spec is not None and currency_spec.loader is not None
+    currency_migration = importlib.util.module_from_spec(currency_spec)
+    currency_spec.loader.exec_module(currency_migration)
+    extra_details_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "0016_listing_extra_details.py"
+    )
+    extra_details_spec = importlib.util.spec_from_file_location(
+        "f04_listing_extra_details", extra_details_path
+    )
+    assert extra_details_spec is not None and extra_details_spec.loader is not None
+    extra_details_migration = importlib.util.module_from_spec(extra_details_spec)
+    extra_details_spec.loader.exec_module(extra_details_migration)
     with engine.begin() as connection:
         with Operations.context(MigrationContext.configure(connection)):
             migration._install_sqlite_offer_version_triggers()
+            currency_migration._install_listing_currency_triggers()
+            extra_details_migration._drop_sqlite_extra_triggers()
+            extra_details_migration._install_sqlite_extra_triggers(quantity_aware=True)
+            currency_migration._install_snapshot_immutability()
     app = create_app(
         settings=Settings(
             database_url="sqlite+pysqlite:///:memory:",
@@ -125,6 +153,7 @@ def _seed_listing(
     is_published: bool = False,
     base_price: str = "100000.00",
     created_at: datetime | None = None,
+    currency: str = "BOB",
 ) -> None:
     with context.session_factory.begin() as session:
         if session.get(Agency, agency_id) is None:
@@ -145,6 +174,7 @@ def _seed_listing(
         )
         if created_at is not None:
             listing.created_at = created_at
+        listing.currency = currency
         session.add(listing)
 
 
@@ -183,7 +213,7 @@ def test_create_listing_starts_as_normalized_unpublished_draft(f04_context: F04C
         listing = session.get(Listing, listing_id)
         assert listing is not None
         assert listing.city_key == "medellín" and listing.zone_key == "el poblado"
-        assert listing.deposit_amount_cop is None
+        assert listing.deposit_amount is None
     assert [(row.action, row.from_status, row.to_status) for row in _history(context, listing_id)] == [
         ("create", None, "draft")
     ]
@@ -225,6 +255,22 @@ def test_client_cannot_supply_authority_or_server_derived_fields(f04_context: F0
     assert response.status_code == 422
     with context.session_factory() as session:
         assert session.query(Listing).count() == 0
+
+
+def test_edit_keeps_the_stored_currency_regardless_of_the_payload(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    _seed_listing(context, "usd-listing", currency="USD")
+    _staff(context, role="agent")
+
+    response = context.client.put(
+        _url("agency-one", "usd-listing"),
+        json=_payload(currency="BOB"),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["currency"] == "USD"
 
 
 def test_editing_published_listing_reopens_it_and_hides_it_immediately(
@@ -652,7 +698,7 @@ _LISTING_ROUTES: list[tuple[str, str, str, dict[str, Any] | None, tuple[str, boo
     ("publish", "POST", "/publish", None, ("approved", False)),
     ("unpublish", "POST", "/unpublish", None, ("approved", True)),
     ("transitions", "GET", "/transitions", None, ("draft", False)),
-    ("deposit", "PATCH", "/deposit", {"deposit_amount_cop": "100.00"}, ("approved", False)),
+    ("deposit", "PATCH", "/deposit", {"deposit_amount": "100.00"}, ("approved", False))
 ]
 _ROUTE_IDS = [route[0] for route in _LISTING_ROUTES]
 
@@ -673,7 +719,7 @@ def _listing_state(context: F04Context, listing_id: str) -> tuple[Any, ...]:
             listing.base_price,
             listing.city,
             listing.offer_version,
-            listing.deposit_amount_cop,
+            listing.deposit_amount,
         )
 
 
@@ -846,3 +892,335 @@ def test_staff_listing_routes_require_a_staff_session_with_real_authentication(
         assert session.query(Listing).count() == len({route[4] for route in _LISTING_ROUTES})
     control = context.client.get(_collection_url("agency-one"), headers=staff_headers)
     assert control.status_code == 200, control.text
+
+
+_F05M_EXTRAS_PAYLOAD: list[dict[str, Any]] = [
+    {
+        "name": "Cama queen",
+        "price": "1500.00",
+        "category": "bed",
+        "room": "dormitorio",
+        "width_cm": 160,
+        "height_cm": 110,
+        "depth_cm": 210,
+        "origin": "Importada",
+        "visual_reference": "https://cdn.example.test/bed.png",
+        "quantity": 2,
+    },
+    {
+        "name": "Sofá tres cuerpos",
+        "price": "800.00",
+        "quantity": 1,
+    },
+]
+
+_EXTRA_DETAIL_FIELDS = {
+    "extra_id",
+    "name",
+    "price",
+    "category",
+    "room",
+    "width_cm",
+    "height_cm",
+    "depth_cm",
+    "origin",
+    "visual_reference",
+    "quantity",
+}
+
+
+def _with_stable_ids(extras: list[dict[str, Any]], response_extras: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    assert len(extras) == len(response_extras)
+    ids_by_name = {served["name"]: served["extra_id"] for served in response_extras}
+    return [
+        {"extra_id": ids_by_name[payload["name"]], **payload} for payload in extras
+    ]
+
+
+def _by_name(served: list[dict[str, Any]], name: str) -> dict[str, Any]:
+    return next(extra for extra in served if extra["name"] == name)
+
+
+def _create_listing_with_extras(
+    context: F04Context,
+    *,
+    extras: list[dict[str, Any]] | None = None,
+) -> Any:
+    _staff(context)
+    body = _payload(extras=_F05M_EXTRAS_PAYLOAD if extras is None else extras)
+    created = context.client.post(_collection_url("agency-one"), json=body)
+    assert created.status_code == 201, created.text
+    return created.json()
+
+
+def _publish_listing(context: F04Context, listing_id: str) -> None:
+    for action in ("submit", "approve", "publish"):
+        moved = context.client.post(_url("agency-one", listing_id) + f"/{action}")
+        assert moved.status_code == 200, moved.text
+
+
+def test_create_listing_with_extras_inserts_every_payload_extra_with_new_ids(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    body = _create_listing_with_extras(context)
+
+    served = body["extras"]
+    assert len(served) == 2
+    assert all(set(extra) == _EXTRA_DETAIL_FIELDS for extra in served)
+    bed = _by_name(served, "Cama queen")
+    sofa = _by_name(served, "Sof\u00e1 tres cuerpos")
+    assert bed["extra_id"] != sofa["extra_id"]
+    assert all(len(extra["extra_id"]) == 36 for extra in served)
+    assert bed["price"] == "1500.00"
+    assert bed["category"] == "bed"
+    assert bed["room"] == "dormitorio"
+    assert bed["width_cm"] == 160
+    assert bed["height_cm"] == 110
+    assert bed["depth_cm"] == 210
+    assert bed["origin"] == "Importada"
+    assert bed["visual_reference"] == "https://cdn.example.test/bed.png"
+    assert bed["quantity"] == 2
+    assert sofa["category"] is None
+    assert sofa["width_cm"] is None
+    assert sofa["quantity"] == 1
+    # The existing trigger rule bumps the offer version once per inserted extra.
+    assert body["offer_version"] == 3
+
+
+def test_create_listing_without_extras_echoes_an_empty_set(f04_context: F04Context) -> None:
+    context = f04_context
+    body = _create_listing_with_extras(context, extras=[])
+
+    assert body["extras"] == []
+    assert body["offer_version"] == 1
+
+
+def test_edit_with_identical_extras_payload_keeps_ids_and_offer_version(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    created = _create_listing_with_extras(context)
+    payload = _payload(extras=_with_stable_ids(_F05M_EXTRAS_PAYLOAD, created["extras"]))
+
+    edited = context.client.put(_url("agency-one", created["listing_id"]), json=payload)
+
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["offer_version"] == created["offer_version"]
+    ids_before = {
+        extra["name"]: extra["extra_id"] for extra in created["extras"]
+    }
+    assert {
+        extra["name"]: extra["extra_id"] for extra in edited.json()["extras"]
+    } == ids_before
+    assert all(
+        set(extra) == _EXTRA_DETAIL_FIELDS for extra in edited.json()["extras"]
+    )
+
+
+def test_edit_updates_an_extra_in_place_keeping_its_stable_id(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    created = _create_listing_with_extras(context)
+    payload_extras = _with_stable_ids(_F05M_EXTRAS_PAYLOAD, created["extras"])
+    payload_extras[0]["price"] = "1750.00"
+    edited = context.client.put(
+        _url("agency-one", created["listing_id"]), json=_payload(extras=payload_extras)
+    )
+
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["offer_version"] == created["offer_version"] + 1
+    served = edited.json()["extras"]
+    ids_before = {
+        extra["name"]: extra["extra_id"] for extra in created["extras"]
+    }
+    assert {
+        extra["name"]: extra["extra_id"] for extra in served
+    } == ids_before
+    assert _by_name(served, "Cama queen")["price"] == "1750.00"
+
+
+def test_edit_quantity_change_is_an_offer_change(f04_context: F04Context) -> None:
+    context = f04_context
+    created = _create_listing_with_extras(context)
+    payload_extras = _with_stable_ids(_F05M_EXTRAS_PAYLOAD, created["extras"])
+    payload_extras[1]["quantity"] = 4
+    edited = context.client.put(
+        _url("agency-one", created["listing_id"]), json=_payload(extras=payload_extras)
+    )
+
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["offer_version"] == created["offer_version"] + 1
+    assert _by_name(edited.json()["extras"], "Sof\u00e1 tres cuerpos")["quantity"] == 4
+
+
+def test_edit_descriptive_extra_fields_do_not_bump_offer_version(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    created = _create_listing_with_extras(context)
+    payload_extras = _with_stable_ids(_F05M_EXTRAS_PAYLOAD, created["extras"])
+    payload_extras[0]["category"] = "sofa"
+    payload_extras[0]["room"] = "living"
+    payload_extras[0]["origin"] = "Nacional"
+    payload_extras[0]["visual_reference"] = "https://cdn.example.test/sofa.png"
+    payload_extras[0]["width_cm"] = 200
+    edited = context.client.put(
+        _url("agency-one", created["listing_id"]), json=_payload(extras=payload_extras)
+    )
+
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["offer_version"] == created["offer_version"]
+    bed = _by_name(edited.json()["extras"], "Cama queen")
+    assert bed["category"] == "sofa"
+    assert bed["room"] == "living"
+    assert bed["origin"] == "Nacional"
+    assert bed["width_cm"] == 200
+
+
+def test_edit_inserts_new_extras_and_deletes_missing_ones(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    created = _create_listing_with_extras(context)
+    kept = _by_name(created["extras"], "Cama queen")
+    new_extra = {
+        "name": "Escritorio",
+        "price": "450.00",
+        "room": "estudio",
+        "quantity": 1,
+    }
+    payload = _payload(extras=[{"extra_id": kept["extra_id"], **{k: v for k, v in _F05M_EXTRAS_PAYLOAD[0].items()}}, new_extra])
+
+    edited = context.client.put(_url("agency-one", created["listing_id"]), json=payload)
+
+    assert edited.status_code == 200, edited.text
+    served = edited.json()["extras"]
+    desk = _by_name(served, "Escritorio")
+    assert _by_name(served, "Cama queen")["extra_id"] == kept["extra_id"]
+    assert desk["extra_id"] != kept["extra_id"]
+    # One deletion and one insertion each advance the offer version once.
+    assert edited.json()["offer_version"] == created["offer_version"] + 2
+
+
+def test_edit_rejects_unknown_extra_references_without_changes(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    created = _create_listing_with_extras(context)
+    payload = _payload(
+        extras=[{"extra_id": "0" * 36, **_F05M_EXTRAS_PAYLOAD[0]}]
+    )
+
+    edited = context.client.put(_url("agency-one", created["listing_id"]), json=payload)
+
+    assert edited.status_code == 422, edited.text
+    assert edited.json()["code"] == "validation_error"
+    with context.session_factory() as session:
+        stored = (
+            session.query(Listing)
+            .filter(Listing.id == created["listing_id"])
+            .one()
+        )
+        assert stored.offer_version == created["offer_version"]
+        assert len(stored.extras) == 2
+
+
+@pytest.mark.parametrize(
+    "extra_change",
+    [
+        {"quantity": 0},
+        {"width_cm": 0},
+        {"height_cm": -5},
+        {"category": "   "},
+        {"name": "   "},
+    ],
+)
+def test_invalid_extra_payloads_are_rejected_without_creating_a_listing(
+    f04_context: F04Context, extra_change: dict[str, Any]
+) -> None:
+    context = f04_context
+    _staff(context)
+    payload_extra = {**_F05M_EXTRAS_PAYLOAD[0], **extra_change}
+    response = context.client.post(
+        _collection_url("agency-one"), json=_payload(extras=[payload_extra])
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
+
+
+def test_published_detail_echoes_the_full_extra_set(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    created = _create_listing_with_extras(context)
+    _publish_listing(context, created["listing_id"])
+
+    detail = context.client.get(f"/api/v1/listings/{created['listing_id']}")
+
+    assert detail.status_code == 200, detail.text
+    served = detail.json()["extras"]
+    assert len(served) == 2
+    assert all(set(extra) == _EXTRA_DETAIL_FIELDS for extra in served)
+    assert _by_name(served, "Cama queen")["quantity"] == 2
+    assert _by_name(served, "Sof\u00e1 tres cuerpos")["category"] is None
+
+
+def test_quote_lines_and_totals_multiply_extra_price_by_quantity(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    created = _create_listing_with_extras(context)
+    _publish_listing(context, created["listing_id"])
+    extra_id = _by_name(created["extras"], "Cama queen")["extra_id"]
+
+    quote = context.client.post(
+        "/api/v1/quotes",
+        json={
+            "listing_id": created["listing_id"],
+            "offer_version": created["offer_version"],
+            "selected_extra_ids": [extra_id],
+        },
+    )
+
+    assert quote.status_code == 201, quote.text
+    lines = quote.json()["lines"]
+    extra_line = next(line for line in lines if line["kind"] == "extra")
+    assert extra_line["amount"] == "3000.00"
+    assert quote.json()["one_time_total"] == {"amount": "128000.00", "currency": "BOB"}
+    assert quote.json()["monthly_total"] == {"amount": "0.00", "currency": "BOB"}
+
+
+def test_quote_snapshot_stays_immutable_after_extras_authoring(
+    f04_context: F04Context,
+) -> None:
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+
+    context = f04_context
+    created = _create_listing_with_extras(context)
+    _publish_listing(context, created["listing_id"])
+    quote = context.client.post(
+        "/api/v1/quotes",
+        json={
+            "listing_id": created["listing_id"],
+            "offer_version": created["offer_version"],
+            "selected_extra_ids": [],
+        },
+    )
+    assert quote.status_code == 201, quote.text
+    quote_id = quote.json()["quote_id"]
+
+    with context.session_factory.begin() as session:
+        with pytest.raises(IntegrityError):
+            session.execute(
+                text("UPDATE quote_snapshot SET one_time_total = 0 WHERE id = :id"),
+                {"id": quote_id},
+            )
+        with pytest.raises(IntegrityError):
+            session.execute(
+                text("DELETE FROM quote_snapshot WHERE id = :id"),
+                {"id": quote_id},
+            )

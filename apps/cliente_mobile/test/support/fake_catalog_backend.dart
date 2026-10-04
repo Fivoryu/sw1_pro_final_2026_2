@@ -18,11 +18,13 @@ class FakeCatalogBackend {
 
   http.Client get client => MockClient(_handle);
 
-  /// Publishes a listing; later seeds are newer and come first.
+  /// Publishes a listing; later seeds are newer and come first. The currency
+  /// is echoed exactly as the API sends it: the app never converts prices.
   void seed({
     required String id,
     String operation = 'sale',
     String amount = '350000000.00',
+    String currency = 'BOB',
     String city = 'Medellín',
     String zone = 'El Poblado',
     int bedrooms = 3,
@@ -33,7 +35,7 @@ class FakeCatalogBackend {
       'listing_id': id,
       'offer_version': 1,
       'operation': operation,
-      'base_price': {'amount': amount, 'currency': 'COP'},
+      'base_price': {'amount': amount, 'currency': currency},
       'city': city,
       'zone': zone,
       'bedrooms': bedrooms,
@@ -43,7 +45,7 @@ class FakeCatalogBackend {
           {
             'extra_id': extra.id,
             'name': extra.name,
-            'price': {'amount': extra.amount, 'currency': 'COP'},
+            'price': {'amount': extra.amount, 'currency': currency},
           },
       ],
     });

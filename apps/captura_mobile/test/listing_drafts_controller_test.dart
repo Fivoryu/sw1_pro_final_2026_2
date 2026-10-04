@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:captura_mobile/data/models/staff_listing.dart';
 import 'package:captura_mobile/data/services/staff_auth_api.dart';
 import 'package:captura_mobile/data/services/staff_listings_api.dart';
@@ -11,6 +13,7 @@ import 'support/fake_staff_backend.dart';
 const _input = ListingDraftInput(
   operation: ListingOperation.sale,
   basePrice: '350000000.00',
+  currency: ListingCurrency.bob,
   city: 'Medellín',
   zone: 'El Poblado',
   bedrooms: 3,
@@ -116,6 +119,7 @@ void main() {
         input: const ListingDraftInput(
           operation: ListingOperation.sale,
           basePrice: '360000000.00',
+          currency: ListingCurrency.bob,
           city: 'Medellín',
           zone: 'Laureles',
           bedrooms: 3,
@@ -129,6 +133,52 @@ void main() {
       expect(edited!.listingId, created.listingId);
       expect(edited.zone, 'Laureles');
       expect(harness.backend.requests.map((r) => r.method), ['POST', 'PUT']);
+    });
+
+    test('sends the chosen currency when creating', () async {
+      final harness = await _build();
+
+      await harness.controller.save(
+        input: const ListingDraftInput(
+          operation: ListingOperation.sale,
+          basePrice: '100000.00',
+          currency: ListingCurrency.usd,
+          city: 'Medellín',
+          zone: 'El Poblado',
+          bedrooms: 3,
+          bathrooms: 2,
+          description: null,
+          exactAddress: null,
+        ),
+      );
+
+      final post = harness.backend.requests.single;
+      expect(jsonDecode(post.body)['currency'], 'USD');
+    });
+
+    test('echoes the stored currency when editing a listing', () async {
+      final harness = await _build();
+      harness.backend.seed(id: 'usd-1', currency: 'USD');
+
+      final edited = await harness.controller.save(
+        listingId: 'usd-1',
+        input: const ListingDraftInput(
+          operation: ListingOperation.sale,
+          basePrice: '350000000.00',
+          currency: ListingCurrency.usd,
+          city: 'Medellín',
+          zone: 'Laureles',
+          bedrooms: 3,
+          bathrooms: 2,
+          description: null,
+          exactAddress: null,
+        ),
+      );
+
+      final put = harness.backend.requests.lastWhere((r) => r.method == 'PUT');
+      expect(jsonDecode(put.body)['currency'], 'USD');
+      expect(edited!.currency, ListingCurrency.usd);
+      expect(edited.zone, 'Laureles');
     });
 
     test('submits a draft for review', () async {

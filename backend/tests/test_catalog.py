@@ -74,24 +74,24 @@ def catalog_api_context() -> Iterator[CatalogApiContext]:
     assert quote_migration_spec is not None and quote_migration_spec.loader is not None
     quote_migration = importlib.util.module_from_spec(quote_migration_spec)
     quote_migration_spec.loader.exec_module(quote_migration)
-    deposit_migration_path = (
+    currency_migration_path = (
         Path(__file__).resolve().parents[1]
         / "alembic"
         / "versions"
-        / "0009_agency_wallets_deposit.py"
+        / "0013_listing_currency.py"
     )
-    deposit_migration_spec = importlib.util.spec_from_file_location(
-        "listing_deposit_triggers_for_api_tests", deposit_migration_path
+    currency_migration_spec = importlib.util.spec_from_file_location(
+        "listing_currency_triggers_for_api_tests", currency_migration_path
     )
-    assert deposit_migration_spec is not None and deposit_migration_spec.loader is not None
-    deposit_migration = importlib.util.module_from_spec(deposit_migration_spec)
-    deposit_migration_spec.loader.exec_module(deposit_migration)
+    assert currency_migration_spec is not None and currency_migration_spec.loader is not None
+    currency_migration = importlib.util.module_from_spec(currency_migration_spec)
+    currency_migration_spec.loader.exec_module(currency_migration)
     with engine.begin() as connection:
         migration_context = MigrationContext.configure(connection)
         with Operations.context(migration_context):
             migration._install_offer_version_triggers()
             quote_migration._install_snapshot_immutability()
-            deposit_migration._install_listing_deposit_offer_version_triggers()
+            currency_migration._install_listing_currency_triggers()
     app = create_app(
         settings=Settings(
             database_url="sqlite+pysqlite:///:memory:",
@@ -220,7 +220,7 @@ def test_deposit_configuration_rejects_nonpositive_or_excess_precision(
 
     response = context.client.patch(
         "/api/v1/staff/agencies/agency-one/listings/invalid-deposit/deposit",
-        json={"deposit_amount_cop": amount},
+        json={"deposit_amount": amount},
         headers=_staff_headers(context),
     )
 
@@ -237,22 +237,22 @@ def test_only_owning_agency_admin_can_configure_listing_deposit(
 
     configured = context.client.patch(
         "/api/v1/staff/agencies/agency-one/listings/owned-deposit/deposit",
-        json={"deposit_amount_cop": "1250.50"},
+        json={"deposit_amount": "1250.50"},
         headers=own_headers,
     )
     cross_tenant = context.client.patch(
         "/api/v1/staff/agencies/agency-two/listings/other-agency-deposit/deposit",
-        json={"deposit_amount_cop": "1250.50"},
+        json={"deposit_amount": "1250.50"},
         headers=own_headers,
     )
     agent = context.client.patch(
         "/api/v1/staff/agencies/agency-one/listings/owned-deposit/deposit",
-        json={"deposit_amount_cop": "1500.00"},
+        json={"deposit_amount": "1500.00"},
         headers=_staff_headers(context, account_id="listing-agent", role="agent"),
     )
     platform_admin = context.client.patch(
         "/api/v1/staff/agencies/agency-one/listings/owned-deposit/deposit",
-        json={"deposit_amount_cop": "1500.00"},
+        json={"deposit_amount": "1500.00"},
         headers=_staff_headers(
             context,
             account_id="listing-platform-admin",
@@ -264,7 +264,7 @@ def test_only_owning_agency_admin_can_configure_listing_deposit(
     assert configured.status_code == 200, configured.text
     assert configured.json() == {
         "listing_id": "owned-deposit",
-        "deposit_amount_cop": "1250.50",
+        "deposit_amount": "1250.50",
         "offer_version": 2,
     }
     assert [cross_tenant.status_code, agent.status_code, platform_admin.status_code] == [
@@ -277,8 +277,8 @@ def test_only_owning_agency_admin_can_configure_listing_deposit(
     with context.session_factory() as session:
         owned = session.get(Listing, "owned-deposit")
         other = session.get(Listing, "other-agency-deposit")
-        assert owned is not None and owned.deposit_amount_cop == Decimal("1250.50")
-        assert other is not None and other.deposit_amount_cop is None
+        assert owned is not None and owned.deposit_amount == Decimal("1250.50")
+        assert other is not None and other.deposit_amount is None
 
 
 def test_deposit_change_invalidates_existing_quote_by_offer_version(
@@ -301,7 +301,7 @@ def test_deposit_change_invalidates_existing_quote_by_offer_version(
     assert quote_response.status_code == 201, quote_response.text
     changed = context.client.patch(
         "/api/v1/staff/agencies/agency-one/listings/deposit-quote/deposit",
-        json={"deposit_amount_cop": "5000.00"},
+        json={"deposit_amount": "5000.00"},
         headers=_staff_headers(context),
     )
     assert changed.status_code == 200, changed.text
@@ -359,7 +359,7 @@ def test_detail_has_minimal_public_schema_and_hides_private_fields(
         "listing_id": "detail-listing",
         "offer_version": 2,
         "operation": "sale",
-        "base_price": {"amount": "100000.00", "currency": "COP"},
+        "base_price": {"amount": "100000.00", "currency": "BOB"},
         "city": "Córdoba",
         "zone": "Centro",
         "bedrooms": 2,
@@ -368,7 +368,15 @@ def test_detail_has_minimal_public_schema_and_hides_private_fields(
             {
                 "extra_id": "extra-stable-id",
                 "name": "Amoblamiento",
-                "price": {"amount": "1234.50", "currency": "COP"},
+                "price": {"amount": "1234.50", "currency": "BOB"},
+                "category": None,
+                "room": None,
+                "width_cm": None,
+                "height_cm": None,
+                "depth_cm": None,
+                "origin": None,
+                "visual_reference": None,
+                "quantity": 1,
             }
         ],
     }
@@ -376,7 +384,93 @@ def test_detail_has_minimal_public_schema_and_hides_private_fields(
     assert "private description" not in serialized
     assert "private exact address" not in serialized
     assert "private-photo.jpg" not in serialized
-    assert set(response.json()["extras"][0]) == {"extra_id", "name", "price"}
+    assert set(response.json()["extras"][0]) == {
+        "extra_id",
+        "name",
+        "price",
+        "category",
+        "room",
+        "width_cm",
+        "height_cm",
+        "depth_cm",
+        "origin",
+        "visual_reference",
+        "quantity",
+    }
+
+
+@pytest.mark.parametrize("currency", ["USD", "USDT"])
+def test_authoring_currency_is_echoed_in_catalog_detail_and_quote(
+    catalog_api_context: CatalogApiContext, currency: str
+) -> None:
+    context = catalog_api_context
+    headers = _staff_headers(context)
+    body = {
+        "operation": "sale",
+        "base_price": "1250.50",
+        "currency": currency,
+        "city": "La Paz",
+        "zone": "Centro",
+        "bedrooms": 2,
+        "bathrooms": 1,
+    }
+    created = context.client.post(
+        "/api/v1/staff/agencies/agency-one/listings", json=body, headers=headers
+    )
+    assert created.status_code == 201, created.text
+    listing_id = created.json()["listing_id"]
+    assert created.json()["currency"] == currency
+
+    listing_path = f"/api/v1/staff/agencies/agency-one/listings/{listing_id}"
+    assert context.client.post(listing_path + "/submit", headers=headers).status_code == 200
+    assert context.client.post(listing_path + "/approve", headers=headers).status_code == 200
+    assert context.client.post(listing_path + "/publish", headers=headers).status_code == 200
+
+    catalog = context.client.get("/api/v1/listings")
+    detail = context.client.get(f"/api/v1/listings/{listing_id}")
+    quote = context.client.post(
+        "/api/v1/quotes",
+        json={"listing_id": listing_id, "offer_version": 1, "selected_extra_ids": []},
+    )
+
+    assert catalog.status_code == detail.status_code == 200
+    assert quote.status_code == 201, quote.text
+    item = next(
+        row for row in catalog.json()["items"] if row["listing_id"] == listing_id
+    )
+    assert item["base_price"]["currency"] == currency
+    assert detail.json()["base_price"]["currency"] == currency
+    assert quote.json()["lines"][0]["currency"] == currency
+    assert quote.json()["one_time_total"]["currency"] == currency
+    assert quote.json()["monthly_total"]["currency"] == currency
+
+
+def test_listing_authoring_defaults_currency_to_bob_and_rejects_unsupported_currency(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    context = catalog_api_context
+    headers = _staff_headers(context)
+    body = {
+        "operation": "sale",
+        "base_price": "1250.50",
+        "city": "La Paz",
+        "zone": "Centro",
+        "bedrooms": 2,
+        "bathrooms": 1,
+    }
+
+    created = context.client.post(
+        "/api/v1/staff/agencies/agency-one/listings", json=body, headers=headers
+    )
+    unsupported = context.client.post(
+        "/api/v1/staff/agencies/agency-one/listings",
+        json={**body, "currency": "EUR"},
+        headers=headers,
+    )
+
+    assert created.status_code == 201, created.text
+    assert created.json()["currency"] == "BOB"
+    assert unsupported.status_code == 422
 
 
 def test_missing_and_non_visible_listing_detail_return_same_404(
@@ -844,8 +938,8 @@ def test_untrusted_sqlite_trigger_cannot_spoof_offer_version_guard_marker(
     _seed_listing(context, listing_id="untrusted-trigger-offer")
 
     raw_connection = context.session_factory.kw["bind"].raw_connection()
+    dbapi_connection = raw_connection.driver_connection
     try:
-        dbapi_connection = raw_connection.driver_connection
         # Model a trigger installed before application connections are protected.
         dbapi_connection.set_authorizer(None)
         dbapi_connection.execute(
@@ -1077,7 +1171,7 @@ def test_create_session_factory_protects_sqlite_guard_writes(tmp_path: Path) -> 
         engine.dispose()
 
 
-def test_price_serialization_is_exact_cop_with_two_decimals(
+def test_price_serialization_is_exact_with_two_decimals(
     catalog_api_context: CatalogApiContext,
 ) -> None:
     context = catalog_api_context
@@ -1094,7 +1188,7 @@ def test_price_serialization_is_exact_cop_with_two_decimals(
     assert list_response.status_code == detail_response.status_code == 200
     assert list_response.json()["items"][0]["base_price"] == {
         "amount": "1234.50",
-        "currency": "COP",
+        "currency": "BOB",
     }
     assert detail_response.json()["base_price"]["amount"] == "1234.50"
     assert detail_response.json()["extras"][0]["price"]["amount"] == "0.10"
@@ -1201,6 +1295,14 @@ def test_openapi_and_validation_preserve_staff_customer_namespaces(
         "extra_id",
         "name",
         "price",
+        "category",
+        "room",
+        "width_cm",
+        "height_cm",
+        "depth_cm",
+        "origin",
+        "visual_reference",
+        "quantity",
     }
 
     catalog_invalid = context.client.get("/api/v1/listings", params={"limit": 0})
@@ -1273,6 +1375,7 @@ def test_quote_openapi_and_public_creation_make_a_new_snapshot_per_post(
         "listing_id",
         "offer_version",
         "selected_extra_ids",
+        "target_currency",
     }
     assert request_schema["properties"]["offer_version"]["type"] == "integer"
     assert operation["responses"]["201"]["content"]["application/json"]["schema"][
@@ -1295,8 +1398,8 @@ def test_quote_openapi_and_public_creation_make_a_new_snapshot_per_post(
     assert first_quote["offer_version"] == 3
     assert first_quote["operation"] == "sale"
     assert [line["extra_id"] for line in first_quote["lines"]] == [None, "extra-a", "extra-z"]
-    assert first_quote["one_time_total"] == {"amount": "100000.30", "currency": "COP"}
-    assert first_quote["monthly_total"] == {"amount": "0.00", "currency": "COP"}
+    assert first_quote["one_time_total"] == {"amount": "100000.30", "currency": "BOB"}
+    assert first_quote["monthly_total"] == {"amount": "0.00", "currency": "BOB"}
     assert first_quote["expires_at"] == "2026-09-01T12:15:00Z"
 
 
@@ -1392,14 +1495,14 @@ def test_quote_sale_and_rent_charge_periods_and_round_half_up_totals(
             "kind": "base",
             "extra_id": None,
             "amount": "1.00",
-            "currency": "COP",
+            "currency": "BOB",
             "charge_period": "one_time",
         },
         {
             "kind": "extra",
             "extra_id": "sale-extra",
             "amount": "0.10",
-            "currency": "COP",
+            "currency": "BOB",
             "charge_period": "one_time",
         },
     ]
@@ -1584,6 +1687,280 @@ def test_quote_rate_limit_is_per_direct_peer_ip_and_stores_only_hmac_key(
         assert {len(event.client_key) for event in events} == {64}
         assert all("127.0.0.1" not in event.client_key for event in events)
         assert all("192.0.2.44" not in event.client_key for event in events)
+
+
+def _quote_fx_admin_headers(context: CatalogApiContext) -> dict[str, str]:
+    return _staff_headers(
+        context,
+        account_id="quote-fx-admin",
+        role="platform_admin",
+        tenant_id=None,
+    )
+
+
+def _create_quote_bob_rate(
+    context: CatalogApiContext, headers: dict[str, str], units_per_usd: str
+) -> Any:
+    response = context.client.post(
+        "/api/v1/platform/exchange-rates",
+        json={"currency": "BOB", "units_per_usd": units_per_usd},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    return response
+
+
+def test_quote_target_currency_converts_totals_and_freezes_rate_values(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    context = catalog_api_context
+    _seed_listing(context, listing_id="display-quote", base_price="100.00")
+    admin_headers = _quote_fx_admin_headers(context)
+    _create_quote_bob_rate(context, admin_headers, "6.96000000")
+
+    response = context.client.post(
+        "/api/v1/quotes",
+        json={
+            **_quote_payload(listing_id="display-quote", offer_version=1),
+            "target_currency": "USD",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    quote = response.json()
+    assert quote["one_time_total"] == {"amount": "100.00", "currency": "BOB"}
+    assert quote["monthly_total"] == {"amount": "0.00", "currency": "BOB"}
+    assert quote["display_totals"] == {
+        "one_time_total": {"amount": "14.37", "currency": "USD"},
+        "monthly_total": {"amount": "0.00", "currency": "USD"},
+    }
+    assert quote["display_rate"] == {
+        "base_currency": "BOB",
+        "display_currency": "USD",
+        "base_units_per_usd": "6.96000000",
+        "display_units_per_usd": "1.00000000",
+    }
+
+
+def test_quote_snapshots_keep_old_rates_while_new_quotes_use_current_rates(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    from app.modules.catalog.models import QuoteSnapshot
+    from app.modules.catalog.router import _quote_response
+
+    context = catalog_api_context
+    _seed_listing(context, listing_id="frozen-rate-quote", base_price="100.00")
+    admin_headers = _quote_fx_admin_headers(context)
+    _create_quote_bob_rate(context, admin_headers, "6.96000000")
+    payload = {
+        **_quote_payload(listing_id="frozen-rate-quote", offer_version=1),
+        "target_currency": "USD",
+    }
+    first = context.client.post("/api/v1/quotes", json=payload)
+    assert first.status_code == 201, first.text
+    first_body = first.json()
+
+    _create_quote_bob_rate(context, admin_headers, "8.00000000")
+
+    with context.session_factory() as session:
+        snapshot = session.get(QuoteSnapshot, first_body["quote_id"])
+        assert snapshot is not None
+        reserialized = _quote_response(snapshot).model_dump(mode="json")
+    assert reserialized["display_totals"] == first_body["display_totals"]
+    assert reserialized["display_rate"] == first_body["display_rate"]
+
+    second = context.client.post("/api/v1/quotes", json=payload)
+    assert second.status_code == 201, second.text
+    assert second.json()["display_totals"]["one_time_total"] == {
+        "amount": "12.50",
+        "currency": "USD",
+    }
+    assert second.json()["display_rate"]["base_units_per_usd"] == "8.00000000"
+
+
+def test_quote_target_currency_omitted_or_same_as_listing_omits_display_blocks(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    context = catalog_api_context
+    _seed_listing(context, listing_id="bob-quote", base_price="100.00")
+
+    omitted = context.client.post(
+        "/api/v1/quotes",
+        json=_quote_payload(listing_id="bob-quote", offer_version=1),
+    )
+    same_currency = context.client.post(
+        "/api/v1/quotes",
+        json={
+            **_quote_payload(listing_id="bob-quote", offer_version=1),
+            "target_currency": "BOB",
+        },
+    )
+
+    assert omitted.status_code == same_currency.status_code == 201
+    for response in (omitted, same_currency):
+        assert response.json()["one_time_total"] == {"amount": "100.00", "currency": "BOB"}
+        assert "display_totals" not in response.json()
+        assert "display_rate" not in response.json()
+
+
+def test_quote_rejects_unsupported_target_currency(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    response = catalog_api_context.client.post(
+        "/api/v1/quotes",
+        json={
+            **_quote_payload(listing_id="display-quote", offer_version=1),
+            "target_currency": "EUR",
+        },
+    )
+
+    _assert_quote_error(response, status_code=422, code="validation_error")
+
+
+def test_quote_target_currency_fails_closed_when_a_rate_is_missing(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    context = catalog_api_context
+    _seed_listing(context, listing_id="missing-fx-quote", base_price="100.00")
+
+    response = context.client.post(
+        "/api/v1/quotes",
+        json={
+            **_quote_payload(listing_id="missing-fx-quote", offer_version=1),
+            "target_currency": "USD",
+        },
+    )
+
+    _assert_quote_error(response, status_code=503, code="exchange_rate_unavailable")
+
+
+def test_quote_cross_conversion_uses_both_current_usd_relative_rates(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    context = catalog_api_context
+    _seed_listing(context, listing_id="cross-fx-quote", base_price="100.00")
+    admin_headers = _quote_fx_admin_headers(context)
+    _create_quote_bob_rate(context, admin_headers, "6.96000000")
+    usdt_rate = context.client.post(
+        "/api/v1/platform/exchange-rates",
+        json={"currency": "USDT", "units_per_usd": "1.01000000"},
+        headers=admin_headers,
+    )
+    assert usdt_rate.status_code == 201, usdt_rate.text
+
+    response = context.client.post(
+        "/api/v1/quotes",
+        json={
+            **_quote_payload(listing_id="cross-fx-quote", offer_version=1),
+            "target_currency": "USDT",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    quote = response.json()
+    assert quote["display_totals"]["one_time_total"] == {
+        "amount": "14.51",
+        "currency": "USDT",
+    }
+    assert quote["display_rate"] == {
+        "base_currency": "BOB",
+        "display_currency": "USDT",
+        "base_units_per_usd": "6.96000000",
+        "display_units_per_usd": "1.01000000",
+    }
+
+
+def test_quote_display_currency_migration_adds_all_or_nothing_columns() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "0015_quote_display_currency.py"
+    )
+    migration_spec = importlib.util.spec_from_file_location(
+        "quote_display_currency_0015_test", migration_path
+    )
+    assert migration_spec is not None and migration_spec.loader is not None
+    migration = importlib.util.module_from_spec(migration_spec)
+    migration_spec.loader.exec_module(migration)
+    assert migration.revision == "0015_quote_display_currency"
+    assert migration.down_revision == "0014_exchange_rates"
+
+    from sqlalchemy import inspect
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("CREATE TABLE quote_snapshot (id VARCHAR(36) PRIMARY KEY)")
+            )
+            connection.execute(
+                text(
+                    "CREATE TRIGGER trg_quote_snapshot_immutable_update "
+                    "BEFORE UPDATE ON quote_snapshot BEGIN "
+                    "SELECT RAISE(ABORT, 'quote snapshots are immutable'); END"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE TRIGGER trg_quote_snapshot_immutable_delete "
+                    "BEFORE DELETE ON quote_snapshot BEGIN "
+                    "SELECT RAISE(ABORT, 'quote snapshots are immutable'); END"
+                )
+            )
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.upgrade()
+
+            inspector = inspect(connection)
+            columns = {column["name"] for column in inspector.get_columns("quote_snapshot")}
+            display_columns = {
+                "display_currency",
+                "display_one_time_total",
+                "display_monthly_total",
+                "base_units_per_usd",
+                "display_units_per_usd",
+            }
+            assert display_columns <= columns
+            checks = {
+                check["name"] for check in inspector.get_check_constraints("quote_snapshot")
+            }
+            assert "ck_quote_snapshot_display_fields_all_or_none" in checks
+
+            connection.execute(text("INSERT INTO quote_snapshot (id) VALUES ('legacy')"))
+            with connection.begin_nested():
+                with pytest.raises(IntegrityError):
+                    connection.execute(
+                        text(
+                            "INSERT INTO quote_snapshot (id, display_currency) "
+                            "VALUES ('partial', 'USD')"
+                        )
+                    )
+            connection.execute(
+                text(
+                    "INSERT INTO quote_snapshot (id, display_currency, display_one_time_total, "
+                    "display_monthly_total, base_units_per_usd, display_units_per_usd) "
+                    "VALUES ('complete', 'USD', 10.00, 0.00, 6.96000000, 1.00000000)"
+                )
+            )
+            trigger_names = {
+                row[0]
+                for row in connection.execute(
+                    text("SELECT name FROM sqlite_master WHERE type = 'trigger'")
+                )
+            }
+            assert {
+                "trg_quote_snapshot_immutable_update",
+                "trg_quote_snapshot_immutable_delete",
+            } <= trigger_names
+
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.downgrade()
+            downgraded_columns = {
+                column["name"] for column in inspect(connection).get_columns("quote_snapshot")
+            }
+            assert not display_columns & downgraded_columns
+    finally:
+        engine.dispose()
 
 
 def test_quote_validation_envelope_is_quote_specific(
