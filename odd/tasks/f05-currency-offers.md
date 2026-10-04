@@ -58,5 +58,7 @@ Fuera de superficie: `docs/diagramas/Diagrama1.eapx`, `openspec/`, identidad de 
 - `cop_to_token_units` → `money_to_token_units` (escala ×100 sin cambios, mensajes neutrales); cero referencias a COP en `backend/app`.
 - Verificación independiente del orquestador: suite backend 531 aprobadas / 3 omitidas, Ruff limpio; Pyright conserva 19 diagnósticos preexistentes (`eth_account`/`eth_utils`, archivos no tocados). Migración verificada solo con SQLite; PostgreSQL descartable queda para F05M-T9.
 - Commit de work unit `b99ce22` (`feat(backend): replace COP with typed BOB/USD/USDT currency support`), sin push.
+- **Revisión nativa (RDD):** lineage `review-e3dd0a3ee264fc17`, riesgo medium (cambio ejecutable en la migración). El lente `review-reliability` (validado por refuter) halló un CRITICAL real: `money_to_token_units` seguía multiplicando ×100 para USDT, que el escrow de 6 decimales (T8) recibiría con fondos insuficientes (`R3-UsdtTokenScale`). Corrección acotada aplicada y validada: `TOKEN_UNIT_SCALES` por moneda en `app/core/money.py` (BOB/USD → ×100, USDT → ×10⁶), `money_to_token_units(amount, *, token_scale)` y helper `_deposit_token_units` en reservas; commit `386b7e2` (`fix(reservations): scale deposits to token units per currency`). Suite 531 aprobadas / 3 omitidas, Ruff limpio tras la corrección. Revisión cerrada en `approved` con autoridad quemada.
+- Lección registrada: la corrección debía commitearse para que el proveedor reconociera el candidato corregido (`corrected_candidate_unavailable` con el fix sin commit).
 
 (aún sin más entradas)
