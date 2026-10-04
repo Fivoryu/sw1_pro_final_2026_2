@@ -78,7 +78,17 @@ Fuera de superficie: `docs/diagramas/Diagrama1.eapx`, `openspec/`, identidad de 
 - Extras: el editor no gestiona mobiliario hoy; no se añadió autoría de extras (solo se cablea lo existente).
 - TDD: RED observado (3 archivos no compilaban: símbolos inexistentes) → captura 86/86 (+10), `flutter analyze` y `dart format` limpios; backend 579/3 tras el fix, Ruff limpio. Verificación flutter del orquestador vía cmd.exe.
 - Commits (ver git log), sin push.
-- [ ] **F05M-T8 — Escrow con USDT.** Mock USDT (6 decimales) y despliegue parametrizado del escrow; pruebas Hardhat del flujo de reserva con USDT y con el token de prueba existente.
+- [x] **F05M-T8 — Escrow con USDT.** Mock USDT (6 decimales) y despliegue parametrizado del escrow; pruebas Hardhat del flujo de reserva con USDT y con el token de prueba existente.
+
+## Registro de ejecución (continuación)
+
+### F05M-T8 — Escrow con USDT (2026-10-04)
+
+- **Decisión de diseño:** el escrow solo mueve unidades crudas del token; la escala por moneda vive en el backend (`TOKEN_UNIT_SCALES`: BOB/USD ×100, USDT ×10⁶). El constructor pasó de exigir exactamente 2 decimales a aceptar **decimales ≥ 2** (rechaza < 2, el piso comercial), con NatSpec neutral: los importes van en las unidades del token y escalar es responsabilidad del que llama. La regla histórica «denominado en COP» quedó removida del contrato y del README.
+- Nuevo `contracts/contracts/MockUSDT.sol`: ERC20 de 6 decimales (estilo espejo de `RoomForgeTestToken`, mint con owner).
+- Pruebas: flujo completo de reserva (depósito → aceptar, rechazo con reembolso, cancelación con reembolso, expiración permisionless) con el mock de 6 decimales y montos escalados (1.00 USDT = 1.000.000 unidades), más rechazo de token de 1 decimal; los 34 tests previos con el token de 2 decimales siguen en verde.
+- TDD: RED observado (6 fallos por artefacto `MockUSDT` inexistente) → GREEN 40/40; `hardhat compile` limpio. El escritor instaló `node_modules` con `npm ci --ignore-scripts` (lockfile pinned) para poder verificar; sin cambios en package.json/lockfile.
+- Commit de work unit (ver git log), sin push.
 - [ ] **F05M-T9 — Verificación integrada.** Suites completas de las cuatro superficies; PostgreSQL descartable con la migración de moneda; recorrido manual: publicar en BOB, cotizar en USD y en USDT, reservar contra el escrow; actualización del plan maestro al integrar.
 
 ## Registro de ejecución
