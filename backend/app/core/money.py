@@ -8,6 +8,11 @@ SupportedCurrency = Literal["BOB", "USD", "USDT"]
 SUPPORTED_CURRENCIES: tuple[SupportedCurrency, ...] = ("BOB", "USD", "USDT")
 _MONEY_QUANTUM = Decimal("0.01")
 
+# On-chain token units per commercial unit, by currency: BOB and USD keep two
+# commercial decimals (x100); USDT follows the six-decimal precision of the
+# escrow asset (F05M-T8), so 1.00 USDT must become 1_000_000 base units.
+TOKEN_UNIT_SCALES: dict[str, int] = {"BOB": 100, "USD": 100, "USDT": 1_000_000}
+
 
 def validate_currency(value: object) -> str:
     """Return a supported currency code, rejecting any non-exact match."""

@@ -228,10 +228,14 @@ def test_api_identifiers_use_ethereum_keccak_and_money_uses_integer_units() -> N
     chain = _chain_module()
 
     assert chain.hash_api_id("reserva-ñ") == "0x" + keccak(text="reserva-ñ").hex()
-    assert chain.money_to_token_units(Decimal("38.42")) == 3842
-    assert chain.money_to_token_units(None) == 0
+    assert chain.money_to_token_units(Decimal("38.42"), token_scale=100) == 3842
+    assert chain.money_to_token_units(None, token_scale=100) == 0
+    assert chain.money_to_token_units(Decimal("1.00"), token_scale=1_000_000) == 1_000_000
+    assert chain.money_to_token_units(Decimal("0.000001"), token_scale=1_000_000) == 1
     with pytest.raises(ValueError):
-        chain.money_to_token_units(Decimal("0.001"))
+        chain.money_to_token_units(Decimal("0.001"), token_scale=100)
+    with pytest.raises(ValueError):
+        chain.money_to_token_units(Decimal("1.00"), token_scale=0)
 
 
 def test_typed_data_exactly_matches_reservation_escrow_domain_and_primary_type() -> None:

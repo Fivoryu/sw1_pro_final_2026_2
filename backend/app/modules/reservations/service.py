@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
-from app.core.money import format_money_amount, validate_currency
+from app.core.money import format_money_amount, validate_currency, TOKEN_UNIT_SCALES
 from app.modules.agencies.models import AgencyWallet
 from app.modules.catalog.models import Listing, QuoteSnapshot
 from app.modules.customer_identity.models import CustomerWallet
@@ -83,6 +83,24 @@ def _begin_sqlite_immediate(session: Session) -> None:
             time.sleep(0.01)
 
 
+def _reservation_currency(reservation: Reservation) -> str:
+    """Derive the reservation currency from its persisted quote snapshot lines."""
+    return validate_currency(
+        next(
+            (line.get("currency") for line in reservation.quote_lines if line.get("kind") == "base"),
+            "BOB",
+        )
+    )
+
+
+def _deposit_token_units(reservation: Reservation) -> int:
+    """Scale the deposit to on-chain token units using its currency precision."""
+    return money_to_token_units(
+        reservation.deposit_amount,
+        token_scale=TOKEN_UNIT_SCALES[_reservation_currency(reservation)],
+    )
+
+
 def _fingerprint(*, listing_id: str, quote_id: str, customer_wallet_id: str) -> str:
     body = {
         "customer_wallet_id": customer_wallet_id,
@@ -95,12 +113,7 @@ def _fingerprint(*, listing_id: str, quote_id: str, customer_wallet_id: str) -> 
 
 def _reservation_response(reservation: Reservation) -> ReservationResponse:
     deposit = reservation.deposit_amount
-    currency = validate_currency(
-        next(
-            (line.get("currency") for line in reservation.quote_lines if line.get("kind") == "base"),
-            "BOB",
-        )
-    )
+    currency = _reservation_currency(reservation)
     quote_lines = [{**line, "currency": currency} for line in reservation.quote_lines]
     return ReservationResponse.model_validate(
         {
@@ -531,7 +544,7 @@ def issue_reservation_permit(
             )
 
         try:
-            amount = money_to_token_units(reservation.deposit_amount)
+            amount = _deposit_token_units(reservation)
         except ValueError:
             raise ReservationApiError(
                 409,
@@ -791,7 +804,7 @@ def _load_chain_context(
         actor_address = reservation.customer_wallet_address
 
     if action in {"accept", "reject", "deposit"}:
-        amount = money_to_token_units(reservation.deposit_amount)
+        amount = _deposit_token_units(reservation)
         if action in {"accept", "reject"} and amount and reservation.deposit_confirmed_at is None:
             raise ReservationApiError(
                 409,
@@ -799,9 +812,9 @@ def _load_chain_context(
                 "The reservation deposit must be confirmed before this decision.",
             )
     elif action == "expire":
-        amount = money_to_token_units(reservation.deposit_amount)
+        amount = _deposit_token_units(reservation)
     else:
-        amount = money_to_token_units(reservation.deposit_amount)
+        amount = _deposit_token_units(reservation)
         if reservation.deposit_confirmed_at is None:
             amount = 0
     return reservation, actor_address if action != "expire" else None, amount
