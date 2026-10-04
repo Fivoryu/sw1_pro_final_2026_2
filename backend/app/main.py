@@ -22,6 +22,10 @@ from app.modules.catalog.router import router as catalog_router
 from app.modules.customer_identity.router import router as customer_identity_router
 from app.modules.customer_identity.router import wallet_router as customer_wallet_router
 from app.modules.health.router import router as health_router
+from app.modules.exchange_rates.router import (
+    platform_router as platform_exchange_rates_router,
+    public_router as public_exchange_rates_router,
+)
 from app.modules.identity.router import router as identity_router
 from app.modules.reservations.errors import ReservationApiError
 from app.modules.reservations.router import router as reservations_router
@@ -67,6 +71,8 @@ def create_app(
     app.include_router(customer_wallet_router)
     app.include_router(agencies_router)
     app.include_router(agency_wallet_router)
+    app.include_router(platform_exchange_rates_router)
+    app.include_router(public_exchange_rates_router)
     app.include_router(catalog_router)
     app.include_router(reservations_router)
     app.include_router(staff_reservations_router)
