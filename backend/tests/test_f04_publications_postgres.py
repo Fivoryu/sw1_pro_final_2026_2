@@ -347,3 +347,46 @@ def test_f04_publications_against_real_postgres(f04_postgres_engine: Engine) -> 
         )
         assert _listing_state(factory, foreign_id) == foreign_state
         assert _history_actions(factory, foreign_id) == foreign_history
+
+        # Staff list and detail on real PostgreSQL: `created_at` comes from the server's
+        # now() with microsecond precision, so the newest-first order must follow the
+        # creation order exactly and the filtered total must match each page.
+        draft_ids = []
+        for _ in range(3):
+            draft = client.post(_collection_url(_AGENCY_ONE), json=_payload())
+            assert draft.status_code == 201, draft.text
+            draft_ids.append(draft.json()["listing_id"])
+        newest_first = [*reversed(draft_ids), rejected_id, listing_id]
+
+        def staff_page(query: str = "") -> tuple[list[str], dict[str, int]]:
+            response = client.get(_collection_url(_AGENCY_ONE) + query)
+            assert response.status_code == 200, response.text
+            body = response.json()
+            return [item["listing_id"] for item in body["listings"]], body["pagination"]
+
+        assert staff_page() == (newest_first, {"limit": 20, "offset": 0, "total": 5})
+        assert foreign_id not in staff_page()[0]
+        assert staff_page("?status=draft") == (
+            list(reversed(draft_ids)),
+            {"limit": 20, "offset": 0, "total": 3},
+        )
+        assert staff_page("?status=approved&published=false") == (
+            [listing_id],
+            {"limit": 20, "offset": 0, "total": 1},
+        )
+        assert staff_page("?published=true") == ([], {"limit": 20, "offset": 0, "total": 0})
+        assert staff_page("?limit=2&offset=1") == (
+            newest_first[1:3],
+            {"limit": 2, "offset": 1, "total": 5},
+        )
+
+        act_as("agent", _AGENCY_ONE, "f04-agent-one")
+        assert staff_page()[0] == newest_first
+        detail = client.get(_listing_url(_AGENCY_ONE, draft_ids[0]))
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["listing_id"] == draft_ids[0]
+        assert detail.json()["exact_address"] == "Private address"
+        foreign_detail = client.get(_listing_url(_AGENCY_ONE, foreign_id))
+        absent_detail = client.get(_listing_url(_AGENCY_ONE, "absent-listing"))
+        assert foreign_detail.status_code == absent_detail.status_code == 404
+        assert foreign_detail.json() == absent_detail.json()

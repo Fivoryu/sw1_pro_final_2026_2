@@ -2,13 +2,15 @@ import 'dart:ui' show SemanticsAction;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:cliente_mobile/data/services/catalog_api.dart';
 import 'package:cliente_mobile/data/services/customer_auth_api.dart';
 import 'package:cliente_mobile/domain/customer_session_controller.dart';
 import 'package:cliente_mobile/main.dart';
 
+import 'support/fake_catalog_backend.dart';
 import 'support/fake_customer_backend.dart';
 
-/// The shell needs a session controller; the fake backend keeps these catalog
+/// The shell needs a session controller; the fake backends keep these shell
 /// tests independent from the network.
 CustomerSessionController testSession() => CustomerSessionController(
   api: CustomerAuthApi(
@@ -18,7 +20,19 @@ CustomerSessionController testSession() => CustomerSessionController(
   tokenStore: InMemoryCustomerTokenStore(),
 );
 
-RoomForgeApp app() => RoomForgeApp(sessionController: testSession());
+CatalogApi testCatalog([FakeCatalogBackend? backend]) => CatalogApi(
+  baseUrl: 'https://api.example.test',
+  client: (backend ?? FakeCatalogBackend()).client,
+);
+
+RoomForgeApp app([FakeCatalogBackend? catalog]) => RoomForgeApp(
+  sessionController: testSession(),
+  catalogApi: testCatalog(catalog),
+);
+
+/// A catalog with one published listing, as the API would return it.
+FakeCatalogBackend publishedCatalog() =>
+    FakeCatalogBackend()..seed(id: 'listing-1', operation: 'rent');
 
 Future<void> openFilters(WidgetTester tester) async {
   await tester.tap(find.byKey(const ValueKey('catalog-filter-button')));
@@ -48,41 +62,39 @@ void main() {
     );
   });
 
-  testWidgets('shows offline catalog notice', (tester) async {
-    await tester.pumpWidget(app());
-    expect(find.text('Catálogo sin conexión'), findsOneWidget);
+  testWidgets('explores the published catalog without signing in', (
+    tester,
+  ) async {
+    await tester.pumpWidget(app(publishedCatalog()));
+    await tester.pumpAndSettle();
+    expect(find.text('Explorar inmuebles'), findsOneWidget);
     expect(
-      find.text(
-        'La aplicación todavía no está conectada a un catálogo de inmuebles.',
-      ),
+      find.byKey(const ValueKey('catalog-listing-listing-1')),
       findsOneWidget,
     );
+    expect(find.textContaining('sintética'), findsNothing);
+    expect(find.text('Catálogo sin conexión'), findsNothing);
   });
 
-  testWidgets('offers only approved filters and keeps entries local', (
+  testWidgets('offers only approved filters and keeps the applied ones', (
     tester,
   ) async {
     await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
     await openFilters(tester);
     expect(find.text('Filtros del catálogo'), findsOneWidget);
     for (final label in [
-      'Ciudad/zona',
+      'Ciudad',
+      'Zona',
       'Operación',
-      'Precio base',
-      'Habitaciones',
-      'Baños',
+      'Precio mínimo (COP)',
+      'Precio máximo (COP)',
+      'Dormitorios mínimos',
+      'Baños mínimos',
     ]) {
       expect(find.text(label), findsOneWidget);
     }
-    expect(find.byType(TextFormField), findsNWidgets(4));
-    expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
-    expect(find.text('Buscar'), findsNothing);
-    expect(
-      find.text(
-        'Los filtros son una demostración local; no hay API ni resultados conectados.',
-      ),
-      findsOneWidget,
-    );
+    expect(find.byType(TextFormField), findsNWidgets(6));
     expect(
       tester
           .getSize(find.byKey(const ValueKey('catalog-filter-button')))
@@ -90,42 +102,42 @@ void main() {
       greaterThanOrEqualTo(48),
     );
 
-    await tester.enterText(
-      find.byKey(const ValueKey('filter-city-zone')),
-      'Centro',
-    );
-    await tester.tap(find.text('Guardar filtros'));
+    await tester.enterText(find.byKey(const ValueKey('filter-city')), 'Centro');
+    await tester.ensureVisible(find.byKey(const ValueKey('filter-apply')));
+    await tester.tap(find.byKey(const ValueKey('filter-apply')));
     await tester.pumpAndSettle();
     await openFilters(tester);
     expect(
       tester
-          .widget<TextFormField>(find.byKey(const ValueKey('filter-city-zone')))
+          .widget<TextFormField>(find.byKey(const ValueKey('filter-city')))
           .controller!
           .text,
       'Centro',
     );
   });
 
-  testWidgets('reservations remain a prototype and the account offers sign-in', (
-    tester,
-  ) async {
-    await tester.pumpWidget(app());
-    await tester.tap(find.text('Reservas'));
-    await tester.pumpAndSettle();
-    expect(find.text('Prototipo de reservas'), findsOneWidget);
-    expect(
-      find.text('No hay reservas reales ni datos conectados.'),
-      findsOneWidget,
-    );
-    await tester.tap(find.text('Cuenta'));
-    await tester.pumpAndSettle();
-    expect(find.text('Iniciar sesión'), findsOneWidget);
-    expect(find.byKey(const ValueKey('account-submit')), findsOneWidget);
-  });
+  testWidgets(
+    'reservations remain a prototype and the account offers sign-in',
+    (tester) async {
+      await tester.pumpWidget(app());
+      await tester.tap(find.text('Reservas'));
+      await tester.pumpAndSettle();
+      expect(find.text('Prototipo de reservas'), findsOneWidget);
+      expect(
+        find.text('No hay reservas reales ni datos conectados.'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Cuenta'));
+      await tester.pumpAndSettle();
+      expect(find.text('Iniciar sesión'), findsOneWidget);
+      expect(find.byKey(const ValueKey('account-submit')), findsOneWidget);
+    },
+  );
 
   testWidgets('fits at 320 pixels wide', (tester) async {
     setNarrowViewport(tester);
     await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     await openFilters(tester);
     expect(find.text('Filtros del catálogo'), findsOneWidget);
@@ -138,7 +150,7 @@ void main() {
     setNarrowViewport(tester);
     await tester.pumpWidget(app());
     for (final (label, content) in [
-      ('Explorar', 'Catálogo sin conexión'),
+      ('Explorar', 'Explorar inmuebles'),
       ('Reservas', 'Prototipo de reservas'),
       ('Cuenta', 'Iniciar sesión'),
     ]) {
@@ -152,7 +164,8 @@ void main() {
   testWidgets('catalog and filter controls meet accessibility guidelines', (
     tester,
   ) async {
-    await tester.pumpWidget(app());
+    await tester.pumpWidget(app(publishedCatalog()));
+    await tester.pumpAndSettle();
     final semantics = tester.ensureSemantics();
     try {
       expect(find.bySemanticsLabel('Filtrar catálogo'), findsOneWidget);
@@ -161,12 +174,14 @@ void main() {
 
       await openFilters(tester);
       for (final label in [
-        'Ciudad/zona',
+        'Ciudad',
+        'Zona',
         'Operación',
-        'Precio base',
-        'Habitaciones',
-        'Baños',
-        'Guardar filtros',
+        'Precio mínimo (COP)',
+        'Precio máximo (COP)',
+        'Dormitorios mínimos',
+        'Baños mínimos',
+        'Aplicar filtros',
       ]) {
         expect(
           find.bySemanticsLabel(RegExp(RegExp.escape(label))),
@@ -180,63 +195,26 @@ void main() {
     }
   });
 
-  testWidgets('opens a synthetic listing and returns to the catalog', (
+  testWidgets('opens a published listing and returns to the catalog', (
     tester,
   ) async {
-    await tester.pumpWidget(app());
-    const warning = 'Muestra sintética; no es una publicación real.';
-    expect(find.text(warning), findsOneWidget);
+    await tester.pumpWidget(app(publishedCatalog()));
+    await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('catalog-synthetic-listing')));
+    await tester.tap(find.byKey(const ValueKey('catalog-listing-listing-1')));
     await tester.pumpAndSettle();
     expect(find.text('Detalle del inmueble'), findsOneWidget);
-    expect(find.text(warning), findsOneWidget);
-    expect(find.text('Vivienda de muestra'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('property-detail-content')),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
     expect(find.text('Explorar inmuebles'), findsOneWidget);
-    expect(find.text(warning), findsOneWidget);
-  });
-
-  testWidgets('detail states unavailable tour and unconfirmed availability', (
-    tester,
-  ) async {
-    await tester.pumpWidget(app());
-    await tester.tap(find.byKey(const ValueKey('catalog-synthetic-listing')));
-    await tester.pumpAndSettle();
-
-    final detail = find.byKey(const ValueKey('property-detail-content'));
     expect(
-      find.descendant(
-        of: detail,
-        matching: find.text('Recorrido 3D no disponible.'),
-      ),
+      find.byKey(const ValueKey('catalog-listing-listing-1')),
       findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: detail,
-        matching: find.text('Disponibilidad no consultada ni confirmada.'),
-      ),
-      findsOneWidget,
-    );
-    for (final prohibited in [
-      'Reservar',
-      'Precio',
-      'Moneda',
-      'Impuestos',
-      'Cargos',
-      'Descuentos',
-    ]) {
-      expect(
-        find.descendant(of: detail, matching: find.text(prohibited)),
-        findsNothing,
-      );
-    }
-    expect(
-      find.descendant(of: detail, matching: find.byType(FilledButton)),
-      findsNothing,
     );
   });
 
@@ -244,10 +222,14 @@ void main() {
     tester,
   ) async {
     setNarrowViewport(tester);
-    await tester.pumpWidget(app());
+    await tester.pumpWidget(app(publishedCatalog()));
+    await tester.pumpAndSettle();
     final semantics = tester.ensureSemantics();
     try {
-      final listing = find.byKey(const ValueKey('catalog-synthetic-listing'));
+      final listing = find.descendant(
+        of: find.byKey(const ValueKey('catalog-listing-listing-1')),
+        matching: find.byType(InkWell),
+      );
       expect(tester.getSize(listing).height, greaterThanOrEqualTo(48));
       expect(
         tester
@@ -286,25 +268,26 @@ void main() {
             data: MediaQuery.of(
               context,
             ).copyWith(textScaler: const TextScaler.linear(1.5)),
-            child: CustomerShell(sessionController: session),
+            child: CustomerShell(
+              sessionController: session,
+              catalogApi: testCatalog(),
+            ),
           ),
         ),
       ),
     );
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull, reason: 'catalog at 320 px');
     await openFilters(tester);
     expect(tester.takeException(), isNull, reason: 'filter sheet at 320 px');
-    await tester.tap(find.byKey(const ValueKey('filter-city-zone')));
+    await tester.tap(find.byKey(const ValueKey('filter-city')));
     tester.view.viewInsets = const FakeViewPadding(bottom: 260);
     addTearDown(tester.view.resetViewInsets);
     await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('filter-city-zone')),
-      'Centro',
-    );
-    await tester.ensureVisible(find.text('Guardar filtros'));
+    await tester.enterText(find.byKey(const ValueKey('filter-city')), 'Centro');
+    await tester.ensureVisible(find.text('Aplicar filtros'));
     expect(find.text('Filtros del catálogo'), findsOneWidget);
-    expect(find.text('Guardar filtros'), findsOneWidget);
+    expect(find.text('Aplicar filtros'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

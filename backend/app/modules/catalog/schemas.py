@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt
 # Single source of truth for the listing operation domain; the ORM stores it as a plain
 # string guarded by a CHECK constraint, so routers cast database values to this alias.
 ListingOperation = Literal["sale", "rent"]
+ListingApprovalStatus = Literal["draft", "pending", "approved", "rejected"]
 
 
 class CatalogMoney(BaseModel):
@@ -154,10 +155,25 @@ class ListingAuthoringResponse(BaseModel):
     bathrooms: int
     description: str | None
     exact_address: str | None
-    approval_status: Literal["draft", "pending", "approved", "rejected"]
+    approval_status: ListingApprovalStatus
     is_published: bool
     offer_version: int
     created_at: datetime
+
+
+class StaffListingPagination(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
+    total: int = Field(ge=0)
+
+
+class StaffListingPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    listings: list[ListingAuthoringResponse]
+    pagination: StaffListingPagination
 
 
 class ListingTransitionResponse(BaseModel):

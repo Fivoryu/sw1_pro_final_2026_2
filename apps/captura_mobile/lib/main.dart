@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 
 import 'data/services/staff_auth_api.dart';
 import 'data/services/staff_credential_store.dart';
+import 'data/services/staff_listings_api.dart';
+import 'domain/listing_drafts_controller.dart';
 import 'domain/staff_session_controller.dart';
+import 'ui/listings/listings_screen.dart';
 
 /// Backend used by the running app. Override it per environment with
 /// `--dart-define=ROOMFORGE_API_BASE_URL=https://host`.
@@ -11,17 +14,14 @@ const _apiBaseUrl = String.fromEnvironment(
   defaultValue: 'http://10.0.2.2:8000',
 );
 
-/// Prototype-only copy shared by the capture screens. Nothing in this app
-/// captures, persists or uploads real data.
-const _prototypeNotice =
-    'Prototipo de interfaz: no hay cámara ni datos guardados.';
+/// What the agent can rely on: listings are saved in RoomForge (F04), while
+/// camera capture belongs to a later phase and stays unavailable.
+const _accessNotice =
+    'La captura con cámara todavía no está disponible. Los inmuebles que '
+    'cargues se guardan en RoomForge.';
 
 const _credentialsNotice =
     'El acceso valida tus credenciales y el código de tu segundo factor.';
-
-const _draftsNotice =
-    'Prototipo local: los borradores se muestran solo en pantalla; no se '
-    'guardan ni se sincronizan.';
 
 /// Minimum 48 dp touch target for the prototype primary actions.
 const _actionMinSize = Size.fromHeight(48);
@@ -35,13 +35,19 @@ void main() => runApp(
       api: StaffAuthApi(baseUrl: _apiBaseUrl),
       credentialStore: SecureStaffCredentialStore(),
     ),
+    listingsApi: StaffListingsApi(baseUrl: _apiBaseUrl),
   ),
 );
 
 class CaptureApp extends StatelessWidget {
-  const CaptureApp({super.key, required this.controller});
+  const CaptureApp({
+    super.key,
+    required this.controller,
+    required this.listingsApi,
+  });
 
   final StaffSessionController controller;
+  final StaffListingsApi listingsApi;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -50,15 +56,20 @@ class CaptureApp extends StatelessWidget {
       colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1D4ED8)),
       useMaterial3: true,
     ),
-    home: AgentAccessScreen(controller: controller),
+    home: AgentAccessScreen(controller: controller, listingsApi: listingsApi),
   );
 }
 
-/// Access step: credentials, then the TOTP proof, then the private drafts.
+/// Access step: credentials, then the TOTP proof, then the agent's listings.
 class AgentAccessScreen extends StatefulWidget {
-  const AgentAccessScreen({super.key, required this.controller});
+  const AgentAccessScreen({
+    super.key,
+    required this.controller,
+    required this.listingsApi,
+  });
 
   final StaffSessionController controller;
+  final StaffListingsApi listingsApi;
 
   @override
   State<AgentAccessScreen> createState() => _AgentAccessScreenState();
@@ -112,7 +123,7 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
   List<Widget> _heading(BuildContext context, String title) => [
     Text('Acceso del agente', style: Theme.of(context).textTheme.headlineSmall),
     const SizedBox(height: 20),
-    const _NoticeCard(message: _prototypeNotice),
+    const _NoticeCard(message: _accessNotice),
     const SizedBox(height: 20),
     Text(title, style: Theme.of(context).textTheme.titleLarge),
     const SizedBox(height: 8),
@@ -260,10 +271,17 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
         key: const ValueKey('access-continue-button'),
         style: FilledButton.styleFrom(minimumSize: _actionMinSize),
         onPressed: () => Navigator.of(context).push<void>(
-          MaterialPageRoute<void>(builder: (_) => const DraftsScreen()),
+          MaterialPageRoute<void>(
+            builder: (_) => ListingsScreen(
+              controller: ListingDraftsController(
+                api: widget.listingsApi,
+                session: widget.controller,
+              ),
+            ),
+          ),
         ),
         icon: const Icon(Icons.arrow_forward),
-        label: const Text('Continuar al prototipo'),
+        label: const Text('Continuar a mis inmuebles'),
       ),
       const SizedBox(height: 8),
       OutlinedButton(
@@ -281,126 +299,6 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
     child: Padding(
       padding: const EdgeInsets.all(16),
       child: Text(message ?? ''),
-    ),
-  );
-}
-
-/// Empty drafts shell. No property fixture, price or persistence.
-class DraftsScreen extends StatelessWidget {
-  const DraftsScreen({super.key});
-
-  void _openNewPropertyPrototype(BuildContext context) =>
-      Navigator.of(context).push<void>(
-        MaterialPageRoute<void>(builder: (_) => const BasicOperationScreen()),
-      );
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(title: const Text('Borradores')),
-      body: _PrototypePage(
-        children: [
-          Text('Borradores de inmuebles', style: theme.textTheme.headlineSmall),
-          const SizedBox(height: 20),
-          FilledButton.icon(
-            key: const ValueKey('new-property-button'),
-            style: FilledButton.styleFrom(minimumSize: _actionMinSize),
-            onPressed: () => _openNewPropertyPrototype(context),
-            icon: const Icon(Icons.add),
-            label: const Text('Nuevo inmueble'),
-          ),
-          const SizedBox(height: 20),
-          const _NoticeCard(message: _draftsNotice),
-          const SizedBox(height: 20),
-          Card(
-            key: const ValueKey('drafts-empty-state'),
-            color: theme.colorScheme.surfaceContainerLow,
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ExcludeSemantics(
-                    child: Icon(
-                      Icons.home_work_outlined,
-                      size: 36,
-                      color: theme.colorScheme.primary,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Todavía no hay borradores',
-                    style: theme.textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Cuando crees un inmueble aparecerá en esta lista. Este '
-                    'prototipo no guarda datos.',
-                    style: theme.textTheme.bodyLarge?.copyWith(height: 1.5),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Step one of the local, unsaved new-property prototype.
-class BasicOperationScreen extends StatelessWidget {
-  const BasicOperationScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('Nuevo inmueble'),
-      leading: const BackButton(key: ValueKey('basic-operation-back')),
-    ),
-    body: KeyedSubtree(
-      key: const ValueKey('basic-operation-screen'),
-      child: _PrototypePage(
-        children: [
-          Text(
-            'Datos básicos y operación',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          const SizedBox(height: 12),
-          const Text('Paso 1 de 5 · Prototipo local'),
-          const SizedBox(height: 20),
-          const _NoticeCard(
-            message:
-                'Esta pantalla demuestra el recorrido, pero no define campos '
-                'F04 ni valores de ejemplo.',
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'La captura de datos básicos y de operación todavía no está '
-            'implementada.',
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.5),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'No hay guardado, sincronización ni inmueble creado en este '
-            'prototipo local.',
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.5),
-          ),
-          const SizedBox(height: 24),
-          FilledButton.icon(
-            key: const ValueKey('basic-operation-continue'),
-            style: FilledButton.styleFrom(minimumSize: _actionMinSize),
-            onPressed: () => Navigator.of(context).push<void>(
-              MaterialPageRoute<void>(
-                builder: (_) => const RoomsPhotosScreen(),
-              ),
-            ),
-            icon: const Icon(Icons.arrow_forward),
-            label: const Text('Continuar a ambientes y fotos'),
-          ),
-        ],
-      ),
     ),
   );
 }

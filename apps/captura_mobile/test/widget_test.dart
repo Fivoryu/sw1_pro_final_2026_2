@@ -1,13 +1,20 @@
 import 'package:captura_mobile/data/services/staff_auth_api.dart';
+import 'package:captura_mobile/data/services/staff_listings_api.dart';
 import 'package:captura_mobile/domain/staff_session_controller.dart';
 import 'package:captura_mobile/main.dart';
 
+import 'support/fake_listings_backend.dart';
 import 'support/fake_staff_backend.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+StaffListingsApi fakeListingsApi() => StaffListingsApi(
+  baseUrl: 'https://api.example.test',
+  client: FakeListingsBackend().client,
+);
+
 /// Builds a controller backed by the fake staff API. When [signedIn] is true the
-/// session is opened first, which is what the prototype screens require.
+/// session is opened first.
 Future<StaffSessionController> captureController({
   bool signedIn = false,
 }) async {
@@ -34,20 +41,25 @@ Future<StaffSessionController> pumpCaptureApp(
   bool signedIn = false,
 }) async {
   final controller = await captureController(signedIn: signedIn);
-  await tester.pumpWidget(CaptureApp(controller: controller));
+  await tester.pumpWidget(
+    CaptureApp(controller: controller, listingsApi: fakeListingsApi()),
+  );
   await tester.pumpAndSettle();
   return controller;
 }
 
 void main() {
-  testWidgets('starts on the access step and declares the prototype', (
+  testWidgets('starts on the access step and states what is available', (
     tester,
   ) async {
     await pumpCaptureApp(tester, signedIn: false);
 
     expect(find.text('Acceso del agente'), findsOneWidget);
     expect(find.byKey(const ValueKey('access-email-field')), findsOneWidget);
-    expect(find.textContaining('Prototipo de interfaz'), findsOneWidget);
+    expect(
+      find.textContaining('La captura con cámara todavía no está disponible'),
+      findsOneWidget,
+    );
     expect(find.byKey(const ValueKey('access-continue-button')), findsNothing);
   });
 
@@ -62,44 +74,34 @@ void main() {
     expect(find.byKey(const ValueKey('access-password-field')), findsOneWidget);
   });
 
-  testWidgets('continues from access to the drafts shell', (tester) async {
+  testWidgets('continues from access to the agent listings', (tester) async {
     await pumpCaptureApp(tester, signedIn: true);
 
     await tester.tap(find.byKey(const ValueKey('access-continue-button')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Borradores de inmuebles'), findsOneWidget);
-    expect(find.byKey(const ValueKey('drafts-empty-state')), findsOneWidget);
-    expect(find.textContaining('Todavía no hay borradores'), findsOneWidget);
-    expect(
-      find.textContaining('no se guardan ni se sincronizan'),
-      findsOneWidget,
-    );
-    expect(find.byKey(const ValueKey('new-property-button')), findsOneWidget);
+    expect(find.text('Mis inmuebles'), findsOneWidget);
+    expect(find.byKey(const ValueKey('new-listing-button')), findsOneWidget);
+    expect(find.byKey(const ValueKey('listings-empty')), findsOneWidget);
   });
 
-  testWidgets('drafts shell shows no property fixture', (tester) async {
-    await pumpCaptureApp(tester, signedIn: true);
-    await tester.tap(find.byKey(const ValueKey('access-continue-button')));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const ValueKey('drafts-empty-state')), findsOneWidget);
-    expect(find.textContaining(RegExp(r'USD|EUR|\$ |Vivienda')), findsNothing);
-    expect(find.byType(ListTile), findsNothing);
-  });
-
-  Future<void> openNewPropertyPrototype(WidgetTester tester) async {
-    await pumpCaptureApp(tester, signedIn: true);
-    await tester.tap(find.byKey(const ValueKey('access-continue-button')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('new-property-button')));
+  /// Opens the first future-phase prototype step directly; it is no longer part
+  /// of the agent's real flow (F04 ends at submitting the listing for review).
+  Future<void> openRoomsPhotosPrototype(WidgetTester tester) async {
+    await tester.pumpWidget(const MaterialApp(home: RoomsPhotosScreen()));
     await tester.pumpAndSettle();
   }
 
   /// Scrolls a prototype step to its end so its final action is fully visible.
   Future<void> tapScreenEndAction(WidgetTester tester, String key) async {
     final target = find.byKey(ValueKey(key));
-    await tester.drag(find.byType(ListView), const Offset(0, -1000));
+    // Lazily built steps grow with the text scale, so scroll until the action
+    // exists instead of by a fixed distance.
+    await tester.dragUntilVisible(
+      target,
+      find.byType(ListView),
+      const Offset(0, -300),
+    );
     await tester.pumpAndSettle();
     await tester.ensureVisible(target);
     await tester.pumpAndSettle();
@@ -107,43 +109,23 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('Nuevo inmueble opens the basic operation step', (tester) async {
-    await openNewPropertyPrototype(tester);
-
-    expect(
-      find.byKey(const ValueKey('basic-operation-screen')),
-      findsOneWidget,
-    );
-    expect(find.text('Datos básicos y operación'), findsOneWidget);
-    expect(find.textContaining('no define campos F04'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('basic-operation-continue')),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('navigates between both local prototype steps and back', (
+  testWidgets('navigates between two local prototype steps and back', (
     tester,
   ) async {
-    await openNewPropertyPrototype(tester);
-
-    await tester.tap(find.byKey(const ValueKey('basic-operation-continue')));
-    await tester.pumpAndSettle();
+    await openRoomsPhotosPrototype(tester);
     expect(find.byKey(const ValueKey('rooms-photos-screen')), findsOneWidget);
     expect(find.text('Ambientes y fotos'), findsOneWidget);
     expect(find.textContaining('No se guardan'), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('rooms-photos-back')));
-    await tester.pumpAndSettle();
+    await tapScreenEndAction(tester, 'rooms-photos-continue');
     expect(
-      find.byKey(const ValueKey('basic-operation-screen')),
+      find.byKey(const ValueKey('geometry-objects-screen')),
       findsOneWidget,
     );
 
-    await tester.tap(find.byType(BackButton));
+    await tester.tap(find.byKey(const ValueKey('geometry-objects-back')));
     await tester.pumpAndSettle();
-    expect(find.text('Borradores de inmuebles'), findsOneWidget);
-    expect(find.byKey(const ValueKey('drafts-empty-state')), findsOneWidget);
+    expect(find.byKey(const ValueKey('rooms-photos-screen')), findsOneWidget);
   });
 
   testWidgets('flow remains scroll-safe at a narrow viewport', (tester) async {
@@ -152,28 +134,26 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await openNewPropertyPrototype(tester);
+    await openRoomsPhotosPrototype(tester);
     expect(tester.takeException(), isNull);
-    await tester.drag(find.byType(ListView), const Offset(0, -300));
+    await tester.drag(find.byType(ListView), const Offset(0, -2000));
     await tester.pumpAndSettle();
     expect(
       tester
-          .getSize(find.byKey(const ValueKey('basic-operation-continue')))
+          .getSize(find.byKey(const ValueKey('rooms-photos-continue')))
           .height,
       greaterThanOrEqualTo(48),
     );
-    await tester.tap(find.byKey(const ValueKey('basic-operation-continue')));
+    await tester.tap(find.byKey(const ValueKey('rooms-photos-continue')));
     await tester.pumpAndSettle();
-    expect(find.text('Ambientes y fotos'), findsOneWidget);
+    expect(find.text('Corregir geometría y objetos'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('exposes simulated permission, offline, error and retry states', (
     tester,
   ) async {
-    await openNewPropertyPrototype(tester);
-    await tester.tap(find.byKey(const ValueKey('basic-operation-continue')));
-    await tester.pumpAndSettle();
+    await openRoomsPhotosPrototype(tester);
 
     expect(find.text('Permiso de fotos: requerido (simulado)'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('simulate-photo-denied')));
@@ -211,9 +191,7 @@ void main() {
   testWidgets('simulates a photo capture without using a device camera', (
     tester,
   ) async {
-    await openNewPropertyPrototype(tester);
-    await tester.tap(find.byKey(const ValueKey('basic-operation-continue')));
-    await tester.pumpAndSettle();
+    await openRoomsPhotosPrototype(tester);
 
     await tester.drag(find.byType(ListView), const Offset(0, -600));
     await tester.pumpAndSettle();
@@ -236,9 +214,7 @@ void main() {
   });
 
   Future<void> openGeometryPrototype(WidgetTester tester) async {
-    await openNewPropertyPrototype(tester);
-    await tester.tap(find.byKey(const ValueKey('basic-operation-continue')));
-    await tester.pumpAndSettle();
+    await openRoomsPhotosPrototype(tester);
     await tapScreenEndAction(tester, 'rooms-photos-continue');
   }
 
@@ -358,7 +334,6 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final controller = await captureController(signedIn: true);
     await tester.pumpWidget(
       MaterialApp(
         home: Builder(
@@ -366,15 +341,12 @@ void main() {
             data: MediaQuery.of(
               context,
             ).copyWith(textScaler: const TextScaler.linear(1.5)),
-            child: AgentAccessScreen(controller: controller),
+            child: const RoomsPhotosScreen(),
           ),
         ),
       ),
     );
     for (final key in [
-      'access-continue-button',
-      'new-property-button',
-      'basic-operation-continue',
       'rooms-photos-continue',
       'geometry-continue',
       'offer-continue',
@@ -428,7 +400,9 @@ void main() {
       credentialStore: InMemoryStaffCredentialStore(),
     );
     await controller.restore();
-    await tester.pumpWidget(CaptureApp(controller: controller));
+    await tester.pumpWidget(
+      CaptureApp(controller: controller, listingsApi: fakeListingsApi()),
+    );
     await tester.pumpAndSettle();
 
     await tester.enterText(
@@ -461,7 +435,9 @@ void main() {
       ),
     );
     await controller.restore();
-    await tester.pumpWidget(CaptureApp(controller: controller));
+    await tester.pumpWidget(
+      CaptureApp(controller: controller, listingsApi: fakeListingsApi()),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('access-retry')), findsOneWidget);

@@ -177,4 +177,50 @@ void main() {
       expect(harness.store.refreshCookie, 'rotated-cookie');
     });
   });
+
+  group('access token', () {
+    test('keeps the access token in memory after the TOTP login', () async {
+      final harness = _build();
+      expect(harness.controller.accessToken, isNull);
+      await harness.controller.startLogin(
+        email: 'agent@example.test',
+        password: 'password123',
+      );
+      expect(harness.controller.accessToken, isNull);
+
+      await harness.controller.submitCode('123456');
+
+      expect(harness.controller.accessToken, 'access-token');
+      expect(harness.store.refreshCookie, isNot('access-token'));
+      expect(harness.store.csrfToken, isNot('access-token'));
+    });
+
+    test('takes the rotated access token when restoring a session', () async {
+      final harness = _build(cookie: 'refresh-cookie', csrf: 'csrf-1');
+
+      await harness.controller.restore();
+
+      expect(harness.controller.accessToken, 'access-token');
+    });
+
+    test('forgets the access token when the API rejects the session', () async {
+      final harness = _build(cookie: 'refresh-cookie', csrf: 'csrf-1');
+      await harness.controller.restore();
+      harness.backend.refreshRejected = true;
+
+      await harness.controller.restore();
+
+      expect(harness.controller.status, StaffSessionStatus.signedOut);
+      expect(harness.controller.accessToken, isNull);
+    });
+
+    test('forgets the access token on logout', () async {
+      final harness = _build(cookie: 'refresh-cookie', csrf: 'csrf-1');
+      await harness.controller.restore();
+
+      await harness.controller.signOut();
+
+      expect(harness.controller.accessToken, isNull);
+    });
+  });
 }
