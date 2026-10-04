@@ -39,6 +39,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
   late final TextEditingController _description;
   late final TextEditingController _address;
   late ListingOperation _operation;
+  late ListingCurrency _currency;
   StaffListing? _listing;
   Map<String, Object?>? _savedFields;
   String? _rejectionReason;
@@ -51,6 +52,9 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     final listing = widget.listing;
     _listing = listing;
     _operation = listing?.operation ?? ListingOperation.sale;
+    // The server fixes the currency per listing (F05): the agent chooses it
+    // only when creating, and the editor echoes it read-only afterwards.
+    _currency = listing?.currency ?? ListingCurrency.bob;
     _price = TextEditingController(text: listing?.basePrice ?? '');
     _city = TextEditingController(text: listing?.city ?? '');
     _zone = TextEditingController(text: listing?.zone ?? '');
@@ -117,6 +121,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     return ListingDraftInput(
       operation: _operation,
       basePrice: price,
+      currency: _currency,
       city: city,
       zone: zone,
       bedrooms: int.parse(_bedrooms.text.trim()),
@@ -320,6 +325,34 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
                           setState(() => _operation = selection.single),
                     ),
                     const SizedBox(height: 16),
+                    DropdownButtonFormField<ListingCurrency>(
+                      key: const ValueKey('listing-currency-field'),
+                      initialValue: _currency,
+                      decoration: InputDecoration(
+                        labelText: 'Moneda',
+                        helperText:
+                            'Elegí la moneda del precio; después de crear el '
+                            'inmueble no se puede cambiar.',
+                        border: const OutlineInputBorder(),
+                      ),
+                      items: [
+                        for (final currency in ListingCurrency.values)
+                          DropdownMenuItem(
+                            value: currency,
+                            child: Text(currencyLabel(currency)),
+                          ),
+                      ],
+                      // The API rewrites the currency on edit, so the editor
+                      // echoes the stored one instead of offering a choice.
+                      onChanged: listing == null
+                          ? (currency) {
+                              if (currency != null) {
+                                setState(() => _currency = currency);
+                              }
+                            }
+                          : null,
+                    ),
+                    const SizedBox(height: 12),
                     TextFormField(
                       key: const ValueKey('listing-price-field'),
                       controller: _price,
@@ -327,7 +360,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
                         decimal: true,
                       ),
                       decoration: InputDecoration(
-                        labelText: 'Precio base (COP)',
+                        labelText: 'Precio base (${_currency.wireName})',
                         helperText: _operation == ListingOperation.rent
                             ? 'Precio mensual, sin muebles opcionales.'
                             : 'Precio de venta, sin muebles opcionales.',

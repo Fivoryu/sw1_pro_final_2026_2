@@ -36,16 +36,37 @@ enum ListingStatus {
       );
 }
 
+/// Supported listing currency (F05): exactly BOB, USD and USDT, as the
+/// catalog API accepts. The server validates; the app mirrors the same set.
+enum ListingCurrency {
+  bob('BOB'),
+  usd('USD'),
+  usdt('USDT');
+
+  const ListingCurrency(this.wireName);
+
+  final String wireName;
+
+  static ListingCurrency fromWire(Object? value) =>
+      ListingCurrency.values.firstWhere(
+        (currency) => currency.wireName == value,
+        orElse: () {
+          throw FormatException('Unknown listing currency: $value');
+        },
+      );
+}
+
 /// A listing as seen by staff of its own agency, private fields included.
 ///
-/// [basePrice] keeps the server's decimal string in COP; the app never turns it
-/// into a floating-point number.
+/// [basePrice] keeps the server's decimal string in the listing's own
+/// currency; the app never turns it into a floating-point number.
 class StaffListing {
   const StaffListing({
     required this.listingId,
     required this.agencyId,
     required this.operation,
     required this.basePrice,
+    required this.currency,
     required this.city,
     required this.zone,
     required this.bedrooms,
@@ -64,6 +85,7 @@ class StaffListing {
     agencyId: _string(json, 'agency_id'),
     operation: ListingOperation.fromWire(json['operation']),
     basePrice: _string(json, 'base_price'),
+    currency: ListingCurrency.fromWire(json['currency']),
     city: _string(json, 'city'),
     zone: _string(json, 'zone'),
     bedrooms: _int(json, 'bedrooms'),
@@ -80,6 +102,7 @@ class StaffListing {
   final String agencyId;
   final ListingOperation operation;
   final String basePrice;
+  final ListingCurrency currency;
   final String city;
   final String zone;
   final int bedrooms;
@@ -123,6 +146,7 @@ class ListingDraftInput {
   const ListingDraftInput({
     required this.operation,
     required this.basePrice,
+    required this.currency,
     required this.city,
     required this.zone,
     required this.bedrooms,
@@ -133,6 +157,7 @@ class ListingDraftInput {
 
   final ListingOperation operation;
   final String basePrice;
+  final ListingCurrency currency;
   final String city;
   final String zone;
   final int bedrooms;
@@ -143,6 +168,7 @@ class ListingDraftInput {
   Map<String, Object?> toJson() => {
     'operation': operation.wireName,
     'base_price': basePrice,
+    'currency': currency.wireName,
     'city': city,
     'zone': zone,
     'bedrooms': bedrooms,
