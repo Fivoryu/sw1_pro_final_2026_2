@@ -161,7 +161,7 @@ def configure_listing_deposit(
     *,
     agency_id: str,
     listing_id: str,
-    deposit_amount_cop: Decimal,
+    deposit_amount: Decimal,
 ) -> Listing | None:
     listing = (
         session.query(Listing)
@@ -172,9 +172,9 @@ def configure_listing_deposit(
     if listing is None:
         return None
 
-    listing.deposit_amount_cop = deposit_amount_cop
+    listing.deposit_amount = deposit_amount
     session.flush()
-    session.refresh(listing, attribute_names=["deposit_amount_cop", "offer_version"])
+    session.refresh(listing, attribute_names=["deposit_amount", "offer_version"])
     return listing
 
 
@@ -193,7 +193,8 @@ def create_staff_listing(
         is_published=False,
         operation=content.operation,
         base_price=content.base_price,
-        deposit_amount_cop=None,
+        currency=content.currency,
+        deposit_amount=None,
         offer_version=1,
         city=content.city,
         city_key=normalize_geo_key(content.city),
@@ -250,6 +251,7 @@ def edit_staff_listing(
         .values(
             operation=content.operation,
             base_price=content.base_price,
+            currency=content.currency,
             city=content.city,
             city_key=normalize_geo_key(content.city),
             zone=content.zone,
@@ -462,7 +464,7 @@ def create_quote_snapshot(
             "kind": "base",
             "extra_id": None,
             "amount": format(_quote_money(listing.base_price), ".2f"),
-            "currency": "COP",
+            "currency": listing.currency,
             "charge_period": period,
         }
     ]
@@ -471,7 +473,7 @@ def create_quote_snapshot(
             "kind": "extra",
             "extra_id": extra.id,
             "amount": format(_quote_money(extra.price), ".2f"),
-            "currency": "COP",
+            "currency": listing.currency,
             "charge_period": period,
         }
         for extra in extras
@@ -486,6 +488,7 @@ def create_quote_snapshot(
         listing_id=listing.id,
         offer_version=listing.offer_version,
         operation=listing.operation,
+        currency=listing.currency,
         lines=lines,
         one_time_total=one_time_total,
         monthly_total=monthly_total,

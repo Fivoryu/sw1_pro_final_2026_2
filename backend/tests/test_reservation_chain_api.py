@@ -99,7 +99,7 @@ def test_customer_reconciles_deposit_atomically_and_replays_without_duplicate_au
 ) -> None:
     context = reservations_context
     customer_id, auth, reservation = _create_test_reservation(
-        context, listing_id="chain-deposit-listing", deposit_amount_cop=Decimal("1000.00")
+        context, listing_id="chain-deposit-listing", deposit_amount=Decimal("1000.00")
     )
     tx_hash = "0x" + "1" * 64
     customer_address = "0x" + __import__("hashlib").sha256(customer_id.encode()).hexdigest()[:40]
@@ -197,7 +197,7 @@ def test_staff_accepts_after_confirmed_deposit_and_accepted_stays_listing_locked
         stored = session.get(Reservation, reservation["reservation_id"])
         assert stored is not None and stored.status == "accepted"
     quote_id, wallet_id = _seed_reservation_inputs(
-        context, customer_id, listing_id="chain-terminal-listing-2", deposit_amount_cop=Decimal("1000.00")
+        context, customer_id, listing_id="chain-terminal-listing-2", deposit_amount=Decimal("1000.00")
     )
     blocked = _create_reservation(
         context,
@@ -218,13 +218,13 @@ def test_zero_deposit_first_actions_and_local_expiry_do_not_need_expired_event(
         context,
         listing_id="chain-zero-cancel",
         email="zero-cancel@example.test",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     _customer_id2, _customer_auth2, accept_reservation = _create_test_reservation(
         context,
         listing_id="chain-zero-accept",
         email="zero-accept@example.test",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     agency_address = "0x" + "a" * 40
     customer_address = "0x" + __import__("hashlib").sha256(customer_id.encode()).hexdigest()[:40]
@@ -260,13 +260,13 @@ def test_local_expiry_has_no_chain_audit_but_deposited_expiry_requires_verified_
         context,
         listing_id="chain-local-expiry",
         email="local-expiry@example.test",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     _customer_id2, auth2, chain_reservation = _create_test_reservation(
         context,
         listing_id="chain-onchain-expiry",
         email="onchain-expiry@example.test",
-        deposit_amount_cop=Decimal("1000.00"),
+        deposit_amount=Decimal("1000.00"),
     )
     customer_address = "0x" + __import__("hashlib").sha256(_customer_id2.encode()).hexdigest()[:40]
     deposit_hash = "0x" + "9" * 64
@@ -376,7 +376,7 @@ def test_customer_route_rejects_staff_only_actions_before_any_chain_work(
     _customer_id, auth, reservation = _create_test_reservation(
         context,
         listing_id="chain-customer-action-scope",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     called = False
 
@@ -405,7 +405,7 @@ def test_staff_chain_reconciliation_rejects_cross_agency_admin_before_chain_work
     _customer_id, _customer_auth_token, reservation = _create_test_reservation(
         context,
         listing_id="chain-cross-agency-admin",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     with context.session_factory.begin() as session:
         session.add(Agency(id="agency-two"))
@@ -497,7 +497,7 @@ def test_reconciliation_guards_customer_action_scope_before_verifying(
     customer_id, _auth, reservation = _create_test_reservation(
         context,
         listing_id="chain-service-action-scope",
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     customer_address = "0x" + __import__("hashlib").sha256(customer_id.encode()).hexdigest()[:40]
     tx_hash = "0x" + "c" * 64
@@ -618,7 +618,7 @@ def test_customer_cancel_confirmed_before_the_deadline_reconciles_after_it(
         context,
         listing_id="chain-late-cancel",
         email=email,
-        deposit_amount_cop=None,
+        deposit_amount=None,
     )
     customer_address = "0x" + __import__("hashlib").sha256(customer_id.encode()).hexdigest()[:40]
     policy_deadline = datetime.fromisoformat(

@@ -40,6 +40,7 @@ El cuerpo de alta y reemplazo admite únicamente estos campos:
 {
   "operation": "sale",
   "base_price": "125000.00",
+  "currency": "BOB",
   "city": "Medellín",
   "zone": "El Poblado",
   "bedrooms": 3,
@@ -49,7 +50,7 @@ El cuerpo de alta y reemplazo admite únicamente estos campos:
 }
 ```
 
-`operation` es `sale` o `rent`; `base_price` debe ser decimal positivo con hasta 18 dígitos y 2 decimales; `city` y `zone` son textos no vacíos de hasta 120 caracteres; `bedrooms` y `bathrooms` son enteros no negativos. El servidor deriva `city_key` y `zone_key` con `normalize_geo_key`. En `reject`, el cuerpo contiene `observation`, obligatoria y no vacía después de quitar espacios. Las demás acciones pueden omitirla o incluirla para el historial.
+`operation` es `sale` o `rent`; `base_price` debe ser decimal positivo con hasta 18 dígitos y 2 decimales. `currency` es opcional y acepta exactamente `BOB`, `USD` o `USDT`; si se omite, el servidor usa `BOB`. La moneda queda asociada al inmueble y se conserva en las cotizaciones. El catálogo público representa sus importes como `{ "amount": "125000.00", "currency": "BOB" }`, y las cotizaciones incluyen la moneda en cada línea y total. Los importes comerciales se representan con dos decimales. Esta unidad no convierte importes entre monedas. `city` y `zone` son textos no vacíos de hasta 120 caracteres; `bedrooms` y `bathrooms` son enteros no negativos. El servidor deriva `city_key` y `zone_key` con `normalize_geo_key`. En `reject`, el cuerpo contiene `observation`, obligatoria y no vacía después de quitar espacios. Las demás acciones pueden omitirla o incluirla para el historial.
 
 Los esquemas rechazan campos adicionales. No se aceptan autoridad, estado ni valores derivados del cliente, incluidos `tenant_id`, actor, rol, `status`, `is_published`, `offer_version`, timestamps, `city_key`, `zone_key` y `photos`.
 
@@ -74,6 +75,7 @@ Ordena del más reciente al más antiguo (`created_at` descendente, luego `id` d
       "agency_id": "…",
       "operation": "sale",
       "base_price": "125000.00",
+      "currency": "BOB",
       "city": "Medellín",
       "zone": "El Poblado",
       "bedrooms": 3,
@@ -101,7 +103,7 @@ Matriz por actor (F03.3). «Agencia» es la agencia de la URL; la del actor sale
 | Crear, editar, enviar a revisión, leer transiciones | Sí | Sí | `403` | `403` | `401` |
 | Listar y consultar inmuebles de la agencia | Sí | Sí, todos los de su agencia | `403` | `403` | `401` |
 | Aprobar, rechazar, publicar, retirar | Sí | `403` | `403` | `403` | `401` |
-| Configurar el depósito (`PATCH .../deposit`) | Sí | `403` | `403` | `403` | `401` |
+| Configurar el depósito (`PATCH .../deposit`, cuerpo `{"deposit_amount":"5000.00"}`) | Sí | `403` | `403` | `403` | `401` |
 | Catálogo público (`GET /api/v1/listings` y detalle) | Sí | Sí | Sí | Sí | Sí, sin sesión |
 
 - **ID ajeno en la ruta propia:** un inmueble de otra agencia pedido con la URL de la agencia autorizada responde `404`, con el mismo cuerpo que un inmueble inexistente, en todas las rutas de inmueble (consulta, edición, envío, aprobación, rechazo, publicación, retiro, historial y depósito). No se modifica el inmueble ni se agrega historial.

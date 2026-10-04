@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.core.money import SupportedCurrency, format_money_amount
 from app.modules.catalog.errors import (
     InvalidQuoteExtrasError,
     QuoteApiError,
@@ -62,12 +63,12 @@ from app.modules.identity.session import ActiveStaff, get_active_staff
 router = APIRouter()
 listings_router = APIRouter(prefix="/api/v1/listings", tags=["catalog"])
 quotes_router = APIRouter(prefix="/api/v1/quotes", tags=["quotes"])
-_MONEY_QUANTUM = Decimal("0.01")
 
 
-def _money(amount: Decimal) -> CatalogMoney:
-    exact_amount = amount.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_UP)
-    return CatalogMoney(amount=format(exact_amount, ".2f"), currency="COP")
+def _money(amount: Decimal, currency: str) -> CatalogMoney:
+    return CatalogMoney(
+        amount=format_money_amount(amount), currency=cast(SupportedCurrency, currency)
+    )
 
 
 def _listing_item(listing: Listing) -> CatalogListingItem:
@@ -75,7 +76,7 @@ def _listing_item(listing: Listing) -> CatalogListingItem:
         listing_id=listing.id,
         offer_version=listing.offer_version,
         operation=cast(ListingOperation, listing.operation),
-        base_price=_money(listing.base_price),
+        base_price=_money(listing.base_price, listing.currency),
         city=listing.city,
         zone=listing.zone,
     )
@@ -162,7 +163,7 @@ def get_public_listing_detail(
                 CatalogExtraItem(
                     extra_id=extra.id,
                     name=extra.name,
-                    price=_money(extra.price),
+                    price=_money(extra.price, listing.currency),
                 )
                 for extra in extras
             ],
@@ -175,9 +176,12 @@ def _quote_response(quote: QuoteSnapshot) -> QuoteSnapshotResponse:
         listing_id=quote.listing_id,
         offer_version=quote.offer_version,
         operation=cast(ListingOperation, quote.operation),
-        lines=[QuoteLine.model_validate(line) for line in quote.lines],
-        one_time_total=_money(quote.one_time_total),
-        monthly_total=_money(quote.monthly_total),
+        lines=[
+            QuoteLine.model_validate({**line, "currency": quote.currency})
+            for line in quote.lines
+        ],
+        one_time_total=_money(quote.one_time_total, quote.currency),
+        monthly_total=_money(quote.monthly_total, quote.currency),
         created_at=quote.created_at,
         expires_at=quote.expires_at,
     )
@@ -303,14 +307,14 @@ def set_listing_deposit(
             session,
             agency_id=agency_id,
             listing_id=listing_id,
-            deposit_amount_cop=body.deposit_amount_cop,
+            deposit_amount=body.deposit_amount,
         )
         if listing is None:
             raise HTTPException(status_code=404, detail="Listing not found")
-        assert listing.deposit_amount_cop is not None
+        assert listing.deposit_amount is not None
         return ListingDepositResponse(
             listing_id=listing.id,
-            deposit_amount_cop=format(listing.deposit_amount_cop, ".2f"),
+            deposit_amount=format_money_amount(listing.deposit_amount),
             offer_version=listing.offer_version,
         )
 
@@ -331,6 +335,7 @@ def _authoring_response(listing: Listing) -> ListingAuthoringResponse:
         agency_id=listing.agency_id,
         operation=cast(ListingOperation, listing.operation),
         base_price=listing.base_price,
+        currency=cast(SupportedCurrency, listing.currency),
         city=listing.city,
         zone=listing.zone,
         bedrooms=listing.bedrooms,

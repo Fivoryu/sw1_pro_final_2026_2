@@ -33,7 +33,7 @@ def make_reservation(
         customer_id=customer_id,
         status=status,
         decision_deadline_at=deadline,
-        deposit_amount_cop=deposit,
+        deposit_amount=deposit,
         deposit_confirmed_at=deposit_confirmed_at,
     )
 

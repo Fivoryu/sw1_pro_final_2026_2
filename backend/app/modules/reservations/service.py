@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
+from app.core.money import format_money_amount, validate_currency
 from app.modules.agencies.models import AgencyWallet
 from app.modules.catalog.models import Listing, QuoteSnapshot
 from app.modules.customer_identity.models import CustomerWallet
@@ -26,7 +27,7 @@ from app.modules.reservations.chain import (
     PermitUnavailableError,
     RpcTransport,
     contract_deadline_seconds,
-    cop_to_token_units,
+    money_to_token_units,
     issue_permit,
 )
 from app.modules.reservations.errors import ReservationApiError
@@ -93,7 +94,14 @@ def _fingerprint(*, listing_id: str, quote_id: str, customer_wallet_id: str) -> 
 
 
 def _reservation_response(reservation: Reservation) -> ReservationResponse:
-    deposit = reservation.deposit_amount_cop
+    deposit = reservation.deposit_amount
+    currency = validate_currency(
+        next(
+            (line.get("currency") for line in reservation.quote_lines if line.get("kind") == "base"),
+            "BOB",
+        )
+    )
+    quote_lines = [{**line, "currency": currency} for line in reservation.quote_lines]
     return ReservationResponse.model_validate(
         {
             "reservation_id": reservation.id,
@@ -105,17 +113,17 @@ def _reservation_response(reservation: Reservation) -> ReservationResponse:
                 "quote_id": reservation.quote_id,
                 "offer_version": reservation.offer_version,
                 "operation": reservation.operation,
-                "lines": reservation.quote_lines,
+                "lines": quote_lines,
                 "one_time_total": {
-                    "amount": format(reservation.one_time_total, ".2f"),
-                    "currency": "COP",
+                    "amount": format_money_amount(reservation.one_time_total),
+                    "currency": currency,
                 },
                 "monthly_total": {
-                    "amount": format(reservation.monthly_total, ".2f"),
-                    "currency": "COP",
+                    "amount": format_money_amount(reservation.monthly_total),
+                    "currency": currency,
                 },
             },
-            "deposit_amount_cop": format(deposit, ".2f") if deposit is not None else None,
+            "deposit_amount": format_money_amount(deposit) if deposit is not None else None,
         }
     )
 
@@ -319,7 +327,7 @@ def create_reservation(
                 quote_lines=[dict(line) for line in quote.lines],
                 one_time_total=quote.one_time_total,
                 monthly_total=quote.monthly_total,
-                deposit_amount_cop=listing.deposit_amount_cop,
+                deposit_amount=listing.deposit_amount,
                 api_created_at=api_created_at,
                 decision_deadline_at=api_created_at + _DECISION_WINDOW,
                 status="pending",
@@ -415,7 +423,7 @@ def _ensure_deposit_request_eligible(
             "reservation_decision_deadline_passed",
             "The reservation decision deadline has passed.",
         )
-    if reservation.deposit_amount_cop is None:
+    if reservation.deposit_amount is None:
         raise ReservationApiError(
             409,
             "reservation_deposit_not_configured",
@@ -523,7 +531,7 @@ def issue_reservation_permit(
             )
 
         try:
-            amount = cop_to_token_units(reservation.deposit_amount_cop)
+            amount = money_to_token_units(reservation.deposit_amount)
         except ValueError:
             raise ReservationApiError(
                 409,
@@ -783,7 +791,7 @@ def _load_chain_context(
         actor_address = reservation.customer_wallet_address
 
     if action in {"accept", "reject", "deposit"}:
-        amount = cop_to_token_units(reservation.deposit_amount_cop)
+        amount = money_to_token_units(reservation.deposit_amount)
         if action in {"accept", "reject"} and amount and reservation.deposit_confirmed_at is None:
             raise ReservationApiError(
                 409,
@@ -791,9 +799,9 @@ def _load_chain_context(
                 "The reservation deposit must be confirmed before this decision.",
             )
     elif action == "expire":
-        amount = cop_to_token_units(reservation.deposit_amount_cop)
+        amount = money_to_token_units(reservation.deposit_amount)
     else:
-        amount = cop_to_token_units(reservation.deposit_amount_cop)
+        amount = money_to_token_units(reservation.deposit_amount)
         if reservation.deposit_confirmed_at is None:
             amount = 0
     return reservation, actor_address if action != "expire" else None, amount

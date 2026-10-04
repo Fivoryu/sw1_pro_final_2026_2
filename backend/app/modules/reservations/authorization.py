@@ -107,7 +107,7 @@ def ensure_reservation_action_eligible(
     if (
         _is_staff(actor)
         and action in {"accept", "reject"}
-        and reservation.deposit_amount_cop is not None
+        and reservation.deposit_amount is not None
         and reservation.deposit_confirmed_at is None
     ):
         raise ReservationApiError(

@@ -57,9 +57,22 @@ def f04_context() -> Iterator[F04Context]:
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
 
+    currency_migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "0013_listing_currency.py"
+    )
+    currency_spec = importlib.util.spec_from_file_location(
+        "f04_listing_currency", currency_migration_path
+    )
+    assert currency_spec is not None and currency_spec.loader is not None
+    currency_migration = importlib.util.module_from_spec(currency_spec)
+    currency_spec.loader.exec_module(currency_migration)
     with engine.begin() as connection:
         with Operations.context(MigrationContext.configure(connection)):
             migration._install_sqlite_offer_version_triggers()
+            currency_migration._install_listing_currency_triggers()
     app = create_app(
         settings=Settings(
             database_url="sqlite+pysqlite:///:memory:",
@@ -183,7 +196,7 @@ def test_create_listing_starts_as_normalized_unpublished_draft(f04_context: F04C
         listing = session.get(Listing, listing_id)
         assert listing is not None
         assert listing.city_key == "medellín" and listing.zone_key == "el poblado"
-        assert listing.deposit_amount_cop is None
+        assert listing.deposit_amount is None
     assert [(row.action, row.from_status, row.to_status) for row in _history(context, listing_id)] == [
         ("create", None, "draft")
     ]
@@ -652,7 +665,7 @@ _LISTING_ROUTES: list[tuple[str, str, str, dict[str, Any] | None, tuple[str, boo
     ("publish", "POST", "/publish", None, ("approved", False)),
     ("unpublish", "POST", "/unpublish", None, ("approved", True)),
     ("transitions", "GET", "/transitions", None, ("draft", False)),
-    ("deposit", "PATCH", "/deposit", {"deposit_amount_cop": "100.00"}, ("approved", False)),
+    ("deposit", "PATCH", "/deposit", {"deposit_amount": "100.00"}, ("approved", False))
 ]
 _ROUTE_IDS = [route[0] for route in _LISTING_ROUTES]
 
@@ -673,7 +686,7 @@ def _listing_state(context: F04Context, listing_id: str) -> tuple[Any, ...]:
             listing.base_price,
             listing.city,
             listing.offer_version,
-            listing.deposit_amount_cop,
+            listing.deposit_amount,
         )
 
 

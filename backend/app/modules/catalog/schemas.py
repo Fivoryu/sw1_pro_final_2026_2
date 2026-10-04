@@ -8,6 +8,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
+from app.core.money import SupportedCurrency
+
 # Single source of truth for the listing operation domain; the ORM stores it as a plain
 # string guarded by a CHECK constraint, so routers cast database values to this alias.
 ListingOperation = Literal["sale", "rent"]
@@ -18,7 +20,7 @@ class CatalogMoney(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     amount: str
-    currency: Literal["COP"]
+    currency: SupportedCurrency
 
 
 class CatalogListingItem(BaseModel):
@@ -69,7 +71,7 @@ class QuoteLine(BaseModel):
     kind: Literal["base", "extra"]
     extra_id: str | None
     amount: str
-    currency: Literal["COP"]
+    currency: SupportedCurrency
     charge_period: Literal["one_time", "monthly"]
 
 
@@ -106,7 +108,7 @@ class QuoteErrorResponse(BaseModel):
 class ListingDepositUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    deposit_amount_cop: Annotated[
+    deposit_amount: Annotated[
         Decimal,
         Field(gt=Decimal("0"), max_digits=18, decimal_places=2),
     ]
@@ -116,7 +118,7 @@ class ListingDepositResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     listing_id: str
-    deposit_amount_cop: str
+    deposit_amount: str
     offer_version: int
 
 
@@ -128,6 +130,7 @@ class ListingAuthoringRequest(BaseModel):
         Decimal,
         Field(gt=Decimal("0"), max_digits=18, decimal_places=2),
     ]
+    currency: SupportedCurrency = "BOB"
     city: Annotated[str, Field(min_length=1, max_length=120)]
     zone: Annotated[str, Field(min_length=1, max_length=120)]
     bedrooms: Annotated[StrictInt, Field(ge=0)]
@@ -149,6 +152,7 @@ class ListingAuthoringResponse(BaseModel):
     agency_id: str
     operation: ListingOperation
     base_price: Decimal
+    currency: SupportedCurrency
     city: str
     zone: str
     bedrooms: int
