@@ -39,7 +39,7 @@ Fuera de superficie: `docs/diagramas/Diagrama1.eapx`, `openspec/`, identidad de 
 
 ## Tareas
 
-- [ ] **F05M-T1 — Núcleo de moneda (backend).** Enum tipado `Currency` (`BOB`, `USD`, `USDT`), reemplazo del `Literal["COP"]` en catálogo y del campo moneda en cotizaciones/reservas; validación de formato `.2f` por moneda; migración Alembic que reescribe datos `COP` a `BOB` (datos de desarrollo, decidir y registrar el mapeo) o los invalida; regresión completa de suites.
+- [x] **F05M-T1 — Núcleo de moneda (backend).** Enum tipado `Currency` (`BOB`, `USD`, `USDT`), reemplazo del `Literal["COP"]` en catálogo y del campo moneda en cotizaciones/reservas; validación de formato `.2f` por moneda; migración Alembic que reescribe datos `COP` a `BOB` (datos de desarrollo, decidir y registrar el mapeo) o los invalida; regresión completa de suites.
 - [ ] **F05M-T2 — Tasas administradas (backend).** Tabla de tasas (base USD) con vigencia y autoría; rutas de plataforma para crear/listar tasas; lectura pública de la tasa vigente; matriz de conversión por cruce (`BOB→USD→X`); pruebas de autorización (`platform_admin` escribe, otros `403`).
 - [ ] **F05M-T3 — Cotización en moneda elegida (backend).** `POST /quotes` (y equivalente vigente) acepta `target_currency`; total convertido con la tasa vigente y congelado en la instantánea con su tasa; validación de que la reserva usa la moneda de la instantánea; contrato documentado.
 - [ ] **F05M-T4 — F05.1 mobiliario completo (backend).** Categoría, habitación, dimensiones/origen y vínculo visual en `ListingExtra`; gestión de referencias al eliminar/reemplazar; contrato documentado.
@@ -51,4 +51,12 @@ Fuera de superficie: `docs/diagramas/Diagrama1.eapx`, `openspec/`, identidad de 
 
 ## Registro de ejecución
 
-(aún sin entradas)
+### F05M-T1 — Núcleo de moneda (2026-10-03)
+
+- Nuevo `backend/app/core/money.py`: `SupportedCurrency` (`BOB`/`USD`/`USDT`), `validate_currency` que falla cerrado y `format_money_amount` con 2 decimales y `ROUND_HALF_UP`. Implementado por subagente escritor (`gentle-ai-worker`) con TDD: RED observado (módulo inexistente, autoría rechazando USD/USDT, revisión 0013 inexistente) y luego GREEN.
+- `Listing` y `QuoteSnapshot` ganan columna `currency` (default `BOB`, CHECK de enum); migración `0013_listing_currency` añade ambas columnas y renombra `deposit_amount_cop` → `deposit_amount` con sus CHECK; el downgrade rechaza monedas no `BOB` en vez de convertir implícitamente. La moneda del inmueble se propaga a catálogo, cotizaciones y reservas sin conversión (T2/T3).
+- `cop_to_token_units` → `money_to_token_units` (escala ×100 sin cambios, mensajes neutrales); cero referencias a COP en `backend/app`.
+- Verificación independiente del orquestador: suite backend 531 aprobadas / 3 omitidas, Ruff limpio; Pyright conserva 19 diagnósticos preexistentes (`eth_account`/`eth_utils`, archivos no tocados). Migración verificada solo con SQLite; PostgreSQL descartable queda para F05M-T9.
+- Commit de work unit `b99ce22` (`feat(backend): replace COP with typed BOB/USD/USDT currency support`), sin push.
+
+(aún sin más entradas)
