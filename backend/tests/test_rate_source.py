@@ -106,7 +106,7 @@ def _stub_suggestions(
 # ---------------------------------------------------------------------------
 
 
-def test_coinbase_spot_price_is_parsed_as_an_eight_decimal_usdt_rate(
+def test_coinbase_spot_price_is_inverted_into_units_per_usd(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -120,11 +120,12 @@ def test_coinbase_spot_price_is_parsed_as_an_eight_decimal_usdt_rate(
     rates = fetch_official_rates()
 
     assert rates["USDT"].currency == "USDT"
-    assert rates["USDT"].units_per_usd == Decimal("0.99980000")
+    # Coinbase quotes 1 USDT in USD; our convention is units of USDT per 1 USD.
+    assert rates["USDT"].units_per_usd == Decimal("1.00020004")
     assert rates["USDT"].source == "coinbase"
 
 
-def test_coinbase_amount_is_quantized_to_eight_decimals_with_half_up(
+def test_coinbase_amount_is_inverted_and_quantized_to_eight_decimals_with_half_up(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -136,7 +137,7 @@ def test_coinbase_amount_is_quantized_to_eight_decimals_with_half_up(
 
     rates = fetch_official_rates()
 
-    assert rates["USDT"].units_per_usd == Decimal("1.23456786")
+    assert rates["USDT"].units_per_usd == Decimal("0.81000003")
 
 
 @pytest.mark.parametrize(

@@ -51,7 +51,7 @@ class RateSuggestion:
     source: str
 
 
-def _parse_positive_rate(raw: object, *, source: str) -> Decimal:
+def _parse_positive_rate(raw: object, *, source: str, invert: bool = False) -> Decimal:
     if not isinstance(raw, str):
         raise RateSourceError(f"{source} returned a non-string rate value")
     try:
@@ -62,6 +62,12 @@ def _parse_positive_rate(raw: object, *, source: str) -> Decimal:
         raise RateSourceError(f"{source} returned a non-positive rate value")
     if value >= _MAX_RATE:
         raise RateSourceError(f"{source} returned a rate beyond the supported precision")
+    if invert:
+        # Price sources quote 1 currency unit in USD; our convention is units
+        # of the currency per 1 USD, so the price must be inverted.
+        value = Decimal(1) / value
+        if value >= _MAX_RATE:
+            raise RateSourceError(f"{source} returned a price too small to invert")
     return value.quantize(_RATE_QUANTUM, rounding=ROUND_HALF_UP)
 
 
@@ -88,7 +94,7 @@ def _fetch_usdt_suggestion() -> RateSuggestion:
     return RateSuggestion(
         currency="USDT",
         units_per_usd=_parse_positive_rate(
-            payload["data"].get("amount"), source="coinbase"
+            payload["data"].get("amount"), source="coinbase", invert=True
         ),
         source=_SOURCES["USDT"],
     )
