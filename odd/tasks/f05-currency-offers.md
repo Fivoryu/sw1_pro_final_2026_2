@@ -43,7 +43,18 @@ Fuera de superficie: `docs/diagramas/Diagrama1.eapx`, `openspec/`, identidad de 
 - [x] **F05M-T2 — Tasas administradas (backend).** Tabla de tasas (base USD) con vigencia y autoría; rutas de plataforma para crear/listar tasas; lectura pública de la tasa vigente; matriz de conversión por cruce (`BOB→USD→X`); pruebas de autorización (`platform_admin` escribe, otros `403`).
 - [x] **F05M-T3 — Cotización en moneda elegida (backend).** `POST /quotes` (y equivalente vigente) acepta `target_currency`; total convertido con la tasa vigente y congelado en la instantánea con su tasa; validación de que la reserva usa la moneda de la instantánea; contrato documentado.
 - [x] **F05M-T4 — F05.1 mobiliario completo (backend).** Categoría, habitación, dimensiones/origen y vínculo visual en `ListingExtra`; gestión de referencias al eliminar/reemplazar; contrato documentado.
-- [ ] **F05M-T5 — Panel (moneda + tasas).** Selector de moneda en autoría de inmueble; pantalla de administración de tasas para `platform_admin`; desglose convertido en la bandeja/visión de cotizaciones.
+- [x] **F05M-T5 — Panel (moneda + tasas).** Selector de moneda en autoría de inmueble; pantalla de administración de tasas para `platform_admin`; desglose convertido en la bandeja/visión de cotizaciones.
+
+## Registro de ejecución (continuación)
+
+### F05M-T5 — Panel: tasas y moneda (2026-10-04)
+
+- **Alcance ajustado a la realidad del panel:** no existe pantalla de autoría de inmuebles (el agente crea en la app de captura, T7) ni vista de cotizaciones; el selector de moneda de autoría y el desglose de cotizaciones no aplican acá. La unidad entregó la administración de tasas y la visibilidad de moneda.
+- Nuevo `application/exchangeRatesApi.ts` (patrón `staffListingsApi`): `getCurrentExchangeRates`, `getExchangeRateHistory`, `createExchangeRate`, error tipado con estado; suite propia (éxitos, 401/403/422/503, fallo de transporte).
+- Nueva pantalla `features/rates/ExchangeRatesAdmin.tsx`, visible solo para `platform_admin` (gating por rol en `ProtectedStaffShell`, reemplazando el placeholder): tasas vigentes (BOB/USDT administradas, USD fijo `1.00000000` etiquetado como referencia), historial (más nuevo primero) y formulario de alta (moneda BOB/USDT, unidades por USD con validación cliente de >0 y ≤8 decimales; el servidor queda como autoridad). Mensajes de error en español profesional.
+- `StaffListing` conserva el campo `currency` que el backend ya envía; la bandeja muestra la moneda junto a los montos (lista y detalle, campo «Moneda»). Aserciones legacy COP→BOB actualizadas según la decisión F05.
+- TDD: RED observado (imports inexistentes, heading ausente, moneda perdida por el DTO) → GREEN; panel 116/116 en 10 archivos (+15), build limpio sin dependencias nuevas.
+- Commit de work unit (ver git log) — sin push.
 - [ ] **F05M-T6 — App cliente (moneda elegida).** Selector de moneda de visualización persistente; precio convertido junto al original; cotización en la moneda elegida con aviso de tasa congelada.
 - [ ] **F05M-T7 — App de captura (moneda).** Selección de moneda al crear/editar inmueble; validaciones equivalentes a la API.
 - [ ] **F05M-T8 — Escrow con USDT.** Mock USDT (6 decimales) y despliegue parametrizado del escrow; pruebas Hardhat del flujo de reserva con USDT y con el token de prueba existente.
