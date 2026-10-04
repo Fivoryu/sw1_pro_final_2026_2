@@ -55,7 +55,18 @@ Fuera de superficie: `docs/diagramas/Diagrama1.eapx`, `openspec/`, identidad de 
 - `StaffListing` conserva el campo `currency` que el backend ya envía; la bandeja muestra la moneda junto a los montos (lista y detalle, campo «Moneda»). Aserciones legacy COP→BOB actualizadas según la decisión F05.
 - TDD: RED observado (imports inexistentes, heading ausente, moneda perdida por el DTO) → GREEN; panel 116/116 en 10 archivos (+15), build limpio sin dependencias nuevas.
 - Commit de work unit (ver git log) — sin push.
-- [ ] **F05M-T6 — App cliente (moneda elegida).** Selector de moneda de visualización persistente; precio convertido junto al original; cotización en la moneda elegida con aviso de tasa congelada.
+- [x] **F05M-T6 — App cliente (moneda elegida).** Selector de moneda de visualización persistente; precio convertido junto al original; cotización en la moneda elegida con aviso de tasa congelada.
+
+## Registro de ejecución (continuación)
+
+### F05M-T6 — App cliente (2026-10-04)
+
+- `DisplayCurrency` en `CatalogController` (BOB default, setter notificante e idempotente); selector en el catálogo («Moneda de visualización»); formateador `formatMoney(amount, currency)` etiqueta con el código de la moneda del servidor; detalle muestra «Cotizable en X» solo si difiere de la elegida. **Sin conversión del lado cliente** — el servidor es la única autoridad.
+- Etiquetas de filtros de precio dejaron el «(COP)» hardcodeado (falso desde T1); la prueba de `catalog_api_test` conserva su JSON con «COP» inline como prueba de paso de cadenas de moneda.
+- **Ítem de cotización omitido honestamente:** la app cliente NO tiene flujo de solicitud de cotización aún (pestaña prototype); cuando exista, debe enviar `target_currency` y renderizar `display_totals`/`display_rate` con «Tasa congelada al cotizar». Queda registrado como pendiente para la unidad de cotizador.
+- **Persistencia pendiente:** no hay dependencia de preferences en pubspec (prohibida en superficie); la moneda vive en estado del controller y se resetea al reiniciar. Unidad futura puede persistirla.
+- TDD: RED observado (3 archivos no cargaban: símbolos inexistentes) → GREEN 83/83 (+7), `flutter analyze` sin hallazgos; verificación independiente del orquestador vía cmd.exe (flutter nativo WSL falla por CRLF).
+- Commit de work unit (ver git log), sin push.
 - [ ] **F05M-T7 — App de captura (moneda).** Selección de moneda al crear/editar inmueble; validaciones equivalentes a la API.
 - [ ] **F05M-T8 — Escrow con USDT.** Mock USDT (6 decimales) y despliegue parametrizado del escrow; pruebas Hardhat del flujo de reserva con USDT y con el token de prueba existente.
 - [ ] **F05M-T9 — Verificación integrada.** Suites completas de las cuatro superficies; PostgreSQL descartable con la migración de moneda; recorrido manual: publicar en BOB, cotizar en USD y en USDT, reservar contra el escrow; actualización del plan maestro al integrar.
