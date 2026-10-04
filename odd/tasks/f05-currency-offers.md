@@ -42,7 +42,7 @@ Fuera de superficie: `docs/diagramas/Diagrama1.eapx`, `openspec/`, identidad de 
 - [x] **F05M-T1 — Núcleo de moneda (backend).** Enum tipado `Currency` (`BOB`, `USD`, `USDT`), reemplazo del `Literal["COP"]` en catálogo y del campo moneda en cotizaciones/reservas; validación de formato `.2f` por moneda; migración Alembic que reescribe datos `COP` a `BOB` (datos de desarrollo, decidir y registrar el mapeo) o los invalida; regresión completa de suites.
 - [x] **F05M-T2 — Tasas administradas (backend).** Tabla de tasas (base USD) con vigencia y autoría; rutas de plataforma para crear/listar tasas; lectura pública de la tasa vigente; matriz de conversión por cruce (`BOB→USD→X`); pruebas de autorización (`platform_admin` escribe, otros `403`).
 - [x] **F05M-T3 — Cotización en moneda elegida (backend).** `POST /quotes` (y equivalente vigente) acepta `target_currency`; total convertido con la tasa vigente y congelado en la instantánea con su tasa; validación de que la reserva usa la moneda de la instantánea; contrato documentado.
-- [ ] **F05M-T4 — F05.1 mobiliario completo (backend).** Categoría, habitación, dimensiones/origen y vínculo visual en `ListingExtra`; gestión de referencias al eliminar/reemplazar; contrato documentado.
+- [x] **F05M-T4 — F05.1 mobiliario completo (backend).** Categoría, habitación, dimensiones/origen y vínculo visual en `ListingExtra`; gestión de referencias al eliminar/reemplazar; contrato documentado.
 - [ ] **F05M-T5 — Panel (moneda + tasas).** Selector de moneda en autoría de inmueble; pantalla de administración de tasas para `platform_admin`; desglose convertido en la bandeja/visión de cotizaciones.
 - [ ] **F05M-T6 — App cliente (moneda elegida).** Selector de moneda de visualización persistente; precio convertido junto al original; cotización en la moneda elegida con aviso de tasa congelada.
 - [ ] **F05M-T7 — App de captura (moneda).** Selección de moneda al crear/editar inmueble; validaciones equivalentes a la API.
@@ -62,6 +62,17 @@ Fuera de superficie: `docs/diagramas/Diagrama1.eapx`, `openspec/`, identidad de 
 - Lección registrada: la corrección debía commitearse para que el proveedor reconociera el candidato corregido (`corrected_candidate_unavailable` con el fix sin commit).
 
 (aún sin más entradas)
+
+### F05M-T4 — F05.1 mobiliario completo (2026-10-04)
+
+- **Decisión de contrato (del orquestador, a pedido del escritor):** la API F04 no autorizaba extras (regla histórica «La API F04 no modifica extras»); F05.1 exige lista editable y el mapa UX asigna la autoría a la app de captura (T7), así que la autoría de extras entró a la API de autoría de inmuebles como extensión F05.1, con la regla histórica marcada como reemplazada (2026-10-04) en el contrato.
+- `ListingExtra` gana 8 columnas opcionales: `category`, `room`, `origin`, `visual_reference` (texto libre con límites y CHECK no-vacío), `width_cm`/`height_cm`/`depth_cm` (enteros ≥ 1) y `quantity` NOT NULL default 1. Migración `0016_listing_extra_details` (batch SQLite, recreación de triggers; PostgreSQL queda para T9).
+- **Autoría por diff de ID estable:** POST inserta con IDs nuevos; PUT concilia por `extra_id` (actualiza en sitio / inserta / elimina); `extras` omitido no toca nada, `[]` explícito elimina todos; conjunto idéntico → `offer_version` sin cambio; cambio de `quantity` es cambio de oferta (trigger 0007 extendido) y cambio solo descriptivo no la bumpa. `extra_id` desconocido → `422` sin mutación.
+- Totales de oferta: `Σ(precio × cantidad)`; con default 1 el aritmética legacy queda idéntica. Las líneas de cotización no cambian de forma (el monto ya incluye cantidad) — parsers de clientes intactos.
+- Cantidades explícitas: nada las deriva sumando detecciones de fotos repetidas (F08 no existe aún; `origin` documenta procedencia, nada automatiza).
+- Snapshot inmutable verificado por UPDATE/DELETE crudos sobre la copia.
+- TDD: RED observado (16 pruebas: `422 validation_error` por campo rechazado) → GREEN; suite 578 aprobadas / 3 omitidas (+24), Ruff limpio, Pyright sin diagnósticos nuevos.
+- Commit de work unit `e4101b5` (`feat(catalog): complete furniture inventory with stable-ID extras authoring`), sin push.
 
 ### F05M-T3 — Cotización multi-moneda (2026-10-04)
 
