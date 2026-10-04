@@ -67,7 +67,17 @@ Fuera de superficie: `docs/diagramas/Diagrama1.eapx`, `openspec/`, identidad de 
 - **Persistencia pendiente:** no hay dependencia de preferences en pubspec (prohibida en superficie); la moneda vive en estado del controller y se resetea al reiniciar. Unidad futura puede persistirla.
 - TDD: RED observado (3 archivos no cargaban: símbolos inexistentes) → GREEN 83/83 (+7), `flutter analyze` sin hallazgos; verificación independiente del orquestador vía cmd.exe (flutter nativo WSL falla por CRLF).
 - Commit de work unit (ver git log), sin push.
-- [ ] **F05M-T7 — App de captura (moneda).** Selección de moneda al crear/editar inmueble; validaciones equivalentes a la API.
+- [x] **F05M-T7 — App de captura (moneda).** Selección de moneda al crear/editar inmueble; validaciones equivalentes a la API.
+
+## Registro de ejecución (continuación)
+
+### F05M-T7 — App de captura (2026-10-04)
+
+- `ListingCurrency` enum (BOB/USD/USDT, parseo fail-closed); `StaffListing.currency` requerido; selector «Moneda» en el editor habilitado solo al crear y de solo-lectura al editar (echo de la moneda almacenada); precios etiquetados con su moneda en «Mis inmuebles» y en el editor.
+- **Hallazgo del escritor:** el PUT del backend sobrescribía la moneda (default `BOB` al omitirla) — un cliente que no la enviara reseteaba un inmueble USD/USDT a BOB silenciosamente. Corregido en backend en la misma ronda: la edición ignora `currency` (inmutable tras la creación), con RED→GREEN (`test_edit_keeps_the_stored_currency_regardless_of_the_payload`) y contrato actualizado (`docs/api/f04-publications-v1.md`, con nota histórica). La app edita solo-lectura coherente con esa inmutabilidad.
+- Extras: el editor no gestiona mobiliario hoy; no se añadió autoría de extras (solo se cablea lo existente).
+- TDD: RED observado (3 archivos no compilaban: símbolos inexistentes) → captura 86/86 (+10), `flutter analyze` y `dart format` limpios; backend 579/3 tras el fix, Ruff limpio. Verificación flutter del orquestador vía cmd.exe.
+- Commits (ver git log), sin push.
 - [ ] **F05M-T8 — Escrow con USDT.** Mock USDT (6 decimales) y despliegue parametrizado del escrow; pruebas Hardhat del flujo de reserva con USDT y con el token de prueba existente.
 - [ ] **F05M-T9 — Verificación integrada.** Suites completas de las cuatro superficies; PostgreSQL descartable con la migración de moneda; recorrido manual: publicar en BOB, cotizar en USD y en USDT, reservar contra el escrow; actualización del plan maestro al integrar.
 
