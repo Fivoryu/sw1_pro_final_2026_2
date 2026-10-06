@@ -378,6 +378,18 @@ Antes de código sustancial, resolver requisitos y seguir el flujo SDD del proye
 
 Al cerrar: registrar archivos y comportamiento, ejecutar comprobaciones pertinentes, documentar límites y actualizar trazabilidad. Solo declarar una subfase terminada cuando su resultado observable exista. Los gates siguientes son dependencias técnicas/producto, no aprobaciones inventadas de un controlador.
 
+#### Contrato mínimo de una ficha de ejecución
+
+El plan maestro conserva el mapa de fases; agregar una ficha breve solo cuando reduzca decisiones implícitas o redescubrimiento. Cada ficha debe indicar:
+
+- **Entradas y lecturas previas:** dependencias reales y documentos, manifiestos o decisiones que se deben verificar antes de actuar.
+- **Alcance:** acciones permitidas, exclusiones y, si corresponde, rutas exactas propuestas; una ruta propuesta no es una superficie autorizada.
+- **Pasos y entrega:** orden de trabajo, salida esperada, responsable de cada decisión y qué se entrega al siguiente paso.
+- **Comprobaciones:** comandos exactos, directorio de ejecución, observación esperada y estado real por registrar; separar preparación de evidencia experimental.
+- **Bloqueos:** qué puede prepararse sin ellos, qué evidencia queda pendiente y qué decisión requiere al dueño del producto.
+
+La ficha es entrada de trabajo, no evidencia ni aprobación. No concede autoridad para implementar, acceder a destinos remotos, instalar dependencias, hacer commits o publicar. Tampoco duplica ni reemplaza requisitos canónicos, decisiones de producto, IDs académicos o documentos de tareas existentes. Mantener el formato reconocible y pequeño; no completar una plantilla extensa si los campos no aplican.
+
 ## F00 — Alinear alcance y recuperar contexto
 
 **Objetivo:** evitar desarrollar contra documentación desactualizada. No convertir esta fase en semanas de planificación.
@@ -596,6 +608,38 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 - **Acciones:** escena simple Three.js, WebView candidato, controles táctiles y navegación; medir consumo y fluidez en S23 FE. Comparar alternativa nativa solo si hay un problema concreto.
 - **Salida:** elección fundamentada de motor/canal y límites medidos.
 - **Aceptación:** carga y recuperación del visor funcionan; no se decide por captura de pantalla. Falla aquí bloquea el visor, no F03–F05.
+
+#### Ficha ejecutable — piloto móvil (trabajo futuro)
+
+**Objetivo y límite.** Validar una escena sintética pequeña en un WebView candidato dentro de la app cliente, con navegación táctil, carga, recuperación y mediciones observables en un Samsung Galaxy S23 FE. Esta prueba técnica no completa F06 ni decide automáticamente el motor definitivo. No usa capturas, inmuebles reales, datos comerciales, cámara, AR, API ni contrato de escena de F06.2/F07.
+
+**Entradas y preparación (antes de implementar):**
+
+1. Releer F06.1, el estado vigente de la app y las decisiones/requisitos canónicos que definan límites de rendimiento. Anotar la revisión de `docs/plan-maestro-roomforge.md` y las fuentes verificadas; no convertir propuestas de otras notas en requisitos sin confirmar su vigencia.
+2. Revisar `apps/cliente_mobile/pubspec.yaml`, `apps/cliente_mobile/README.md` y el job `customer-flutter` de `.github/workflows/ci.yml`. En la revisión de este plan, `pubspec.yaml` no declara una dependencia WebView. Verificar de nuevo al ejecutar: si no existe un candidato aprobado, presentar nombre y versión exacta de la dependencia y su efecto antes de agregarla o cambiar la arquitectura. No elegir ni actualizar una versión en silencio.
+3. Confirmar disponibilidad del S23 FE y registrar modelo/SKU, versión y parche de Android, WebView del sistema, resolución/orientación, estado inicial de batería/temperatura, brillo y modo de energía. Si el teléfono no está disponible, se puede completar la preparación, pero no afirmar mediciones ni recomendación basada en dispositivo.
+4. Antes de tocar código, congelar en la bitácora una fixture de prueba —no un esquema de producto—: una habitación sintética rectangular de 4 × 3 m y 2,4 m de alto, suelo, paredes con una abertura simple, cámara inicial a 1,6 m, tres cubos de color como referencias y sin texturas, sombras ni efectos. Registrar unidades, ejes, geometría/triángulos, tamaño de archivos, viewport, iluminación y hash de los recursos efectivamente usados. Estos valores son una propuesta reproducible para el spike, no requisitos del inmueble ni el modelo de F06.2.
+5. Congelar un puente desechable con solo las señales necesarias para observar `ready`, `load_error` y el resultado del reintento. Registrar los mensajes exactos y el límite Flutter/WebView elegido; no promoverlos a contrato de producto ni ampliar el esquema de escena. Si el candidato no necesita un puente explícito, registrar esa observación en lugar de añadir uno.
+
+**Protocolo propuesto para aceptación antes de medir formalmente:**
+
+- **Carga:** cinco arranques en frío y cinco recargas en caliente; medir desde la acción de abrir hasta la primera escena visible y navegable. Registrar cada duración por separado.
+- **Fluidez/recursos:** en cada corrida, esperar 30 s de estabilización y repetir durante 120 s una secuencia fija de avance, retroceso, desplazamiento lateral y giro táctil. Propuesta: cinco corridas con la misma fixture, dispositivo y condiciones; registrar el orden y los gestos exactos.
+- **Error y recuperación:** tres veces provocar deliberadamente un fallo de carga controlado; comprobar estado de error y reintentar sin forzar el cierre de la app. Registrar resultado y tiempo de recuperación en cada intento.
+- **Ciclo de vida y puente:** tres veces enviar la app a segundo plano durante 30 s y volver; comprobar que la escena vuelve a ser navegable o presenta una recuperación explícita. Provocar además un mensaje de puente desconocido/fallido una vez: la app no debe cerrarse y el resultado debe ser observable, no una pantalla negra silenciosa.
+- Las cantidades y duraciones anteriores son propuestas metodológicas, no umbrales de aceptación. El dueño del producto debe confirmarlas o cambiarlas antes de la corrida formal. No asignar cortes numéricos de FPS, tiempo, memoria, CPU o temperatura si no existen en un requisito canónico vigente; registrar el umbral como **pendiente de aceptación humana**.
+
+**Registro por corrida.** Anotar fecha, commit (`git rev-parse HEAD`), rama y `git status --short`; modo de build, versiones reales de Flutter/Dart, dependencia WebView y motor; dispositivo/Android/WebView; fixture/hash; condiciones de red, pantalla y energía; escenario, repetición y herramienta/versión de medición. Medir tiempo a primera vista navegable, FPS o tiempos de cuadro, CPU, memoria del proceso, memoria gráfica y señal térmica solo cuando la herramienta disponible los exponga. Guardar valores individuales, resumen y evidencia asociada. Campo no observable o herramienta ausente = **no medido**, nunca una estimación.
+
+**Éxito y fallo observables.** La carga tiene éxito si aparece la fixture y la navegación responde; falla si la app/WebView se cierra, queda en blanco o no alcanza ese estado. La recuperación tiene éxito si el error deliberado es visible y el reintento vuelve a una escena navegable sin reiniciar la app; falla si queda bloqueada o silenciosamente vacía. Los gestos deben cambiar la vista/posición en la dirección prevista y detenerse al soltar; tras reanudar, la escena debe responder o mostrar una ruta de recuperación. Mensajes de puente desconocidos no deben cerrar la app. Separar estos resultados funcionales de las mediciones numéricas: sin umbrales aprobados, reportar los datos y dejar la valoración cuantitativa pendiente.
+
+**Alternativa nativa.** Solo iniciar su comparación cuando un defecto del candidato WebView sea concreto, repetible y registrado con pasos/evidencia. La comparación debe usar la misma fixture, dispositivo y secuencia; no reemplazar WebView por defecto ni elegir por una corrida aislada. Si no se reproduce un bloqueo, no se amplía el piloto a implementación nativa.
+
+**Comprobaciones de la app documentadas actualmente** (ejecutar desde `apps/cliente_mobile/` cuando exista una implementación autorizada): `flutter test` debe terminar sin pruebas fallidas; `flutter analyze` debe informar cero problemas; `flutter build apk --debug` debe generar el APK de depuración. Registrar comandos y salidas reales, sin copiar el conteo histórico de pruebas. La verificación en teléfono es separada y no se sustituye por estas comprobaciones. No ejecutar suites, builds ni pruebas de dispositivo durante la preparación documental.
+
+**Entrega futura.** Bitácora propuesta: `docs/spikes/spk-06-1-mobile-viewer-pilot.md` (ruta propuesta, no creada ni enlazada aquí). Debe separar: preparación completa, experimento completo/parcial, resultados funcionales, mediciones/no medidos, limitaciones, recomendación fundamentada y decisión humana pendiente. Sin S23 FE, solo puede cerrarse preparación; sin umbrales acordados, no declarar ganador por rendimiento. Mantener F06 en pendiente hasta que exista el alcance posterior aprobado e integrado. La ubicación del editor, colisión de muebles ocultos y precisión AR no bloquean este piloto: pertenecen a F06.3, F06.4 y F07.
+
+**Superficie futura.** La única ruta de producto identificada al preparar esta ficha es `apps/cliente_mobile/pubspec.yaml`; su presencia no autoriza editarla ni elegir dependencias. No se asignan todavía rutas fuente nuevas: quien reciba la implementación debe inspeccionar el árbol vigente, proponer paths exactos y nuevas carpetas necesarias, y obtener autorización para esa superficie antes de escribir. No usar un comodín como `apps/*`.
 
 ### F06.2 — Generar escena paramétrica
 
