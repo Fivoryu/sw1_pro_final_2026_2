@@ -167,7 +167,8 @@ Ejemplo de respuesta parcial; los nombres y tipos de propiedades son **PROPUESTA
         "currency": "COP"
       },
       "city": "EXAMPLE_CITY",
-      "zone": "EXAMPLE_ZONE"
+      "zone": "EXAMPLE_ZONE",
+      "cover_photo_url": null
     }
   ],
   "next_cursor": null
@@ -184,6 +185,7 @@ Ejemplo de respuesta parcial; los nombres y tipos de propiedades son **PROPUESTA
   "base_price": {"amount": "1234.50", "currency": "COP"},
   "city": "EXAMPLE_CITY",
   "zone": "EXAMPLE_ZONE",
+  "cover_photo_url": "EXAMPLE_SIGNED_URL",
   "bedrooms": 2,
   "bathrooms": 1,
   "extras": [
@@ -192,9 +194,21 @@ Ejemplo de respuesta parcial; los nombres y tipos de propiedades son **PROPUESTA
       "name": "EXAMPLE_DISPLAY_NAME",
       "price": {"amount": "123.45", "currency": "COP"}
     }
+  ],
+  "photos": [
+    {"photo_id": "EXAMPLE_PHOTO_ID", "url": "EXAMPLE_SIGNED_URL"}
   ]
 }
 ```
+
+**F04.2, implementado el 2026-10-06 (`odd/tasks/f04-photos.md`, contrato de personal en `docs/api/f04-publications-v1.md`):**
+
+- Cada ítem de la lista y el detalle agregan `cover_photo_url`: enlace firmado a la primera foto confirmada, o `null` si no hay ninguna.
+- El detalle agrega `photos`, con `photo_id` y `url` de cada foto confirmada, de la más antigua a la más reciente.
+- Solo se exponen fotos confirmadas de inmuebles aprobados y publicados. Cada foto se volvió a codificar sin metadatos (EXIF, incluida la ubicación GPS).
+- Los enlaces vencen a los 10 minutos; cada consulta los regenera.
+- Sin almacenamiento configurado, `cover_photo_url` es `null` y `photos` es `[]`.
+- La descripción y la dirección exacta siguen sin exponerse.
 
 Los valores son ilustrativos, no fixtures de migración ni datos desplegados. No se incluye un schema de escena 3D ni se agregan rutas de publicación para personal.
 
