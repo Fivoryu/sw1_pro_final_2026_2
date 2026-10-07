@@ -1,6 +1,8 @@
 import 'dart:convert';
 
+import 'package:captura_mobile/data/models/staff_listing.dart';
 import 'package:captura_mobile/data/services/staff_auth_api.dart';
+import 'package:captura_mobile/data/services/staff_listing_photos_api.dart';
 import 'package:captura_mobile/data/services/staff_listings_api.dart';
 import 'package:captura_mobile/domain/listing_drafts_controller.dart';
 import 'package:captura_mobile/domain/staff_session_controller.dart';
@@ -10,11 +12,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fake_listings_backend.dart';
+import 'support/fake_photo_source.dart';
 import 'support/fake_staff_backend.dart';
 
 Future<FakeListingsBackend> _pumpListings(
   WidgetTester tester, {
   void Function(FakeListingsBackend backend)? seed,
+  FakePhotoSource? source,
 }) async {
   final session = StaffSessionController(
     api: StaffAuthApi(
@@ -34,6 +38,11 @@ Future<FakeListingsBackend> _pumpListings(
       client: backend.client,
     ),
     session: session,
+    photosApi: StaffListingPhotosApi(
+      baseUrl: 'https://api.example.test',
+      client: backend.client,
+    ),
+    photoSource: source ?? FakePhotoSource(),
   );
   await tester.pumpWidget(
     MaterialApp(home: ListingsScreen(controller: controller)),
@@ -60,6 +69,23 @@ Future<void> _tapVisible(WidgetTester tester, String key) async {
   await tester.ensureVisible(target);
   await tester.pumpAndSettle();
   await tester.tap(target);
+  await tester.pumpAndSettle();
+}
+
+/// Chooses [origin] in the photo sheet and lets the upload finish.
+///
+/// The upload streams its body to the storage; that stream only advances on
+/// the real event loop, which widget tests reach through `runAsync`.
+Future<void> _pickPhoto(WidgetTester tester, String origin) async {
+  await tester.tap(find.byKey(ValueKey('photo-origin-$origin')));
+  await _settleUpload(tester);
+}
+
+Future<void> _settleUpload(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  await tester.runAsync(
+    () => Future<void>.delayed(const Duration(milliseconds: 50)),
+  );
   await tester.pumpAndSettle();
 }
 
@@ -231,6 +257,22 @@ void main() {
       await tester.pump(const Duration(seconds: 5));
       await tester.pumpAndSettle();
       expect(find.text('Borrador guardado.'), findsNothing);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.byKey(const ValueKey('listing-submit-button')),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        find.text('Agregá al menos una foto para enviar a revisión.'),
+        findsOneWidget,
+      );
+
+      await _tapVisible(tester, 'listing-photos-add');
+      await _pickPhoto(tester, 'gallery');
+      expect(backend.confirmedPhotos('listing-1'), hasLength(1));
 
       await _tapVisible(tester, 'listing-submit-button');
       expect(find.text('Enviar a revisión'), findsWidgets);
@@ -250,7 +292,12 @@ void main() {
     testWidgets('requires saving pending edits before submitting', (
       tester,
     ) async {
-      await _pumpListings(tester, seed: (backend) => backend.seed(id: 'd-1'));
+      await _pumpListings(
+        tester,
+        seed: (backend) => backend
+          ..seed(id: 'd-1')
+          ..seedPhoto('d-1'),
+      );
       await _tapVisible(tester, 'listing-item-d-1');
 
       expect(
@@ -303,7 +350,12 @@ void main() {
     });
 
     testWidgets('meets touch target guidelines', (tester) async {
-      await _pumpListings(tester, seed: (backend) => backend.seed(id: 'd-1'));
+      await _pumpListings(
+        tester,
+        seed: (backend) => backend
+          ..seed(id: 'd-1')
+          ..seedPhoto('d-1'),
+      );
       final semantics = tester.ensureSemantics();
       try {
         await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
@@ -314,6 +366,132 @@ void main() {
       } finally {
         semantics.dispose();
       }
+    });
+  });
+
+  group('Listing photos', () {
+    testWidgets('a new listing must be saved before adding photos', (
+      tester,
+    ) async {
+      await _pumpListings(tester);
+      await _tapVisible(tester, 'new-listing-button');
+
+      expect(
+        find.byKey(const ValueKey('listing-photos-unsaved')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('listing-photos-add')), findsNothing);
+    });
+
+    testWidgets('shows the saved photos with their count', (tester) async {
+      await _pumpListings(
+        tester,
+        seed: (backend) => backend
+          ..seed(id: 'd-1')
+          ..seedPhoto('d-1', photoId: 'photo-a')
+          ..seedPhoto('d-1', photoId: 'photo-b'),
+      );
+      await _tapVisible(tester, 'listing-item-d-1');
+
+      expect(find.text('Fotos (2 de 10)'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('listing-photo-photo-a')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('listing-photo-photo-b')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('retries a failed upload from its tile', (tester) async {
+      final backend = await _pumpListings(
+        tester,
+        seed: (fake) => fake
+          ..seed(id: 'd-1')
+          ..storageOffline = true,
+      );
+      await _tapVisible(tester, 'listing-item-d-1');
+      await _tapVisible(tester, 'listing-photos-add');
+      await _pickPhoto(tester, 'camera');
+
+      expect(
+        find.byKey(const ValueKey('listing-photo-upload-message-0')),
+        findsOneWidget,
+      );
+      expect(backend.confirmedPhotos('d-1'), isEmpty);
+
+      backend.storageOffline = false;
+      await _tapVisible(tester, 'listing-photo-retry-0');
+      await _settleUpload(tester);
+
+      expect(backend.confirmedPhotos('d-1'), hasLength(1));
+      expect(find.text('Fotos (1 de 10)'), findsOneWidget);
+    });
+
+    testWidgets('deletes a photo after confirmation', (tester) async {
+      final backend = await _pumpListings(
+        tester,
+        seed: (fake) => fake
+          ..seed(id: 'd-1')
+          ..seedPhoto('d-1', photoId: 'photo-a'),
+      );
+      await _tapVisible(tester, 'listing-item-d-1');
+
+      await _tapVisible(tester, 'listing-photo-delete-photo-a');
+      await tester.tap(find.byKey(const ValueKey('photo-delete-cancel')));
+      await tester.pumpAndSettle();
+      expect(backend.confirmedPhotos('d-1'), hasLength(1));
+
+      await _tapVisible(tester, 'listing-photo-delete-photo-a');
+      await tester.tap(find.byKey(const ValueKey('photo-delete-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(backend.confirmedPhotos('d-1'), isEmpty);
+      expect(find.byKey(const ValueKey('listing-photo-photo-a')), findsNothing);
+      expect(
+        find.text('Agregá al menos una foto para enviar a revisión.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('adding a photo to a listing under review asks first and '
+        'returns it to draft', (tester) async {
+      final backend = await _pumpListings(
+        tester,
+        seed: (fake) => fake
+          ..seed(id: 'p-1', status: 'pending')
+          ..seedPhoto('p-1'),
+      );
+      await _tapVisible(tester, 'listings-tab-pending');
+      await _tapVisible(tester, 'listing-item-p-1');
+
+      await _tapVisible(tester, 'listing-photos-add');
+      await tester.tap(find.byKey(const ValueKey('photo-origin-gallery')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('photo-change-cancel')));
+      await tester.pumpAndSettle();
+      expect(
+        backend.requests.where((request) => request.method == 'POST'),
+        isEmpty,
+      );
+
+      await _tapVisible(tester, 'listing-photos-add');
+      await tester.tap(find.byKey(const ValueKey('photo-origin-gallery')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('photo-change-confirm')));
+      await _settleUpload(tester);
+
+      expect(backend.confirmedPhotos('p-1'), hasLength(2));
+      expect(backend.listings['p-1']!['approval_status'], 'draft');
+      expect(
+        find.text('Estado: ${statusLabel(ListingStatus.draft)}'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('listing-status-warning')),
+        findsNothing,
+      );
     });
   });
 }

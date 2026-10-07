@@ -1,11 +1,13 @@
 import 'package:captura_mobile/data/models/staff_listing.dart';
 import 'package:captura_mobile/data/services/staff_auth_api.dart';
+import 'package:captura_mobile/data/services/staff_listing_photos_api.dart';
 import 'package:captura_mobile/data/services/staff_listings_api.dart';
 import 'package:captura_mobile/domain/listing_drafts_controller.dart';
 import 'package:captura_mobile/domain/staff_session_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fake_listings_backend.dart';
+import 'support/fake_photo_source.dart';
 import 'support/fake_staff_backend.dart';
 
 const _input = ListingDraftInput(
@@ -41,6 +43,11 @@ _build({bool signedIn = true}) async {
         client: backend.client,
       ),
       session: session,
+      photosApi: StaffListingPhotosApi(
+        baseUrl: 'https://api.example.test',
+        client: backend.client,
+      ),
+      photoSource: FakePhotoSource(),
     ),
     backend: backend,
   );
@@ -133,7 +140,9 @@ void main() {
 
     test('submits a draft for review', () async {
       final harness = await _build();
-      harness.backend.seed(id: 'draft-1');
+      harness.backend
+        ..seed(id: 'draft-1')
+        ..seedPhoto('draft-1');
 
       final submitted = await harness.controller.submit('draft-1');
 
@@ -188,5 +197,15 @@ void main() {
 
       expect(await harness.controller.latestRejectionReason('draft-1'), isNull);
     });
+  });
+
+  test('explains that a submission needs a photo', () async {
+    final harness = await _build();
+    harness.backend.seed(id: 'draft-1');
+
+    final submitted = await harness.controller.submit('draft-1');
+
+    expect(submitted, isFalse);
+    expect(harness.controller.message, contains('al menos una foto'));
   });
 }

@@ -1,8 +1,11 @@
 import 'package:flutter/foundation.dart';
 
 import '../data/models/staff_listing.dart';
+import '../data/services/photo_source.dart';
 import '../data/services/staff_auth_failure.dart';
+import '../data/services/staff_listing_photos_api.dart';
 import '../data/services/staff_listings_api.dart';
+import 'listing_photos_controller.dart';
 import 'staff_session_controller.dart';
 
 /// Loading state of the agent's listing list.
@@ -17,8 +20,12 @@ class ListingDraftsController extends ChangeNotifier {
   ListingDraftsController({
     required StaffListingsApi api,
     required StaffSessionController session,
+    required StaffListingPhotosApi photosApi,
+    required PhotoSource photoSource,
   }) : _api = api,
-       _session = session;
+       _session = session,
+       _photosApi = photosApi,
+       _photoSource = photoSource;
 
   static const String _noAgencyMessage =
       'Tu cuenta no pertenece a una inmobiliaria con sesión activa. Volvé a '
@@ -26,6 +33,8 @@ class ListingDraftsController extends ChangeNotifier {
 
   final StaffListingsApi _api;
   final StaffSessionController _session;
+  final StaffListingPhotosApi _photosApi;
+  final PhotoSource _photoSource;
 
   ListingStatus _tab = ListingStatus.draft;
   ListingsLoadState _loadState = ListingsLoadState.loading;
@@ -100,6 +109,18 @@ class ListingDraftsController extends ChangeNotifier {
     return submitted != null;
   }
 
+  /// Photos of one saved listing (F04.2), sharing this controller's session.
+  ListingPhotosController photosFor(
+    String listingId, {
+    VoidCallback? onListingChanged,
+  }) => ListingPhotosController(
+    api: _photosApi,
+    session: _session,
+    source: _photoSource,
+    listingId: listingId,
+    onListingChanged: onListingChanged,
+  );
+
   /// Reads the observation of the most recent rejection, if any.
   Future<String?> latestRejectionReason(String listingId) async {
     final credentials = _credentials();
@@ -161,6 +182,9 @@ class ListingDraftsController extends ChangeNotifier {
         'Tu cuenta no tiene permisos sobre los inmuebles de esta '
             'inmobiliaria.',
       404 => 'El inmueble ya no existe.',
+      // The API rejects a submission without a confirmed photo (F04.2).
+      409 when failure.detail.contains('photo') =>
+        'Agregá al menos una foto antes de enviar el inmueble a revisión.',
       409 =>
         'El inmueble cambió de estado mientras lo editabas. Actualizá '
             'la lista.',
