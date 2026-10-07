@@ -4,7 +4,7 @@
 
 ## 1. Entradas y preparación (Antes de implementar)
 - [ ] **Fuentes verificadas:** Se revisó el `docs/plan-maestro-roomforge.md` y `docs/redefinicion-roomforge.md`.
-- [ ] **Dependencia WebView:** (Pendiente revisar `apps/cliente_mobile/pubspec.yaml` para ver qué candidato proponer).
+- [x] **Dependencia WebView:** Se propone agregar \webview_flutter: ^4.8.0` (paquete oficial de Flutter) para poder renderizar la escena Three.js en el cliente.`
 - [ ] **Dispositivo de prueba:** 
   - Modelo/SKU: (Ej. Samsung Galaxy S23 FE o el que vayas a usar)
   - Versión Android: 
