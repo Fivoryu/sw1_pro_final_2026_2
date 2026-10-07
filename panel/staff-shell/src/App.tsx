@@ -1,5 +1,6 @@
 import { InvitationAcceptancePage } from "./features/auth/InvitationAcceptancePage";
 import { ProtectedStaffShell } from "./features/auth/ProtectedStaffShell";
+import { SceneViewer } from "./features/editor3d/SceneViewer";
 
 const INVITATION_PATH = "/accept-invitation";
 const BACKEND_INVITATION_PATH = "/invitations/accept";
@@ -34,6 +35,11 @@ function getPathInvitationToken(pathname: string) {
 export function App() {
   const currentUrl = new URL(window.location.href);
   const pathInvitation = getPathInvitationToken(currentUrl.pathname);
+
+  // --- RUTA EXCLUSIVA PARA TU VISOR 3D ---
+  if (currentUrl.pathname === "/visor3d") {
+    return <SceneViewer />;
+  }
 
   if (pathInvitation.isInvitationRoute) {
     return <InvitationAcceptancePage invitationToken={pathInvitation.token} />;
