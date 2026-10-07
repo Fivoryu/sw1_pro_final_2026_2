@@ -141,3 +141,22 @@ Fuera de superficie: identidad, agencias, reservas, contratos, prototipos de F07
   - verificación del control de firmas en S3 real (F11);
   - CP-011 menciona «verificación del difuminado», que el plan declara función adicional y no promesa: se trata en el punto académico de F04.
 
+### 2026-10-07 — Integración sobre `main` actualizado
+
+- Mientras se hacía F04.2, `main` integró la primera parte de F04 (PR #12 y #13) y F05 con multi-moneda (PR #14 y #15). Los commits de fotos se aplicaron uno por uno en la rama nueva `feat/f04-listing-photos`, creada desde `origin/main` (`03d93ae`).
+- **Migración renumerada:** `0013_listing_photos` pasó a ser `0018_listing_photos`, con `down_revision = "0017_exchange_rate_source"`, porque `main` ya ocupaba `0013` a `0017`. Las entradas anteriores de este registro conservan el nombre original.
+- **Conflictos resueltos:**
+  - backend: el error nuevo junto a `InvalidExtraReferenceError`; los imports del router; el detalle público con los extras de F05 (`_public_extra_item` con moneda) más `photos`; la prueba de migración agregada al final de las de F05;
+  - backend falso de la app cliente: moneda y fotos;
+  - contrato y plan: la fila de depósito de F05 más la fila de fotos, y un párrafo propio para F04.2 debajo de la línea reescrita por el PR #13.
+- **Ajustes por la combinación:**
+  - cinco pruebas nuevas de F05 enviaban inmuebles a revisión sin foto; ahora siembran una foto confirmada, igual que las de F04;
+  - `StaffListing.reopenedAsDraft()` de la app de captura conserva el campo `currency` nuevo;
+  - `apps/captura_mobile/pubspec.lock`, que ahora se versiona en `main`, incluye `image_picker`.
+- **Verificación sobre la base combinada:**
+  - backend: 657 aprobadas, 3 omitidas; Ruff y Pyright sin errores;
+  - PostgreSQL 16 descartable: `1 passed`, head `0018_listing_photos`;
+  - app de captura: 115/115, análisis y formato limpios;
+  - app cliente: 89/89, análisis limpio;
+  - panel: 123/123 y build.
+- **Pendiente para el usuario, sin ejecutar:** la base local de desarrollo quedó en la revisión `0013_listing_photos` de la rama anterior. Deshacerla, que borra la tabla `listing_photo` y sus filas de prueba, quedó bloqueado por los permisos de la sesión; el usuario decide cuándo ejecutarlo antes de aplicar la cadena nueva.
