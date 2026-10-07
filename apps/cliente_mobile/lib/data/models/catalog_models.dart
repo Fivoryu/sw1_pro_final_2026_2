@@ -43,6 +43,7 @@ class CatalogListing {
     required this.basePrice,
     required this.city,
     required this.zone,
+    this.coverPhotoUrl,
   });
 
   factory CatalogListing.fromJson(Object? json) {
@@ -53,10 +54,12 @@ class CatalogListing {
     final offerVersion = json['offer_version'];
     final city = json['city'];
     final zone = json['zone'];
+    final cover = json['cover_photo_url'];
     if (listingId is! String ||
         offerVersion is! int ||
         city is! String ||
-        zone is! String) {
+        zone is! String ||
+        (cover != null && cover is! String)) {
       throw const FormatException('Listing fields are invalid');
     }
     return CatalogListing(
@@ -66,6 +69,7 @@ class CatalogListing {
       basePrice: CatalogMoney.fromJson(json['base_price']),
       city: city,
       zone: zone,
+      coverPhotoUrl: cover as String?,
     );
   }
 
@@ -75,6 +79,29 @@ class CatalogListing {
   final CatalogMoney basePrice;
   final String city;
   final String zone;
+
+  /// Short-lived signed link to the first photo, or null without photos.
+  final String? coverPhotoUrl;
+}
+
+/// A published listing photo behind a short-lived signed link.
+class CatalogPhoto {
+  const CatalogPhoto({required this.photoId, required this.url});
+
+  factory CatalogPhoto.fromJson(Object? json) {
+    if (json is! Map<String, Object?>) {
+      throw const FormatException('Photo must be an object');
+    }
+    final photoId = json['photo_id'];
+    final url = json['url'];
+    if (photoId is! String || url is! String) {
+      throw const FormatException('Photo fields are invalid');
+    }
+    return CatalogPhoto(photoId: photoId, url: url);
+  }
+
+  final String photoId;
+  final String url;
 }
 
 /// An optional item the agency prices apart from the base price.
@@ -113,6 +140,7 @@ class CatalogListingDetail {
     required this.bedrooms,
     required this.bathrooms,
     required this.extras,
+    this.photos = const [],
   });
 
   factory CatalogListingDetail.fromJson(Object? json) {
@@ -122,7 +150,11 @@ class CatalogListingDetail {
     final bedrooms = json['bedrooms'];
     final bathrooms = json['bathrooms'];
     final extras = json['extras'];
-    if (bedrooms is! int || bathrooms is! int || extras is! List<Object?>) {
+    final photos = json['photos'] ?? const <Object?>[];
+    if (bedrooms is! int ||
+        bathrooms is! int ||
+        extras is! List<Object?> ||
+        photos is! List<Object?>) {
       throw const FormatException('Detail fields are invalid');
     }
     return CatalogListingDetail(
@@ -130,6 +162,7 @@ class CatalogListingDetail {
       bedrooms: bedrooms,
       bathrooms: bathrooms,
       extras: extras.map(CatalogExtra.fromJson).toList(growable: false),
+      photos: photos.map(CatalogPhoto.fromJson).toList(growable: false),
     );
   }
 
@@ -137,6 +170,9 @@ class CatalogListingDetail {
   final int bedrooms;
   final int bathrooms;
   final List<CatalogExtra> extras;
+
+  /// Gallery in upload order; the first one is the cover.
+  final List<CatalogPhoto> photos;
 }
 
 /// One page of search results; [nextCursor] is null on the last page.

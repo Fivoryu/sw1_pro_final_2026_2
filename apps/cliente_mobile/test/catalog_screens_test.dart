@@ -342,6 +342,14 @@ void main() {
         'Recorrido 3D no disponible.',
         'Disponibilidad no consultada ni confirmada.',
       ]) {
+        // The gallery sits on top; scroll the detail to reach lower sections.
+        await tester.scrollUntilVisible(
+          find.text(text),
+          200,
+          scrollable: find
+              .descendant(of: detail, matching: find.byType(Scrollable))
+              .first,
+        );
         expect(
           find.descendant(of: detail, matching: find.text(text)),
           findsOneWidget,
@@ -460,5 +468,78 @@ void main() {
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
+  });
+
+  group('photos', () {
+    testWidgets('a card shows its cover or a neutral placeholder', (
+      tester,
+    ) async {
+      final harness = _build();
+      harness.backend.seed(id: 'bare', city: 'Bogotá');
+      harness.backend.seed(id: 'with-photos', photoIds: ['a', 'b']);
+
+      await _pumpCatalog(tester, harness.controller);
+
+      final cover = tester.widget<Image>(
+        find.descendant(
+          of: find.byKey(const ValueKey('catalog-cover-with-photos')),
+          matching: find.byType(Image),
+        ),
+      );
+      expect(
+        (cover.image as NetworkImage).url,
+        '${FakeCatalogBackend.photoBaseUrl}/a?download=600',
+      );
+      expect(
+        find.byKey(const ValueKey('catalog-cover-placeholder-bare')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('catalog-cover-bare')), findsNothing);
+    });
+
+    testWidgets('the detail shows the gallery in order with its position', (
+      tester,
+    ) async {
+      final harness = _build();
+      harness.backend.seed(id: 'with-photos', photoIds: ['a', 'b', 'c']);
+
+      await _pumpCatalog(tester, harness.controller);
+      await _tap(
+        tester,
+        find.byKey(const ValueKey('catalog-listing-with-photos')),
+      );
+
+      final gallery = find.byKey(const ValueKey('detail-photos'));
+      expect(gallery, findsOneWidget);
+      expect(find.text('Foto 1 de 3'), findsOneWidget);
+      final first = tester.widget<Image>(
+        find.descendant(
+          of: find.byKey(const ValueKey('detail-photo-a')),
+          matching: find.byType(Image),
+        ),
+      );
+      expect(
+        (first.image as NetworkImage).url,
+        '${FakeCatalogBackend.photoBaseUrl}/a?download=600',
+      );
+
+      await tester.drag(gallery, const Offset(-600, 0));
+      await tester.pumpAndSettle();
+      expect(find.text('Foto 2 de 3'), findsOneWidget);
+    });
+
+    testWidgets('the detail says when a listing has no photos', (tester) async {
+      final harness = _build();
+      harness.backend.seed(id: 'bare');
+
+      await _pumpCatalog(tester, harness.controller);
+      await _tap(tester, find.byKey(const ValueKey('catalog-listing-bare')));
+
+      expect(
+        find.text('Este inmueble todavía no tiene fotos.'),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('detail-photos')), findsNothing);
+    });
   });
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../../data/models/catalog_models.dart';
 import '../../../../domain/catalog_controller.dart';
 import 'catalog_format.dart';
+import 'listing_photo.dart';
 
 /// Public detail of one published listing.
 ///
@@ -24,6 +25,7 @@ class ListingDetailScreen extends StatefulWidget {
 
 class _ListingDetailScreenState extends State<ListingDetailScreen> {
   CatalogListingDetail? _detail;
+  int _photoIndex = 0;
   String? _message;
   bool _loading = true;
 
@@ -93,6 +95,8 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
       key: const ValueKey('property-detail-content'),
       padding: const EdgeInsets.all(20),
       children: [
+        _gallery(context, detail),
+        const SizedBox(height: 16),
         Text(locationLabel(listing), style: theme.textTheme.headlineSmall),
         const SizedBox(height: 4),
         Text(operationLabel(listing.operation)),
@@ -140,6 +144,47 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
         Text('Disponibilidad', style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),
         const Text('Disponibilidad no consultada ni confirmada.'),
+      ],
+    );
+  }
+
+  /// Photos in upload order, swiped one at a time; the first is the cover.
+  Widget _gallery(BuildContext context, CatalogListingDetail detail) {
+    final photos = detail.photos;
+    final place = locationLabel(detail.listing);
+    if (photos.isEmpty) {
+      return const SizedBox(
+        height: 240,
+        child: PhotoPlaceholder(
+          message: 'Este inmueble todavía no tiene fotos.',
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: 240,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: PageView.builder(
+              key: const ValueKey('detail-photos'),
+              itemCount: photos.length,
+              onPageChanged: (index) => setState(() => _photoIndex = index),
+              itemBuilder: (context, index) => ListingPhoto(
+                key: ValueKey('detail-photo-${photos[index].photoId}'),
+                url: photos[index].url,
+                semanticLabel:
+                    'Foto ${index + 1} de ${photos.length} de $place',
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Foto ${_photoIndex + 1} de ${photos.length}',
+          textAlign: TextAlign.center,
+        ),
       ],
     );
   }
