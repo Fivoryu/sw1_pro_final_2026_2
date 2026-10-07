@@ -25,6 +25,7 @@ from app.modules.catalog.errors import (
     InvalidExtraReferenceError,
     InvalidListingTransitionError,
     InvalidQuoteExtrasError,
+    ListingPhotoRequiredError,
     QuoteExpiredError,
     QuoteNotFoundError,
     QuoteOfferVersionMismatchError,
@@ -33,6 +34,7 @@ from app.modules.catalog.errors import (
 from app.modules.catalog.models import (
     Listing,
     ListingExtra,
+    ListingPhoto,
     ListingTransition,
     QuoteRateLimitEvent,
     QuoteSnapshot,
@@ -360,6 +362,15 @@ def edit_staff_listing(
     return listing
 
 
+def _has_confirmed_photo(session: Session, listing_id: str) -> bool:
+    return (
+        session.query(ListingPhoto.id)
+        .filter(ListingPhoto.listing_id == listing_id, ListingPhoto.status == "confirmed")
+        .first()
+        is not None
+    )
+
+
 _TRANSITION_STATES = {
     "submit": (("draft", False), ("pending", False)),
     "approve": (("pending", False), ("approved", False)),
@@ -393,6 +404,8 @@ def transition_staff_listing(
     from_status, from_published = listing.approval_status, listing.is_published
     if (from_status, from_published) != expected:
         raise InvalidListingTransitionError
+    if action == "submit" and not _has_confirmed_photo(session, listing_id):
+        raise ListingPhotoRequiredError
     listing.approval_status, listing.is_published = target
     session.flush()
     session.add(

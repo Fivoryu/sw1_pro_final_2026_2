@@ -45,3 +45,7 @@ class InvalidListingTransitionError(Exception):
 
 class InvalidExtraReferenceError(Exception):
     """An extras payload references an extra that does not belong to the listing."""
+
+
+class ListingPhotoRequiredError(Exception):
+    """A listing cannot be submitted for review without a confirmed photo."""
