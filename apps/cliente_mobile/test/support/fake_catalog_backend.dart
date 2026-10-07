@@ -18,6 +18,8 @@ class FakeCatalogBackend {
 
   http.Client get client => MockClient(_handle);
 
+  static const photoBaseUrl = 'http://127.0.0.1:4566/roomforge-local-assets';
+
   /// Publishes a listing; later seeds are newer and come first.
   void seed({
     required String id,
@@ -28,7 +30,12 @@ class FakeCatalogBackend {
     int bedrooms = 3,
     int bathrooms = 2,
     List<({String id, String name, String amount})> extras = const [],
+    List<String> photoIds = const [],
   }) {
+    final photos = [
+      for (final photoId in photoIds)
+        {'photo_id': photoId, 'url': '$photoBaseUrl/$photoId?download=600'},
+    ];
     _listings.insert(0, {
       'listing_id': id,
       'offer_version': 1,
@@ -36,6 +43,8 @@ class FakeCatalogBackend {
       'base_price': {'amount': amount, 'currency': 'COP'},
       'city': city,
       'zone': zone,
+      'cover_photo_url': photos.isEmpty ? null : photos.first['url'],
+      'photos': photos,
       'bedrooms': bedrooms,
       'bathrooms': bathrooms,
       'extras': [
@@ -66,6 +75,7 @@ class FakeCatalogBackend {
       'base_price',
       'city',
       'zone',
+      'cover_photo_url',
     ])
       key: listing[key],
   };
