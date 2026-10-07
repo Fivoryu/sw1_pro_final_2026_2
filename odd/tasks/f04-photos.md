@@ -61,7 +61,7 @@ Fuera de superficie: identidad, agencias, reservas, contratos, prototipos de F07
 - [x] **F04P-T5 — App de captura.** Sacar o elegir foto, subir con progreso, reintentar, ver y borrar en la ficha.
 - [x] **F04P-T6 — Panel.** Ver las fotos al revisar un inmueble.
 - [x] **F04P-T7 — App cliente.** Portada en la lista y galería en el detalle.
-- [ ] **F04P-T8 — Verificación.** Suites, PostgreSQL real, recorrido en el emulador y el panel, documentación y plan.
+- [x] **F04P-T8 — Verificación.** Suites, PostgreSQL real, recorrido en el emulador y el panel, documentación y plan.
 
 ## Registro de ejecución
 
@@ -123,4 +123,21 @@ Fuera de superficie: identidad, agencias, reservas, contratos, prototipos de F07
 - Ajustes durante GREEN: con la proporción 16:9 o 4:3 sobre 720 px de ancho las imágenes medían unos 400 px y empujaban el contenido fuera de lo que la lista construye, rompiendo tres pruebas existentes; se fijaron alturas de 160 y 240 px. La prueba del detalle ahora se desplaza hasta las secciones inferiores, que quedaron debajo de la galería. Dos pruebas nuevas buscaban `Image` en la clave del componente que la envuelve; se corrigieron para buscarla dentro.
 - Verificación: `flutter test` 83/83, `flutter analyze --no-pub` sin hallazgos, formato limpio en los archivos de la tarea. APK de depuración compilado (Gradle detenido) e instalado en el emulador, con `adb reverse tcp:4566 tcp:4566` activo.
 - Prueba manual del usuario en el emulador, sin iniciar sesión: portadas en la lista, recuadro neutro en los inmuebles sin fotos y galería en el detalle. Resultado informado: «funciona muy bien».
+
+### 2026-10-07 — F04P-T8, cierre
+
+- Verificación final sobre los commits `a8b8448`, `8594413`, `a1e6f32` y `596ee2d`:
+  - backend: 555 aprobadas, 3 omitidas; Ruff y Pyright sin errores;
+  - `test_f04_publications_postgres.py` contra PostgreSQL 16 descartable: `1 passed`, head `0013_listing_photos`;
+  - app de captura: `flutter test` 106/106 y `flutter analyze` sin hallazgos;
+  - app cliente: 83/83 y sin hallazgos;
+  - panel: `vitest` 102/102 y `npm run build` sin errores.
+- Contratos:
+  - `docs/api/f04-publications-v1.md`: rutas de fotos, flujo, cuerpos y respuestas, reglas, fila de autorización con sus pruebas, errores `409`, `422` y `503`, y límites (Floci sin validación de firmas, sin política de retención).
+  - `docs/api/catalog-reservations-v1.md`: `cover_photo_url` en lista y detalle y `photos` en el detalle, como nota fechada.
+- Plan maestro: línea de avance de F04 con F04.2 implementada en la rama; el cuadro §1.4.1 se actualiza al integrar en `main`.
+- Pendiente fuera de esta tarea:
+  - política de retención y borrado de fotos (plan F04.2, sin decisión);
+  - verificación del control de firmas en S3 real (F11);
+  - CP-011 menciona «verificación del difuminado», que el plan declara función adicional y no promesa: se trata en el punto académico de F04.
 
