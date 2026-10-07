@@ -8,6 +8,7 @@
 
 - **Escenario**: inmobiliarias publican inmuebles; agentes capturan videos/fotos para reconstrucción 3D (Meshroom); clientes recorren los inmuebles en 3D, consultan precios, reservan y pagan con token de prueba.
 - **Fase actual**: en la base `b6a468a` están AGENCY-2 (registro de agencias) y la autenticación de personal. PB-001/PB-002 (autenticación de clientes) y el registro, login y sesión de la app cliente son históricos y no están presentes en esta base. La app Flutter cliente tiene únicamente su shell inicial; cuenta/sesión, catálogo, cotizaciones, reservas y wallet siguen pendientes.
+- **Actualización 2026-10-07 (F04 integrada):** el párrafo anterior describe una base histórica. El estado vigente por fase está en `docs/plan-maestro-roomforge.md` §1.4.1. Con F04 completa: el panel tiene la bandeja de revisión de inmuebles; la app de captura tiene el acceso de personal y los borradores de inmuebles con fotos; la app cliente tiene cuenta y sesión de cliente y el catálogo público con fotos. Cotización, wallet y reservas no tienen interfaz todavía.
 - **Documentación maestra**: `docs/` — PAPS, Sprint 0–3, trazabilidad de IDs (PB/HU/CP/GAP) siguiendo el formato del documento modelo (Grupo #12).
 
 ## 2. Cómo trabajar acá (primero leé esto)
@@ -96,10 +97,10 @@ docker compose -f infra/docker/compose.postgres.yml up -d
 
 | Superficie | Estado |
 | --- | --- |
-| `backend/` | AGENCY-2 (registro de agencias) y autenticación de personal presentes en `b6a468a`; autenticación de cliente, catálogo, cotizaciones y reservas aún ausentes en esta base. |
-| `panel/` | 🔲 Estructura inicial (React + TypeScript + Vite), sin código |
-| `apps/captura_mobile/` | 🔲 Estructura inicial (Flutter), sin código |
-| `apps/cliente_mobile/` | Shell Flutter preparado en `feat/roomforge-mobile-3d`; sesión de cuenta, catálogo, cotizaciones y reservas integradas pendientes. |
+| `backend/` | Identidad de personal y de cliente, agencias, catálogo con publicaciones y fotos (F04, migraciones hasta `0013_listing_photos`), cotizaciones y reservas con escrow local (F05/F09 parciales). |
+| `panel/` | Panel de personal (React + TypeScript + Vite): acceso con TOTP, administración de agencias y bandeja de revisión de inmuebles con fotos. |
+| `apps/captura_mobile/` | App de captura (Flutter): acceso de personal y borradores de inmuebles con fotos; las pantallas de captura espacial (F07) siguen siendo prototipos. |
+| `apps/cliente_mobile/` | App cliente (Flutter): cuenta y sesión de cliente, y catálogo público con filtros, detalle y fotos; cotización, wallet y reservas sin interfaz. |
 | `worker3d/`, `contracts/` | 🔲 Sin trabajo aún |
 
 ## 7. Documentación y trazabilidad (convenciones)

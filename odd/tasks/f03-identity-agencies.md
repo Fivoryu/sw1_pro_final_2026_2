@@ -191,3 +191,14 @@ Everything above was written while the work was still local. What actually happe
 ## Nota posterior (2026-10-01): acceso de la app de captura contra la API real
 
 Lo registrado arriba como completo para `apps/captura_mobile` se verificó solo contra `test/support/fake_staff_backend.dart`. Contra la API real, `login/totp`, `refresh` y `logout` respondían `403 Origin is not allowed` porque la app, como cliente nativo, no envía `Origin`, y el controlador descartaba el token de acceso tras el login. Ambos defectos se corrigen en `odd/tasks/f03-capture-staff-origin.md`; este registro no se reescribe.
+
+## Nota posterior (2026-10-07): F03.3 verificado con F04
+
+La dependencia abierta de F03.3 quedó cerrada en `feat/f04-listings-completion`:
+
+- la API pública de catálogo devuelve solo publicaciones aprobadas y publicadas, de todas las agencias;
+- la matriz de autorización por actor está en `docs/api/f04-publications-v1.md`;
+- 40 pruebas de acceso cruzado cubren todas las rutas de inmueble: otra agencia y `platform_admin` reciben `403`, un ID ajeno en la ruta propia recibe un `404` idéntico al de un inmueble inexistente, y sin sesión o con token de cliente se recibe `401`;
+- las rutas de fotos se cubren con las pruebas equivalentes.
+
+Las pruebas pasaron sin defectos y el sabotaje en una copia descartable demostró que detectan un hueco real. Evidencia: `odd/tasks/f04-listings-completion.md` (F04C-T6) y `odd/tasks/f04-photos.md`.
