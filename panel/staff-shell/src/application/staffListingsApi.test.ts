@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getAgencyListing,
   listAgencyListings,
+  listListingPhotos,
   listListingTransitions,
   StaffListingsApiError,
   transitionListing,
@@ -185,3 +186,33 @@ describe("staff listings API", () => {
     ).rejects.toBeInstanceOf(TypeError);
   });
 });
+
+describe("staff listing photos API", () => {
+  it("lists a listing's confirmed photos with the access token", async () => {
+    const photo = {
+      photo_id: "photo-1",
+      content_type: "image/jpeg",
+      size_bytes: 2048,
+      url: "http://127.0.0.1:4566/bucket/photo-1?X-Amz-Signature=abc",
+      created_at: "2026-10-06T12:00:00Z",
+    };
+    respondWithJson({ photos: [photo] });
+
+    const result = await listListingPhotos("volatile-access", "agency 1", "listing/1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/staff/agencies/agency%201/listings/listing%2F1/photos",
+      { method: "GET", headers: bearer },
+    );
+    expect(result).toEqual([photo]);
+  });
+
+  it("raises the server detail when the photos cannot be listed", async () => {
+    respondWithJson({ detail: "Photo storage is not configured", code: "dependency_unavailable" }, 503);
+
+    await expect(listListingPhotos("volatile-access", "agency-1", "listing-1")).rejects.toEqual(
+      new StaffListingsApiError(503, "Photo storage is not configured"),
+    );
+  });
+});
+

@@ -2,10 +2,12 @@ import { useEffect, useId, useRef, useState } from "react";
 import {
   getAgencyListing,
   listAgencyListings,
+  listListingPhotos,
   listListingTransitions,
   StaffListingsApiError,
   transitionListing,
   type ListingReviewAction,
+  type ListingPhoto,
   type ListingTransition,
   type StaffListing,
 } from "../../application/staffListingsApi";
@@ -302,8 +304,28 @@ function ListingReviewDetail({
   const [reason, setReason] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<LoadState<ListingPhoto[]>>({ kind: "loading" });
   const confirmationId = useId();
   const reasonId = useId();
+
+  // Photos load on their own: a storage problem must not block the review.
+  useEffect(() => {
+    let isCurrent = true;
+    setPhotos({ kind: "loading" });
+    listListingPhotos(tokenRef.current, agencyId, listingId).then(
+      (value) => {
+        if (isCurrent) setPhotos({ kind: "ready", value });
+      },
+      () => {
+        if (isCurrent) {
+          setPhotos({ kind: "error", message: "No se pudieron cargar las fotos del inmueble." });
+        }
+      },
+    );
+    return () => {
+      isCurrent = false;
+    };
+  }, [agencyId, listingId, detailReload, tokenRef]);
 
   useEffect(() => {
     let isCurrent = true;
@@ -431,6 +453,33 @@ function ListingReviewDetail({
               <dd>{detail.value.listing.description ?? "Sin descripción"}</dd>
             </div>
           </dl>
+
+          <section aria-labelledby={`${confirmationId}-photos`} className="review-photos">
+            <h4 id={`${confirmationId}-photos`}>Fotos</h4>
+            {photos.kind === "loading" ? <p>Cargando fotos…</p> : null}
+            {photos.kind === "error" ? <p role="status">{photos.message}</p> : null}
+            {photos.kind === "ready" && photos.value.length === 0 ? (
+              <p>Este inmueble no tiene fotos.</p>
+            ) : null}
+            {photos.kind === "ready" && photos.value.length > 0 ? (
+              <>
+                <ul aria-label="Fotos del inmueble" className="review-photos__grid">
+                  {photos.value.map((photo, index) => (
+                    <li key={photo.photo_id}>
+                      <a href={photo.url} rel="noopener noreferrer" target="_blank">
+                        <img
+                          alt={`Foto ${index + 1} de ${photos.value.length} · ${detail.value.listing.city} · ${detail.value.listing.zone}`}
+                          loading="lazy"
+                          src={photo.url}
+                        />
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+                <p className="review-photos__note">La primera foto es la portada del catálogo.</p>
+              </>
+            ) : null}
+          </section>
 
           <section aria-labelledby={`${confirmationId}-history`} className="review-history">
             <h4 id={`${confirmationId}-history`}>Historial</h4>

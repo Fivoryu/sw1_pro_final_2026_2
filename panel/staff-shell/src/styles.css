@@ -1001,6 +1001,7 @@ a {
   overflow-wrap: anywhere;
 }
 
+.review-photos h4,
 .review-history h4,
 .review-confirmation h4 {
   margin: 0 0 0.6rem;
@@ -1295,3 +1296,32 @@ a {
     transition-duration: 0.01ms !important;
   }
 }
+
+.review-photos__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.review-photos__grid a {
+  display: block;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.review-photos__grid img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: var(--surface-edge);
+}
+
+.review-photos__note {
+  margin: 0.5rem 0 0;
+  font-size: 0.875rem;
+}
+
