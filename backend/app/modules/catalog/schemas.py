@@ -30,6 +30,14 @@ class CatalogListingItem(BaseModel):
     base_price: CatalogMoney
     city: str
     zone: str
+    cover_photo_url: str | None
+
+
+class CatalogPhotoItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    photo_id: str
+    url: str
 
 
 class CatalogExtraItem(BaseModel):
@@ -44,6 +52,7 @@ class CatalogListingDetail(CatalogListingItem):
     bedrooms: int
     bathrooms: int
     extras: list[CatalogExtraItem]
+    photos: list[CatalogPhotoItem]
 
 
 class CatalogListingPage(BaseModel):
@@ -191,3 +200,40 @@ class ListingTransitionResponse(BaseModel):
     actor_id: str
     actor_role: str
     created_at: datetime
+
+
+ListingPhotoContentType = Literal["image/jpeg", "image/png", "image/webp"]
+
+
+class ListingPhotoUploadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content_type: ListingPhotoContentType
+    size_bytes: Annotated[StrictInt, Field(ge=1, le=5 * 1024 * 1024)]
+
+
+class ListingPhotoUploadResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    photo_id: str
+    upload_url: str
+    upload_method: Literal["PUT"]
+    upload_headers: dict[str, str]
+    expires_at: datetime
+
+
+class ListingPhotoResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    photo_id: str
+    content_type: ListingPhotoContentType
+    size_bytes: int
+    url: str
+    created_at: datetime
+
+
+class ListingPhotoList(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    photos: list[ListingPhotoResponse]
+

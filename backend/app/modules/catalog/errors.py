@@ -41,3 +41,7 @@ class UnsupportedRateLimitDialectError(Exception):
 
 class InvalidListingTransitionError(Exception):
     """The requested listing action does not match its current state."""
+
+
+class ListingPhotoRequiredError(Exception):
+    """A listing cannot be submitted for review without a confirmed photo."""

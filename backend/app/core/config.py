@@ -36,6 +36,9 @@ class Settings:
     database_statement_timeout_seconds: int = 10
     email_send_timeout_seconds: int = 10
     s3_endpoint_url: str | None = None
+    s3_bucket_name: str | None = None
+    s3_public_endpoint_url: str | None = None
+    s3_region: str = "us-east-1"
     escrow_rpc_url: str | None = None
     escrow_address: str | None = None
     escrow_chain_id: str | None = None
@@ -79,6 +82,9 @@ class Settings:
                 "STAFF_EMAIL_SEND_TIMEOUT_SECONDS", 10
             ),
             s3_endpoint_url=os.environ.get("S3_ENDPOINT_URL"),
+            s3_bucket_name=os.environ.get("S3_BUCKET_NAME") or None,
+            s3_public_endpoint_url=os.environ.get("S3_PUBLIC_ENDPOINT_URL") or None,
+            s3_region=os.environ.get("AWS_DEFAULT_REGION") or "us-east-1",
             escrow_rpc_url=os.environ.get("ROOMFORGE_ESCROW_RPC_URL"),
             escrow_address=os.environ.get("ROOMFORGE_ESCROW_ADDRESS"),
             escrow_chain_id=os.environ.get("ROOMFORGE_ESCROW_CHAIN_ID"),

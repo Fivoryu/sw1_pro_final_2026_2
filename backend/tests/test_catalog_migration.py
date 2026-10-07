@@ -514,3 +514,105 @@ def test_quote_snapshot_migration_upgrades_and_downgrades_sqlite() -> None:
             assert "listing" in inspect(connection).get_table_names()
     finally:
         engine.dispose()
+
+
+def test_listing_photo_migration_upgrades_and_downgrades_sqlite() -> None:
+    catalog = _load_migration(
+        _MIGRATIONS / "0007_catalog_offers.py", "catalog_offers_0007_for_photo_test"
+    )
+    migration_path = _MIGRATIONS / "0013_listing_photos.py"
+    assert migration_path.is_file(), "F04.2 must add the 0013 listing photo migration"
+    migration = _load_migration(migration_path, "listing_photos_0013_for_test")
+    assert migration.revision == "0013_listing_photos"
+    assert migration.down_revision == "0012_listing_transitions"
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+            connection.execute(text("CREATE TABLE agency (id VARCHAR(36) PRIMARY KEY)"))
+            connection.execute(text("INSERT INTO agency (id) VALUES ('agency-one')"))
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                catalog.upgrade()
+                migration.upgrade()
+            _insert_listing(connection)
+
+            inspector = inspect(connection)
+            assert {column["name"] for column in inspector.get_columns("listing_photo")} == {
+                "id",
+                "agency_id",
+                "listing_id",
+                "object_key",
+                "status",
+                "content_type",
+                "size_bytes",
+                "created_at",
+                "expires_at",
+                "confirmed_at",
+            }
+            assert {index["name"] for index in inspector.get_indexes("listing_photo")} >= {
+                "ix_listing_photo_listing_id_created_at",
+            }
+
+            insert = (
+                "INSERT INTO listing_photo "
+                "(id, agency_id, listing_id, object_key, status, content_type, size_bytes, "
+                "created_at, expires_at, confirmed_at) VALUES "
+                "(:id, 'agency-one', 'listing-one', :object_key, :status, :content_type, "
+                ":size_bytes, '2026-10-04 12:00:00', '2026-10-04 12:15:00', :confirmed_at)"
+            )
+            valid = {
+                "id": "photo-one",
+                "object_key": "agencies/agency-one/listings/listing-one/photos/photo-one",
+                "status": "pending",
+                "content_type": "image/jpeg",
+                "size_bytes": 1024,
+                "confirmed_at": None,
+            }
+            connection.execute(text(insert), valid)
+            connection.execute(
+                text(insert),
+                {
+                    **valid,
+                    "id": "photo-two",
+                    "object_key": "agencies/agency-one/listings/listing-one/photos/photo-two",
+                    "status": "confirmed",
+                    "content_type": "image/webp",
+                    "size_bytes": 5 * 1024 * 1024,
+                    "confirmed_at": "2026-10-04 12:01:00",
+                },
+            )
+
+            for invalid in (
+                {"status": "uploaded"},
+                {"content_type": "image/gif"},
+                {"size_bytes": 0},
+                {"size_bytes": 5 * 1024 * 1024 + 1},
+                {"status": "confirmed", "confirmed_at": None},
+                {"status": "pending", "confirmed_at": "2026-10-04 12:01:00"},
+                {"object_key": valid["object_key"]},
+            ):
+                _assert_integrity_error(
+                    connection,
+                    insert,
+                    {
+                        **valid,
+                        "id": "photo-invalid",
+                        "object_key": "agencies/agency-one/listings/listing-one/photos/other",
+                        **invalid,
+                    },
+                )
+            _assert_integrity_error(
+                connection,
+                insert.replace("'listing-one'", "'missing-listing'"),
+                {**valid, "id": "photo-orphan", "object_key": "orphan"},
+            )
+
+            with Operations.context(context):
+                migration.downgrade()
+            assert "listing_photo" not in inspect(connection).get_table_names()
+            assert "listing" in inspect(connection).get_table_names()
+    finally:
+        engine.dispose()
+

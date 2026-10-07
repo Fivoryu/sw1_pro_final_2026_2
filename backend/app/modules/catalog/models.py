@@ -17,6 +17,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     event,
     false,
     func,
@@ -89,6 +90,45 @@ class Listing(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+
+
+# Photo limits shared by the model constraints and the photo service.
+LISTING_PHOTO_CONTENT_TYPES = ("image/jpeg", "image/png", "image/webp")
+LISTING_PHOTO_MAX_BYTES = 5 * 1024 * 1024
+LISTING_PHOTO_MAX_COUNT = 10
+
+
+class ListingPhoto(Base):
+    """A listing photo kept in object storage; the database holds only its metadata."""
+
+    __tablename__ = "listing_photo"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'confirmed')", name="ck_listing_photo_status"),
+        CheckConstraint(
+            "content_type IN ('image/jpeg', 'image/png', 'image/webp')",
+            name="ck_listing_photo_content_type",
+        ),
+        CheckConstraint(
+            "size_bytes > 0 AND size_bytes <= 5242880", name="ck_listing_photo_size_bytes"
+        ),
+        CheckConstraint(
+            "(status = 'confirmed') = (confirmed_at IS NOT NULL)",
+            name="ck_listing_photo_confirmed_at",
+        ),
+        UniqueConstraint("object_key", name="uq_listing_photo_object_key"),
+        Index("ix_listing_photo_listing_id_created_at", "listing_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    agency_id: Mapped[str] = mapped_column(ForeignKey("agency.id"), nullable=False)
+    listing_id: Mapped[str] = mapped_column(ForeignKey("listing.id"), nullable=False)
+    object_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ListingTransition(Base):

@@ -71,6 +71,7 @@ services:
       S3_BUCKET_NAME: ${S3_BUCKET_NAME:-roomforge-local-assets}
       SQS_QUEUE_NAME: ${SQS_QUEUE_NAME:-roomforge-local-events}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://floci:4566}
+      S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-http://127.0.0.1:4566}
       SQS_ENDPOINT_URL: ${SQS_ENDPOINT_URL:-http://floci:4566}
     ports:
       - "127.0.0.1:${API_PORT:-8000}:8000"

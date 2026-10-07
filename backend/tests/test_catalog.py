@@ -339,6 +339,7 @@ def test_public_list_is_approved_published_and_cross_agency(
         "base_price",
         "city",
         "zone",
+        "cover_photo_url",
     }
 
 
@@ -362,6 +363,7 @@ def test_detail_has_minimal_public_schema_and_hides_private_fields(
         "base_price": {"amount": "100000.00", "currency": "COP"},
         "city": "Córdoba",
         "zone": "Centro",
+        "cover_photo_url": None,
         "bedrooms": 2,
         "bathrooms": 1,
         "extras": [
@@ -371,6 +373,7 @@ def test_detail_has_minimal_public_schema_and_hides_private_fields(
                 "price": {"amount": "1234.50", "currency": "COP"},
             }
         ],
+        "photos": [],
     }
     serialized = response.text
     assert "private description" not in serialized
@@ -1185,6 +1188,7 @@ def test_openapi_and_validation_preserve_staff_customer_namespaces(
         "base_price",
         "city",
         "zone",
+        "cover_photo_url",
     }
     assert set(schemas["CatalogListingDetail"]["properties"]) == {
         "listing_id",
@@ -1193,9 +1197,11 @@ def test_openapi_and_validation_preserve_staff_customer_namespaces(
         "base_price",
         "city",
         "zone",
+        "cover_photo_url",
         "bedrooms",
         "bathrooms",
         "extras",
+        "photos",
     }
     assert set(schemas["CatalogExtraItem"]["properties"]) == {
         "extra_id",

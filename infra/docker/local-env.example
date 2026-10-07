@@ -23,4 +23,7 @@ AWS_DEFAULT_REGION=us-east-1
 S3_BUCKET_NAME=roomforge-local-assets
 SQS_QUEUE_NAME=roomforge-local-events
 S3_ENDPOINT_URL=http://floci:4566
+# Address that signed photo links use. The API reaches Floci at S3_ENDPOINT_URL,
+# while the panel and the emulator (through `adb reverse tcp:4566 tcp:4566`) use this one.
+S3_PUBLIC_ENDPOINT_URL=http://127.0.0.1:4566
 SQS_ENDPOINT_URL=http://floci:4566

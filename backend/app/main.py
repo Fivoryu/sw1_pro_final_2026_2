@@ -18,6 +18,8 @@ from app.core.errors import ErrorResponse, error_code_for_status
 from app.db.session import create_session_factory, protect_session_factory
 from app.modules.agencies.router import agency_wallet_router, router as agencies_router
 from app.modules.catalog.errors import QuoteApiError
+from app.modules.catalog.photo_router import router as catalog_photo_router
+from app.modules.catalog.photo_storage import PhotoStorage, create_photo_storage
 from app.modules.catalog.router import router as catalog_router
 from app.modules.customer_identity.router import router as customer_identity_router
 from app.modules.customer_identity.router import wallet_router as customer_wallet_router
@@ -34,6 +36,7 @@ def create_app(
     session_factory: sessionmaker[Session] | None = None,
     email_sender: Any = None,
     clock: Callable[[], datetime] | None = None,
+    photo_storage: PhotoStorage | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_env()
     resolved_settings.validate()
@@ -54,6 +57,9 @@ def create_app(
     app.state.email_sender = email_sender
     app.state.clock = clock or (lambda: datetime.now(timezone.utc))
     app.state.engine = engine
+    app.state.photo_storage = (
+        photo_storage if photo_storage is not None else create_photo_storage(resolved_settings)
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[resolved_settings.web_origin.rstrip("/")],
@@ -68,6 +74,7 @@ def create_app(
     app.include_router(agencies_router)
     app.include_router(agency_wallet_router)
     app.include_router(catalog_router)
+    app.include_router(catalog_photo_router)
     app.include_router(reservations_router)
     app.include_router(staff_reservations_router)
 

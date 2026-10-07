@@ -17,10 +17,13 @@ from app.modules.catalog.errors import (
     UnsupportedRateLimitDialectError,
 )
 from app.modules.catalog.models import Listing, QuoteSnapshot
+from app.modules.catalog.photo_storage import PhotoStorage
+from app.modules.catalog.photos import DOWNLOAD_LINK_SECONDS, confirmed_photos
 from app.modules.catalog.schemas import (
     CatalogExtraItem,
     CatalogListingDetail,
     CatalogListingItem,
+    CatalogPhotoItem,
     CatalogListingPage,
     CatalogMoney,
     ListingApprovalStatus,
@@ -38,7 +41,7 @@ from app.modules.catalog.schemas import (
     StaffListingPage,
     StaffListingPagination,
 )
-from app.modules.catalog.errors import InvalidListingTransitionError
+from app.modules.catalog.errors import InvalidListingTransitionError, ListingPhotoRequiredError
 from app.modules.catalog.service import (
     configure_listing_deposit,
     create_staff_listing,
@@ -70,7 +73,7 @@ def _money(amount: Decimal) -> CatalogMoney:
     return CatalogMoney(amount=format(exact_amount, ".2f"), currency="COP")
 
 
-def _listing_item(listing: Listing) -> CatalogListingItem:
+def _listing_item(listing: Listing, cover_photo_url: str | None) -> CatalogListingItem:
     return CatalogListingItem(
         listing_id=listing.id,
         offer_version=listing.offer_version,
@@ -78,7 +81,22 @@ def _listing_item(listing: Listing) -> CatalogListingItem:
         base_price=_money(listing.base_price),
         city=listing.city,
         zone=listing.zone,
+        cover_photo_url=cover_photo_url,
     )
+
+
+def _public_photos(request: Request, session: Session, listing_id: str) -> list[CatalogPhotoItem]:
+    """Signed links to a public listing's confirmed photos; none without storage."""
+    storage: PhotoStorage | None = request.app.state.photo_storage
+    if storage is None:
+        return []
+    return [
+        CatalogPhotoItem(
+            photo_id=photo.id,
+            url=storage.presign_download(photo.object_key, expires_in=DOWNLOAD_LINK_SECONDS),
+        )
+        for photo in confirmed_photos(session, listing_id)
+    ]
 
 
 @listings_router.get(
@@ -132,12 +150,13 @@ def list_public_listings(
             )
         except InvalidCursorError:
             raise HTTPException(status_code=400, detail="invalid_cursor") from None
+        items = []
+        for listing in listings:
+            photos = _public_photos(request, session, listing.id)
+            items.append(_listing_item(listing, photos[0].url if photos else None))
 
     next_cursor = encode_cursor(listings[-1].created_at, listings[-1].id) if has_more else None
-    return CatalogListingPage(
-        items=[_listing_item(listing) for listing in listings],
-        next_cursor=next_cursor,
-    )
+    return CatalogListingPage(items=items, next_cursor=next_cursor)
 
 
 @listings_router.get(
@@ -154,8 +173,9 @@ def get_public_listing_detail(
         if listing is None:
             raise HTTPException(status_code=404, detail="listing_not_found")
         extras = list_listing_extras(session, listing.id)
+        photos = _public_photos(request, session, listing.id)
         return CatalogListingDetail(
-            **_listing_item(listing).model_dump(),
+            **_listing_item(listing, photos[0].url if photos else None).model_dump(),
             bedrooms=listing.bedrooms,
             bathrooms=listing.bathrooms,
             extras=[
@@ -166,6 +186,7 @@ def get_public_listing_detail(
                 )
                 for extra in extras
             ],
+            photos=photos,
         )
 
 
@@ -483,6 +504,10 @@ def _apply_listing_transition(
     except InvalidListingTransitionError:
         raise HTTPException(
             status_code=409, detail="Listing cannot be changed from its current state"
+        ) from None
+    except ListingPhotoRequiredError:
+        raise HTTPException(
+            status_code=409, detail="Listing needs at least one confirmed photo"
         ) from None
 
 

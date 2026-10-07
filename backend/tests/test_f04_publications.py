@@ -21,7 +21,7 @@ from app.core.security import create_access_token
 from app.db.base import Base
 from app.main import create_app
 from app.modules.catalog.errors import QuoteOfferVersionMismatchError
-from app.modules.catalog.models import Listing
+from app.modules.catalog.models import Listing, ListingPhoto
 from app.modules.catalog.service import validate_quote_for_use
 from app.modules.identity.models import Agency, StaffAccount, StaffSession
 from app.modules.identity.session import get_active_staff
@@ -146,6 +146,25 @@ def _seed_listing(
         if created_at is not None:
             listing.created_at = created_at
         session.add(listing)
+
+
+def _seed_confirmed_photo(context: F04Context, listing_id: str, agency_id: str = "agency-one") -> None:
+    """Submitting for review requires a confirmed photo (F04.2)."""
+    now = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
+    with context.session_factory.begin() as session:
+        session.add(
+            ListingPhoto(
+                agency_id=agency_id,
+                listing_id=listing_id,
+                object_key=f"agencies/{agency_id}/listings/{listing_id}/photos/seeded",
+                status="confirmed",
+                content_type="image/jpeg",
+                size_bytes=10,
+                created_at=now,
+                expires_at=now + timedelta(minutes=15),
+                confirmed_at=now,
+            )
+        )
 
 
 def _create_quote(context: F04Context, listing_id: str) -> str:
@@ -325,6 +344,7 @@ def test_quotes_survive_description_edits_but_price_edits_make_them_stale(
 def test_submit_is_draft_only_and_invalid_retry_adds_no_history(f04_context: F04Context) -> None:
     context = f04_context
     _seed_listing(context, "submit-me")
+    _seed_confirmed_photo(context, "submit-me")
     _staff(context, role="agent")
     url = _url("agency-one", "submit-me")
 
@@ -462,6 +482,7 @@ def test_transition_history_is_staff_only_append_ordered_and_absent_from_catalog
     created = context.client.post(_collection_url("agency-one"), json=_payload())
     assert created.status_code == 201, created.text
     url = _url("agency-one", created.json()["listing_id"])
+    _seed_confirmed_photo(context, created.json()["listing_id"])
     submitted = context.client.post(url + "/submit")
     history = context.client.get(url + "/transitions")
 
