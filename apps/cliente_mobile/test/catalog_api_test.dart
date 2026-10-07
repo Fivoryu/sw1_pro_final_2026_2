@@ -202,4 +202,69 @@ void main() {
       expect(const CatalogFilters(minBathrooms: 0).isEmpty, isFalse);
     });
   });
+
+  group('CatalogApi photos', () {
+    test('reads the cover of each listed item', () async {
+      final harness = _build(
+        (_) async => _json({
+          'items': [
+            {
+              ..._item(id: 'with-cover'),
+              'cover_photo_url': 'http://s/cover.jpg',
+            },
+            {..._item(id: 'without-cover'), 'cover_photo_url': null},
+          ],
+          'next_cursor': null,
+        }, 200),
+      );
+
+      final page = await harness.api.searchListings();
+
+      expect(page.items.first.coverPhotoUrl, 'http://s/cover.jpg');
+      expect(page.items.last.coverPhotoUrl, isNull);
+    });
+
+    test('reads the gallery of a listing detail in order', () async {
+      final harness = _build(
+        (_) async => _json({
+          ..._item(),
+          'cover_photo_url': 'http://s/a.jpg',
+          'bedrooms': 3,
+          'bathrooms': 2,
+          'extras': [],
+          'photos': [
+            {'photo_id': 'a', 'url': 'http://s/a.jpg'},
+            {'photo_id': 'b', 'url': 'http://s/b.jpg'},
+          ],
+        }, 200),
+      );
+
+      final detail = await harness.api.getListing('listing-1');
+
+      expect(detail.photos.map((photo) => photo.photoId), ['a', 'b']);
+      expect(detail.photos.last.url, 'http://s/b.jpg');
+    });
+
+    test('rejects a cover that is not a link', () async {
+      final harness = _build(
+        (_) async => _json({
+          'items': [
+            {..._item(), 'cover_photo_url': 42},
+          ],
+          'next_cursor': null,
+        }, 200),
+      );
+
+      await expectLater(
+        harness.api.searchListings(),
+        throwsA(
+          isA<CustomerAuthFailure>().having(
+            (failure) => failure.code,
+            'code',
+            kInternalError,
+          ),
+        ),
+      );
+    });
+  });
 }

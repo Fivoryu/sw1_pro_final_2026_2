@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
 from app.main import create_app
-from app.modules.catalog.models import Listing, ListingTransition
+from app.modules.catalog.models import Listing, ListingPhoto, ListingTransition
 from app.modules.identity.models import Agency
 from app.modules.identity.session import get_active_staff
 
@@ -128,6 +128,25 @@ def _history_actions(factory: sessionmaker[Session], listing_id: str) -> list[st
         return [row.action for row in rows]
 
 
+def _seed_confirmed_photo(factory: sessionmaker[Session], listing_id: str) -> None:
+    """Submitting for review requires a confirmed photo (F04.2)."""
+    now = datetime.now(timezone.utc)
+    with factory.begin() as session:
+        session.add(
+            ListingPhoto(
+                agency_id=_AGENCY_ONE,
+                listing_id=listing_id,
+                object_key=f"agencies/{_AGENCY_ONE}/listings/{listing_id}/photos/seeded",
+                status="confirmed",
+                content_type="image/jpeg",
+                size_bytes=10,
+                created_at=now,
+                expires_at=now + timedelta(minutes=15),
+                confirmed_at=now,
+            )
+        )
+
+
 def _public_listing_ids(client: TestClient) -> set[str]:
     response = client.get("/api/v1/listings")
     assert response.status_code == 200, response.text
@@ -219,6 +238,7 @@ def test_f04_publications_against_real_postgres(f04_postgres_engine: Engine) -> 
         assert _listing_state(factory, listing_id)[2] == 2
         assert _history_actions(factory, listing_id) == ["create", "edit", "edit"]
 
+        _seed_confirmed_photo(factory, listing_id)
         submitted = client.post(url + "/submit")
         assert submitted.status_code == 200, submitted.text
         assert submitted.json()["approval_status"] == "pending"
@@ -281,6 +301,7 @@ def test_f04_publications_against_real_postgres(f04_postgres_engine: Engine) -> 
         assert rejected_create.status_code == 201, rejected_create.text
         rejected_id = rejected_create.json()["listing_id"]
         rejected_url = _listing_url(_AGENCY_ONE, rejected_id)
+        _seed_confirmed_photo(factory, rejected_id)
         rejected_submit = client.post(rejected_url + "/submit")
         assert rejected_submit.status_code == 200, rejected_submit.text
         pending_state = _listing_state(factory, rejected_id)

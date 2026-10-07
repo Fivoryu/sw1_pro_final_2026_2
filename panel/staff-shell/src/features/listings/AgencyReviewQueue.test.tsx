@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getAgencyListing,
   listAgencyListings,
+  listListingPhotos,
   listListingTransitions,
   StaffListingsApiError,
   transitionListing,
@@ -19,6 +20,7 @@ vi.mock("../../application/staffListingsApi", async (importOriginal) => {
     ...actual,
     getAgencyListing: vi.fn(),
     listAgencyListings: vi.fn(),
+    listListingPhotos: vi.fn(),
     listListingTransitions: vi.fn(),
     transitionListing: vi.fn(),
   };
@@ -81,6 +83,7 @@ beforeEach(() => {
   vi.mocked(getAgencyListing).mockReset();
   vi.mocked(listAgencyListings).mockReset();
   vi.mocked(listListingTransitions).mockReset().mockResolvedValue([transition()]);
+  vi.mocked(listListingPhotos).mockReset().mockResolvedValue([]);
   vi.mocked(transitionListing).mockReset();
 });
 
@@ -382,4 +385,61 @@ describe("AgencyReviewQueue", () => {
       "Tu sesión expiró. Cierra sesión y vuelve a ingresar.",
     );
   });
+
+  describe("photos", () => {
+    function photo(id: string) {
+      return {
+        photo_id: id,
+        content_type: "image/jpeg" as const,
+        size_bytes: 2048,
+        url: `http://127.0.0.1:4566/roomforge-local-assets/${id}?X-Amz-Signature=abc`,
+        created_at: "2026-10-06T12:00:00Z",
+      };
+    }
+
+    it("shows the listing photos so the admin reviews them before approving", async () => {
+      const user = userEvent.setup();
+      vi.mocked(listAgencyListings).mockResolvedValue(page([listing()]));
+      vi.mocked(listListingPhotos).mockResolvedValue([photo("photo-a"), photo("photo-b")]);
+      renderQueue();
+
+      await openDetail(user, listing());
+
+      const gallery = await screen.findByRole("list", { name: "Fotos del inmueble" });
+      const images = within(gallery).getAllByRole("img");
+      expect(images).toHaveLength(2);
+      expect(images[0]).toHaveAttribute("src", photo("photo-a").url);
+      expect(images[0]).toHaveAccessibleName("Foto 1 de 2 · Medellín · El Poblado");
+      expect(within(gallery).getAllByRole("link")[1]).toHaveAttribute("href", photo("photo-b").url);
+      expect(screen.getByText("La primera foto es la portada del catálogo.")).toBeInTheDocument();
+      expect(listListingPhotos).toHaveBeenCalledWith("volatile-access", "agency-1", "listing-1");
+    });
+
+    it("says when a listing has no photos", async () => {
+      const user = userEvent.setup();
+      vi.mocked(listAgencyListings).mockResolvedValue(page([listing()]));
+      renderQueue();
+
+      await openDetail(user, listing());
+
+      expect(await screen.findByText("Este inmueble no tiene fotos.")).toBeInTheDocument();
+    });
+
+    it("keeps the review usable when the photos cannot be loaded", async () => {
+      const user = userEvent.setup();
+      vi.mocked(listAgencyListings).mockResolvedValue(page([listing()]));
+      vi.mocked(listListingPhotos).mockRejectedValue(
+        new StaffListingsApiError(503, "Photo storage is not configured"),
+      );
+      renderQueue();
+
+      await openDetail(user, listing());
+
+      expect(
+        await screen.findByText("No se pudieron cargar las fotos del inmueble."),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Aprobar" })).toBeEnabled();
+    });
+  });
 });
+

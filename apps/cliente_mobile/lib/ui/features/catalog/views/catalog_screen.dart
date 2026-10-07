@@ -5,6 +5,7 @@ import '../../../../domain/catalog_controller.dart';
 import 'catalog_filters_sheet.dart';
 import 'catalog_format.dart';
 import 'listing_detail_screen.dart';
+import 'listing_photo.dart';
 
 /// The "Explorar" tab: published listings with filters, paging and honest
 /// loading, empty and error states.
@@ -183,23 +184,45 @@ class _CatalogScreenState extends State<CatalogScreen> {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () => _openListing(listing),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(locationLabel(listing), style: theme.textTheme.titleMedium),
-              const SizedBox(height: 4),
-              Text(operationLabel(listing.operation)),
-              const SizedBox(height: 4),
-              Text(
-                chargeLabel(listing.basePrice, listing.operation),
-                style: theme.textTheme.titleSmall?.copyWith(
-                  color: theme.colorScheme.primary,
-                ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              height: 160,
+              child: listing.coverPhotoUrl == null
+                  ? PhotoPlaceholder(
+                      key: ValueKey(
+                        'catalog-cover-placeholder-${listing.listingId}',
+                      ),
+                    )
+                  : ListingPhoto(
+                      key: ValueKey('catalog-cover-${listing.listingId}'),
+                      url: listing.coverPhotoUrl!,
+                      semanticLabel: 'Portada de ${locationLabel(listing)}',
+                    ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    locationLabel(listing),
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(operationLabel(listing.operation)),
+                  const SizedBox(height: 4),
+                  Text(
+                    chargeLabel(listing.basePrice, listing.operation),
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

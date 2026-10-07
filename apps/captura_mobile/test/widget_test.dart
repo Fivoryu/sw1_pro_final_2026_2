@@ -1,14 +1,21 @@
 import 'package:captura_mobile/data/services/staff_auth_api.dart';
+import 'package:captura_mobile/data/services/staff_listing_photos_api.dart';
 import 'package:captura_mobile/data/services/staff_listings_api.dart';
 import 'package:captura_mobile/domain/staff_session_controller.dart';
 import 'package:captura_mobile/main.dart';
 
 import 'support/fake_listings_backend.dart';
+import 'support/fake_photo_source.dart';
 import 'support/fake_staff_backend.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 StaffListingsApi fakeListingsApi() => StaffListingsApi(
+  baseUrl: 'https://api.example.test',
+  client: FakeListingsBackend().client,
+);
+
+StaffListingPhotosApi fakePhotosApi() => StaffListingPhotosApi(
   baseUrl: 'https://api.example.test',
   client: FakeListingsBackend().client,
 );
@@ -42,7 +49,12 @@ Future<StaffSessionController> pumpCaptureApp(
 }) async {
   final controller = await captureController(signedIn: signedIn);
   await tester.pumpWidget(
-    CaptureApp(controller: controller, listingsApi: fakeListingsApi()),
+    CaptureApp(
+      controller: controller,
+      listingsApi: fakeListingsApi(),
+      photosApi: fakePhotosApi(),
+      photoSource: FakePhotoSource(),
+    ),
   );
   await tester.pumpAndSettle();
   return controller;
@@ -401,7 +413,12 @@ void main() {
     );
     await controller.restore();
     await tester.pumpWidget(
-      CaptureApp(controller: controller, listingsApi: fakeListingsApi()),
+      CaptureApp(
+        controller: controller,
+        listingsApi: fakeListingsApi(),
+        photosApi: fakePhotosApi(),
+        photoSource: FakePhotoSource(),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -436,7 +453,12 @@ void main() {
     );
     await controller.restore();
     await tester.pumpWidget(
-      CaptureApp(controller: controller, listingsApi: fakeListingsApi()),
+      CaptureApp(
+        controller: controller,
+        listingsApi: fakeListingsApi(),
+        photosApi: fakePhotosApi(),
+        photoSource: FakePhotoSource(),
+      ),
     );
     await tester.pumpAndSettle();
 

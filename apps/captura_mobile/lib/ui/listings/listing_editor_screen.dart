@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../data/models/staff_listing.dart';
+import '../../data/services/photo_source.dart';
 import '../../domain/listing_drafts_controller.dart';
+import '../../domain/listing_photos_controller.dart';
 import 'listing_format.dart';
+import 'listing_photos_section.dart';
 
 /// Minimum 48 dp touch target for primary actions.
 const _actionMinSize = Size.fromHeight(48);
@@ -45,6 +48,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
   String? _rejectionReason;
   String? _message;
   bool _busy = false;
+  ListingPhotosController? _photos;
 
   @override
   void initState() {
@@ -69,6 +73,81 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
       field.addListener(_onChanged);
     }
     if (listing?.status == ListingStatus.rejected) _loadRejectionReason();
+    if (listing != null) _attachPhotos(listing.listingId);
+  }
+
+  /// Photos need a saved listing: they are attached once it has an id.
+  void _attachPhotos(String listingId) {
+    final photos = widget.controller.photosFor(
+      listingId,
+      onListingChanged: _onPhotosChanged,
+    )..addListener(_onChanged);
+    _photos = photos;
+    photos.load();
+  }
+
+  /// A confirmed photo change returns the listing to draft on the server.
+  void _onPhotosChanged() {
+    final listing = _listing;
+    if (!mounted || listing == null) return;
+    setState(() => _listing = listing.reopenedAsDraft());
+  }
+
+  bool get _reopensReview {
+    final status = _listing?.status;
+    return status == ListingStatus.pending || status == ListingStatus.approved;
+  }
+
+  Future<bool> _confirmPhotoChange(String title, String action) async {
+    final reopens = _reopensReview;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(
+          reopens
+              ? 'El inmueble volverá a borrador, saldrá del catálogo si estaba '
+                    'publicado y deberá aprobarse de nuevo.'
+              : 'Podés volver a agregar fotos cuando quieras.',
+        ),
+        actions: [
+          TextButton(
+            key: ValueKey(
+              reopens ? 'photo-change-cancel' : 'photo-delete-cancel',
+            ),
+            style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            key: ValueKey(
+              reopens ? 'photo-change-confirm' : 'photo-delete-confirm',
+            ),
+            style: FilledButton.styleFrom(minimumSize: const Size(64, 48)),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(action),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
+
+  Future<void> _addPhoto(PhotoOrigin origin) async {
+    final photos = _photos;
+    if (photos == null) return;
+    if (_reopensReview &&
+        !await _confirmPhotoChange('¿Agregar la foto?', 'Agregar')) {
+      return;
+    }
+    await photos.add(origin);
+  }
+
+  Future<void> _deletePhoto(String photoId) async {
+    final photos = _photos;
+    if (photos == null) return;
+    if (!await _confirmPhotoChange('¿Borrar la foto?', 'Borrar')) return;
+    await photos.delete(photoId);
   }
 
   List<TextEditingController> get _fields => [
@@ -86,6 +165,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     for (final field in _fields) {
       field.dispose();
     }
+    _photos?.dispose();
     super.dispose();
   }
 
@@ -138,8 +218,14 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     return saved.entries.any((entry) => current[entry.key] != entry.value);
   }
 
+  bool get _hasPhoto => _photos?.photos.isNotEmpty ?? false;
+
   bool get _canSubmit =>
-      !_busy && _listing?.status == ListingStatus.draft && !_isDirty;
+      !_busy &&
+      _listing?.status == ListingStatus.draft &&
+      !_isDirty &&
+      _hasPhoto &&
+      !(_photos?.isUploading ?? false);
 
   String? get _submitHint {
     final listing = _listing;
@@ -150,6 +236,8 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
       return 'Guardá los cambios antes de enviar el inmueble a revisión.';
     }
     return switch (listing.status) {
+      ListingStatus.draft when !_hasPhoto =>
+        'Agregá al menos una foto para enviar a revisión.',
       ListingStatus.draft => null,
       ListingStatus.rejected =>
         'Corregí el inmueble y guardalo para volver a enviarlo.',
@@ -181,6 +269,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
         _rejectionReason = null;
       }
     });
+    if (saved != null && _photos == null) _attachPhotos(saved.listingId);
     if (saved != null) {
       ScaffoldMessenger.of(
         context,
@@ -237,10 +326,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final listing = _listing;
-    final reopensReview =
-        listing != null &&
-        (listing.status == ListingStatus.pending ||
-            listing.status == ListingStatus.approved);
+    final reopensReview = _reopensReview;
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -420,6 +506,12 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
                         helperText: 'No se muestra en el catálogo público.',
                         border: OutlineInputBorder(),
                       ),
+                    ),
+                    const SizedBox(height: 24),
+                    ListingPhotosSection(
+                      controller: _photos,
+                      onAdd: _addPhoto,
+                      onDelete: _deletePhoto,
                     ),
                     const SizedBox(height: 24),
                     OutlinedButton.icon(

@@ -41,6 +41,15 @@ export interface ListingTransition {
   created_at: string;
 }
 
+/** A confirmed listing photo; `url` is a short-lived signed storage link. */
+export interface ListingPhoto {
+  photo_id: string;
+  content_type: "image/jpeg" | "image/png" | "image/webp";
+  size_bytes: number;
+  url: string;
+  created_at: string;
+}
+
 export interface ListingFilter {
   status: ListingApprovalStatus;
 }
@@ -130,6 +139,18 @@ export function listListingTransitions(
     `${listingPath(agencyId, listingId)}/transitions`,
     authorizedGet(accessToken),
   );
+}
+
+export async function listListingPhotos(
+  accessToken: string,
+  agencyId: string,
+  listingId: string,
+): Promise<ListingPhoto[]> {
+  const payload = await requestJson<{ photos: ListingPhoto[] }>(
+    `${listingPath(agencyId, listingId)}/photos`,
+    authorizedGet(accessToken),
+  );
+  return payload.photos;
 }
 
 export function transitionListing(

@@ -339,6 +339,7 @@ def test_public_list_is_approved_published_and_cross_agency(
         "base_price",
         "city",
         "zone",
+        "cover_photo_url",
     }
 
 
@@ -362,6 +363,7 @@ def test_detail_has_minimal_public_schema_and_hides_private_fields(
         "base_price": {"amount": "100000.00", "currency": "BOB"},
         "city": "Córdoba",
         "zone": "Centro",
+        "cover_photo_url": None,
         "bedrooms": 2,
         "bathrooms": 1,
         "extras": [
@@ -379,6 +381,7 @@ def test_detail_has_minimal_public_schema_and_hides_private_fields(
                 "quantity": 1,
             }
         ],
+        "photos": [],
     }
     serialized = response.text
     assert "private description" not in serialized
@@ -422,6 +425,24 @@ def test_authoring_currency_is_echoed_in_catalog_detail_and_quote(
     assert created.json()["currency"] == currency
 
     listing_path = f"/api/v1/staff/agencies/agency-one/listings/{listing_id}"
+    # Submitting for review requires a confirmed photo (F04.2).
+    from app.modules.catalog.models import ListingPhoto
+
+    now = datetime.now(timezone.utc)
+    with context.session_factory.begin() as session:
+        session.add(
+            ListingPhoto(
+                agency_id="agency-one",
+                listing_id=listing_id,
+                object_key=f"agencies/agency-one/listings/{listing_id}/photos/seeded",
+                status="confirmed",
+                content_type="image/jpeg",
+                size_bytes=10,
+                created_at=now,
+                expires_at=now + timedelta(minutes=15),
+                confirmed_at=now,
+            )
+        )
     assert context.client.post(listing_path + "/submit", headers=headers).status_code == 200
     assert context.client.post(listing_path + "/approve", headers=headers).status_code == 200
     assert context.client.post(listing_path + "/publish", headers=headers).status_code == 200
@@ -1279,6 +1300,7 @@ def test_openapi_and_validation_preserve_staff_customer_namespaces(
         "base_price",
         "city",
         "zone",
+        "cover_photo_url",
     }
     assert set(schemas["CatalogListingDetail"]["properties"]) == {
         "listing_id",
@@ -1287,9 +1309,11 @@ def test_openapi_and_validation_preserve_staff_customer_namespaces(
         "base_price",
         "city",
         "zone",
+        "cover_photo_url",
         "bedrooms",
         "bathrooms",
         "extras",
+        "photos",
     }
     assert set(schemas["CatalogExtraItem"]["properties"]) == {
         "extra_id",

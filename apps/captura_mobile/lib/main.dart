@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import 'data/services/staff_auth_api.dart';
+import 'data/services/photo_source.dart';
 import 'data/services/staff_credential_store.dart';
+import 'data/services/staff_listing_photos_api.dart';
 import 'data/services/staff_listings_api.dart';
 import 'domain/listing_drafts_controller.dart';
 import 'domain/staff_session_controller.dart';
@@ -36,6 +38,8 @@ void main() => runApp(
       credentialStore: SecureStaffCredentialStore(),
     ),
     listingsApi: StaffListingsApi(baseUrl: _apiBaseUrl),
+    photosApi: StaffListingPhotosApi(baseUrl: _apiBaseUrl),
+    photoSource: ImagePickerPhotoSource(),
   ),
 );
 
@@ -44,10 +48,14 @@ class CaptureApp extends StatelessWidget {
     super.key,
     required this.controller,
     required this.listingsApi,
+    required this.photosApi,
+    required this.photoSource,
   });
 
   final StaffSessionController controller;
   final StaffListingsApi listingsApi;
+  final StaffListingPhotosApi photosApi;
+  final PhotoSource photoSource;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -56,7 +64,12 @@ class CaptureApp extends StatelessWidget {
       colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1D4ED8)),
       useMaterial3: true,
     ),
-    home: AgentAccessScreen(controller: controller, listingsApi: listingsApi),
+    home: AgentAccessScreen(
+      controller: controller,
+      listingsApi: listingsApi,
+      photosApi: photosApi,
+      photoSource: photoSource,
+    ),
   );
 }
 
@@ -66,10 +79,14 @@ class AgentAccessScreen extends StatefulWidget {
     super.key,
     required this.controller,
     required this.listingsApi,
+    required this.photosApi,
+    required this.photoSource,
   });
 
   final StaffSessionController controller;
   final StaffListingsApi listingsApi;
+  final StaffListingPhotosApi photosApi;
+  final PhotoSource photoSource;
 
   @override
   State<AgentAccessScreen> createState() => _AgentAccessScreenState();
@@ -276,6 +293,8 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
               controller: ListingDraftsController(
                 api: widget.listingsApi,
                 session: widget.controller,
+                photosApi: widget.photosApi,
+                photoSource: widget.photoSource,
               ),
             ),
           ),
