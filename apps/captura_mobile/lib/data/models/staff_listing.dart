@@ -98,6 +98,26 @@ class StaffListing {
     createdAt: DateTime.parse(_string(json, 'created_at')),
   );
 
+  /// The same listing back in draft and unpublished, as the API leaves it
+  /// after a content change such as a photo.
+  StaffListing reopenedAsDraft() => StaffListing(
+    listingId: listingId,
+    agencyId: agencyId,
+    operation: operation,
+    basePrice: basePrice,
+    currency: currency,
+    city: city,
+    zone: zone,
+    bedrooms: bedrooms,
+    bathrooms: bathrooms,
+    description: description,
+    exactAddress: exactAddress,
+    status: ListingStatus.draft,
+    isPublished: false,
+    offerVersion: offerVersion,
+    createdAt: createdAt,
+  );
+
   final String listingId;
   final String agencyId;
   final ListingOperation operation;
