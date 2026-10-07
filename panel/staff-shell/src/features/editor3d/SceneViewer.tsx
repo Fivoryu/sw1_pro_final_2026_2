@@ -35,7 +35,6 @@ export const SceneViewer: React.FC = () => {
   useEffect(() => {
     if (!mountRef.current) return;
     
-    // SOLUCIÓN: Limpiar el contenedor a la fuerza antes de dibujar nada para evitar duplicados
     mountRef.current.innerHTML = '';
 
     const scene = new THREE.Scene();
@@ -46,7 +45,8 @@ export const SceneViewer: React.FC = () => {
     scene.add(gridHelper);
 
     const camera = new THREE.PerspectiveCamera(75, 800 / 600, 0.1, 1000);
-    camera.position.set(5, 6, 6);
+    // 1. Bajamos la cámara a 1.6m de altura (nivel de los ojos) y la metemos dentro del cuarto
+    camera.position.set(2, 1.6, 3.8);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(800, 600);
@@ -54,7 +54,8 @@ export const SceneViewer: React.FC = () => {
 
     const orbitControls = new OrbitControls(camera, renderer.domElement);
     orbitControls.enableDamping = true;
-    orbitControls.target.set(2, 1, 1.5);
+    orbitControls.target.set(2, 1.6, 1.5); // Mirando al frente
+    orbitControls.maxPolarAngle = Math.PI / 2; // Evita que la cámara se hunda por debajo del suelo
 
     const room = roomData.rooms[0];
 
@@ -99,11 +100,7 @@ export const SceneViewer: React.FC = () => {
       const yPosition = obj.position.y + (obj.dimensions.height / 2);
       mesh.position.set(obj.position.x, yPosition, obj.position.z);
       
-      mesh.userData = { 
-        originalY: yPosition,
-        halfWidth: obj.dimensions.width / 2,
-        halfDepth: obj.dimensions.depth / 2
-      };
+      mesh.userData = { originalY: yPosition, halfWidth: obj.dimensions.width / 2, halfDepth: obj.dimensions.depth / 2 };
 
       const edges = new THREE.EdgesGeometry(geometry);
       const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000 }));
@@ -114,34 +111,66 @@ export const SceneViewer: React.FC = () => {
     });
 
     const dragControls = new DragControls(draggableObjects, camera, renderer.domElement);
-    
-    dragControls.addEventListener('dragstart', () => {
-      orbitControls.enabled = false;
-    });
-
+    dragControls.addEventListener('dragstart', () => orbitControls.enabled = false);
     dragControls.addEventListener('drag', (event) => {
       const obj = event.object;
-      
       obj.position.y = obj.userData.originalY;
-
-      const minX = 0 + obj.userData.halfWidth;
+      const minX = obj.userData.halfWidth;
       const maxX = 4 - obj.userData.halfWidth;
-      const minZ = 0 + obj.userData.halfDepth;
+      const minZ = obj.userData.halfDepth;
       const maxZ = 3 - obj.userData.halfDepth;
-
       if (obj.position.x < minX) obj.position.x = minX;
       if (obj.position.x > maxX) obj.position.x = maxX;
       if (obj.position.z < minZ) obj.position.z = minZ;
       if (obj.position.z > maxZ) obj.position.z = maxZ;
     });
+    dragControls.addEventListener('dragend', () => orbitControls.enabled = true);
 
-    dragControls.addEventListener('dragend', () => {
-      orbitControls.enabled = true;
-    });
+    // --- 2. CONTROLES DE TECLADO (WASD) PARA CAMINAR ---
+    const keys = { w: false, a: false, s: false, d: false };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      if (keys.hasOwnProperty(key)) keys[key as keyof typeof keys] = true;
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      if (keys.hasOwnProperty(key)) keys[key as keyof typeof keys] = false;
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    // ----------------------------------------------------
 
     let animationId: number;
     const animate = () => {
       animationId = requestAnimationFrame(animate);
+
+      // 3. MATEMÁTICA PARA MOVER LA CÁMARA HACIA DONDE ESTÉ MIRANDO
+      const speed = 0.05;
+      const direction = new THREE.Vector3();
+      camera.getWorldDirection(direction);
+      direction.y = 0; // Mantiene el movimiento plano sobre el piso
+      direction.normalize();
+
+      const right = new THREE.Vector3();
+      right.crossVectors(camera.up, direction).normalize();
+
+      if (keys.w) {
+        camera.position.addScaledVector(direction, speed);
+        orbitControls.target.addScaledVector(direction, speed);
+      }
+      if (keys.s) {
+        camera.position.addScaledVector(direction, -speed);
+        orbitControls.target.addScaledVector(direction, -speed);
+      }
+      if (keys.a) {
+        camera.position.addScaledVector(right, speed);
+        orbitControls.target.addScaledVector(right, speed);
+      }
+      if (keys.d) {
+        camera.position.addScaledVector(right, -speed);
+        orbitControls.target.addScaledVector(right, -speed);
+      }
+
       orbitControls.update();
       renderer.render(scene, camera);
     };
@@ -149,20 +178,22 @@ export const SceneViewer: React.FC = () => {
 
     return () => {
       cancelAnimationFrame(animationId);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
       orbitControls.dispose();
       dragControls.dispose();
       renderer.dispose();
-      if (mountRef.current) {
-        mountRef.current.innerHTML = ''; // Limpiar todo al salir
-      }
+      if (mountRef.current) mountRef.current.innerHTML = '';
     };
   }, []);
 
   return (
     <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', backgroundColor: '#f0f0f0', minHeight: '100vh' }}>
-      <h2 style={{ fontFamily: 'sans-serif', color: '#333' }}>Visor 3D Paramétrico - F06.3</h2>
-      <p style={{ fontFamily: 'sans-serif', color: '#666' }}>El cubo rojo ahora tiene <b>colisiones</b> y no puede salir de la habitación.</p>
-      <div ref={mountRef} style={{ border: '3px solid #333', borderRadius: '8px', overflow: 'hidden', cursor: 'grab', boxShadow: '0 4px 8px rgba(0,0,0,0.2)' }} />
+      <h2 style={{ fontFamily: 'sans-serif', color: '#333' }}>Visor 3D Paramétrico - F06.4</h2>
+      <p style={{ fontFamily: 'sans-serif', color: '#666' }}>
+        Usa <b>W, A, S, D</b> para caminar por la habitación. Usa el ratón para mirar y mover el cubo.
+      </p>
+      <div ref={mountRef} style={{ border: '3px solid #333', borderRadius: '8px', overflow: 'hidden', cursor: 'crosshair', boxShadow: '0 4px 8px rgba(0,0,0,0.2)' }} />
     </div>
   );
 };
