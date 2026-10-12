@@ -137,6 +137,11 @@ def _reservation_response(reservation: Reservation) -> ReservationResponse:
                 },
             },
             "deposit_amount": format_money_amount(deposit) if deposit is not None else None,
+            "deposit_confirmed_at": (
+                _as_utc(reservation.deposit_confirmed_at)
+                if reservation.deposit_confirmed_at is not None
+                else None
+            ),
         }
     )
 
@@ -563,6 +568,7 @@ def issue_reservation_permit(
             "actor_address": action_actor,
             "amount": amount,
             "deadline": deadline,
+            "currency": _reservation_currency(reservation),
         }
 
     try:
@@ -894,6 +900,7 @@ def reconcile_chain_transaction(
             nonce=nonce,
             deadline=reservation.decision_deadline_at,
             actor_address=actor_address,
+            currency=_reservation_currency(reservation),
         )
     except PermitUnavailableError:
         raise ReservationApiError(

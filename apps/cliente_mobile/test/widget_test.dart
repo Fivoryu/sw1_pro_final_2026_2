@@ -117,14 +117,13 @@ void main() {
   });
 
   testWidgets(
-    'reservations remain a prototype and the account offers sign-in',
+    'reservations require a customer session and the account offers sign-in',
     (tester) async {
       await tester.pumpWidget(app());
       await tester.tap(find.text('Reservas'));
       await tester.pumpAndSettle();
-      expect(find.text('Prototipo de reservas'), findsOneWidget);
       expect(
-        find.text('No hay reservas reales ni datos conectados.'),
+        find.text('Iniciá sesión para consultar tus reservas.'),
         findsOneWidget,
       );
       await tester.tap(find.text('Cuenta'));
@@ -151,7 +150,7 @@ void main() {
     await tester.pumpWidget(app());
     for (final (label, content) in [
       ('Explorar', 'Explorar inmuebles'),
-      ('Reservas', 'Prototipo de reservas'),
+      ('Reservas', 'Iniciá sesión para consultar tus reservas.'),
       ('Cuenta', 'Iniciar sesión'),
     ]) {
       await tester.tap(find.text(label));

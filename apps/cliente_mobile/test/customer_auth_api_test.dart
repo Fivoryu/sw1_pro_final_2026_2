@@ -15,52 +15,64 @@ http.Response _json(Object body, int status) => http.Response(
 
 void main() {
   group('CustomerAuthApi', () {
-    test('register posts credentials and returns the created identity', () async {
-      late http.Request captured;
-      final client = MockClient((request) async {
-        captured = request;
-        return _json(const {'id': 'customer-1', 'email': 'client@example.test'}, 201);
-      });
-      final api = CustomerAuthApi(baseUrl: _baseUrl, client: client);
+    test(
+      'register posts credentials and returns the created identity',
+      () async {
+        late http.Request captured;
+        final client = MockClient((request) async {
+          captured = request;
+          return _json(const {
+            'id': 'customer-1',
+            'email': 'client@example.test',
+          }, 201);
+        });
+        final api = CustomerAuthApi(baseUrl: _baseUrl, client: client);
 
-      final identity = await api.register(
-        email: 'client@example.test',
-        password: 'password123',
-      );
+        final identity = await api.register(
+          email: 'client@example.test',
+          password: 'password123',
+        );
 
-      expect(captured.method, 'POST');
-      expect(captured.url.toString(), '$_baseUrl/api/v1/customer/auth/register');
-      expect(
-        jsonDecode(captured.body),
-        {'email': 'client@example.test', 'password': 'password123'},
-      );
-      expect(identity.id, 'customer-1');
-      expect(identity.email, 'client@example.test');
-    });
+        expect(captured.method, 'POST');
+        expect(
+          captured.url.toString(),
+          '$_baseUrl/api/v1/customer/auth/register',
+        );
+        expect(jsonDecode(captured.body), {
+          'email': 'client@example.test',
+          'password': 'password123',
+        });
+        expect(identity.id, 'customer-1');
+        expect(identity.email, 'client@example.test');
+      },
+    );
 
-    test('login returns the rotated token pair with its access lifetime', () async {
-      late http.Request captured;
-      final client = MockClient((request) async {
-        captured = request;
-        return _json(const {
-          'access_token': 'access-token',
-          'refresh_token': 'refresh-token',
-          'token_type': 'Bearer',
-          'access_expires_in': 900,
-        }, 200);
-      });
-      final api = CustomerAuthApi(baseUrl: _baseUrl, client: client);
+    test(
+      'login returns the rotated token pair with its access lifetime',
+      () async {
+        late http.Request captured;
+        final client = MockClient((request) async {
+          captured = request;
+          return _json(const {
+            'access_token': 'access-token',
+            'refresh_token': 'refresh-token',
+            'token_type': 'Bearer',
+            'access_expires_in': 900,
+          }, 200);
+        });
+        final api = CustomerAuthApi(baseUrl: _baseUrl, client: client);
 
-      final tokens = await api.login(
-        email: 'client@example.test',
-        password: 'password123',
-      );
+        final tokens = await api.login(
+          email: 'client@example.test',
+          password: 'password123',
+        );
 
-      expect(captured.url.path, '/api/v1/customer/auth/login');
-      expect(tokens.accessToken, 'access-token');
-      expect(tokens.refreshToken, 'refresh-token');
-      expect(tokens.accessExpiresIn, const Duration(minutes: 15));
-    });
+        expect(captured.url.path, '/api/v1/customer/auth/login');
+        expect(tokens.accessToken, 'access-token');
+        expect(tokens.refreshToken, 'refresh-token');
+        expect(tokens.accessExpiresIn, const Duration(minutes: 15));
+      },
+    );
 
     test('refresh sends the opaque refresh token in the body', () async {
       late http.Request captured;
@@ -100,7 +112,10 @@ void main() {
       late http.Request captured;
       final client = MockClient((request) async {
         captured = request;
-        return _json(const {'id': 'customer-1', 'email': 'client@example.test'}, 200);
+        return _json(const {
+          'id': 'customer-1',
+          'email': 'client@example.test',
+        }, 200);
       });
       final api = CustomerAuthApi(baseUrl: _baseUrl, client: client);
 
@@ -118,7 +133,8 @@ void main() {
         String code,
       ) async {
         final client = MockClient(
-          (_) async => _json({'detail': 'Rejected by the API.', 'code': code}, status),
+          (_) async =>
+              _json({'detail': 'Rejected by the API.', 'code': code}, status),
         );
         final api = CustomerAuthApi(baseUrl: _baseUrl, client: client);
         try {
@@ -130,12 +146,14 @@ void main() {
       }
 
       final unauthorized = await failureFor(
-        (api) => api.login(email: 'client@example.test', password: 'password123'),
+        (api) =>
+            api.login(email: 'client@example.test', password: 'password123'),
         401,
         'unauthorized',
       );
       final conflict = await failureFor(
-        (api) => api.register(email: 'client@example.test', password: 'password123'),
+        (api) =>
+            api.register(email: 'client@example.test', password: 'password123'),
         409,
         'conflict',
       );
@@ -154,38 +172,51 @@ void main() {
     });
 
     test('reports a network failure when the transport throws', () async {
-      final client = MockClient((_) async => throw http.ClientException('offline'));
+      final client = MockClient(
+        (_) async => throw http.ClientException('offline'),
+      );
       final api = CustomerAuthApi(baseUrl: _baseUrl, client: client);
 
       await expectLater(
         api.login(email: 'client@example.test', password: 'password123'),
         throwsA(
           isA<CustomerAuthFailure>()
-              .having((failure) => failure.isNetworkFailure, 'isNetworkFailure', isTrue)
+              .having(
+                (failure) => failure.isNetworkFailure,
+                'isNetworkFailure',
+                isTrue,
+              )
               .having((failure) => failure.code, 'code', 'network_error'),
         ),
       );
     });
 
-    test('does not leak a malformed body when the response is not the envelope', () async {
-      final client = MockClient(
-        (_) async => http.Response('<html>gateway exploded</html>', 502),
-      );
-      final api = CustomerAuthApi(baseUrl: _baseUrl, client: client);
+    test(
+      'does not leak a malformed body when the response is not the envelope',
+      () async {
+        final client = MockClient(
+          (_) async => http.Response('<html>gateway exploded</html>', 502),
+        );
+        final api = CustomerAuthApi(baseUrl: _baseUrl, client: client);
 
-      await expectLater(
-        api.login(email: 'client@example.test', password: 'password123'),
-        throwsA(
-          isA<CustomerAuthFailure>()
-              .having((failure) => failure.statusCode, 'statusCode', 502)
-              .having((failure) => failure.code, 'code', 'dependency_unavailable')
-              .having(
-                (failure) => failure.detail,
-                'detail',
-                isNot(contains('gateway exploded')),
-              ),
-        ),
-      );
-    });
+        await expectLater(
+          api.login(email: 'client@example.test', password: 'password123'),
+          throwsA(
+            isA<CustomerAuthFailure>()
+                .having((failure) => failure.statusCode, 'statusCode', 502)
+                .having(
+                  (failure) => failure.code,
+                  'code',
+                  'dependency_unavailable',
+                )
+                .having(
+                  (failure) => failure.detail,
+                  'detail',
+                  isNot(contains('gateway exploded')),
+                ),
+          ),
+        );
+      },
+    );
   });
 }

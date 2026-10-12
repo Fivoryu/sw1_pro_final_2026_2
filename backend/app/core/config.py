@@ -41,6 +41,9 @@ class Settings:
     s3_region: str = "us-east-1"
     escrow_rpc_url: str | None = None
     escrow_address: str | None = None
+    escrow_bob_address: str | None = None
+    escrow_usd_address: str | None = None
+    escrow_usdt_address: str | None = None
     escrow_chain_id: str | None = None
     escrow_signer_private_key: str | None = None
 
@@ -87,9 +90,24 @@ class Settings:
             s3_region=os.environ.get("AWS_DEFAULT_REGION") or "us-east-1",
             escrow_rpc_url=os.environ.get("ROOMFORGE_ESCROW_RPC_URL"),
             escrow_address=os.environ.get("ROOMFORGE_ESCROW_ADDRESS"),
+            escrow_bob_address=os.environ.get("ROOMFORGE_ESCROW_BOB_ADDRESS"),
+            escrow_usd_address=os.environ.get("ROOMFORGE_ESCROW_USD_ADDRESS"),
+            escrow_usdt_address=os.environ.get("ROOMFORGE_ESCROW_USDT_ADDRESS"),
             escrow_chain_id=os.environ.get("ROOMFORGE_ESCROW_CHAIN_ID"),
             escrow_signer_private_key=os.environ.get("ROOMFORGE_ESCROW_SIGNER_PRIVATE_KEY"),
         )
+
+    def escrow_address_for(self, currency: str) -> str | None:
+        """Return the local escrow deployed for the token of one offer currency."""
+        if currency == "BOB":
+            return self.escrow_bob_address or self.escrow_address
+        if currency == "USD":
+            return self.escrow_usd_address or self.escrow_address
+        if currency == "USDT":
+            # USDT uses a different 6-decimal test token and must never silently
+            # fall back to the legacy RFT escrow address.
+            return self.escrow_usdt_address
+        return None
 
     def validate(self) -> None:
         if len(self.jwt_secret.encode("utf-8")) < 32:

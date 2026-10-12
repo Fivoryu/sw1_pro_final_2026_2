@@ -13,6 +13,7 @@ from eth_account.messages import encode_typed_data
 from eth_utils.address import to_checksum_address
 from eth_utils.crypto import keccak
 from app.core.config import Settings
+from app.modules.reservations import chain
 
 PRIVATE_KEY = "0x" + "11" * 32
 SIGNER_ADDRESS = Account.from_key(PRIVATE_KEY).address
@@ -34,6 +35,37 @@ def _settings(**overrides: Any) -> Settings:
     }
     values.update(overrides)
     return Settings(**values)
+
+
+def test_currency_configuration_selects_the_matching_local_escrow() -> None:
+    bob_escrow = "0x" + "55" * 20
+    usd_escrow = "0x" + "66" * 20
+    usdt_escrow = "0x" + "77" * 20
+    settings = _settings(
+        escrow_bob_address=bob_escrow,
+        escrow_usd_address=usd_escrow,
+        escrow_usdt_address=usdt_escrow,
+    )
+
+    assert chain._read_configuration(settings, currency="BOB") == (
+        "http://127.0.0.1:8545",
+        to_checksum_address(bob_escrow),
+    )
+    assert chain._read_configuration(settings, currency="USD") == (
+        "http://127.0.0.1:8545",
+        to_checksum_address(usd_escrow),
+    )
+    assert chain._read_configuration(settings, currency="USDT") == (
+        "http://127.0.0.1:8545",
+        to_checksum_address(usdt_escrow),
+    )
+
+
+def test_usdt_fails_closed_without_its_own_token_escrow() -> None:
+    settings = _settings(escrow_usdt_address=None)
+
+    with pytest.raises(chain.PermitUnavailableError):
+        chain._read_configuration(settings, currency="USDT")
 
 
 class FakeJsonRpc:

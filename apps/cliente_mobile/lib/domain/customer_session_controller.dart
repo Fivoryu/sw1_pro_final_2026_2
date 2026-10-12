@@ -37,12 +37,55 @@ class CustomerSessionController extends ChangeNotifier {
   CustomerSessionStatus _status = CustomerSessionStatus.restoring;
   CustomerIdentity? _identity;
   String? _message;
+  String? _accessToken;
+  DateTime? _accessTokenExpiresAt;
+  Future<String>? _refreshingAccessToken;
 
   CustomerSessionStatus get status => _status;
   CustomerIdentity? get identity => _identity;
 
   /// User-facing notice for the last failure or confirmation, if any.
   String? get message => _message;
+
+  /// Returns a short-lived access token, rotating the secure refresh token
+  /// when the current access token is near expiry. The access token is kept
+  /// only in memory.
+  Future<String> obtainAccessToken() async {
+    final token = _accessToken;
+    final expiresAt = _accessTokenExpiresAt;
+    if (token != null &&
+        expiresAt != null &&
+        expiresAt.isAfter(DateTime.now().add(const Duration(seconds: 30)))) {
+      return token;
+    }
+    final inFlight = _refreshingAccessToken;
+    if (inFlight != null) return inFlight;
+    final refresh = _refreshAccessToken();
+    _refreshingAccessToken = refresh;
+    try {
+      return await refresh;
+    } finally {
+      if (identical(_refreshingAccessToken, refresh)) {
+        _refreshingAccessToken = null;
+      }
+    }
+  }
+
+  Future<String> _refreshAccessToken() async {
+    final refreshToken = await _tokenStore.readRefreshToken();
+    if (refreshToken == null) {
+      throw StateError('Customer session is not authenticated.');
+    }
+    final tokens = await _api.refresh(refreshToken: refreshToken);
+    await _tokenStore.writeRefreshToken(tokens.refreshToken);
+    _rememberAccessToken(tokens);
+    return tokens.accessToken;
+  }
+
+  void _rememberAccessToken(CustomerTokenPair tokens) {
+    _accessToken = tokens.accessToken;
+    _accessTokenExpiresAt = DateTime.now().add(tokens.accessExpiresIn);
+  }
 
   /// Restores a stored session when the app starts.
   ///
@@ -61,6 +104,7 @@ class CustomerSessionController extends ChangeNotifier {
     try {
       final tokens = await _api.refresh(refreshToken: refreshToken);
       await _tokenStore.writeRefreshToken(tokens.refreshToken);
+      _rememberAccessToken(tokens);
       await _loadIdentity(tokens.accessToken);
     } on CustomerAuthFailure catch (failure) {
       if (failure.isNetworkFailure) {
@@ -78,6 +122,7 @@ class CustomerSessionController extends ChangeNotifier {
     try {
       final tokens = await _api.login(email: email, password: password);
       await _tokenStore.writeRefreshToken(tokens.refreshToken);
+      _rememberAccessToken(tokens);
       await _loadIdentity(tokens.accessToken);
     } on CustomerAuthFailure catch (failure) {
       if (failure.isNetworkFailure) {
@@ -127,6 +172,8 @@ class CustomerSessionController extends ChangeNotifier {
       }
     }
     await _tokenStore.clearRefreshToken();
+    _accessToken = null;
+    _accessTokenExpiresAt = null;
     _setSignedOut();
   }
 
@@ -143,6 +190,8 @@ class CustomerSessionController extends ChangeNotifier {
 
   Future<void> _discardSession({String? message}) async {
     await _tokenStore.clearRefreshToken();
+    _accessToken = null;
+    _accessTokenExpiresAt = null;
     _setSignedOut(message: message);
   }
 

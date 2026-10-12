@@ -45,27 +45,27 @@ class FakeCustomerBackend {
     headers: const {'content-type': 'application/json'},
   );
 
-  static http.Response _failure(int status, String code) => _json({
-    'detail': 'Rejected by the API.',
-    'code': code,
-  }, status);
+  static http.Response _failure(int status, String code) =>
+      _json({'detail': 'Rejected by the API.', 'code': code}, status);
 
   Future<http.Response> _handle(http.Request request) async {
     calls.add(request.url.path);
     if (offline) throw http.ClientException('offline');
     return switch (request.url.path) {
-      '/api/v1/customer/auth/register' => registerConflict
-          ? _failure(409, 'conflict')
-          : _json({'id': 'customer-1', 'email': email}, 201),
-      '/api/v1/customer/auth/login' => loginRejected
-          ? _failure(401, 'unauthorized')
-          : _json(_tokens('access-token', 'refresh-token-1'), 200),
-      '/api/v1/customer/auth/refresh' => refreshRejected
-          ? _failure(401, 'unauthorized')
-          : _json(_tokens('access-token-2', 'refresh-token-2'), 200),
-      '/api/v1/customer/auth/logout' => logoutRejected
-          ? _failure(401, 'unauthorized')
-          : http.Response('', 204),
+      '/api/v1/customer/auth/register' =>
+        registerConflict
+            ? _failure(409, 'conflict')
+            : _json({'id': 'customer-1', 'email': email}, 201),
+      '/api/v1/customer/auth/login' =>
+        loginRejected
+            ? _failure(401, 'unauthorized')
+            : _json(_tokens('access-token', 'refresh-token-1'), 200),
+      '/api/v1/customer/auth/refresh' =>
+        refreshRejected
+            ? _failure(401, 'unauthorized')
+            : _json(_tokens('access-token-2', 'refresh-token-2'), 200),
+      '/api/v1/customer/auth/logout' =>
+        logoutRejected ? _failure(401, 'unauthorized') : http.Response('', 204),
       '/api/v1/customer/auth/me' => _json({
         'id': 'customer-1',
         'email': email,

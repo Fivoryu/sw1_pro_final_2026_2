@@ -319,6 +319,7 @@ def test_create_snapshots_quote_deposit_and_both_linked_wallet_addresses(
     ) == context.clock() + timedelta(hours=24)
     assert created["quote_snapshot"]["quote_id"] == quote_id
     assert created["deposit_amount"] == "25000.00"
+    assert created["deposit_confirmed_at"] is None
 
     nullable_quote, nullable_wallet = _seed_reservation_inputs(
         context,
@@ -700,6 +701,29 @@ def test_active_listing_lock_reusable_quote_and_unpaid_deadline_expiry(
         409,
         "listing_has_active_reservation",
     )
+
+
+def test_reservation_response_exposes_confirmed_deposit_timestamp(
+    reservations_context: ReservationsContext,
+) -> None:
+    context = reservations_context
+    _, auth, reservation = _create_test_reservation(
+        context, listing_id="deposit-response-listing"
+    )
+    confirmed_at = datetime(2026, 9, 1, 13, 45, tzinfo=timezone.utc)
+    with context.session_factory.begin() as session:
+        stored = session.get(Reservation, reservation["reservation_id"])
+        assert stored is not None
+        stored.deposit_confirmed_at = confirmed_at
+
+    response = context.client.get(
+        f"/api/v1/reservations/{reservation['reservation_id']}", headers=auth
+    )
+
+    assert response.status_code == 200, response.text
+    assert datetime.fromisoformat(
+        response.json()["deposit_confirmed_at"].replace("Z", "+00:00")
+    ) == confirmed_at
 
 
 def test_customer_can_only_read_and_list_own_reservations(

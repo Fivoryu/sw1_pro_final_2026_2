@@ -91,7 +91,8 @@ CustomerAuthFailure failureFromResponse({
   final fallback = codeForStatus(statusCode);
   return CustomerAuthFailure(
     code: fallback,
-    detail: kSafeFailureDetails[fallback] ?? kSafeFailureDetails[kInternalError]!,
+    detail:
+        kSafeFailureDetails[fallback] ?? kSafeFailureDetails[kInternalError]!,
     statusCode: statusCode,
   );
 }
