@@ -285,6 +285,44 @@ def test_concurrent_same_generation_enqueue_marker_is_successful(
         assert job.enqueued_at.replace(tzinfo=UTC) == _NOW
 
 
+def test_publisher_accepts_a_same_generation_job_claimed_during_publish(
+    context: DetectionContext,
+) -> None:
+    _seed_listing(context.session_factory)
+    _seed_photo(context.session_factory)
+    context.app.state.settings = _settings(detection_worker_token="test-worker-token")
+
+    class ClaimingQueue:
+        def __init__(self) -> None:
+            self.published: list[JobMessage] = []
+            self.claimed: dict[str, object] | None = None
+
+        def publish(self, message: JobMessage) -> None:
+            self.published.append(message)
+            response = context.client.post(
+                f"/api/v1/detection/jobs/{message.job_id}/claim",
+                headers={"Authorization": "Bearer test-worker-token"},
+            )
+            assert response.status_code == 200, response.text
+            self.claimed = response.json()
+
+    queue = ClaimingQueue()
+    context.app.state.job_queue = queue
+
+    response = context.client.post(_detections_url())
+
+    assert response.status_code == 201, response.text
+    assert len(queue.published) == 1
+    assert queue.claimed is not None
+    assert queue.claimed["status"] == "running"
+    with context.session_factory() as session:
+        job = session.get(DetectionJob, response.json()["job_id"])
+        assert job is not None
+        assert job.status == "running"
+        assert job.attempts == 0
+        assert job.enqueued_at is None
+
+
 def test_stale_publisher_cannot_mark_a_later_attempt_enqueued(
     context: DetectionContext,
 ) -> None:

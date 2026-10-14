@@ -23,6 +23,7 @@ def test_local_detection_queue_is_provisioned_with_a_dead_letter_redrive_policy(
     )
     script_literal = str(script_path).replace("'", "''")
     mock_docker = rf'''
+$env:DETECTION_MAX_ATTEMPTS = '7'
 $global:queueNames = @()
 $global:capturedAttributes = $null
 function docker {{
@@ -80,7 +81,7 @@ Write-Output ("CAPTURED-QUEUES:" + ($global:queueNames -join ','))
     redrive_policy = json.loads(attributes["RedrivePolicy"])
     assert redrive_policy == {
         "deadLetterTargetArn": "arn:aws:sqs:us-east-1:000000000000:roomforge-local-detection-dlq",
-        "maxReceiveCount": "4",
+        "maxReceiveCount": "8",
     }
 
     queues_line = next(

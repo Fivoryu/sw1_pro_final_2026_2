@@ -91,3 +91,73 @@ Se declara, no se disimula:
 **Validación observada en el worktree:** desde `backend/`, `python.exe -m pytest tests -q` → `711 passed, 3 skipped`; `python.exe -m ruff check app tests` → limpio; `pyright.exe app tests` → 18 errores preexistentes de imports `eth_account`/`eth_utils`, sin diagnósticos en los archivos de esta unidad. Desde la raíz, `python.exe -m pytest worker3d/tests -q` → `44 passed`. La prueba de provisionamiento ejecutó el script PowerShell con un Docker simulado y comprobó el `RedrivePolicy` (dead-letter ARN y `maxReceiveCount=4`); el parser de Windows PowerShell también informó `PowerShell syntax OK`.
 
 **No ejecutado en este cierre:** el script de provisionamiento contra Docker/Floci, el redrive real de Floci/SQS ni PostgreSQL. La migración `0020` y su columna `claim_token` se registran únicamente según evidencia aportada por el padre; ver §1.1.
+
+## 7. Cierre de los hallazgos de la cuarta verificación
+
+### H1 — Sweep definitivo para `pending`
+
+El barrido ahora selecciona `pending` con `enqueued_at IS NULL` **o** con una marca de al menos `DETECTION_LEASE_SECONDS` (300 s por defecto). La API pasa el valor configurado al barrido. Cinco minutos superan el intervalo de sweep de 60 s y dan tiempo a una entrega sana para ser reclamada; una marca reciente no se vuelve a publicar en cada vuelta. Antes de publicar una marca antigua, el barrido la limpia; si la publicación falla, el trabajo sigue seleccionable. Tras publicar, la marca se vuelve a fijar. Así, la ruta worker capped-drop puede borrar una entrega conservando su marca vieja, pero no puede dejar el trabajo `pending` invisible para siempre.
+
+**RED observado antes de implementar H1:**
+
+```text
+cd backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m pytest -p no:cacheprovider tests/test_detection_recovery.py -q -k 'claim_failures_beyond_receive_cap or pending_job_with_stale_enqueue_marker or recent_enqueue_marker or running_job_with_active_lease or pending_job_that_was_never_enqueued'
+2 failed, 3 passed, 6 deselected, 1 warning in 2.38s
+```
+
+Fallaron `test_claim_failures_beyond_receive_cap_drop_delivery_and_recover_job` y `test_pending_job_with_stale_enqueue_marker_is_republished`: ambos observaron `recovered == 0` donde se esperaba `1`. El primero ahora siembra explícitamente `pending` **con** `enqueued_at` de hace 10 minutos, confirma que el worker capped-drop deja esa marca, y verifica el republicado. Los casos de marca nula, marca reciente y lease activo cubren los límites alternos.
+
+**GREEN observado:** el mismo comando → `5 passed, 6 deselected, 1 warning in 4.69s`.
+
+### H2 — DLQ y worker comparten el tope
+
+`init-local-resources.ps1` ahora lee `DETECTION_MAX_ATTEMPTS`, valida que sea un entero positivo y configura `maxReceiveCount` con una recepción adicional; sin override, el default 3 coincide con la configuración de la API y el worker. La prueba inyecta 7 y exige un `maxReceiveCount` de 8.
+
+**RED observado:**
+
+```text
+cd backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m pytest -p no:cacheprovider tests/test_detection_local_provisioning.py -q
+1 failed in 1.14s
+```
+
+Fallo observado: `maxReceiveCount` real `4`, esperado `8` con `DETECTION_MAX_ATTEMPTS=7`.
+
+**GREEN observado:** el mismo comando → `1 passed in 1.04s`.
+
+### H3 — Un claim concurrente no es un fallo de cola
+
+Si la actualización de `enqueued_at` afecta cero filas, la relectura ahora acepta `running` con la misma generación (`attempts`) como prueba de que el worker ya reclamó el mensaje. Conserva el caso existente de `pending` con la marca de la misma generación. El test hace que la cola reclame de verdad por el endpoint de la API antes de que el publicador fije la marca.
+
+**RED observado:**
+
+```text
+cd backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m pytest -p no:cacheprovider tests/test_detection_jobs_api.py -q -k publisher_accepts_a_same_generation_job_claimed_during_publish
+1 failed, 16 deselected, 1 warning in 2.17s
+```
+
+La respuesta observada era `503` (`dependency_unavailable`) en vez del `201` esperado, pese a que el endpoint de claim había dejado el trabajo `running` en la misma generación.
+
+**GREEN observado:** el mismo comando → `1 passed, 16 deselected, 1 warning in 4.60s`.
+
+### Validación final del cierre
+
+```text
+cd backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m pytest -p no:cacheprovider tests/test_detection_*.py -q
+54 passed, 1 warning in 20.13s
+
+cd /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final-f08-ai-wt/backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m pytest -p no:cacheprovider tests -q
+715 passed, 3 skipped, 4 warnings in 68.75s
+
+cd /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final-f08-ai-wt && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m pytest -p no:cacheprovider worker3d/tests -q
+44 passed in 2.45s
+
+cd /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final-f08-ai-wt/backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m ruff check app tests
+All checks passed!
+```
+
+```text
+cd /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final-f08-ai-wt/backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/pyright.exe app tests
+18 errors, 0 warnings, 0 informations
+```
+
+Los 18 errores son los imports preexistentes `eth_account`/`eth_utils`; la salida no incluye ninguno de los archivos modificados. No se ejecutaron provisionamiento real contra Floci, redrive real, PostgreSQL, imagen/inferencia de worker ni SQS de AWS; esos efectos externos siguen sin verificar en este cierre.

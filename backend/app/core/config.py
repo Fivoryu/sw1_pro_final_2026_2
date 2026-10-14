@@ -4,6 +4,9 @@ import os
 from dataclasses import dataclass
 
 
+DETECTION_LEASE_SECONDS_DEFAULT = 300
+
+
 def _boolean_from_env(environment_name: str, default: bool) -> bool:
     value = os.environ.get(environment_name)
     if value is None:
@@ -60,7 +63,7 @@ class Settings:
     detection_worker_token: str | None = None
     detection_max_attempts: int = 3
     detection_visibility_timeout_seconds: int = 60
-    detection_lease_seconds: int = 300
+    detection_lease_seconds: int = DETECTION_LEASE_SECONDS_DEFAULT
     detection_sweep_seconds: int = 60
     escrow_rpc_url: str | None = None
     escrow_address: str | None = None
@@ -121,7 +124,9 @@ class Settings:
             detection_visibility_timeout_seconds=_positive_timeout_from_env(
                 "DETECTION_VISIBILITY_TIMEOUT_SECONDS", 60
             ),
-            detection_lease_seconds=_positive_timeout_from_env("DETECTION_LEASE_SECONDS", 300),
+            detection_lease_seconds=_positive_timeout_from_env(
+                "DETECTION_LEASE_SECONDS", DETECTION_LEASE_SECONDS_DEFAULT
+            ),
             detection_sweep_seconds=_positive_timeout_from_env(
                 "ROOMFORGE_DETECTION_SWEEP_SECONDS", 60
             ),

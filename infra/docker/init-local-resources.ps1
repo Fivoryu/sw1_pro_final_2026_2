@@ -26,7 +26,17 @@ $bucketName = [string]$flociEnvironment.S3_BUCKET_NAME
 $queueName = [string]$flociEnvironment.SQS_QUEUE_NAME
 $detectionQueueName = 'roomforge-local-detection'
 $detectionDeadLetterQueueName = 'roomforge-local-detection-dlq'
-$detectionReceiveCap = 3
+# Keep the queue redrive threshold coupled to the worker's DETECTION_MAX_ATTEMPTS.
+# Its unset default matches Settings.from_env() and job_worker.py.
+[long]$detectionReceiveCap = 3
+if (-not [string]::IsNullOrWhiteSpace($env:DETECTION_MAX_ATTEMPTS)) {
+    [long]$configuredReceiveCap = 0
+    if (-not [long]::TryParse([string]$env:DETECTION_MAX_ATTEMPTS, [ref]$configuredReceiveCap) -or
+        $configuredReceiveCap -lt 1 -or $configuredReceiveCap -ge [int]::MaxValue) {
+        throw 'DETECTION_MAX_ATTEMPTS must be a positive integer below Int32.MaxValue.'
+    }
+    $detectionReceiveCap = $configuredReceiveCap
+}
 $detectionRedriveReceiveCount = $detectionReceiveCap + 1
 $s3Endpoint = [string]$flociEnvironment.S3_ENDPOINT_URL
 $sqsEndpoint = [string]$flociEnvironment.SQS_ENDPOINT_URL

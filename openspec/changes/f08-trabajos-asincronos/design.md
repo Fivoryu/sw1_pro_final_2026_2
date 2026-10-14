@@ -25,7 +25,7 @@ El estado del trabajo lo escribe **sólo la API**. El worker no toca la base: pi
 | `claim_token` | `String(64)` nullable | Token de fencing del claim vigente; sólo se acepta en `complete` o `fail` si coincide |
 | `result` | `JSON` nullable | Detecciones y versión de modelo efectivamente usada |
 | `failure_reason` | `String(255)` nullable | Motivo legible del fallo |
-| `created_at` / `enqueued_at` / `started_at` / `finished_at` | `DateTime(tz)` | Trazabilidad de tiempos. `enqueued_at` vacío significa «persistido pero todavía no encolado»: es la señal que usa la reconciliación |
+| `created_at` / `enqueued_at` / `started_at` / `finished_at` | `DateTime(tz)` | Trazabilidad de tiempos. `enqueued_at` vacío significa «todavía recuperable»; una marca ausente se publica enseguida y una marca más antigua que el lease también se recicla si el trabajo sigue `pending` |
 
 **Índices:** `dedupe_key` único, más `(status, lease_expires_at)` para el barrido de recuperación y `(listing_id)` para las consultas de personal.
 
@@ -92,9 +92,9 @@ Lección que se conserva: **una base y una cola no se confirman juntas.** Cualqu
 
 1. El trabajo se inserta y confirma con `enqueued_at` sin fijar.
 2. Antes de publicar, se lee `attempts` como generación de ese intento; se publica el mensaje.
-3. Después de que `publish` retorna, una actualización condicional fija `enqueued_at` sólo si siguen coincidiendo `attempts`, `status = pending` y `enqueued_at IS NULL`. La hora se captura después de publicar. Si la actualización afecta cero filas, se relee el trabajo: se acepta como marcado si sigue `pending`, conserva la misma generación (`attempts`) y ya tiene `enqueued_at`; eso cubre a otro publicador de la misma generación que ganó la carrera. En cualquier otro caso se reporta como no marcado.
+3. Después de que `publish` retorna, una actualización condicional fija `enqueued_at` sólo si siguen coincidiendo `attempts`, `status = pending` y `enqueued_at IS NULL`. La hora se captura después de publicar. Si la actualización afecta cero filas, se relee el trabajo: se acepta como marcado si sigue `pending`, conserva la misma generación (`attempts`) y ya tiene `enqueued_at`, o si ya pasó a `running` en esa misma generación porque el worker reclamó el mensaje. En cualquier otro caso se reporta como no marcado.
 
-La reconciliación aplica la misma condición y generación. Un publicador retrasado de una generación anterior no puede marcar la posterior como encolada; puede dejar un mensaje duplicado, lo cual es aceptable, pero la marca vacía permite que el barrido recupere el trabajo.
+La reconciliación aplica la misma condición y generación. Un publicador retrasado de una generación anterior no puede marcar la posterior como encolada; puede dejar un mensaje duplicado, lo cual es aceptable. El barrido publica trabajos `pending` con marca vacía, o con marca que alcanzó la antigüedad configurada para `DETECTION_LEASE_SECONDS`, y borra la marca antigua antes de publicar. Si la publicación falla o el worker elimina una entrega sin cambiar el estado, el trabajo vuelve a ser inmediatamente elegible; tras una publicación exitosa la nueva marca da un lease completo antes de otro reintento.
 
 Consecuencias, las dos cubiertas:
 
@@ -111,10 +111,10 @@ Van a configuración con default, y se declaran como **valores elegidos, no medi
 |---|---|---|
 | `DETECTION_MAX_ATTEMPTS` | 3 | Acota los intentos del trabajo y el número de recepciones del worker para fallos de claim no-404 sin token |
 | `DETECTION_VISIBILITY_TIMEOUT_SECONDS` | 60 | El mensaje vuelve a la cola si el worker muere procesándolo |
-| `DETECTION_LEASE_SECONDS` | 300 | Mayor que la visibilidad: un trabajo no se declara huérfano mientras un worker sano todavía puede estar trabajando |
+| `DETECTION_LEASE_SECONDS` | 300 | Mayor que la visibilidad: un trabajo no se declara huérfano mientras un worker sano todavía puede estar trabajando; también es la espera máxima antes de reciclar una marca de enqueue sin progreso |
 | `ROOMFORGE_DETECTION_SWEEP_SECONDS` | 60 | Frecuencia del barrido |
 
-**Barrido de recuperación.** Un barrido periódico —con el mismo patrón que el refresher de tasas de cambio, que ya corre como tarea de fondo— toma los trabajos `running` con `lease_expires_at` vencido y los devuelve a `pending` republicando, o los marca `failed` si ya agotaron los intentos. También republica los trabajos `pending` con `enqueued_at` vacío. Si el worker no obtiene un token en un error de claim no-404, deja el mensaje disponible hasta que `ApproximateReceiveCount` supera `DETECTION_MAX_ATTEMPTS`; entonces registra el descarte y elimina la entrega. El barrido recupera el trabajo si sigue pendiente y sin marca de encolado. **Ésta es la respuesta a R7:** un worker que muere no deja un trabajo atascado para siempre.
+**Barrido de recuperación.** Un barrido periódico —con el mismo patrón que el refresher de tasas de cambio, que ya corre como tarea de fondo— toma los trabajos `running` con `lease_expires_at` vencido y los devuelve a `pending` republicando, o los marca `failed` si ya agotaron los intentos. También republica los trabajos `pending` con `enqueued_at` vacío o con una marca de al menos `DETECTION_LEASE_SECONDS` (300 s por defecto). Ese límite es cinco veces el intervalo del barrido (60 s): un trabajo recién encolado espera, en vez de republicarse en cada vuelta, mientras la recuperación sigue acotada. Antes de republicar se limpia la marca; un fallo de publicación deja el trabajo recuperable en la siguiente vuelta. Si el worker no obtiene un token en un error de claim no-404, deja el mensaje disponible hasta que `ApproximateReceiveCount` supera `DETECTION_MAX_ATTEMPTS`; entonces registra el descarte y elimina la entrega. Aunque ese mensaje se borre con la marca original aún presente, el trabajo `pending` se vuelve a publicar cuando la marca cumple el límite. **Ésta es la respuesta a R6/R7:** una entrega abandonada no deja un trabajo pendiente perpetuamente mudo y un worker que muere no deja un trabajo atascado para siempre.
 
 ## 8. Autenticación del worker y fencing del claim
 
@@ -132,7 +132,7 @@ El worker usa un Dockerfile propio (`Dockerfile.worker`, contexto `./inference`)
 
 ## 10. Cola dedicada y provisionamiento
 
-Cola propia `roomforge-local-detection`, separada de `roomforge-local-events`, para no mezclar eventos de negocio con trabajos de cómputo. El script de provisionamiento local crea además `roomforge-local-detection-dlq` y configura su `maxReceiveCount` en una recepción más que el límite del worker, para que éste pueda registrar y eliminar el mensaje al superar su cap antes del redrive de los mensajes no eliminados.
+Cola propia `roomforge-local-detection`, separada de `roomforge-local-events`, para no mezclar eventos de negocio con trabajos de cómputo. El script de provisionamiento local crea además `roomforge-local-detection-dlq` y configura `maxReceiveCount = DETECTION_MAX_ATTEMPTS + 1`, leyendo la misma variable que el worker; si está ausente, ambos usan el default 3. Así el worker puede registrar y eliminar el mensaje al superar su cap antes del redrive de los mensajes que no logró eliminar.
 
 ## 11. Endpoints
 
@@ -165,7 +165,7 @@ La descarga se resuelve con un **enlace firmado** emitido por la API, no con cre
 | R4 | El worker usa el mismo módulo de inferencia y el resultado guarda clase, puntuación, caja y versión de modelo |
 | R5 | Mismo mensaje dos veces → un trabajo `completed`, un resultado, mismo conteo de detecciones |
 | R6 | Fallo permanente reportado y crasheos repetidos → `failed` al alcanzar exactamente el tope declarado, con motivo; otro sondeo no cambia nada |
-| R7 | `running` con lease vencido → el barrido consume un intento y republica, o marca `failed` al llegar al tope; también publica un `pending` nunca encolado |
+| R7 | `running` con lease vencido → el barrido consume un intento y republica, o marca `failed` al llegar al tope; también publica un `pending` nunca encolado o con marca vencida. Una marca reciente y un lease activo no generan republicación en cada barrido |
 | R8 | Sin sesión `401`; otra agencia `403`; foto ajena o inexistente `404`; en los tres casos sin trabajo y sin mensaje |
 | R9 | El inventario del inmueble no cambia; la superficie no incluye panel ni apps |
 | R10 | Todo apunta al endpoint local; sin credenciales reales en el repositorio |

@@ -26,12 +26,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import update
+from sqlalchemy import or_, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.core.config import DETECTION_LEASE_SECONDS_DEFAULT
 from app.modules.catalog.models import ListingPhoto
 from app.modules.catalog.photos import lock_staff_listing
 from app.modules.detection.job_queue import MESSAGE_VERSION, JobMessage, JobQueue
@@ -39,6 +40,7 @@ from app.modules.detection.models import DetectionJob, dedupe_key_for
 
 PHOTO_STATUS_CONFIRMED = "confirmed"
 STATUS_PENDING = "pending"
+STATUS_RUNNING = "running"
 LOGGER = logging.getLogger("roomforge.detection.recovery")
 
 
@@ -85,8 +87,10 @@ def _is_enqueued_for_generation(
         return (
             job is not None
             and job.attempts == generation
-            and job.status == STATUS_PENDING
-            and job.enqueued_at is not None
+            and (
+                job.status == STATUS_RUNNING
+                or (job.status == STATUS_PENDING and job.enqueued_at is not None)
+            )
         )
 
 
@@ -166,15 +170,20 @@ def run_detection_recovery_sweep(
     *,
     now: datetime,
     max_attempts: int,
+    pending_republish_after_seconds: int = DETECTION_LEASE_SECONDS_DEFAULT,
 ) -> int:
-    """Recover expired leases and republish pending jobs that were never queued.
+    """Recover expired leases and stale pending deliveries through one sweep.
 
-    The state transition is committed before publishing so a worker that receives
-    the message can claim the now-pending job. If publication fails, the job stays
-    pending with no ``enqueued_at`` and a later sweep retries it.
+    A pending job is eligible when it was never marked enqueued or its marker is
+    at least one lease interval old. The bound gives a healthy worker time to
+    claim the delivery and prevents a duplicate publish on every sweep. Before
+    publishing, the stale marker is cleared so any publish failure remains
+    immediately recoverable by the next sweep.
     """
     if max_attempts < 1:
         raise ValueError("max_attempts must be positive")
+    if pending_republish_after_seconds < 1:
+        raise ValueError("pending_republish_after_seconds must be positive")
 
     messages: dict[str, tuple[JobMessage, int]] = {}
     expired_count = 0
@@ -182,18 +191,22 @@ def run_detection_recovery_sweep(
         expired_jobs = (
             session.query(DetectionJob)
             .filter(
-                DetectionJob.status == "running",
+                DetectionJob.status == STATUS_RUNNING,
                 DetectionJob.lease_expires_at.is_not(None),
                 DetectionJob.lease_expires_at <= now,
             )
             .with_for_update()
             .all()
         )
-        unqueued_jobs = (
+        pending_cutoff = now - timedelta(seconds=pending_republish_after_seconds)
+        recoverable_pending_jobs = (
             session.query(DetectionJob)
             .filter(
                 DetectionJob.status == STATUS_PENDING,
-                DetectionJob.enqueued_at.is_(None),
+                or_(
+                    DetectionJob.enqueued_at.is_(None),
+                    DetectionJob.enqueued_at <= pending_cutoff,
+                ),
             )
             .with_for_update()
             .all()
@@ -237,7 +250,10 @@ def run_detection_recovery_sweep(
                 job.attempts,
             )
 
-        for job in unqueued_jobs:
+        for job in recoverable_pending_jobs:
+            # Release even an old successful marker before publication. If this
+            # process or the queue fails, the pending job remains sweepable.
+            job.enqueued_at = None
             if job.attempts >= max_attempts:
                 job.status = "failed"
                 job.failure_reason = (
@@ -290,7 +306,7 @@ def run_detection_recovery_sweep(
                 "Detection recovery sweep could not mark a published job as enqueued; next sweep will retry"
             )
 
-    return expired_count + len(unqueued_jobs)
+    return expired_count + len(recoverable_pending_jobs)
 
 
 def request_detection_job(

@@ -33,6 +33,7 @@ _NOW = datetime(2026, 10, 14, 21, 0, tzinfo=UTC)
 _MODEL_ID = "ssdlite320-mobilenetv3-coco-v1"
 _JOB_ID = "expired-detection-job"
 _MAX_ATTEMPTS = 3
+_LEASE_SECONDS = 300
 
 
 def _settings(**changes: object) -> Settings:
@@ -186,8 +187,8 @@ def test_claim_failures_beyond_receive_cap_drop_delivery_and_recover_job(
                 dedupe_key=dedupe_key_for("photo-one", _MODEL_ID),
                 status="pending",
                 attempts=0,
-                created_at=_NOW,
-                enqueued_at=None,
+                created_at=_NOW - timedelta(minutes=10),
+                enqueued_at=_NOW - timedelta(minutes=10),
             )
         )
 
@@ -259,7 +260,8 @@ def test_claim_failures_beyond_receive_cap_drop_delivery_and_recover_job(
         assert after_claim_errors.status == "pending"
         assert after_claim_errors.attempts == 0
         assert after_claim_errors.claim_token is None
-        assert after_claim_errors.enqueued_at is None
+        assert after_claim_errors.enqueued_at is not None
+        assert after_claim_errors.enqueued_at.replace(tzinfo=UTC) == _NOW - timedelta(minutes=10)
 
     recovered = run_detection_recovery_sweep(
         context.session_factory,
@@ -309,6 +311,97 @@ def test_pending_job_that_was_never_enqueued_is_republished(context: RecoveryCon
     assert after[0]["attempts"] == 0
     assert [message.job_id for message in context.queue.published] == [_JOB_ID]
     assert [message.attempt for message in context.queue.published] == [1]
+
+
+def test_pending_job_with_stale_enqueue_marker_is_republished(context: RecoveryContext) -> None:
+    """A lost/deleted delivery must recover even after it was marked enqueued."""
+    with context.session_factory.begin() as session:
+        session.add(
+            DetectionJob(
+                id=_JOB_ID,
+                agency_id="agency-one",
+                listing_id="listing-one",
+                photo_id="photo-one",
+                object_key="agencies/agency-one/listings/listing-one/photos/photo-one",
+                model_id=_MODEL_ID,
+                dedupe_key=dedupe_key_for("photo-one", _MODEL_ID),
+                status="pending",
+                attempts=0,
+                created_at=_NOW - timedelta(minutes=10),
+                enqueued_at=_NOW - timedelta(seconds=_LEASE_SECONDS),
+            )
+        )
+
+    recovered = run_detection_recovery_sweep(
+        context.session_factory,
+        context.queue,
+        now=_NOW,
+        max_attempts=_MAX_ATTEMPTS,
+    )
+
+    assert recovered == 1
+    assert [message.job_id for message in context.queue.published] == [_JOB_ID]
+    assert [message.attempt for message in context.queue.published] == [1]
+    with context.session_factory() as session:
+        job = session.get(DetectionJob, _JOB_ID)
+        assert job is not None
+        assert job.status == "pending"
+        assert job.enqueued_at is not None
+        assert job.enqueued_at.replace(tzinfo=UTC) != _NOW - timedelta(seconds=_LEASE_SECONDS)
+
+
+def test_recent_enqueue_marker_is_not_republished_on_each_sweep(
+    context: RecoveryContext,
+) -> None:
+    """A healthy queue/worker gets one lease interval before safety-net replay."""
+    with context.session_factory.begin() as session:
+        session.add(
+            DetectionJob(
+                id=_JOB_ID,
+                agency_id="agency-one",
+                listing_id="listing-one",
+                photo_id="photo-one",
+                object_key="agencies/agency-one/listings/listing-one/photos/photo-one",
+                model_id=_MODEL_ID,
+                dedupe_key=dedupe_key_for("photo-one", _MODEL_ID),
+                status="pending",
+                attempts=0,
+                created_at=_NOW,
+                enqueued_at=_NOW,
+            )
+        )
+
+    for elapsed in (0, 60, 120):
+        recovered = run_detection_recovery_sweep(
+            context.session_factory,
+            context.queue,
+            now=_NOW + timedelta(seconds=elapsed),
+            max_attempts=_MAX_ATTEMPTS,
+        )
+        assert recovered == 0
+        assert context.queue.published == []
+
+
+def test_running_job_with_active_lease_is_not_republished_by_repeated_sweeps(
+    context: RecoveryContext,
+) -> None:
+    _seed_expired_job(context, attempts=0)
+    with context.session_factory.begin() as session:
+        job = session.get(DetectionJob, _JOB_ID)
+        assert job is not None
+        job.lease_expires_at = _NOW + timedelta(minutes=10)
+
+    for elapsed in (0, 60, 120):
+        recovered = run_detection_recovery_sweep(
+            context.session_factory,
+            context.queue,
+            now=_NOW + timedelta(seconds=elapsed),
+            max_attempts=_MAX_ATTEMPTS,
+        )
+        assert recovered == 0
+        assert context.queue.published == []
+
+    assert _listed_jobs(context)[0]["status"] == "running"
 
 
 def test_repeated_worker_crashes_consume_the_retry_budget(context: RecoveryContext) -> None:

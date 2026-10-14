@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.config import Settings
+from app.core.config import DETECTION_LEASE_SECONDS_DEFAULT, Settings
 from app.core.errors import ErrorResponse, error_code_for_status
 from app.core.rate_source import official_rate_refresh_interval_seconds
 from app.db.session import create_session_factory, protect_session_factory
@@ -100,6 +100,7 @@ def _run_detection_recovery_sweep(
     *,
     now: datetime,
     max_attempts: int,
+    pending_republish_after_seconds: int = DETECTION_LEASE_SECONDS_DEFAULT,
 ) -> int:
     """Run one detection recovery sweep inside the API process."""
     return run_detection_recovery_sweep(
@@ -107,6 +108,7 @@ def _run_detection_recovery_sweep(
         job_queue,
         now=now,
         max_attempts=max_attempts,
+        pending_republish_after_seconds=pending_republish_after_seconds,
     )
 
 
@@ -117,6 +119,7 @@ async def _detection_recovery_loop(
     clock: Callable[[], datetime],
     max_attempts: int,
     interval_seconds: float,
+    pending_republish_after_seconds: int = DETECTION_LEASE_SECONDS_DEFAULT,
 ) -> None:
     """Periodically recover jobs whose workers stopped reporting."""
     while True:
@@ -128,6 +131,7 @@ async def _detection_recovery_loop(
                 job_queue,
                 now=clock(),
                 max_attempts=max_attempts,
+                pending_republish_after_seconds=pending_republish_after_seconds,
             )
         except asyncio.CancelledError:
             raise
@@ -163,6 +167,7 @@ def _build_lifespan(
                     clock=clock,
                     max_attempts=settings.detection_max_attempts,
                     interval_seconds=settings.detection_sweep_seconds,
+                    pending_republish_after_seconds=settings.detection_lease_seconds,
                 )
             )
         try:
