@@ -46,3 +46,15 @@ L1 (usuario, verbatim): «Haz 8.4»
 L2 (alcance decidido por el orquestador, 2026-10-14): se implementa F08.4 completo —persistencia, publicación, consumidor, reintentos y recuperación— porque S4 confirma que la modalidad elegida es servidor. F08.5 y F08.6 quedan fuera, y F08.5 sigue bloqueada por F06.
 
 L3 (verificación previa, 2026-10-14): el backend tiene los módulos `agencies`, `catalog`, `customer_identity`, `exchange_rates`, `health`, `identity` y `reservations`; `boto3` ya es dependencia; el head de Alembic es `0018_listing_photos`. **No hay ninguna referencia a SQS en el código**: sólo variables de entorno en el Compose. El mapa detallado de los patrones del backend (modelo de fotos, claves S3, DI, idempotencia de reservas, dobles de AWS en pruebas) se delegó a `gentle-ai-explore` y se registra en el artefacto `explore` del cambio SDD antes de diseñar.
+
+L4 (hallazgo real durante T2, 2026-10-14): la primera implementación de la ventana persistir/encolar **no funcionaba**, y la prueba lo demostró.
+
+El trabajo sobrevivía a una publicación fallida. La causa raíz: el código envolvía el `INSERT` en `session.begin_nested()` para sobrevivir a una carrera sobre la clave de deduplicación, y con el driver `pysqlite` **liberar el `SAVEPOINT` más externo confirma la transacción**. O sea, el savepoint commiteaba antes de tiempo y el rollback posterior no tenía nada que deshacer. El rollback sí ocurría; el dato ya estaba confirmado.
+
+Se probaron hipótesis y se descartaron con evidencia: no era autocommit (`app/db/session.py` instala un **autorizador SQL**, no cambia el modo de transacción) y no era el manejador de errores (el `503` con `dependency_unavailable` es un saneador global de cuerpos `5xx`, así que el detalle interno no llega al cliente).
+
+**Decisión:** una base y una cola no se confirman juntas, así que el diseño dejó de aparentarlo. Ahora el trabajo se inserta, se publica y `enqueued_at` se fija **sólo si la publicación tuvo éxito**; si falla, el trabajo queda `pending` sin encolar y el mismo pedido repetido —o el barrido— lo republica. La carrera se resuelve **sin savepoint**: la restricción única rechaza el segundo `INSERT` y la petición relee al ganador en una transacción nueva y responde `200`. `session.begin_nested()` queda prohibido en el módulo, con la razón escrita en `service.py` y en el `design` del cambio SDD.
+
+**Consecuencia secundaria descubierta:** el proyecto sanea los cuerpos `5xx` (un `503` devuelve `dependency_unavailable`, no el detalle interno). El contrato con el cliente es el código de estado, y el `job_id` se obtiene por `GET /detections`. Queda documentado en `docs/api/f08-detection-jobs.md`.
+
+**Y un error propio que corregí en el acto:** en una edición dejé un marcador sin sentido (`_UnusedFixtureSentinel` y un `test_X` que lanzaba `NotImplementedError`) en el archivo de pruebas. Los tests lo habrían detectado, pero lo encontré yo al releer el archivo antes de correrlo. Mismo patrón que antes: **leer el artefacto**, no confiar en haberlo escrito.

@@ -140,6 +140,7 @@ def test_migration_creates_and_drops_the_detection_job_table() -> None:
                 "result",
                 "failure_reason",
                 "created_at",
+                "enqueued_at",
                 "started_at",
                 "finished_at",
             } <= columns

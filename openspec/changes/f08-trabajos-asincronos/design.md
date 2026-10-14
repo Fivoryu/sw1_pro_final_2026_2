@@ -24,7 +24,7 @@ El estado del trabajo lo escribe **sólo la API**. El worker no toca la base: pi
 | `lease_expires_at` | `DateTime(tz)` nullable | Hasta cuándo vale la toma del trabajo |
 | `result` | `JSON` nullable | Detecciones y versión de modelo efectivamente usada |
 | `failure_reason` | `String(255)` nullable | Motivo legible del fallo |
-| `created_at` / `started_at` / `finished_at` | `DateTime(tz)` | Trazabilidad de tiempos |
+| `created_at` / `enqueued_at` / `started_at` / `finished_at` | `DateTime(tz)` | Trazabilidad de tiempos. `enqueued_at` vacío significa «persistido pero todavía no encolado»: es la señal que usa la reconciliación |
 
 **Índices:** `dedupe_key` único, más `(status, lease_expires_at)` para el barrido de recuperación y `(listing_id)` para las consultas de personal.
 
@@ -81,12 +81,24 @@ Se inyecta en `create_app`, igual que `session_factory` y `photo_storage`. **Con
 
 ## 6. La ventana entre persistir y encolar
 
-Dos casos, los dos cubiertos:
+**Corrección de diseño (2026-10-14, durante T2).** La primera versión de este diseño decía «la publicación va dentro del bloque transaccional: si falla, se revierte todo». **Eso no funcionaba y se cambió.** Lo que pasó, registrado en lugar de borrado:
 
-1. **Se publica y después no se confirma la transacción** → el mensaje existe y el trabajo no. El worker, al no encontrar el trabajo, **descarta el mensaje y no reintenta**: un `404` en la toma es «trabajo inexistente», no un error transitorio. Sin esto, un mensaje así reintentaría hasta agotar la cola por un trabajo que nunca va a existir.
-2. **Se confirma la transacción y falla la publicación** → la publicación va **dentro** del bloque transaccional: si falla, se revierte todo y la petición devuelve un error explícito. El cliente no recibe un trabajo que nadie va a procesar.
+La prueba de R3 demostró que el trabajo **sobrevivía** a la publicación fallida. La causa raíz resultó ser real y no obvia: el primer código envolvía el `INSERT` en `session.begin_nested()`, y con el driver `pysqlite` **liberar el `SAVEPOINT` más externo confirma la transacción**. O sea: el savepoint que puse para proteger una carrera commiteaba antes de tiempo, y el rollback posterior ya no tenía nada que deshacer. El rollback por excepción sí ocurría; el dato ya estaba confirmado.
 
-El segundo caso es el que R3 exige y el que la prueba debe demostrar: `InMemoryJobQueue(fail_on_publish=True)` → respuesta de error y **cero trabajos** en la base.
+Lección que se conserva: **una base y una cola no se confirman juntas.** Cualquier diseño que lo aparente o miente o confirma antes de tiempo.
+
+**Lo que hace el código ahora**, en tres pasos honestos:
+
+1. El trabajo se inserta con `enqueued_at` sin fijar.
+2. Se publica el mensaje.
+3. `enqueued_at` se fija **sólo si la publicación tuvo éxito**.
+
+Consecuencias, las dos cubiertas:
+
+- **La publicación falla.** El trabajo queda confirmado como `pending` con `enqueued_at` vacío, la petición devuelve `503` y el **reintento de la misma petición vuelve a publicar ese mismo trabajo** (misma clave de deduplicación, devuelve `200`). Ésa es la mitad barata de la reconciliación; el barrido de §7 es la otra. Sin esto, un trabajo quedaría esperando para siempre a un mensaje que nadie envió.
+- **Se pierde la carrera contra otra petición idéntica.** La restricción única de `dedupe_key` rechaza el segundo `INSERT` al confirmar. No se usa savepoint: la petición captura el conflicto, **vuelve a leer el trabajo ganador en una transacción nueva** y lo devuelve como repetición (`200`). `session.begin_nested()` queda prohibido en este módulo, y la razón está escrita en el propio `service.py`.
+
+**Mensaje que sobrevive a un commit perdido.** Si el mensaje se publica y la confirmación falla, el worker recibirá un trabajo que no existe: lo **descarta sin reintentar** (un `404` al tomarlo es «no existe», no «error transitorio»). Se prueba en T5.
 
 ## 7. Reintentos, visibilidad y recuperación: valores declarados
 

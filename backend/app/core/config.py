@@ -39,6 +39,14 @@ class Settings:
     s3_bucket_name: str | None = None
     s3_public_endpoint_url: str | None = None
     s3_region: str = "us-east-1"
+    sqs_endpoint_url: str | None = None
+    detection_queue_name: str = "roomforge-local-detection"
+    detection_model_id: str = "ssdlite320-mobilenetv3-coco-v1"
+    detection_worker_token: str | None = None
+    detection_max_attempts: int = 3
+    detection_visibility_timeout_seconds: int = 60
+    detection_lease_seconds: int = 300
+    detection_sweep_seconds: int = 60
     escrow_rpc_url: str | None = None
     escrow_address: str | None = None
     escrow_chain_id: str | None = None
@@ -85,6 +93,20 @@ class Settings:
             s3_bucket_name=os.environ.get("S3_BUCKET_NAME") or None,
             s3_public_endpoint_url=os.environ.get("S3_PUBLIC_ENDPOINT_URL") or None,
             s3_region=os.environ.get("AWS_DEFAULT_REGION") or "us-east-1",
+            sqs_endpoint_url=os.environ.get("SQS_ENDPOINT_URL") or None,
+            detection_queue_name=os.environ.get("DETECTION_QUEUE_NAME")
+            or "roomforge-local-detection",
+            detection_model_id=os.environ.get("DETECTION_MODEL_ID")
+            or "ssdlite320-mobilenetv3-coco-v1",
+            detection_worker_token=os.environ.get("DETECTION_WORKER_TOKEN") or None,
+            detection_max_attempts=_positive_timeout_from_env("DETECTION_MAX_ATTEMPTS", 3),
+            detection_visibility_timeout_seconds=_positive_timeout_from_env(
+                "DETECTION_VISIBILITY_TIMEOUT_SECONDS", 60
+            ),
+            detection_lease_seconds=_positive_timeout_from_env("DETECTION_LEASE_SECONDS", 300),
+            detection_sweep_seconds=_positive_timeout_from_env(
+                "ROOMFORGE_DETECTION_SWEEP_SECONDS", 60
+            ),
             escrow_rpc_url=os.environ.get("ROOMFORGE_ESCROW_RPC_URL"),
             escrow_address=os.environ.get("ROOMFORGE_ESCROW_ADDRESS"),
             escrow_chain_id=os.environ.get("ROOMFORGE_ESCROW_CHAIN_ID"),
@@ -108,5 +130,13 @@ class Settings:
             self.database_pool_timeout_seconds,
             self.database_statement_timeout_seconds,
             self.email_send_timeout_seconds,
+            self.detection_max_attempts,
+            self.detection_visibility_timeout_seconds,
+            self.detection_lease_seconds,
+            self.detection_sweep_seconds,
         ) < 1:
             raise ValueError("Timeouts and recovery-code count must be positive")
+        if self.detection_lease_seconds < self.detection_visibility_timeout_seconds:
+            raise ValueError(
+                "The detection lease must not be shorter than the queue visibility timeout"
+            )

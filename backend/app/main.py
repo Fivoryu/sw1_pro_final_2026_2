@@ -27,6 +27,8 @@ from app.modules.catalog.photo_storage import PhotoStorage, create_photo_storage
 from app.modules.catalog.router import router as catalog_router
 from app.modules.customer_identity.router import router as customer_identity_router
 from app.modules.customer_identity.router import wallet_router as customer_wallet_router
+from app.modules.detection.job_queue import JobQueue, create_job_queue
+from app.modules.detection.router import router as detection_router
 from app.modules.health.router import router as health_router
 from app.modules.exchange_rates.router import (
     platform_router as platform_exchange_rates_router,
@@ -94,6 +96,7 @@ def create_app(
     email_sender: Any = None,
     clock: Callable[[], datetime] | None = None,
     photo_storage: PhotoStorage | None = None,
+    job_queue: JobQueue | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_env()
     resolved_settings.validate()
@@ -121,6 +124,7 @@ def create_app(
     app.state.photo_storage = (
         photo_storage if photo_storage is not None else create_photo_storage(resolved_settings)
     )
+    app.state.job_queue = job_queue if job_queue is not None else create_job_queue(resolved_settings)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[resolved_settings.web_origin.rstrip("/")],
@@ -138,6 +142,7 @@ def create_app(
     app.include_router(public_exchange_rates_router)
     app.include_router(catalog_router)
     app.include_router(catalog_photo_router)
+    app.include_router(detection_router)
     app.include_router(reservations_router)
     app.include_router(staff_reservations_router)
 

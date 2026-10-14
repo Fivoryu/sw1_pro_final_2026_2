@@ -1,17 +1,19 @@
 """Payload shapes for detection jobs (F08.4).
 
-The `result` column holds this shape. It carries suggestions, never commercial
-inventory: the confirmed inventory belongs to F08.5 and its contract with F05
-is not frozen yet.
+The `result` column holds ``DetectionResultPayload``. It carries suggestions,
+never commercial inventory: the confirmed inventory belongs to F08.5 and its
+contract with F05 is not frozen yet.
 """
 
 from __future__ import annotations
 
-from typing import Annotated
+from datetime import datetime
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 MAX_DETECTIONS = 100
+SUGGESTION_BOX_SIZE = 4
 
 
 class DetectionSuggestion(BaseModel):
@@ -21,7 +23,7 @@ class DetectionSuggestion(BaseModel):
 
     label: Annotated[str, Field(min_length=1, max_length=64)]
     score: Annotated[float, Field(ge=0.0, le=1.0)]
-    box: Annotated[list[float], Field(min_length=4, max_length=4)]
+    box: Annotated[list[float], Field(min_length=SUGGESTION_BOX_SIZE, max_length=SUGGESTION_BOX_SIZE)]
 
 
 class DetectionResultPayload(BaseModel):
@@ -39,3 +41,22 @@ class DetectionJobFailure(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: Annotated[str, Field(min_length=1, max_length=255)]
+
+
+class DetectionJobResponse(BaseModel):
+    """A job as the staff API reports it: state, attempts and result."""
+
+    job_id: str
+    photo_id: str
+    model_id: str
+    status: str
+    attempts: int
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    result: dict[str, Any] | None = None
+    failure_reason: str | None = None
+
+
+class DetectionJobList(BaseModel):
+    jobs: list[DetectionJobResponse]

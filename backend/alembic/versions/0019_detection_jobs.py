@@ -35,6 +35,7 @@ def upgrade() -> None:
         sa.Column("result", sa.JSON(), nullable=True),
         sa.Column("failure_reason", sa.String(length=255), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("enqueued_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint(
