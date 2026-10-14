@@ -4,6 +4,18 @@ import os
 from dataclasses import dataclass
 
 
+def _boolean_from_env(environment_name: str, default: bool) -> bool:
+    value = os.environ.get(environment_name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes"}:
+        return True
+    if normalized in {"0", "false", "no"}:
+        return False
+    raise RuntimeError(f"{environment_name} must be a boolean")
+
+
 def _positive_timeout_from_env(environment_name: str, default: int) -> int:
     value = os.environ.get(environment_name)
     if value is None:
@@ -38,6 +50,7 @@ class Settings:
     s3_endpoint_url: str | None = None
     s3_bucket_name: str | None = None
     s3_public_endpoint_url: str | None = None
+    s3_allow_remote_endpoint: bool = False
     s3_region: str = "us-east-1"
     sqs_endpoint_url: str | None = None
     detection_queue_name: str = "roomforge-local-detection"
@@ -92,6 +105,7 @@ class Settings:
             s3_endpoint_url=os.environ.get("S3_ENDPOINT_URL"),
             s3_bucket_name=os.environ.get("S3_BUCKET_NAME") or None,
             s3_public_endpoint_url=os.environ.get("S3_PUBLIC_ENDPOINT_URL") or None,
+            s3_allow_remote_endpoint=_boolean_from_env("S3_ALLOW_REMOTE_ENDPOINT", False),
             s3_region=os.environ.get("AWS_DEFAULT_REGION") or "us-east-1",
             sqs_endpoint_url=os.environ.get("SQS_ENDPOINT_URL") or None,
             detection_queue_name=os.environ.get("DETECTION_QUEUE_NAME")

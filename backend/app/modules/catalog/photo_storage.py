@@ -8,13 +8,45 @@ validate it and rewrite it without metadata. Bytes never reach PostgreSQL.
 from __future__ import annotations
 
 from typing import Any, Protocol
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.config import Settings
+
+
+_LOCAL_ENDPOINT_HOSTS = frozenset({"floci", "localhost", "127.0.0.1", "::1"})
+_LOCAL_ACCESS_KEY_ID = "local-test-key"
+_LOCAL_SECRET_ACCESS_KEY = "local-test-secret"
+
+
+def _validate_s3_endpoint(endpoint_url: str | None, *, allow_remote: bool) -> str:
+    if not endpoint_url:
+        raise ValueError("S3_ENDPOINT_URL is required for real photo storage")
+    try:
+        parsed = urlparse(endpoint_url)
+        host = parsed.hostname
+    except ValueError:
+        parsed = urlparse("")
+        host = None
+    if (
+        parsed.scheme not in {"http", "https"}
+        or host is None
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise ValueError("S3_ENDPOINT_URL must be a valid HTTP(S) endpoint")
+    if host not in _LOCAL_ENDPOINT_HOSTS and not allow_remote:
+        raise ValueError(
+            "S3_ENDPOINT_URL must be local unless S3_ALLOW_REMOTE_ENDPOINT=true"
+        )
+    return endpoint_url.rstrip("/")
+
+
+def _is_local_endpoint(endpoint_url: str) -> bool:
+    return urlparse(endpoint_url).hostname in _LOCAL_ENDPOINT_HOSTS
 
 
 class PhotoStorageUnavailableError(Exception):
@@ -55,7 +87,14 @@ class S3PhotoStorage:
         access_key_id: str | None = None,
         secret_access_key: str | None = None,
         timeout_seconds: int = 10,
+        allow_remote_endpoint: bool = False,
     ) -> None:
+        internal_endpoint = _validate_s3_endpoint(
+            endpoint_url, allow_remote=allow_remote_endpoint
+        )
+        signer_endpoint = _validate_s3_endpoint(
+            public_endpoint_url or endpoint_url, allow_remote=allow_remote_endpoint
+        )
         self._bucket = bucket
         config = Config(
             signature_version="s3v4",
@@ -64,21 +103,32 @@ class S3PhotoStorage:
             read_timeout=timeout_seconds,
             retries={"max_attempts": 2},
         )
-        credentials: dict[str, Any] = {}
-        if access_key_id and secret_access_key:
-            credentials = {
-                "aws_access_key_id": access_key_id,
-                "aws_secret_access_key": secret_access_key,
-            }
+        def credentials_for(endpoint: str) -> dict[str, str]:
+            if _is_local_endpoint(endpoint):
+                return {
+                    "aws_access_key_id": _LOCAL_ACCESS_KEY_ID,
+                    "aws_secret_access_key": _LOCAL_SECRET_ACCESS_KEY,
+                }
+            if access_key_id and secret_access_key:
+                return {
+                    "aws_access_key_id": access_key_id,
+                    "aws_secret_access_key": secret_access_key,
+                }
+            return {}
+
         self._client: Any = boto3.client(
-            "s3", endpoint_url=endpoint_url, region_name=region, config=config, **credentials
+            "s3",
+            endpoint_url=internal_endpoint,
+            region_name=region,
+            config=config,
+            **credentials_for(internal_endpoint),
         )
         self._signer: Any = boto3.client(
             "s3",
-            endpoint_url=public_endpoint_url or endpoint_url,
+            endpoint_url=signer_endpoint,
             region_name=region,
             config=config,
-            **credentials,
+            **credentials_for(signer_endpoint),
         )
 
     def presign_upload(self, key: str, *, content_type: str, expires_in: int) -> str:
@@ -169,4 +219,5 @@ def create_photo_storage(settings: Settings) -> PhotoStorage | None:
         endpoint_url=settings.s3_endpoint_url,
         public_endpoint_url=public.rstrip("/") if public else None,
         region=settings.s3_region,
+        allow_remote_endpoint=settings.s3_allow_remote_endpoint,
     )

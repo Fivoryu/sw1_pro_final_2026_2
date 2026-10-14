@@ -22,6 +22,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.config import Settings
 from app.db.base import Base
 from app.main import create_app
+from app.modules.catalog import photo_storage as photo_storage_module
 from app.modules.catalog.models import Listing, ListingPhoto, ListingTransition
 from app.modules.catalog.photo_storage import (
     InMemoryPhotoStorage,
@@ -83,6 +84,56 @@ def test_download_link_is_signed_for_the_public_endpoint() -> None:
 
 def test_storage_is_disabled_without_a_bucket() -> None:
     assert create_photo_storage(_settings(s3_endpoint_url="http://floci:4566")) is None
+
+
+def test_real_storage_refuses_missing_or_remote_endpoint_without_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_calls: list[dict[str, Any]] = []
+
+    def fake_client(service: str, **kwargs: Any) -> object:
+        client_calls.append({"service": service, **kwargs})
+        return object()
+
+    monkeypatch.setattr(photo_storage_module.boto3, "client", fake_client)
+
+    for endpoint in (None, "https://s3.us-east-1.amazonaws.com"):
+        with pytest.raises(ValueError, match="S3_ENDPOINT_URL"):
+            create_photo_storage(
+                _settings(s3_bucket_name="photo-bucket", s3_endpoint_url=endpoint)
+            )
+    assert client_calls == []
+
+
+def test_local_s3_clients_use_placeholders_and_remote_opt_in_is_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_calls: list[dict[str, Any]] = []
+
+    def fake_client(service: str, **kwargs: Any) -> object:
+        client_calls.append({"service": service, **kwargs})
+        return object()
+
+    monkeypatch.setattr(photo_storage_module.boto3, "client", fake_client)
+
+    storage = create_photo_storage(
+        _settings(s3_bucket_name="photo-bucket", s3_endpoint_url="http://floci:4566")
+    )
+
+    assert isinstance(storage, S3PhotoStorage)
+    assert len(client_calls) == 2
+    assert all(call["aws_access_key_id"] == "local-test-key" for call in client_calls)
+    assert all(call["aws_secret_access_key"] == "local-test-secret" for call in client_calls)
+
+    remote = create_photo_storage(
+        _settings(
+            s3_bucket_name="photo-bucket",
+            s3_endpoint_url="https://s3.us-east-1.amazonaws.com",
+            s3_allow_remote_endpoint=True,
+        )
+    )
+    assert isinstance(remote, S3PhotoStorage)
+    assert len(client_calls) == 4
 
 
 @pytest.fixture
