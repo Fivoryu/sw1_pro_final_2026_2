@@ -1,0 +1,3 @@
+# Worker-only dependencies; the pinned inference requirements remain unchanged.
+boto3>=1.34
+httpx>=0.27

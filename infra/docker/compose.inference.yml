@@ -9,10 +9,19 @@
 #     run --rm inference --list-classes
 #   docker compose -f infra/docker/compose.local.yml -f infra/docker/compose.inference.yml \
 #     run --rm inference --images /work/pilot/input --out /work/pilot/out/detections.jsonl
+#   docker compose -f infra/docker/compose.local.yml -f infra/docker/compose.inference.yml \
+#     up worker
 #
-# Sólo CPU: no se declara GPU porque no se midió ninguna.
+# Sólo CPU: no se declara GPU porque no se midió ninguna. El token de worker por
+# defecto sólo sirve para desarrollo local; puede sobreescribirse en el entorno.
 
 services:
+  api:
+    environment:
+      DETECTION_QUEUE_NAME: roomforge-local-detection
+      DETECTION_WORKER_TOKEN: ${DETECTION_WORKER_TOKEN:-roomforge-local-only-worker-token}
+      SQS_ENDPOINT_URL: ${SQS_ENDPOINT_URL:-http://floci:4566}
+
   inference:
     build:
       context: ./inference
@@ -27,6 +36,34 @@ services:
       - ../../worker3d:/work
     working_dir: /work
     shm_size: "256m"
+
+  worker:
+    build:
+      context: ./inference
+      dockerfile: Dockerfile.worker
+    environment:
+      DETECTION_API_BASE_URL: http://api:8000
+      DETECTION_QUEUE_NAME: roomforge-local-detection
+      DETECTION_VISIBILITY_TIMEOUT_SECONDS: "60"
+      DETECTION_WORKER_TOKEN: ${DETECTION_WORKER_TOKEN:-roomforge-local-only-worker-token}
+      SQS_ENDPOINT_URL: ${SQS_ENDPOINT_URL:-http://floci:4566}
+      AWS_ACCESS_KEY_ID: local-test-key
+      AWS_SECRET_ACCESS_KEY: local-test-secret
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      AWS_EC2_METADATA_DISABLED: "true"
+      TORCH_HOME: /cache/torch
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - inference_torch_cache:/cache/torch
+      - ../../worker3d:/work
+    working_dir: /work
+    shm_size: "256m"
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      floci:
+        condition: service_healthy
 
 volumes:
   inference_torch_cache:

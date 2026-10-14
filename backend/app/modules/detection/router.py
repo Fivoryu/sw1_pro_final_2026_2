@@ -6,16 +6,29 @@ and read the resulting job states. They never write commercial inventory.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.modules.catalog.router import _require_listing_editor  # pyright: ignore[reportPrivateUsage]
-from app.modules.detection.job_queue import JobQueue
-from app.modules.detection.models import DetectionJob
-from app.modules.detection.schemas import DetectionJobList, DetectionJobResponse
+from app.modules.detection.job_queue import MESSAGE_VERSION, JobMessage, JobQueue
+from app.modules.detection.models import (
+    DETECTION_JOB_STATUS_COMPLETED,
+    DETECTION_JOB_STATUS_FAILED,
+    DETECTION_JOB_STATUS_PENDING,
+    DETECTION_JOB_STATUS_RUNNING,
+    DetectionJob,
+)
+from app.modules.detection.schemas import (
+    DetectionJobFailure,
+    DetectionJobList,
+    DetectionJobResponse,
+    DetectionResultPayload,
+    DetectionWorkerClaimResponse,
+)
 from app.modules.detection.service import (
     DetectionListingNotFoundError,
     DetectionPhotoNotConfirmedError,
@@ -36,6 +49,29 @@ _PHOTO_NOT_FOUND = "Photo not found"
 _PHOTO_NOT_CONFIRMED = "Only a confirmed photo can be detected"
 _ALREADY_EXISTS = "A detection job already exists for this photo and model"
 _QUEUE_UNAVAILABLE = "Detection queue is unavailable"
+_WORKER_AUTH_UNAVAILABLE = "Detection worker authentication is not configured"
+_WORKER_UNAUTHORIZED = "Detection worker authentication failed"
+_WORKER_JOB_NOT_FOUND = "Detection job not found"
+_WORKER_JOB_NOT_CLAIMABLE = "Detection job is not running"
+_WORKER_RESULT_MODEL_MISMATCH = "Detection result model does not match the job"
+
+
+def _require_detection_worker(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> None:
+    """Authenticate the API-only worker without ever logging its service token."""
+    expected = request.app.state.settings.detection_worker_token
+    if not expected:
+        raise HTTPException(status_code=503, detail=_WORKER_AUTH_UNAVAILABLE)
+    scheme, separator, candidate = (authorization or "").partition(" ")
+    if (
+        not separator
+        or scheme.lower() != "bearer"
+        or not candidate
+        or not secrets.compare_digest(candidate.encode("utf-8"), expected.encode("utf-8"))
+    ):
+        raise HTTPException(status_code=401, detail=_WORKER_UNAUTHORIZED)
 
 
 def _session_factory(request: Request) -> sessionmaker[Session]:
@@ -139,3 +175,148 @@ def list_detection_jobs(
     with _session_factory(request)() as session:
         jobs = list_jobs(session, agency_id=agency_id, listing_id=listing_id)
         return DetectionJobList(jobs=[job_response(job) for job in jobs])
+
+
+worker_router = APIRouter(
+    prefix="/api/v1/detection/jobs",
+    tags=["detection-worker"],
+    dependencies=[Depends(_require_detection_worker)],
+)
+
+
+@worker_router.post("/{job_id}/claim", response_model=DetectionWorkerClaimResponse)
+def claim_detection_job(job_id: str, request: Request) -> DetectionWorkerClaimResponse:
+    """Atomically lease a pending job and sign only its referenced image."""
+    settings = request.app.state.settings
+    now = request.app.state.clock()
+    download_url: str | None = None
+    with _session_factory(request).begin() as session:
+        claimed = (
+            session.query(DetectionJob)
+            .filter(
+                DetectionJob.id == job_id,
+                DetectionJob.status == DETECTION_JOB_STATUS_PENDING,
+            )
+            .update(
+                {
+                    DetectionJob.status: DETECTION_JOB_STATUS_RUNNING,
+                    DetectionJob.lease_expires_at: now
+                    + timedelta(seconds=settings.detection_lease_seconds),
+                    DetectionJob.started_at: now,
+                    DetectionJob.failure_reason: None,
+                },
+                synchronize_session=False,
+            )
+        )
+        job = session.get(DetectionJob, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=_WORKER_JOB_NOT_FOUND)
+        if claimed:
+            storage = getattr(
+                request.app.state,
+                "worker_photo_storage",
+                request.app.state.photo_storage,
+            )
+            if storage is None:
+                raise HTTPException(status_code=503, detail="Photo storage is not configured")
+            try:
+                download_url = storage.presign_download(
+                    job.object_key, expires_in=settings.detection_lease_seconds
+                )
+            except Exception:
+                raise HTTPException(status_code=503, detail="Photo storage is unavailable") from None
+        return DetectionWorkerClaimResponse(
+            job_id=job.id,
+            photo_id=job.photo_id,
+            object_key=job.object_key,
+            model_id=job.model_id,
+            status=job.status,
+            attempts=job.attempts,
+            download_url=download_url,
+        )
+
+
+@worker_router.post("/{job_id}/complete", response_model=DetectionJobResponse)
+def complete_detection_job(
+    job_id: str,
+    result: DetectionResultPayload,
+    request: Request,
+) -> DetectionJobResponse:
+    """Persist one inference result; a repeated completion returns the first."""
+    with _session_factory(request).begin() as session:
+        job = (
+            session.query(DetectionJob)
+            .filter(DetectionJob.id == job_id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if job is None:
+            raise HTTPException(status_code=404, detail=_WORKER_JOB_NOT_FOUND)
+        if job.status == DETECTION_JOB_STATUS_COMPLETED:
+            return job_response(job)
+        if job.status != DETECTION_JOB_STATUS_RUNNING:
+            raise HTTPException(status_code=409, detail=_WORKER_JOB_NOT_CLAIMABLE)
+        if result.model_id != job.model_id:
+            raise HTTPException(status_code=409, detail=_WORKER_RESULT_MODEL_MISMATCH)
+        job.status = DETECTION_JOB_STATUS_COMPLETED
+        job.result = result.model_dump(mode="json")
+        job.failure_reason = None
+        job.lease_expires_at = None
+        job.finished_at = request.app.state.clock()
+        return job_response(job)
+
+
+@worker_router.post("/{job_id}/fail", response_model=DetectionJobResponse)
+def fail_detection_job(
+    job_id: str,
+    failure: DetectionJobFailure,
+    request: Request,
+) -> DetectionJobResponse:
+    """Consume one failed attempt, republish while bounded retries remain."""
+    settings = request.app.state.settings
+    now = request.app.state.clock()
+    queue: JobQueue | None = request.app.state.job_queue
+    queued = True
+    should_publish = False
+    with _session_factory(request).begin() as session:
+        job = (
+            session.query(DetectionJob)
+            .filter(DetectionJob.id == job_id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if job is None:
+            raise HTTPException(status_code=404, detail=_WORKER_JOB_NOT_FOUND)
+        if job.status == DETECTION_JOB_STATUS_RUNNING:
+            job.attempts += 1
+            job.failure_reason = failure.reason
+            job.lease_expires_at = None
+            if job.attempts >= settings.detection_max_attempts:
+                job.status = DETECTION_JOB_STATUS_FAILED
+                job.finished_at = now
+            else:
+                job.status = DETECTION_JOB_STATUS_PENDING
+                job.enqueued_at = None
+                should_publish = True
+                if queue is None:
+                    queued = False
+                else:
+                    try:
+                        queue.publish(
+                            JobMessage(
+                                version=MESSAGE_VERSION,
+                                job_id=job.id,
+                                photo_id=job.photo_id,
+                                object_key=job.object_key,
+                                model_id=job.model_id,
+                                attempt=job.attempts + 1,
+                            )
+                        )
+                        job.enqueued_at = now
+                    except Exception:
+                        queued = False
+        payload = job_response(job)
+
+    if should_publish and not queued:
+        raise HTTPException(status_code=503, detail=_QUEUE_UNAVAILABLE)
+    return payload

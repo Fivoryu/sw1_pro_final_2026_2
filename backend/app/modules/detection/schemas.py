@@ -43,6 +43,20 @@ class DetectionJobFailure(BaseModel):
     reason: Annotated[str, Field(min_length=1, max_length=255)]
 
 
+class DetectionWorkerClaimResponse(BaseModel):
+    """Job state and, only for a successful claim, its authorized image URL."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str
+    photo_id: str
+    object_key: str
+    model_id: str
+    status: str
+    attempts: int
+    download_url: str | None = None
+
+
 class DetectionJobResponse(BaseModel):
     """A job as the staff API reports it: state, attempts and result."""
 

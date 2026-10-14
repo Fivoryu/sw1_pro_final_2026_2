@@ -24,6 +24,7 @@ catch {
 $flociEnvironment = $composeConfig.services.floci.environment
 $bucketName = [string]$flociEnvironment.S3_BUCKET_NAME
 $queueName = [string]$flociEnvironment.SQS_QUEUE_NAME
+$detectionQueueName = 'roomforge-local-detection'
 $s3Endpoint = [string]$flociEnvironment.S3_ENDPOINT_URL
 $sqsEndpoint = [string]$flociEnvironment.SQS_ENDPOINT_URL
 if ([string]::IsNullOrWhiteSpace($bucketName) -or
@@ -52,7 +53,7 @@ function Invoke-FlociAws {
 try {
     $bucketListJson = Invoke-FlociAws -Endpoint $s3Endpoint -AwsArguments @('s3api', 'list-buckets', '--output', 'json')
     $bucketList = ConvertFrom-Json -InputObject $bucketListJson
-    $queueListJson = Invoke-FlociAws -Endpoint $sqsEndpoint -AwsArguments @('sqs', 'list-queues', '--queue-name-prefix', $queueName, '--output', 'json')
+    $queueListJson = Invoke-FlociAws -Endpoint $sqsEndpoint -AwsArguments @('sqs', 'list-queues', '--output', 'json')
     $queueList = ConvertFrom-Json -InputObject $queueListJson
 }
 catch {
@@ -60,10 +61,7 @@ catch {
 }
 
 $bucketExists = @($bucketList.Buckets | Where-Object { $_.Name -ceq $bucketName }).Count -gt 0
-$queueSuffix = "/$queueName"
-$queueExists = @($queueList.QueueUrls | Where-Object {
-    ([string]$_).TrimEnd('/').EndsWith($queueSuffix, [StringComparison]::Ordinal)
-}).Count -gt 0
+$queueNames = @($queueName, $detectionQueueName) | Select-Object -Unique
 
 if ($bucketExists) {
     Write-Host "S3 bucket '$bucketName' already exists; leaving it unchanged."
@@ -73,10 +71,17 @@ else {
     Write-Host "Created S3 bucket '$bucketName'."
 }
 
-if ($queueExists) {
-    Write-Host "SQS queue '$queueName' already exists; leaving it unchanged."
-}
-else {
-    $null = Invoke-FlociAws -Endpoint $sqsEndpoint -AwsArguments @('sqs', 'create-queue', '--queue-name', $queueName, '--output', 'json')
-    Write-Host "Created SQS queue '$queueName'."
+foreach ($targetQueueName in $queueNames) {
+    $queueSuffix = "/$targetQueueName"
+    $queueExists = @($queueList.QueueUrls | Where-Object {
+        ([string]$_).TrimEnd('/').EndsWith($queueSuffix, [StringComparison]::Ordinal)
+    }).Count -gt 0
+
+    if ($queueExists) {
+        Write-Host "SQS queue '$targetQueueName' already exists; leaving it unchanged."
+    }
+    else {
+        $null = Invoke-FlociAws -Endpoint $sqsEndpoint -AwsArguments @('sqs', 'create-queue', '--queue-name', $targetQueueName, '--output', 'json')
+        Write-Host "Created SQS queue '$targetQueueName'."
+    }
 }

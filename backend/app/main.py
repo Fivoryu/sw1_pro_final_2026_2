@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
+from dataclasses import replace
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from cryptography.fernet import Fernet
@@ -29,6 +31,7 @@ from app.modules.customer_identity.router import router as customer_identity_rou
 from app.modules.customer_identity.router import wallet_router as customer_wallet_router
 from app.modules.detection.job_queue import JobQueue, create_job_queue
 from app.modules.detection.router import router as detection_router
+from app.modules.detection.router import worker_router as detection_worker_router
 from app.modules.health.router import router as health_router
 from app.modules.exchange_rates.router import (
     platform_router as platform_exchange_rates_router,
@@ -39,6 +42,30 @@ from app.modules.identity.router import router as identity_router
 from app.modules.reservations.errors import ReservationApiError
 from app.modules.reservations.router import router as reservations_router
 from app.modules.reservations.router import staff_router as staff_reservations_router
+
+
+def _create_worker_photo_storage(
+    settings: Settings,
+    *,
+    injected_storage: PhotoStorage | None,
+) -> PhotoStorage | None:
+    """Sign worker downloads for the local service network, never a public AWS host."""
+    if injected_storage is not None:
+        return injected_storage
+    endpoint = settings.s3_endpoint_url
+    if not settings.s3_bucket_name or not endpoint:
+        return None
+    parsed = urlparse(endpoint)
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in {
+        "floci",
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }:
+        return None
+    # Browser photo links keep using S3_PUBLIC_ENDPOINT_URL. Worker links need a
+    # signature for the service-to-service Floci hostname reachable in Compose.
+    return create_photo_storage(replace(settings, s3_public_endpoint_url=endpoint))
 
 
 def _run_official_rate_refresh(session_factory: sessionmaker[Session]) -> None:
@@ -124,6 +151,9 @@ def create_app(
     app.state.photo_storage = (
         photo_storage if photo_storage is not None else create_photo_storage(resolved_settings)
     )
+    app.state.worker_photo_storage = _create_worker_photo_storage(
+        resolved_settings, injected_storage=photo_storage
+    )
     app.state.job_queue = job_queue if job_queue is not None else create_job_queue(resolved_settings)
     app.add_middleware(
         CORSMiddleware,
@@ -143,6 +173,7 @@ def create_app(
     app.include_router(catalog_router)
     app.include_router(catalog_photo_router)
     app.include_router(detection_router)
+    app.include_router(detection_worker_router)
     app.include_router(reservations_router)
     app.include_router(staff_reservations_router)
 
