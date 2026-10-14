@@ -29,6 +29,9 @@ from app.modules.detection.models import (
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 MIGRATION_PATH = BACKEND_DIR / "alembic" / "versions" / "0019_detection_jobs.py"
+CLAIM_TOKEN_MIGRATION_PATH = (
+    BACKEND_DIR / "alembic" / "versions" / "0020_detection_job_claim_token.py"
+)
 _NOW = datetime(2026, 10, 14, 15, 0, tzinfo=UTC)
 
 
@@ -108,6 +111,49 @@ def test_new_job_defaults_to_pending_with_no_attempts(session: Session) -> None:
     assert stored.started_at is None
     assert stored.finished_at is None
     assert stored.lease_expires_at is None
+
+
+def test_claim_token_migration_adds_and_drops_the_fencing_column() -> None:
+    spec = importlib.util.spec_from_file_location(
+        "detection_job_claim_token_migration", CLAIM_TOKEN_MIGRATION_PATH
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    base_spec = importlib.util.spec_from_file_location(
+        "detection_jobs_migration_for_claim_token", MIGRATION_PATH
+    )
+    assert base_spec is not None and base_spec.loader is not None
+    base_migration = importlib.util.module_from_spec(base_spec)
+    base_spec.loader.exec_module(base_migration)
+
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    try:
+        with engine.begin() as connection:
+            with Operations.context(MigrationContext.configure(connection)):
+                base_migration.upgrade()
+                migration.upgrade()
+            columns = {
+                column["name"]
+                for column in inspect(connection).get_columns("detection_job")
+            }
+            assert "claim_token" in columns
+
+        with engine.begin() as connection:
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.downgrade()
+            columns = {
+                column["name"]
+                for column in inspect(connection).get_columns("detection_job")
+            }
+            assert "claim_token" not in columns
+    finally:
+        engine.dispose()
 
 
 def test_migration_creates_and_drops_the_detection_job_table() -> None:

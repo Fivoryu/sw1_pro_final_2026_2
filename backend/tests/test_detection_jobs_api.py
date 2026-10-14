@@ -11,10 +11,13 @@ from the API instead of querying storage: the observable effect is what matters.
 from __future__ import annotations
 
 import base64
+import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -28,7 +31,8 @@ from app.db.base import Base
 from app.main import create_app
 from app.modules.catalog.models import Listing, ListingPhoto
 from app.modules.catalog.photo_storage import InMemoryPhotoStorage
-from app.modules.detection.job_queue import InMemoryJobQueue, SqsJobQueue
+from app.modules.detection.job_queue import InMemoryJobQueue, JobMessage, SqsJobQueue
+from app.modules.detection.models import DetectionJob
 from app.modules.identity.models import Agency
 from app.modules.identity.session import get_active_staff
 
@@ -332,3 +336,87 @@ def test_a_lease_shorter_than_the_visibility_timeout_is_rejected() -> None:
         _settings(
             detection_lease_seconds=30, detection_visibility_timeout_seconds=60
         ).validate()
+
+
+def test_job_is_committed_before_the_queue_receives_it(tmp_path: Path) -> None:
+    """A queue consumer must never race ahead of the job transaction."""
+    database = tmp_path / "detection-commit-order.db"
+    engine = create_engine(
+        f"sqlite+pysqlite:///{database}", connect_args={"check_same_thread": False}
+    )
+    factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    Base.metadata.create_all(engine)
+
+    class CommitObservingQueue(InMemoryJobQueue):
+        job_visible_at_publish = False
+
+        def publish(self, message: JobMessage) -> None:
+            with factory() as independent_session:
+                self.job_visible_at_publish = (
+                    independent_session.get(DetectionJob, message.job_id) is not None
+                )
+            super().publish(message)
+
+    queue = CommitObservingQueue()
+    app = create_app(
+        settings=_settings(),
+        session_factory=factory,
+        clock=lambda: _NOW,
+        photo_storage=InMemoryPhotoStorage(),
+        job_queue=queue,
+    )
+    app.dependency_overrides[get_active_staff] = lambda: {
+        "id": "detection-actor",
+        "email": "detection-actor@example.test",
+        "role": "agent",
+        "tenant_id": "agency-one",
+    }
+    try:
+        with TestClient(app) as client:
+            _seed_listing(factory)
+            _seed_photo(factory)
+
+            response = client.post(_detections_url())
+            listed = client.get(_jobs_url())
+
+            assert response.status_code == 201, response.text
+            assert listed.status_code == 200, listed.text
+            assert [job["job_id"] for job in listed.json()["jobs"]] == [
+                response.json()["job_id"]
+            ]
+            assert queue.job_visible_at_publish is True
+            assert [message.job_id for message in queue.published] == [
+                response.json()["job_id"]
+            ]
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("endpoint_url", [None, "https://sqs.us-east-1.amazonaws.com"])
+def test_producer_refuses_missing_or_remote_sqs_endpoints(
+    context: DetectionContext,
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint_url: str | None,
+) -> None:
+    _seed_listing(context.session_factory)
+    _seed_photo(context.session_factory)
+    boto_calls: list[object] = []
+
+    def forbidden_resource(*args: object, **kwargs: object) -> object:
+        boto_calls.append((args, kwargs))
+        raise AssertionError("boto3 must not be called for a non-local endpoint")
+
+    monkeypatch.setitem(sys.modules, "boto3", SimpleNamespace(resource=forbidden_resource))
+    context.app.state.job_queue = SqsJobQueue(
+        queue_name="roomforge-local-detection",
+        endpoint_url=endpoint_url,
+        region="us-east-1",
+    )
+
+    response = context.client.post(_detections_url())
+    listed = _listed_jobs(context)
+
+    assert response.status_code == 503, response.text
+    assert len(listed) == 1 and listed[0]["status"] == "pending"
+    assert context.queue.published == []
+    assert boto_calls == []

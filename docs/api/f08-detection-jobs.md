@@ -27,15 +27,18 @@ Prefijo: `/api/v1/detection/jobs/{job_id}`. Las tres rutas exigen `Authorization
 
 | Método y ruta | Código | Resultado |
 |---|---|---|
-| `POST /claim` | `200` | Si el trabajo está `pending`, pasa a `running`, fija el lease y devuelve el trabajo con `download_url` firmado para su `object_key`. Para un trabajo ya tomado o finalizado devuelve su estado y `download_url: null`, sin volver a tomarlo |
+| `POST /claim` | `200` | Si el trabajo está `pending`, pasa a `running`, fija el lease y devuelve el trabajo con `download_url` firmado para su `object_key` y un `claim_token` opaco. Para un trabajo ya tomado o finalizado devuelve su estado y `download_url: null`, sin volver a tomarlo ni entregar un token |
 | | `404` | El trabajo no existe; el consumidor descarta el mensaje sin reintentar |
 | | `503` | No hay token configurado o no se pudo firmar el enlace; no se procesa la imagen |
-| `POST /complete` | `200` | Guarda `model_id` y `detections` (`label`, `score`, `box`) y pasa a `completed`. Repetirlo devuelve el resultado original sin alterarlo |
-| | `409` | El trabajo no está `running` o el `model_id` informado no coincide con el trabajo |
-| `POST /fail` | `200` | Recibe `{"reason": "..."}`, consume un intento y deja `pending` con republicación o `failed` al agotar `DETECTION_MAX_ATTEMPTS` |
+| `POST /complete` | `200` | Recibe `claim_token`, `model_id` y `detections` (`label`, `score`, `box`); guarda el resultado sin persistir el token y pasa a `completed`. Repetirlo con el mismo token devuelve el resultado original sin alterarlo |
+| | `409` | El token no corresponde al claim vigente, el trabajo no está `running` o el `model_id` informado no coincide con el trabajo |
+| `POST /fail` | `200` | Recibe `{"claim_token": "...", "reason": "..."}`, consume un intento y deja `pending` con republicación o `failed` al agotar `DETECTION_MAX_ATTEMPTS` |
+| | `409` | El token no corresponde al claim vigente; el estado del trabajo no cambia |
 | | `503` | No se pudo republicar; el trabajo persiste como `pending` y el consumidor no confirma el mensaje original |
 
-El worker no recibe credenciales de base de datos ni de S3. Sólo descarga el enlace firmado que devuelve `claim`; el enlace usa el endpoint local de Floci accesible desde la red de Compose. La cola y el almacenamiento de este piloto no apuntan a AWS real.
+Cada claim exitoso genera un `claim_token` nuevo y lo guarda con el trabajo. El worker debe incluirlo en `complete` o `fail`; tras vencer un lease y reclamarse el trabajo, cualquier reporte con el token anterior recibe `409` sin cambiar estado, intentos ni resultado.
+
+El worker no recibe credenciales de base de datos ni de S3. Sólo descarga el enlace firmado que devuelve `claim`; el enlace usa el endpoint local de Floci accesible desde la red de Compose. El productor y el consumidor rechazan endpoints SQS ausentes o no locales antes de crear el cliente boto3. La cola y el almacenamiento de este piloto no apuntan a AWS real.
 
 ## 3. Estados
 

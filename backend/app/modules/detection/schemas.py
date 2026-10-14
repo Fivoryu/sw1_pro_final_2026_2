@@ -27,19 +27,21 @@ class DetectionSuggestion(BaseModel):
 
 
 class DetectionResultPayload(BaseModel):
-    """What the worker reports back for one image."""
+    """What the worker reports back for one image and active claim."""
 
     model_config = ConfigDict(extra="forbid")
 
+    claim_token: Annotated[str, Field(min_length=1, max_length=64)]
     model_id: Annotated[str, Field(min_length=1, max_length=64)]
     detections: Annotated[list[DetectionSuggestion], Field(max_length=MAX_DETECTIONS)]
 
 
 class DetectionJobFailure(BaseModel):
-    """Why a worker could not finish a job."""
+    """Why a worker could not finish its active claim."""
 
     model_config = ConfigDict(extra="forbid")
 
+    claim_token: Annotated[str, Field(min_length=1, max_length=64)]
     reason: Annotated[str, Field(min_length=1, max_length=255)]
 
 
@@ -54,6 +56,7 @@ class DetectionWorkerClaimResponse(BaseModel):
     model_id: str
     status: str
     attempts: int
+    claim_token: str | None = None
     download_url: str | None = None
 
 

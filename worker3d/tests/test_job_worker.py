@@ -43,7 +43,8 @@ class FakeHttpClient:
         self.downloads: list[str] = []
         self.claims = [
             {"job_id": _JOB_ID, "photo_id": "photo-one", "object_key": "photos/one.jpg",
-             "model_id": _MODEL_ID, "status": "running", "download_url": "http://floci/photo"},
+             "model_id": _MODEL_ID, "status": "running", "claim_token": "claim-token-one",
+             "download_url": "http://floci/photo"},
             {"job_id": _JOB_ID, "photo_id": "photo-one", "object_key": "photos/one.jpg",
              "model_id": _MODEL_ID, "status": "completed", "download_url": None},
         ]
@@ -147,7 +148,11 @@ def test_repeated_delivery_neither_infers_nor_reports_twice() -> None:
         "receipt-one", "receipt-two"
     ]
     complete_body = next(body for url, body in http.posts if url.endswith("/complete"))
-    assert complete_body == {"model_id": _MODEL_ID, "detections": [_DETECTION]}
+    assert complete_body == {
+        "claim_token": "claim-token-one",
+        "model_id": _MODEL_ID,
+        "detections": [_DETECTION],
+    }
 
 
 def test_failed_inference_is_reported_to_api_before_acknowledging() -> None:
@@ -171,7 +176,48 @@ def test_failed_inference_is_reported_to_api_before_acknowledging() -> None:
     assert len(failures) == 1
     assert failures[0][1] is not None
     assert "private image path" not in failures[0][1]["reason"]
+    assert failures[0][1]["claim_token"] == "claim-token-one"
     assert [delivery.receipt_handle for delivery in queue.deleted] == ["receipt-failed"]
+
+
+def test_claim_404_discards_a_message_for_a_missing_job() -> None:
+    delivery = _delivery("receipt-missing")
+    queue = FakeQueue([delivery])
+
+    class MissingJobHttpClient:
+        posts: list[str] = []
+
+        def post(
+            self,
+            url: str,
+            *,
+            headers: dict[str, str],
+            json: dict[str, Any] | None = None,
+        ) -> FakeResponse:
+            assert headers == {"Authorization": "Bearer service-token"}
+            assert json is None
+            self.posts.append(url)
+            return FakeResponse(status_code=404)
+
+        def get(self, url: str) -> FakeResponse:
+            raise AssertionError(f"a missing job must not download an image: {url}")
+
+    http = MissingJobHttpClient()
+    inferred: list[Path] = []
+    worker = job_worker.DetectionJobWorker(
+        api_base_url="http://api:8000",
+        service_token="service-token",
+        queue=queue,
+        http_client=http,
+        detector=lambda path: inferred.append(path) or [_DETECTION],
+    )
+
+    assert worker.run_once() is True
+    assert http.posts == [
+        f"http://api:8000/api/v1/detection/jobs/{_JOB_ID}/claim"
+    ]
+    assert inferred == []
+    assert queue.deleted == [delivery]
 
 
 def test_completed_job_is_discarded_without_download_or_detection() -> None:

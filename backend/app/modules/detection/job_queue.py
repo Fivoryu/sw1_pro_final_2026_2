@@ -13,8 +13,32 @@ import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 MESSAGE_VERSION = 1
+LOCAL_QUEUE_HOSTS = frozenset({"floci", "localhost", "127.0.0.1", "::1"})
+LOCAL_AWS_ACCESS_KEY_ID = "local-test-key"
+LOCAL_AWS_SECRET_ACCESS_KEY = "local-test-secret"
+
+
+def validate_local_endpoint(endpoint_url: str | None) -> str:
+    """Reject missing and non-local SQS endpoints before constructing an AWS client."""
+    if not endpoint_url:
+        raise ValueError("SQS_ENDPOINT_URL must point to a local Floci endpoint")
+    try:
+        parsed = urlparse(endpoint_url)
+        host = parsed.hostname
+    except ValueError:
+        parsed = urlparse("")
+        host = None
+    if (
+        parsed.scheme not in {"http", "https"}
+        or host not in LOCAL_QUEUE_HOSTS
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise ValueError("SQS_ENDPOINT_URL must point to a local Floci endpoint")
+    return endpoint_url.rstrip("/")
 
 
 class JobQueueUnavailableError(RuntimeError):
@@ -76,11 +100,16 @@ class SqsJobQueue:
 
     def _resolve(self) -> Any:
         if self._queue is None:
+            endpoint_url = validate_local_endpoint(self._endpoint_url)
             import boto3
 
             # boto3 ships no type stubs here, so the resource is typed explicitly.
             resource: Any = boto3.resource(
-                "sqs", endpoint_url=self._endpoint_url, region_name=self._region
+                "sqs",
+                endpoint_url=endpoint_url,
+                region_name=self._region,
+                aws_access_key_id=LOCAL_AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=LOCAL_AWS_SECRET_ACCESS_KEY,
             )
             self._queue = resource.get_queue_by_name(QueueName=self._queue_name)
         return self._queue

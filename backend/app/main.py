@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 from contextlib import asynccontextmanager, suppress
@@ -43,6 +44,8 @@ from app.modules.identity.router import router as identity_router
 from app.modules.reservations.errors import ReservationApiError
 from app.modules.reservations.router import router as reservations_router
 from app.modules.reservations.router import staff_router as staff_reservations_router
+
+LOGGER = logging.getLogger("roomforge.detection.recovery")
 
 
 def _create_worker_photo_storage(
@@ -129,6 +132,7 @@ async def _detection_recovery_loop(
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - a later sweep retries transient failures
+            LOGGER.warning("Detection recovery loop failed; the next sweep will retry")
             continue
 
 

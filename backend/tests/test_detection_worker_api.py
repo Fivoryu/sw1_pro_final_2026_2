@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -22,7 +22,9 @@ from app.modules.catalog.models import Listing, ListingExtra
 from app.modules.catalog.photo_storage import InMemoryPhotoStorage
 from app.modules.detection.job_queue import InMemoryJobQueue
 from app.modules.detection.models import DetectionJob, dedupe_key_for
+from app.modules.detection.service import run_detection_recovery_sweep
 from app.modules.identity.models import Agency
+from app.modules.identity.session import get_active_staff
 
 _NOW = datetime(2026, 10, 14, 20, 0, tzinfo=UTC)
 _JOB_ID = "detection-job-one"
@@ -63,6 +65,12 @@ class WorkerContext:
             photo_storage=self.storage,
             job_queue=self.queue,
         )
+        self.app.dependency_overrides[get_active_staff] = lambda: {
+            "id": "worker-test-actor",
+            "email": "worker-test@example.test",
+            "role": "agent",
+            "tenant_id": "agency-one",
+        }
         self.client = TestClient(self.app)
         with self.session_factory.begin() as session:
             session.add(
@@ -100,6 +108,62 @@ def _headers(token: str = _TOKEN) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def test_stale_claim_reports_are_rejected_without_changing_the_new_claim(
+    context: WorkerContext,
+) -> None:
+    first_claim = context.client.post(_url("claim"), headers=_headers())
+    assert first_claim.status_code == 200, first_claim.text
+    first_token = first_claim.json().get("claim_token")
+    assert isinstance(first_token, str) and first_token
+
+    run_detection_recovery_sweep(
+        context.session_factory,
+        context.queue,
+        now=_NOW + timedelta(hours=1),
+        max_attempts=3,
+    )
+    second_claim = context.client.post(_url("claim"), headers=_headers())
+    assert second_claim.status_code == 200, second_claim.text
+    second_token = second_claim.json().get("claim_token")
+    assert isinstance(second_token, str) and second_token
+    assert second_token != first_token
+
+    staff_jobs_url = (
+        "/api/v1/staff/agencies/agency-one/listings/listing-one/detections"
+    )
+    before = context.client.get(staff_jobs_url)
+    assert before.status_code == 200, before.text
+    before_job = before.json()["jobs"][0]
+
+    stale_complete = context.client.post(
+        _url("complete"),
+        headers=_headers(),
+        json={"claim_token": first_token, "model_id": _MODEL_ID, "detections": []},
+    )
+    stale_fail = context.client.post(
+        _url("fail"),
+        headers=_headers(),
+        json={"claim_token": first_token, "reason": "stale failure"},
+    )
+    after = context.client.get(staff_jobs_url)
+
+    assert stale_complete.status_code == 409, stale_complete.text
+    assert stale_fail.status_code == 409, stale_fail.text
+    assert after.status_code == 200, after.text
+    assert after.json()["jobs"][0] == before_job
+    assert len(context.queue.published) == 1
+
+    current_complete = context.client.post(
+        _url("complete"),
+        headers=_headers(),
+        json={"claim_token": second_token, "model_id": _MODEL_ID, "detections": []},
+    )
+    assert current_complete.status_code == 200, current_complete.text
+    final = context.client.get(staff_jobs_url)
+    assert final.status_code == 200, final.text
+    assert final.json()["jobs"][0]["status"] == "completed"
+
+
 def test_worker_token_is_required_and_missing_configuration_fails_closed() -> None:
     unopened = WorkerContext(token=None)
     try:
@@ -131,6 +195,7 @@ def test_claim_sets_running_lease_and_returns_the_authorized_download_url(
     assert body["object_key"] == _KEY
     assert body["model_id"] == _MODEL_ID
     assert body["status"] == "running"
+    assert isinstance(body["claim_token"], str) and body["claim_token"]
     assert body["download_url"] == context.storage.presign_download(_KEY, expires_in=300)
     with context.session_factory() as session:
         job = session.get(DetectionJob, _JOB_ID)
@@ -143,7 +208,11 @@ def test_claim_sets_running_lease_and_returns_the_authorized_download_url(
 def test_reclaiming_a_completed_job_does_not_issue_an_image_url(context: WorkerContext) -> None:
     claimed = context.client.post(_url("claim"), headers=_headers())
     assert claimed.status_code == 200, claimed.text
-    result = {"model_id": _MODEL_ID, "detections": []}
+    result = {
+        "claim_token": claimed.json()["claim_token"],
+        "model_id": _MODEL_ID,
+        "detections": [],
+    }
     completed = context.client.post(_url("complete"), headers=_headers(), json=result)
     assert completed.status_code == 200, completed.text
 
@@ -157,27 +226,33 @@ def test_reclaiming_a_completed_job_does_not_issue_an_image_url(context: WorkerC
 def test_complete_persists_detections_and_is_idempotent(context: WorkerContext) -> None:
     claimed = context.client.post(_url("claim"), headers=_headers())
     assert claimed.status_code == 200, claimed.text
+    claim_token = claimed.json()["claim_token"]
     first_result = {
+        "claim_token": claim_token,
         "model_id": _MODEL_ID,
         "detections": [
             {"label": "chair", "score": 0.83, "box": [1.0, 2.0, 30.0, 40.0]}
         ],
     }
+    stored_result = {
+        "model_id": _MODEL_ID,
+        "detections": first_result["detections"],
+    }
     completed = context.client.post(_url("complete"), headers=_headers(), json=first_result)
     replay = context.client.post(
         _url("complete"),
         headers=_headers(),
-        json={"model_id": _MODEL_ID, "detections": []},
+        json={"claim_token": claim_token, "model_id": _MODEL_ID, "detections": []},
     )
 
     assert completed.status_code == 200, completed.text
     assert replay.status_code == 200, replay.text
     assert completed.json()["status"] == "completed"
-    assert replay.json()["result"] == first_result
+    assert replay.json()["result"] == stored_result
     with context.session_factory() as session:
         job = session.get(DetectionJob, _JOB_ID)
         assert job is not None
-        assert job.result == first_result
+        assert job.result == stored_result
         assert job.finished_at is not None
         assert job.finished_at.replace(tzinfo=UTC) == _NOW
 
@@ -191,7 +266,12 @@ def test_fail_counts_attempts_republishes_then_stops_at_the_limit() -> None:
         first_claim = limited.client.post(_url("claim"), headers=_headers())
         assert first_claim.status_code == 200, first_claim.text
         first_fail = limited.client.post(
-            _url("fail"), headers=_headers(), json={"reason": "temporary detector error"}
+            _url("fail"),
+            headers=_headers(),
+            json={
+                "claim_token": first_claim.json()["claim_token"],
+                "reason": "temporary detector error",
+            },
         )
         assert first_fail.status_code == 200, first_fail.text
         assert first_fail.json()["status"] == "pending"
@@ -201,7 +281,12 @@ def test_fail_counts_attempts_republishes_then_stops_at_the_limit() -> None:
         second_claim = limited.client.post(_url("claim"), headers=_headers())
         assert second_claim.status_code == 200, second_claim.text
         second_fail = limited.client.post(
-            _url("fail"), headers=_headers(), json={"reason": "image is unreadable"}
+            _url("fail"),
+            headers=_headers(),
+            json={
+                "claim_token": second_claim.json()["claim_token"],
+                "reason": "image is unreadable",
+            },
         )
 
         assert second_fail.status_code == 200, second_fail.text
@@ -224,9 +309,15 @@ def test_permanent_failure_stops_at_the_exact_attempt_cap_and_stays_failed() -> 
             claimed = limited.client.post(_url("claim"), headers=_headers())
             assert claimed.status_code == 200, claimed.text
             assert claimed.json()["status"] == "running"
+            claim_token = claimed.json()["claim_token"]
 
             failed = limited.client.post(
-                _url("fail"), headers=_headers(), json={"reason": failure_reason}
+                _url("fail"),
+                headers=_headers(),
+                json={
+                    "claim_token": claim_token,
+                    "reason": failure_reason,
+                },
             )
             assert failed.status_code == 200, failed.text
             expected_status = "failed" if attempt == 3 else "pending"
@@ -238,7 +329,12 @@ def test_permanent_failure_stops_at_the_exact_attempt_cap_and_stays_failed() -> 
 
         later_claim = limited.client.post(_url("claim"), headers=_headers())
         later_failure = limited.client.post(
-            _url("fail"), headers=_headers(), json={"reason": "must not replace the reason"}
+            _url("fail"),
+            headers=_headers(),
+            json={
+                "claim_token": claim_token,
+                "reason": "must not replace the reason",
+            },
         )
 
         assert later_claim.status_code == 200, later_claim.text
@@ -331,6 +427,7 @@ def test_worker_result_does_not_write_commercial_inventory(context: WorkerContex
         _url("complete"),
         headers=_headers(),
         json={
+            "claim_token": claimed.json()["claim_token"],
             "model_id": _MODEL_ID,
             "detections": [
                 {"label": "chair", "score": 0.83, "box": [1.0, 2.0, 30.0, 40.0]}
@@ -354,7 +451,11 @@ def test_worker_complete_rejects_a_result_for_another_model(context: WorkerConte
     response = context.client.post(
         _url("complete"),
         headers=_headers(),
-        json={"model_id": "different-model", "detections": []},
+        json={
+            "claim_token": claimed.json()["claim_token"],
+            "model_id": "different-model",
+            "detections": [],
+        },
     )
 
     assert response.status_code == 409, response.text
@@ -366,7 +467,10 @@ def test_worker_complete_rejects_a_result_for_another_model(context: WorkerConte
 def test_failure_body_is_bounded_by_the_published_schema(context: WorkerContext) -> None:
     claimed = context.client.post(_url("claim"), headers=_headers())
     assert claimed.status_code == 200, claimed.text
-    bad_body: dict[str, Any] = {"reason": "x" * 256}
+    bad_body: dict[str, Any] = {
+        "claim_token": claimed.json()["claim_token"],
+        "reason": "x" * 256,
+    }
 
     response = context.client.post(_url("fail"), headers=_headers(), json=bad_body)
 

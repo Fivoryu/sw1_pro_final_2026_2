@@ -156,11 +156,11 @@ La descarga se resuelve con un **enlace firmado** emitido por la API, no con cre
 |---|---|
 | R1 | Crear devuelve `pending`; completar devuelve `completed` con resultado; ningún estado fuera de los cuatro |
 | R2 | Dos peticiones idénticas → mismo id y **un** trabajo; una tercera con el primero `running` tampoco crea otro |
-| R3 | Cola que falla al publicar → error explícito y **cero** trabajos; mensaje sin trabajo → el worker descarta sin reintentar |
+| R3 | Cola que falla al publicar → `503` y un trabajo `pending` sin encolar; el barrido lo republica. Mensaje sin trabajo → el worker descarta sin reintentar |
 | R4 | El worker usa el mismo módulo de inferencia y el resultado guarda clase, puntuación, caja y versión de modelo |
 | R5 | Mismo mensaje dos veces → un trabajo `completed`, un resultado, mismo conteo de detecciones |
-| R6 | Fallo permanente → `failed` tras exactamente el tope declarado, con motivo; otro sondeo no cambia nada |
-| R7 | `running` con lease vencido → el barrido lo republica; con intentos agotados → `failed` |
+| R6 | Fallo permanente reportado y crasheos repetidos → `failed` al alcanzar exactamente el tope declarado, con motivo; otro sondeo no cambia nada |
+| R7 | `running` con lease vencido → el barrido consume un intento y republica, o marca `failed` al llegar al tope; también publica un `pending` nunca encolado |
 | R8 | Sin sesión `401`; otra agencia `403`; foto ajena o inexistente `404`; en los tres casos sin trabajo y sin mensaje |
 | R9 | El inventario del inmueble no cambia; la superficie no incluye panel ni apps |
 | R10 | Todo apunta al endpoint local; sin credenciales reales en el repositorio |

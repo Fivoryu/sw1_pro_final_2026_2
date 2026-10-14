@@ -12,19 +12,19 @@ the persist/publish window look closed when it was not.
 **What replaces it.** A database and a queue cannot be committed together, so
 this code does not pretend otherwise:
 
-1. the job is inserted with ``enqueued_at`` unset;
-2. the message is published;
-3. ``enqueued_at`` is set only when the publish succeeded.
+1. the job is inserted and the database transaction commits with ``enqueued_at`` unset;
+2. only after that commit, the message is published;
+3. ``enqueued_at`` is recorded in a second transaction only when publish succeeds.
 
-If the publish fails, the job is still committed as ``pending`` with
-``enqueued_at`` unset, the caller is told it was not queued, and the next
-repeated request — or the recovery sweep — republishes it. A message that
-outlives a lost commit race refers to a job that does not exist, and the worker
-drops it instead of retrying forever.
+If the publish fails, the job remains ``pending`` with ``enqueued_at`` unset,
+the caller receives an error, and a repeated request or recovery sweep
+republishes it. A message that outlives a failed database commit refers to a
+job that does not exist, and the worker drops it instead of retrying forever.
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from uuid import uuid4
 
@@ -37,6 +37,7 @@ from app.modules.detection.models import DetectionJob, dedupe_key_for
 
 PHOTO_STATUS_CONFIRMED = "confirmed"
 STATUS_PENDING = "pending"
+LOGGER = logging.getLogger("roomforge.detection.recovery")
 
 
 class DetectionListingNotFoundError(LookupError):
@@ -94,22 +95,51 @@ def _find_photo(
     )
 
 
-def _publish(job: DetectionJob, job_queue: JobQueue, now: datetime) -> bool:
-    """Publish the job. Returns whether the queue accepted the message."""
-    try:
-        job_queue.publish(
-            JobMessage(
-                version=MESSAGE_VERSION,
-                job_id=job.id,
-                photo_id=job.photo_id,
-                object_key=job.object_key,
-                model_id=job.model_id,
-                attempt=job.attempts + 1,
-            )
+def publish_pending_detection_job(
+    session_factory: sessionmaker[Session],
+    job_queue: JobQueue,
+    *,
+    job_id: str,
+    now: datetime,
+) -> bool:
+    """Publish a committed pending job, then record the successful enqueue."""
+    with session_factory() as session:
+        job = (
+            session.query(DetectionJob)
+            .filter(DetectionJob.id == job_id)
+            .one_or_none()
         )
-    except Exception:  # any queue failure means "not queued", never a lost job
+        if job is None:
+            return False
+        if job.status != STATUS_PENDING or job.enqueued_at is not None:
+            return True
+        message = JobMessage(
+            version=MESSAGE_VERSION,
+            job_id=job.id,
+            photo_id=job.photo_id,
+            object_key=job.object_key,
+            model_id=job.model_id,
+            attempt=job.attempts + 1,
+        )
+
+    try:
+        job_queue.publish(message)
+    except Exception:  # any queue failure leaves the committed job recoverable
         return False
-    job.enqueued_at = now
+
+    with session_factory.begin() as session:
+        job = (
+            session.query(DetectionJob)
+            .filter(
+                DetectionJob.id == job_id,
+                DetectionJob.status == STATUS_PENDING,
+                DetectionJob.enqueued_at.is_(None),
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        if job is not None:
+            job.enqueued_at = now
     return True
 
 
@@ -160,13 +190,24 @@ def run_detection_recovery_sweep(
                     f"Worker lease expired after {max_attempts} attempts without completion"
                 )
                 job.lease_expires_at = None
+                job.claim_token = None
+                job.finished_at = now
+                continue
+
+            job.attempts += 1
+            job.lease_expires_at = None
+            job.claim_token = None
+            job.enqueued_at = None
+            job.failure_reason = None
+            if job.attempts >= max_attempts:
+                job.status = "failed"
+                job.failure_reason = (
+                    f"Worker lease expired after {job.attempts} attempts without completion"
+                )
                 job.finished_at = now
                 continue
 
             job.status = STATUS_PENDING
-            job.lease_expires_at = None
-            job.enqueued_at = None
-            job.failure_reason = None
             messages[job.id] = JobMessage(
                 version=MESSAGE_VERSION,
                 job_id=job.id,
@@ -182,6 +223,7 @@ def run_detection_recovery_sweep(
                 job.failure_reason = (
                     f"Detection attempts exhausted at {max_attempts} without queue delivery"
                 )
+                job.claim_token = None
                 job.finished_at = now
                 continue
             messages.setdefault(
@@ -198,11 +240,13 @@ def run_detection_recovery_sweep(
 
     for message in messages.values():
         if job_queue is None:
+            LOGGER.warning("Detection recovery sweep could not publish a job message")
             continue
         try:
             job_queue.publish(message)
         except Exception:
             # The unqueued marker remains unset so the next sweep can retry.
+            LOGGER.warning("Detection recovery sweep could not publish a job message")
             continue
         with session_factory.begin() as session:
             job = (
@@ -224,7 +268,6 @@ def run_detection_recovery_sweep(
 def request_detection_job(
     session: Session,
     *,
-    job_queue: JobQueue,
     agency_id: str,
     listing_id: str,
     photo_id: str,
@@ -233,9 +276,9 @@ def request_detection_job(
 ) -> tuple[DetectionJob, bool, bool]:
     """Create the job for a photo, or replay the existing one.
 
-    Returns ``(job, created, queued)``. ``created`` is False when the job already
-    existed, and ``queued`` is False when the queue refused the message — in
-    which case the job is still persisted and awaits republication.
+    Returns ``(job, created, needs_publish)``. The caller commits the transaction
+    before publishing; ``needs_publish`` is true only for a pending job whose
+    ``enqueued_at`` marker is still empty.
     """
     listing = lock_staff_listing(session, agency_id=agency_id, listing_id=listing_id)
     if listing is None:
@@ -252,9 +295,8 @@ def request_detection_job(
     if existing is not None:
         # A job that was never enqueued is republished on the next request: this
         # is the cheap half of the reconciliation for the persist/publish window.
-        if existing.enqueued_at is None and existing.status == STATUS_PENDING:
-            return existing, False, _publish(existing, job_queue, now)
-        return existing, False, True
+        needs_publish = existing.enqueued_at is None and existing.status == STATUS_PENDING
+        return existing, False, needs_publish
 
     job = DetectionJob(
         id=str(uuid4()),
@@ -269,5 +311,4 @@ def request_detection_job(
         created_at=now,
     )
     session.add(job)
-    queued = _publish(job, job_queue, now)
-    return job, True, queued
+    return job, True, True

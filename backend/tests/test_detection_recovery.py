@@ -18,6 +18,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.config import Settings
 from app.db.base import Base
+from app.modules.catalog.photo_storage import InMemoryPhotoStorage
 from app.main import _detection_recovery_loop
 from app.main import create_app
 from app.modules.detection.job_queue import InMemoryJobQueue
@@ -72,6 +73,7 @@ def context() -> Iterator[RecoveryContext]:
         settings=_settings(),
         session_factory=factory,
         clock=lambda: _NOW,
+        photo_storage=InMemoryPhotoStorage(),
         job_queue=queue,
     )
     app.dependency_overrides[get_active_staff] = lambda: {
@@ -116,16 +118,18 @@ def _listed_jobs(context: RecoveryContext) -> list[dict[str, object]]:
 
 
 @pytest.mark.parametrize(
-    ("attempts", "expected_status", "expected_messages"),
+    ("attempts", "expected_status", "expected_attempts", "expected_messages"),
     [
-        (_MAX_ATTEMPTS - 1, "pending", 1),
-        (_MAX_ATTEMPTS, "failed", 0),
+        (0, "pending", 1, 1),
+        (_MAX_ATTEMPTS - 1, "failed", _MAX_ATTEMPTS, 0),
+        (_MAX_ATTEMPTS, "failed", _MAX_ATTEMPTS, 0),
     ],
 )
-def test_expired_lease_is_republished_below_cap_or_failed_at_cap(
+def test_expired_lease_consumes_an_attempt_and_fails_at_the_cap(
     context: RecoveryContext,
     attempts: int,
     expected_status: str,
+    expected_attempts: int,
     expected_messages: int,
 ) -> None:
     _seed_expired_job(context, attempts=attempts)
@@ -142,17 +146,116 @@ def test_expired_lease_is_republished_below_cap_or_failed_at_cap(
     after = _listed_jobs(context)
     assert recovered == 1
     assert after[0]["status"] == expected_status
-    assert after[0]["attempts"] == attempts
+    assert after[0]["attempts"] == expected_attempts
     assert len(context.queue.published) == expected_messages
     if expected_status == "pending":
         assert after[0]["failure_reason"] is None
         assert context.queue.published[0].job_id == _JOB_ID
-        assert context.queue.published[0].attempt == _MAX_ATTEMPTS
+        assert context.queue.published[0].attempt == expected_attempts + 1
     else:
         reason = after[0]["failure_reason"]
         assert isinstance(reason, str) and "lease" in reason.lower()
         assert context.queue.published == []
 
+
+
+def test_pending_job_that_was_never_enqueued_is_republished(context: RecoveryContext) -> None:
+    with context.session_factory.begin() as session:
+        session.add(
+            DetectionJob(
+                id=_JOB_ID,
+                agency_id="agency-one",
+                listing_id="listing-one",
+                photo_id="photo-one",
+                object_key="agencies/agency-one/listings/listing-one/photos/photo-one",
+                model_id=_MODEL_ID,
+                dedupe_key=dedupe_key_for("photo-one", _MODEL_ID),
+                status="pending",
+                attempts=0,
+                created_at=_NOW - timedelta(minutes=10),
+                enqueued_at=None,
+            )
+        )
+
+    before = _listed_jobs(context)
+    recovered = run_detection_recovery_sweep(
+        context.session_factory,
+        context.queue,
+        now=_NOW,
+        max_attempts=_MAX_ATTEMPTS,
+    )
+    after = _listed_jobs(context)
+
+    assert before[0]["status"] == "pending"
+    assert recovered == 1
+    assert after[0]["status"] == "pending"
+    assert after[0]["attempts"] == 0
+    assert [message.job_id for message in context.queue.published] == [_JOB_ID]
+    assert [message.attempt for message in context.queue.published] == [1]
+
+
+def test_repeated_worker_crashes_consume_the_retry_budget(context: RecoveryContext) -> None:
+    _seed_expired_job(context, attempts=0)
+
+    for crash_number in range(1, _MAX_ATTEMPTS + 1):
+        recovered = run_detection_recovery_sweep(
+            context.session_factory,
+            context.queue,
+            now=_NOW + timedelta(hours=crash_number),
+            max_attempts=_MAX_ATTEMPTS,
+        )
+        job = _listed_jobs(context)[0]
+
+        assert recovered == 1
+        assert job["attempts"] == crash_number
+        expected_status = "failed" if crash_number == _MAX_ATTEMPTS else "pending"
+        assert job["status"] == expected_status
+        assert [message.attempt for message in context.queue.published] == list(
+            range(2, min(crash_number, _MAX_ATTEMPTS - 1) + 2)
+        )
+
+        if crash_number < _MAX_ATTEMPTS:
+            claimed = context.client.post(
+                f"/api/v1/detection/jobs/{_JOB_ID}/claim",
+                headers={"Authorization": "Bearer test-worker-token"},
+            )
+            assert claimed.status_code == 200, claimed.text
+            assert claimed.json()["status"] == "running"
+
+    final_job = _listed_jobs(context)[0]
+    assert final_job["status"] == "failed"
+    assert final_job["attempts"] == _MAX_ATTEMPTS
+    assert len(context.queue.published) == _MAX_ATTEMPTS - 1
+
+    later = run_detection_recovery_sweep(
+        context.session_factory,
+        context.queue,
+        now=_NOW + timedelta(days=1),
+        max_attempts=_MAX_ATTEMPTS,
+    )
+    assert later == 0
+    assert _listed_jobs(context)[0] == final_job
+    assert len(context.queue.published) == _MAX_ATTEMPTS - 1
+
+
+def test_sweep_publish_failure_is_logged_and_remains_recoverable(
+    context: RecoveryContext, caplog: pytest.LogCaptureFixture
+) -> None:
+    _seed_expired_job(context, attempts=0)
+    context.queue.fail_on_publish = True
+
+    run_detection_recovery_sweep(
+        context.session_factory,
+        context.queue,
+        now=_NOW,
+        max_attempts=_MAX_ATTEMPTS,
+    )
+
+    job = _listed_jobs(context)[0]
+    assert job["status"] == "pending"
+    assert context.queue.published == []
+    assert "Detection recovery sweep could not publish a job message" in caplog.text
+    assert _JOB_ID not in caplog.text
 
 
 def test_recovery_loop_repeats_after_an_error_and_can_be_cancelled(

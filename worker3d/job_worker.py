@@ -189,6 +189,9 @@ class DetectionJobWorker:
             return
         if str(claimed.get("job_id")) != job_id:
             raise RuntimeError("Detection API returned a different job")
+        claim_token = claimed.get("claim_token")
+        if not isinstance(claim_token, str) or not claim_token:
+            raise RuntimeError("Detection API returned no active claim token")
 
         download_url = str(claimed["download_url"])
         try:
@@ -197,6 +200,7 @@ class DetectionJobWorker:
             self._report_failure(
                 base,
                 delivery,
+                claim_token,
                 f"Image download failed ({type(error).__name__})",
             )
             return
@@ -204,6 +208,7 @@ class DetectionJobWorker:
             self._report_failure(
                 base,
                 delivery,
+                claim_token,
                 f"Image download failed (HTTP {downloaded.status_code})",
             )
             return
@@ -221,11 +226,13 @@ class DetectionJobWorker:
             self._report_failure(
                 base,
                 delivery,
+                claim_token,
                 f"Image processing failed ({type(error).__name__})",
             )
             return
 
         result = {
+            "claim_token": claim_token,
             "model_id": str(claimed["model_id"]),
             "detections": detections,
         }
@@ -237,11 +244,13 @@ class DetectionJobWorker:
         self._require_success(completed, "Detection API could not save the result")
         self._queue.delete(delivery)
 
-    def _report_failure(self, base: str, delivery: QueueDelivery, reason: str) -> None:
+    def _report_failure(
+        self, base: str, delivery: QueueDelivery, claim_token: str, reason: str
+    ) -> None:
         response = self._http_client.post(
             f"{base}/fail",
             headers=self._headers(),
-            json={"reason": reason[:255]},
+            json={"claim_token": claim_token, "reason": reason[:255]},
         )
         self._require_success(response, "Detection API could not record the failure")
         self._queue.delete(delivery)

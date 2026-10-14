@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.modules.catalog.router import _require_listing_editor  # pyright: ignore[reportPrivateUsage]
-from app.modules.detection.job_queue import MESSAGE_VERSION, JobMessage, JobQueue
+from app.modules.detection.job_queue import JobQueue
 from app.modules.detection.models import (
     DETECTION_JOB_STATUS_COMPLETED,
     DETECTION_JOB_STATUS_FAILED,
@@ -35,6 +35,7 @@ from app.modules.detection.service import (
     DetectionPhotoNotFoundError,
     find_job,
     list_jobs,
+    publish_pending_detection_job,
     request_detection_job,
 )
 from app.modules.identity.session import ActiveStaff, get_active_staff
@@ -53,6 +54,7 @@ _WORKER_AUTH_UNAVAILABLE = "Detection worker authentication is not configured"
 _WORKER_UNAUTHORIZED = "Detection worker authentication failed"
 _WORKER_JOB_NOT_FOUND = "Detection job not found"
 _WORKER_JOB_NOT_CLAIMABLE = "Detection job is not running"
+_WORKER_STALE_CLAIM = "Detection job claim is no longer current"
 _WORKER_RESULT_MODEL_MISMATCH = "Detection result model does not match the job"
 
 
@@ -119,9 +121,9 @@ def request_detection(
 ) -> DetectionJobResponse:
     """Create the detection job for a photo, or replay the existing one.
 
-    A job is created and committed even when the queue refuses the message: it is
-    then reported as not queued, and the next request or the recovery sweep
-    publishes it. Losing the race for the dedupe key is replayed, not failed.
+    The job transaction commits before publication. If the queue refuses the
+    message, the committed pending job remains available to a later request or
+    recovery sweep. Losing the race for the dedupe key is replayed, not failed.
     """
     _require_listing_editor(staff, agency_id)
     queue = _job_queue(request)
@@ -129,9 +131,8 @@ def request_detection(
     session_factory = _session_factory(request)
     try:
         with session_factory.begin() as session:
-            job, created, queued = request_detection_job(
+            job, created, needs_publish = request_detection_job(
                 session,
-                job_queue=queue,
                 agency_id=agency_id,
                 listing_id=listing_id,
                 photo_id=photo_id,
@@ -148,7 +149,10 @@ def request_detection(
             if winner is None:
                 raise HTTPException(status_code=409, detail=_ALREADY_EXISTS) from None
             payload = job_response(winner)
-        created, queued = False, True
+            needs_publish = (
+                winner.status == DETECTION_JOB_STATUS_PENDING and winner.enqueued_at is None
+            )
+        created = False
     except DetectionListingNotFoundError as error:
         raise HTTPException(status_code=404, detail=_LISTING_NOT_FOUND) from error
     except DetectionPhotoNotFoundError as error:
@@ -158,7 +162,12 @@ def request_detection(
 
     if not created:
         response.status_code = 200
-    if not queued:
+    if needs_publish and not publish_pending_detection_job(
+        session_factory,
+        queue,
+        job_id=payload.job_id,
+        now=request.app.state.clock(),
+    ):
         raise HTTPException(status_code=503, detail=_QUEUE_UNAVAILABLE)
     return payload
 
@@ -189,6 +198,7 @@ def claim_detection_job(job_id: str, request: Request) -> DetectionWorkerClaimRe
     """Atomically lease a pending job and sign only its referenced image."""
     settings = request.app.state.settings
     now = request.app.state.clock()
+    claim_token = secrets.token_urlsafe(32)
     download_url: str | None = None
     with _session_factory(request).begin() as session:
         claimed = (
@@ -204,6 +214,7 @@ def claim_detection_job(job_id: str, request: Request) -> DetectionWorkerClaimRe
                     + timedelta(seconds=settings.detection_lease_seconds),
                     DetectionJob.started_at: now,
                     DetectionJob.failure_reason: None,
+                    DetectionJob.claim_token: claim_token,
                 },
                 synchronize_session=False,
             )
@@ -232,6 +243,7 @@ def claim_detection_job(job_id: str, request: Request) -> DetectionWorkerClaimRe
             model_id=job.model_id,
             status=job.status,
             attempts=job.attempts,
+            claim_token=claim_token if claimed else None,
             download_url=download_url,
         )
 
@@ -252,6 +264,10 @@ def complete_detection_job(
         )
         if job is None:
             raise HTTPException(status_code=404, detail=_WORKER_JOB_NOT_FOUND)
+        if job.claim_token is None or not secrets.compare_digest(
+            job.claim_token, result.claim_token
+        ):
+            raise HTTPException(status_code=409, detail=_WORKER_STALE_CLAIM)
         if job.status == DETECTION_JOB_STATUS_COMPLETED:
             return job_response(job)
         if job.status != DETECTION_JOB_STATUS_RUNNING:
@@ -259,7 +275,7 @@ def complete_detection_job(
         if result.model_id != job.model_id:
             raise HTTPException(status_code=409, detail=_WORKER_RESULT_MODEL_MISMATCH)
         job.status = DETECTION_JOB_STATUS_COMPLETED
-        job.result = result.model_dump(mode="json")
+        job.result = result.model_dump(mode="json", exclude={"claim_token"})
         job.failure_reason = None
         job.lease_expires_at = None
         job.finished_at = request.app.state.clock()
@@ -276,7 +292,6 @@ def fail_detection_job(
     settings = request.app.state.settings
     now = request.app.state.clock()
     queue: JobQueue | None = request.app.state.job_queue
-    queued = True
     should_publish = False
     with _session_factory(request).begin() as session:
         job = (
@@ -287,6 +302,10 @@ def fail_detection_job(
         )
         if job is None:
             raise HTTPException(status_code=404, detail=_WORKER_JOB_NOT_FOUND)
+        if job.claim_token is None or not secrets.compare_digest(
+            job.claim_token, failure.claim_token
+        ):
+            raise HTTPException(status_code=409, detail=_WORKER_STALE_CLAIM)
         if job.status == DETECTION_JOB_STATUS_RUNNING:
             job.attempts += 1
             job.failure_reason = failure.reason
@@ -297,26 +316,18 @@ def fail_detection_job(
             else:
                 job.status = DETECTION_JOB_STATUS_PENDING
                 job.enqueued_at = None
+                job.claim_token = None
                 should_publish = True
-                if queue is None:
-                    queued = False
-                else:
-                    try:
-                        queue.publish(
-                            JobMessage(
-                                version=MESSAGE_VERSION,
-                                job_id=job.id,
-                                photo_id=job.photo_id,
-                                object_key=job.object_key,
-                                model_id=job.model_id,
-                                attempt=job.attempts + 1,
-                            )
-                        )
-                        job.enqueued_at = now
-                    except Exception:
-                        queued = False
+        elif job.status not in {
+            DETECTION_JOB_STATUS_COMPLETED,
+            DETECTION_JOB_STATUS_FAILED,
+        }:
+            raise HTTPException(status_code=409, detail=_WORKER_JOB_NOT_CLAIMABLE)
         payload = job_response(job)
 
-    if should_publish and not queued:
-        raise HTTPException(status_code=503, detail=_QUEUE_UNAVAILABLE)
+    if should_publish:
+        if queue is None or not publish_pending_detection_job(
+            _session_factory(request), queue, job_id=job_id, now=now
+        ):
+            raise HTTPException(status_code=503, detail=_QUEUE_UNAVAILABLE)
     return payload
