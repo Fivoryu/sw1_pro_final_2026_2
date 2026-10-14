@@ -2,10 +2,10 @@ import { ethers } from "hardhat";
 
 async function main(): Promise<void> {
   const signers = await ethers.getSigners();
-  if (signers.length < 3) {
-    throw new Error("Hardhat local node must expose at least three test accounts.");
+  if (signers.length < 4) {
+    throw new Error("Hardhat local node must expose at least four test accounts.");
   }
-  const [backendSigner, customer, agency] = signers;
+  const [backendSigner, customer, agency, secondaryCustomer] = signers;
 
   const rft = await ethers.deployContract("RoomForgeTestToken", [backendSigner.address]);
   await rft.waitForDeployment();
@@ -26,6 +26,8 @@ async function main(): Promise<void> {
   // Seed customer-only test balances; these local tokens have no monetary value.
   await (await rft.mint(customer.address, 100_000_000n)).wait();
   await (await usdt.mint(customer.address, 100_000_000_000n)).wait();
+  await (await rft.mint(secondaryCustomer.address, 100_000_000n)).wait();
+  await (await usdt.mint(secondaryCustomer.address, 100_000_000_000n)).wait();
 
   console.log(
     JSON.stringify(
@@ -42,6 +44,7 @@ async function main(): Promise<void> {
         accounts: {
           backend_signer: backendSigner.address,
           customer_wallet: customer.address,
+          secondary_customer_wallet: secondaryCustomer.address,
           agency_wallet: agency.address,
         },
         customer_test_balances: {

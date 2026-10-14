@@ -37,15 +37,21 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
   void initState() {
     super.initState();
     widget.controller.addListener(_sessionChanged);
+    widget.walletConnect?.addListener(_walletChanged);
     _sessionChanged();
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_sessionChanged);
+    widget.walletConnect?.removeListener(_walletChanged);
     _email.dispose();
     _password.dispose();
     super.dispose();
+  }
+
+  void _walletChanged() {
+    if (mounted) setState(() {});
   }
 
   void _sessionChanged() {
@@ -107,6 +113,47 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
       if (mounted) {
         setState(() => _walletMessage = _safeWalletMessage(error));
       }
+    } finally {
+      if (mounted) setState(() => _walletBusy = false);
+    }
+  }
+
+  Future<void> _connectLinkedWallet() async {
+    final connect = widget.walletConnect;
+    if (connect == null || _wallets.isEmpty) return;
+    setState(() {
+      _walletBusy = true;
+      _walletMessage = null;
+    });
+    try {
+      await connect.openConnect();
+      if (!connect.isConfigured) {
+        setState(
+          () => _walletMessage =
+              'Falta configurar el Project ID público de Reown.',
+        );
+        return;
+      }
+      final address = connect.address;
+      if (!connect.isConnected || address == null) {
+        setState(
+          () => _walletMessage = 'Conectá la wallet vinculada para continuar.',
+        );
+        return;
+      }
+      if (address.toLowerCase() != _wallets.single.address.toLowerCase()) {
+        setState(
+          () => _walletMessage =
+              'La cuenta conectada no coincide con la wallet verificada de RoomForge.',
+        );
+        return;
+      }
+      setState(
+        () =>
+            _walletMessage = 'Wallet verificada conectada y lista para operar.',
+      );
+    } catch (error) {
+      if (mounted) setState(() => _walletMessage = _safeWalletMessage(error));
     } finally {
       if (mounted) setState(() => _walletBusy = false);
     }
@@ -235,59 +282,75 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
     ];
   }
 
-  Widget _walletSection(BuildContext context) => Card(
-    key: const ValueKey('customer-wallet-section'),
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Wallet externa',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          if (_wallets.isNotEmpty)
+  Widget _walletSection(BuildContext context) {
+    final linkedWallet = _wallets.isEmpty ? null : _wallets.single;
+    final connect = widget.walletConnect;
+    final linkedWalletConnected =
+        linkedWallet != null &&
+        connect?.isConnected == true &&
+        connect?.address?.toLowerCase() == linkedWallet.address.toLowerCase();
+    return Card(
+      key: const ValueKey('customer-wallet-section'),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Text(
-              'Verificada: ${_wallets.single.address}',
-              key: const ValueKey('linked-wallet'),
-            )
-          else
-            const Text(
-              'Vinculá una wallet EVM para firmar operaciones de reserva.',
+              'Wallet externa',
+              style: Theme.of(context).textTheme.titleMedium,
             ),
-          if (_walletMessage != null) ...[
             const SizedBox(height: 8),
-            Text(_walletMessage!, key: const ValueKey('wallet-message')),
-          ],
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              key: const ValueKey('wallet-connect'),
-              onPressed: _walletBusy || _wallets.isNotEmpty
-                  ? null
-                  : _linkWallet,
-              icon: _walletBusy
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.account_balance_wallet_outlined),
-              label: Text(
-                _walletBusy ? 'Verificando…' : 'Conectar y verificar wallet',
+            if (linkedWallet != null)
+              Text(
+                'Verificada: ${linkedWallet.address}',
+                key: const ValueKey('linked-wallet'),
+              )
+            else
+              const Text(
+                'Vinculá una wallet EVM para firmar operaciones de reserva.',
+              ),
+            if (_walletMessage != null) ...[
+              const SizedBox(height: 8),
+              Text(_walletMessage!, key: const ValueKey('wallet-message')),
+            ],
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                key: const ValueKey('wallet-connect'),
+                onPressed: _walletBusy || linkedWalletConnected
+                    ? null
+                    : linkedWallet == null
+                    ? _linkWallet
+                    : _connectLinkedWallet,
+                icon: _walletBusy
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.account_balance_wallet_outlined),
+                label: Text(
+                  _walletBusy
+                      ? 'Conectando…'
+                      : linkedWallet == null
+                      ? 'Conectar y verificar wallet'
+                      : linkedWalletConnected
+                      ? 'Wallet conectada'
+                      : 'Conectar wallet vinculada',
+                ),
               ),
             ),
-          ),
-          if (_wallets.isEmpty && widget.walletConnect?.isConfigured == false)
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: Text('Falta configurar el Project ID público de Reown.'),
-            ),
-        ],
+            if (connect?.isConfigured == false)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text('Falta configurar el Project ID público de Reown.'),
+              ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 
   List<Widget> _form(BuildContext context) => [
     _title(context, _registering ? 'Crear cuenta' : 'Iniciar sesión'),
