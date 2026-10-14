@@ -13,10 +13,12 @@ from __future__ import annotations
 import base64
 import sys
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -34,6 +36,7 @@ from app.modules.catalog.photo_storage import InMemoryPhotoStorage
 from app.modules.detection.job_queue import InMemoryJobQueue, JobMessage, SqsJobQueue
 from app.modules.detection.models import DetectionJob
 from app.modules.identity.models import Agency
+from app.modules.detection.service import run_detection_recovery_sweep
 from app.modules.identity.session import get_active_staff
 
 _NOW = datetime(2026, 10, 14, 18, 0, tzinfo=UTC)
@@ -246,6 +249,80 @@ def test_a_repeated_request_republishes_an_unqueued_job(context: DetectionContex
     assert len(_listed_jobs(context)) == 1
     assert len(context.queue.published) == 1
     assert context.queue.published[0].job_id == job_id
+
+
+def test_stale_publisher_cannot_mark_a_later_attempt_enqueued(
+    context: DetectionContext,
+) -> None:
+    _seed_listing(context.session_factory)
+    _seed_photo(context.session_factory)
+    started = Event()
+    release = Event()
+
+    class DelayedQueue:
+        def __init__(self) -> None:
+            self.publish_calls = 0
+            self.published: list[JobMessage] = []
+            self.received: list[JobMessage] = []
+
+        def publish(self, message: JobMessage) -> None:
+            self.publish_calls += 1
+            if self.publish_calls == 1:
+                self.published.append(message)
+                started.set()
+                if not release.wait(timeout=5):
+                    raise TimeoutError("delayed publish was not released")
+                return
+            if self.publish_calls == 2:
+                raise RuntimeError("retry publication failed")
+            self.published.append(message)
+
+        def receive(self) -> JobMessage | None:
+            if not self.published:
+                return None
+            message = self.published.pop(0)
+            self.received.append(message)
+            return message
+
+    queue = DelayedQueue()
+    context.app.state.job_queue = queue
+    context.app.state.settings = _settings(detection_worker_token="test-worker-token")
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        first_request = executor.submit(context.client.post, _detections_url())
+        try:
+            assert started.wait(timeout=5), "the first publish must reach the delayed queue"
+            first_message = queue.receive()
+            assert first_message is not None and first_message.attempt == 1
+
+            claim = context.client.post(
+                f"/api/v1/detection/jobs/{first_message.job_id}/claim",
+                headers={"Authorization": "Bearer test-worker-token"},
+            )
+            assert claim.status_code == 200, claim.text
+            failed = context.client.post(
+                f"/api/v1/detection/jobs/{first_message.job_id}/fail",
+                headers={"Authorization": "Bearer test-worker-token"},
+                json={"claim_token": claim.json()["claim_token"], "reason": "transient"},
+            )
+            assert failed.status_code == 503, failed.text
+            before_sweep = _listed_jobs(context)[0]
+            assert before_sweep["status"] == "pending"
+            assert before_sweep["attempts"] == 1
+        finally:
+            release.set()
+        stale_response = first_request.result(timeout=5)
+
+    run_detection_recovery_sweep(
+        context.session_factory, queue, now=_NOW + timedelta(seconds=1), max_attempts=3
+    )
+    recovered = _listed_jobs(context)[0]
+    retry_message = queue.receive()
+
+    assert recovered["status"] == "pending"
+    assert recovered["attempts"] == 1
+    assert retry_message is not None and retry_message.attempt == 2
+    assert stale_response.status_code == 503, stale_response.text
+    assert [message.attempt for message in queue.received] == [1, 2]
 
 
 def test_another_agency_cannot_request_detection(context: DetectionContext) -> None:

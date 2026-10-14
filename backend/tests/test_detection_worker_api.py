@@ -183,6 +183,80 @@ def test_invalid_worker_token_is_rejected_without_claiming(context: WorkerContex
         assert job is not None and job.status == "pending"
 
 
+def test_non_ascii_stale_claim_tokens_are_conflicts_without_state_change(
+    context: WorkerContext,
+) -> None:
+    staff_jobs_url = "/api/v1/staff/agencies/agency-one/listings/listing-one/detections"
+    with TestClient(context.app, raise_server_exceptions=False) as client:
+        claimed = client.post(_url("claim"), headers=_headers())
+        assert claimed.status_code == 200, claimed.text
+        before = client.get(staff_jobs_url)
+        assert before.status_code == 200, before.text
+
+        stale_complete = client.post(
+            _url("complete"),
+            headers=_headers(),
+            json={"claim_token": "stale-é", "model_id": _MODEL_ID, "detections": []},
+        )
+        stale_fail = client.post(
+            _url("fail"),
+            headers=_headers(),
+            json={"claim_token": "stale-é", "reason": "stale"},
+        )
+        after = client.get(staff_jobs_url)
+
+    assert stale_complete.status_code == 409, stale_complete.text
+    assert stale_fail.status_code == 409, stale_fail.text
+    assert after.status_code == 200, after.text
+    assert after.json()["jobs"] == before.json()["jobs"]
+    assert context.queue.published == []
+
+
+@pytest.mark.parametrize(
+    ("max_attempts", "expected_status", "expected_messages"),
+    [(2, "pending", 1), (1, "failed", 0)],
+)
+def test_signing_failure_can_be_reported_through_the_bounded_failure_path(
+    context: WorkerContext,
+    monkeypatch: pytest.MonkeyPatch,
+    max_attempts: int,
+    expected_status: str,
+    expected_messages: int,
+) -> None:
+    context.app.state.settings = _settings(
+        detection_worker_token=_TOKEN, detection_max_attempts=max_attempts
+    )
+
+    def fail_signing(*args: object, **kwargs: object) -> str:
+        del args, kwargs
+        raise RuntimeError("signer unavailable")
+
+    monkeypatch.setattr(context.storage, "presign_download", fail_signing)
+    claim = context.client.post(_url("claim"), headers=_headers())
+
+    assert claim.status_code == 503, claim.text
+    claim_token = claim.headers.get("X-Detection-Claim-Token")
+    assert claim_token
+    failure = context.client.post(
+        _url("fail"),
+        headers=_headers(),
+        json={"claim_token": claim_token, "reason": "Job claim failed (HTTP 503)"},
+    )
+    listed = context.client.get(
+        "/api/v1/staff/agencies/agency-one/listings/listing-one/detections"
+    )
+
+    assert failure.status_code == 200, failure.text
+    assert listed.status_code == 200, listed.text
+    job = listed.json()["jobs"][0]
+    assert job["status"] == expected_status
+    assert job["attempts"] == 1
+    assert len(context.queue.published) == expected_messages
+    if expected_status == "pending":
+        assert context.queue.published[0].job_id == _JOB_ID
+        assert context.queue.published[0].attempt == 2
+
+
 def test_claim_sets_running_lease_and_returns_the_authorized_download_url(
     context: WorkerContext,
 ) -> None:

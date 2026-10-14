@@ -29,16 +29,16 @@ Prefijo: `/api/v1/detection/jobs/{job_id}`. Las tres rutas exigen `Authorization
 |---|---|---|
 | `POST /claim` | `200` | Si el trabajo está `pending`, pasa a `running`, fija el lease y devuelve el trabajo con `download_url` firmado para su `object_key` y un `claim_token` opaco. Para un trabajo ya tomado o finalizado devuelve su estado y `download_url: null`, sin volver a tomarlo ni entregar un token |
 | | `404` | El trabajo no existe; el consumidor descarta el mensaje sin reintentar |
-| | `503` | No hay token configurado o no se pudo firmar el enlace; no se procesa la imagen |
+| | `503` | No hay token configurado o no se pudo firmar el enlace; no se procesa la imagen. Si el claim ya se adquirió, la respuesta de firma fallida incluye `X-Detection-Claim-Token` para que el worker consuma el intento mediante `POST /fail` |
 | `POST /complete` | `200` | Recibe `claim_token`, `model_id` y `detections` (`label`, `score`, `box`); guarda el resultado sin persistir el token y pasa a `completed`. Repetirlo con el mismo token devuelve el resultado original sin alterarlo |
 | | `409` | El token no corresponde al claim vigente, el trabajo no está `running` o el `model_id` informado no coincide con el trabajo |
 | `POST /fail` | `200` | Recibe `{"claim_token": "...", "reason": "..."}`, consume un intento y deja `pending` con republicación o `failed` al agotar `DETECTION_MAX_ATTEMPTS` |
 | | `409` | El token no corresponde al claim vigente; el estado del trabajo no cambia |
 | | `503` | No se pudo republicar; el trabajo persiste como `pending` y el consumidor no confirma el mensaje original |
 
-Cada claim exitoso genera un `claim_token` nuevo y lo guarda con el trabajo. El worker debe incluirlo en `complete` o `fail`; tras vencer un lease y reclamarse el trabajo, cualquier reporte con el token anterior recibe `409` sin cambiar estado, intentos ni resultado.
+Cada claim exitoso genera un `claim_token` nuevo y lo guarda en la columna `claim_token` del trabajo. El worker debe incluirlo en `complete` o `fail`; tras vencer un lease y reclamarse el trabajo, cualquier reporte con el token anterior recibe `409` sin cambiar estado, intentos ni resultado. Si falla la firma del enlace tras guardar el claim, la API mantiene el trabajo `running`, devuelve el token en `X-Detection-Claim-Token` y el worker informa el error por `POST /fail`; así se consume el intento y se publica un mensaje nuevo o se alcanza `failed` al tope.
 
-El worker no recibe credenciales de base de datos ni de S3. Sólo descarga el enlace firmado que devuelve `claim`; el enlace usa el endpoint local de Floci accesible desde la red de Compose. El productor y el consumidor rechazan endpoints SQS ausentes o no locales antes de crear el cliente boto3. La cola y el almacenamiento de este piloto no apuntan a AWS real.
+El worker no recibe credenciales de base de datos ni de S3. Sólo descarga el enlace firmado que devuelve `claim`; el enlace usa el endpoint local de Floci accesible desde la red de Compose. El productor y el consumidor rechazan endpoints SQS ausentes o no locales antes de crear el cliente boto3. El almacenamiento S3 también exige un endpoint configurado local por defecto, y sus clientes locales usan credenciales placeholder explícitas para no consultar la cadena ambiental de AWS. `S3_ALLOW_REMOTE_ENDPOINT` permanece en `false`; F11 es la fase que habilitaría endpoints remotos de manera explícita. La cola y el almacenamiento de este piloto no apuntan a AWS real.
 
 ## 3. Estados
 

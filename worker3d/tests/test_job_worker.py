@@ -28,10 +28,12 @@ class FakeResponse:
         status_code: int = 200,
         body: dict[str, Any] | None = None,
         content: bytes = b"image bytes",
+        headers: dict[str, str] | None = None,
     ) -> None:
         self.status_code = status_code
         self._body = body or {}
         self.content = content
+        self.headers = headers or {}
 
     def json(self) -> dict[str, Any]:
         return self._body
@@ -217,6 +219,53 @@ def test_claim_404_discards_a_message_for_a_missing_job() -> None:
         f"http://api:8000/api/v1/detection/jobs/{_JOB_ID}/claim"
     ]
     assert inferred == []
+    assert queue.deleted == [delivery]
+
+
+def test_non_404_claim_error_is_reported_and_acknowledged_after_failure_path() -> None:
+    delivery = _delivery("receipt-claim-error")
+    queue = FakeQueue([delivery])
+
+    class ClaimErrorHttpClient:
+        def __init__(self) -> None:
+            self.posts: list[tuple[str, dict[str, Any] | None]] = []
+
+        def post(
+            self,
+            url: str,
+            *,
+            headers: dict[str, str],
+            json: dict[str, Any] | None = None,
+        ) -> FakeResponse:
+            assert headers == {"Authorization": "Bearer service-token"}
+            self.posts.append((url, json))
+            if url.endswith("/claim"):
+                return FakeResponse(
+                    status_code=503,
+                    headers={"X-Detection-Claim-Token": "claim-before-signing"},
+                )
+            if url.endswith("/fail"):
+                return FakeResponse(body={"status": "pending"})
+            raise AssertionError(f"unexpected POST {url}")
+
+        def get(self, url: str) -> FakeResponse:
+            raise AssertionError(f"claim failure must not download an image: {url}")
+
+    http = ClaimErrorHttpClient()
+    worker = job_worker.DetectionJobWorker(
+        api_base_url="http://api:8000",
+        service_token="service-token",
+        queue=queue,
+        http_client=http,
+        detector=lambda _: pytest.fail("claim failure must not run inference"),
+    )
+
+    assert worker.run_once() is True
+    failure = next((url, body) for url, body in http.posts if url.endswith("/fail"))
+    assert failure[1] == {
+        "claim_token": "claim-before-signing",
+        "reason": "Job claim failed (HTTP 503)",
+    }
     assert queue.deleted == [delivery]
 
 

@@ -166,7 +166,7 @@ def request_detection(
         session_factory,
         queue,
         job_id=payload.job_id,
-        now=request.app.state.clock(),
+        clock=request.app.state.clock,
     ):
         raise HTTPException(status_code=503, detail=_QUEUE_UNAVAILABLE)
     return payload
@@ -200,6 +200,7 @@ def claim_detection_job(job_id: str, request: Request) -> DetectionWorkerClaimRe
     now = request.app.state.clock()
     claim_token = secrets.token_urlsafe(32)
     download_url: str | None = None
+    claim_failure_detail: str | None = None
     with _session_factory(request).begin() as session:
         claimed = (
             session.query(DetectionJob)
@@ -229,23 +230,37 @@ def claim_detection_job(job_id: str, request: Request) -> DetectionWorkerClaimRe
                 request.app.state.photo_storage,
             )
             if storage is None:
-                raise HTTPException(status_code=503, detail="Photo storage is not configured")
-            try:
-                download_url = storage.presign_download(
-                    job.object_key, expires_in=settings.detection_lease_seconds
-                )
-            except Exception:
-                raise HTTPException(status_code=503, detail="Photo storage is unavailable") from None
-        return DetectionWorkerClaimResponse(
-            job_id=job.id,
-            photo_id=job.photo_id,
-            object_key=job.object_key,
-            model_id=job.model_id,
-            status=job.status,
-            attempts=job.attempts,
-            claim_token=claim_token if claimed else None,
-            download_url=download_url,
+                claim_failure_detail = "Photo storage is not configured"
+            else:
+                try:
+                    download_url = storage.presign_download(
+                        job.object_key, expires_in=settings.detection_lease_seconds
+                    )
+                except Exception:
+                    claim_failure_detail = "Photo storage is unavailable"
+        if claim_failure_detail is not None:
+            # Keep the API-owned claim committed so the worker can consume this
+            # attempt through /fail rather than endlessly redelivering the message.
+            raise_after_commit = True
+        else:
+            raise_after_commit = False
+            response = DetectionWorkerClaimResponse(
+                job_id=job.id,
+                photo_id=job.photo_id,
+                object_key=job.object_key,
+                model_id=job.model_id,
+                status=job.status,
+                attempts=job.attempts,
+                claim_token=claim_token if claimed else None,
+                download_url=download_url,
+            )
+    if raise_after_commit:
+        raise HTTPException(
+            status_code=503,
+            detail=claim_failure_detail,
+            headers={"X-Detection-Claim-Token": claim_token},
         )
+    return response
 
 
 @worker_router.post("/{job_id}/complete", response_model=DetectionJobResponse)
@@ -265,7 +280,7 @@ def complete_detection_job(
         if job is None:
             raise HTTPException(status_code=404, detail=_WORKER_JOB_NOT_FOUND)
         if job.claim_token is None or not secrets.compare_digest(
-            job.claim_token, result.claim_token
+            job.claim_token.encode("utf-8"), result.claim_token.encode("utf-8")
         ):
             raise HTTPException(status_code=409, detail=_WORKER_STALE_CLAIM)
         if job.status == DETECTION_JOB_STATUS_COMPLETED:
@@ -303,7 +318,7 @@ def fail_detection_job(
         if job is None:
             raise HTTPException(status_code=404, detail=_WORKER_JOB_NOT_FOUND)
         if job.claim_token is None or not secrets.compare_digest(
-            job.claim_token, failure.claim_token
+            job.claim_token.encode("utf-8"), failure.claim_token.encode("utf-8")
         ):
             raise HTTPException(status_code=409, detail=_WORKER_STALE_CLAIM)
         if job.status == DETECTION_JOB_STATUS_RUNNING:
@@ -327,7 +342,7 @@ def fail_detection_job(
 
     if should_publish:
         if queue is None or not publish_pending_detection_job(
-            _session_factory(request), queue, job_id=job_id, now=now
+            _session_factory(request), queue, job_id=job_id, clock=request.app.state.clock
         ):
             raise HTTPException(status_code=503, detail=_QUEUE_UNAVAILABLE)
     return payload

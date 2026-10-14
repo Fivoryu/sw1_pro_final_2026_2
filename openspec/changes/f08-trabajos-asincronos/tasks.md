@@ -12,8 +12,8 @@ Cada tarea cierra con su verificación y con un commit de unidad de trabajo. El 
 ## F08A-T2 — API que persiste y publica
 
 - **Specs:** R1, R2, R3, R8, R11.
-- **Entrega:** `job_queue.py` (`SqsJobQueue`, `InMemoryJobQueue` con fallo a pedido), `service.py` con el alta idempotente y la publicación **dentro** de la transacción, `router.py` de personal, inyección de la cola en `create_app`, ajustes de configuración, y `docs/api/f08-detection-jobs.md` con el contrato del mensaje.
-- **Verificación:** RED y GREEN de R2 (dos peticiones, un trabajo), R3 (publicación fallida, cero trabajos y error explícito) y R8 (401/403/404 sin crear trabajo ni publicar mensaje).
+- **Entrega:** `job_queue.py` (`SqsJobQueue`, `InMemoryJobQueue` con fallo a pedido), `service.py` con alta idempotente y publicación **después de confirmar el trabajo**; `enqueued_at` se marca condicionalmente sólo si `attempts` sigue en la misma generación y el trabajo continúa `pending`. Incluye `router.py` de personal, inyección de la cola en `create_app`, ajustes de configuración y `docs/api/f08-detection-jobs.md` con el contrato del mensaje.
+- **Verificación:** RED y GREEN de R2 (dos peticiones, un trabajo), R3 (la publicación fallida devuelve error explícito y deja el trabajo `pending` sin marca; la repetición o el barrido vuelve a publicar) y R8 (401/403/404 sin crear trabajo ni publicar mensaje).
 - **Commit:** unidad propia.
 
 ## F08A-T3 — Consumidor

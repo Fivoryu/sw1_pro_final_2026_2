@@ -22,6 +22,7 @@ El estado del trabajo lo escribe **sólo la API**. El worker no toca la base: pi
 | `status` | `String(16)` | `pending` \| `running` \| `completed` \| `failed` |
 | `attempts` | `Integer` | Intentos consumidos |
 | `lease_expires_at` | `DateTime(tz)` nullable | Hasta cuándo vale la toma del trabajo |
+| `claim_token` | `String(64)` nullable | Token de fencing del claim vigente; sólo se acepta en `complete` o `fail` si coincide |
 | `result` | `JSON` nullable | Detecciones y versión de modelo efectivamente usada |
 | `failure_reason` | `String(255)` nullable | Motivo legible del fallo |
 | `created_at` / `enqueued_at` / `started_at` / `finished_at` | `DateTime(tz)` | Trazabilidad de tiempos. `enqueued_at` vacío significa «persistido pero todavía no encolado»: es la señal que usa la reconciliación |
@@ -89,9 +90,11 @@ Lección que se conserva: **una base y una cola no se confirman juntas.** Cualqu
 
 **Lo que hace el código ahora**, en tres pasos honestos:
 
-1. El trabajo se inserta con `enqueued_at` sin fijar.
-2. Se publica el mensaje.
-3. `enqueued_at` se fija **sólo si la publicación tuvo éxito**.
+1. El trabajo se inserta y confirma con `enqueued_at` sin fijar.
+2. Antes de publicar, se lee `attempts` como generación de ese intento; se publica el mensaje.
+3. Después de que `publish` retorna, una actualización condicional fija `enqueued_at` sólo si siguen coincidiendo `attempts`, `status = pending` y `enqueued_at IS NULL`. La hora se captura después de publicar. Si la actualización afecta cero filas, la publicación se reporta como no marcada.
+
+La reconciliación aplica la misma condición y generación. Un publicador retrasado de una generación anterior no puede marcar la posterior como encolada; puede dejar un mensaje duplicado, lo cual es aceptable, pero la marca vacía permite que el barrido recupere el trabajo.
 
 Consecuencias, las dos cubiertas:
 
@@ -113,11 +116,13 @@ Van a configuración con default, y se declaran como **valores elegidos, no medi
 
 **Barrido de recuperación.** Un barrido periódico —con el mismo patrón que el refresher de tasas de cambio, que ya corre como tarea de fondo— toma los trabajos `running` con `lease_expires_at` vencido y los devuelve a `pending` republicando, o los marca `failed` si ya agotaron los intentos. **Ésta es la respuesta a R7:** un worker que muere no deja un trabajo atascado para siempre.
 
-## 8. Autenticación del worker
+## 8. Autenticación del worker y fencing del claim
 
 Token de servicio en configuración (`DETECTION_WORKER_TOKEN`), comparado con `secrets.compare_digest`, nunca registrado en logs.
 
 **Fail-closed:** si el token no está configurado, los endpoints del worker **no existen operativamente** (responden error de configuración), igual que el arranque ya falla cerrado cuando falta el secreto de JWT. Un endpoint de worker abierto por descuido sería una puerta para escribir resultados falsos.
+
+`claim_token` es una columna nullable del trabajo. Al tomar un trabajo, la API genera y guarda un token opaco nuevo, y lo devuelve con el enlace firmado. `complete` y `fail` exigen el token vigente; un token viejo o distinto responde `409` sin cambiar el estado. Al reintentar o recuperar un lease vencido, la API invalida el token anterior. Si falla la firma del enlace después de adquirir el claim, la API confirma el claim y devuelve el token en `X-Detection-Claim-Token`; el worker lo usa inmediatamente en `fail` para consumir ese intento en vez de recibir el mensaje repetidamente sin límite.
 
 ## 9. Imagen del worker: separada, para no invalidar el piloto
 
@@ -171,8 +176,9 @@ El worker se prueba sin torch, sin red y sin cola real: la cola, el cliente HTTP
 
 ## 13. Límites declarados
 
-1. **Floci no es SQS.** La emulación local puede diferir en visibilidad, orden y entrega; nada de lo verificado acá autoriza conclusiones sobre SQS real, que pertenece a F11.
-2. **Los valores de §7 son elegidos, no medidos.** No se presentan como óptimos.
-3. **Sin interfaz.** La única forma de ver un trabajo hoy es la API. La pantalla es F08.5.
-4. **Sin confirmación humana.** Los resultados son sugerencias sin dueño; nada se publica ni se vende con ellos.
-5. **Sin retención decidida.** P4 sigue abierta.
+1. **Almacenamiento local por defecto.** El endpoint S3 debe ser local y se usan credenciales placeholder explícitas; `S3_ALLOW_REMOTE_ENDPOINT` se mantiene en `false`. F11 es la fase autorizada para habilitar endpoints remotos de forma explícita.
+2. **Floci no es SQS.** La emulación local puede diferir en visibilidad, orden y entrega; nada de lo verificado acá autoriza conclusiones sobre SQS real, que pertenece a F11.
+3. **Los valores de §7 son elegidos, no medidos.** No se presentan como óptimos.
+4. **Sin interfaz.** La única forma de ver un trabajo hoy es la API. La pantalla es F08.5.
+5. **Sin confirmación humana.** Los resultados son sugerencias sin dueño; nada se publica ni se vende con ellos.
+6. **Sin retención decidida.** P4 sigue abierta.

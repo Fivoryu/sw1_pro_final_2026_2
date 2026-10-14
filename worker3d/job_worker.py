@@ -12,7 +12,7 @@ import logging
 import os
 import tempfile
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -42,6 +42,7 @@ class MessageQueue(Protocol):
 class HttpResponse(Protocol):
     status_code: int
     content: bytes
+    headers: Mapping[str, str]
 
     def json(self) -> Any: ...
 
@@ -181,7 +182,17 @@ class DetectionJobWorker:
             # A publication can survive a lost DB commit; there is no job to retry.
             self._queue.delete(delivery)
             return
-        self._require_success(claim, "Detection API could not claim the job")
+        if not 200 <= claim.status_code < 300:
+            claim_token = claim.headers.get("X-Detection-Claim-Token")
+            if claim_token:
+                self._report_failure(
+                    base,
+                    delivery,
+                    claim_token,
+                    f"Job claim failed (HTTP {claim.status_code})",
+                )
+                return
+            self._require_success(claim, "Detection API could not claim the job")
         claimed = claim.json()
         if claimed.get("status") != "running" or not claimed.get("download_url"):
             # Completed jobs and jobs leased by another worker need no duplicate work.

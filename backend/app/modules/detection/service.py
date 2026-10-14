@@ -25,9 +25,11 @@ job that does not exist, and the worker drops it instead of retrying forever.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from collections.abc import Callable
+from datetime import datetime, timezone
 from uuid import uuid4
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.modules.catalog.models import ListingPhoto
@@ -100,7 +102,7 @@ def publish_pending_detection_job(
     job_queue: JobQueue,
     *,
     job_id: str,
-    now: datetime,
+    clock: Callable[[], datetime],
 ) -> bool:
     """Publish a committed pending job, then record the successful enqueue."""
     with session_factory() as session:
@@ -113,13 +115,14 @@ def publish_pending_detection_job(
             return False
         if job.status != STATUS_PENDING or job.enqueued_at is not None:
             return True
+        generation = job.attempts
         message = JobMessage(
             version=MESSAGE_VERSION,
             job_id=job.id,
             photo_id=job.photo_id,
             object_key=job.object_key,
             model_id=job.model_id,
-            attempt=job.attempts + 1,
+            attempt=generation + 1,
         )
 
     try:
@@ -127,20 +130,19 @@ def publish_pending_detection_job(
     except Exception:  # any queue failure leaves the committed job recoverable
         return False
 
+    enqueued_at = clock()
     with session_factory.begin() as session:
-        job = (
-            session.query(DetectionJob)
-            .filter(
+        result = session.connection().execute(
+            update(DetectionJob)
+            .where(
                 DetectionJob.id == job_id,
+                DetectionJob.attempts == generation,
                 DetectionJob.status == STATUS_PENDING,
                 DetectionJob.enqueued_at.is_(None),
             )
-            .with_for_update()
-            .one_or_none()
+            .values(enqueued_at=enqueued_at)
         )
-        if job is not None:
-            job.enqueued_at = now
-    return True
+    return result.rowcount == 1
 
 
 def run_detection_recovery_sweep(
@@ -159,7 +161,7 @@ def run_detection_recovery_sweep(
     if max_attempts < 1:
         raise ValueError("max_attempts must be positive")
 
-    messages: dict[str, JobMessage] = {}
+    messages: dict[str, tuple[JobMessage, int]] = {}
     expired_count = 0
     with session_factory.begin() as session:
         expired_jobs = (
@@ -208,13 +210,16 @@ def run_detection_recovery_sweep(
                 continue
 
             job.status = STATUS_PENDING
-            messages[job.id] = JobMessage(
-                version=MESSAGE_VERSION,
-                job_id=job.id,
-                photo_id=job.photo_id,
-                object_key=job.object_key,
-                model_id=job.model_id,
-                attempt=job.attempts + 1,
+            messages[job.id] = (
+                JobMessage(
+                    version=MESSAGE_VERSION,
+                    job_id=job.id,
+                    photo_id=job.photo_id,
+                    object_key=job.object_key,
+                    model_id=job.model_id,
+                    attempt=job.attempts + 1,
+                ),
+                job.attempts,
             )
 
         for job in unqueued_jobs:
@@ -228,17 +233,20 @@ def run_detection_recovery_sweep(
                 continue
             messages.setdefault(
                 job.id,
-                JobMessage(
-                    version=MESSAGE_VERSION,
-                    job_id=job.id,
-                    photo_id=job.photo_id,
-                    object_key=job.object_key,
-                    model_id=job.model_id,
-                    attempt=job.attempts + 1,
+                (
+                    JobMessage(
+                        version=MESSAGE_VERSION,
+                        job_id=job.id,
+                        photo_id=job.photo_id,
+                        object_key=job.object_key,
+                        model_id=job.model_id,
+                        attempt=job.attempts + 1,
+                    ),
+                    job.attempts,
                 ),
             )
 
-    for message in messages.values():
+    for message, generation in messages.values():
         if job_queue is None:
             LOGGER.warning("Detection recovery sweep could not publish a job message")
             continue
@@ -248,19 +256,22 @@ def run_detection_recovery_sweep(
             # The unqueued marker remains unset so the next sweep can retry.
             LOGGER.warning("Detection recovery sweep could not publish a job message")
             continue
+        enqueued_at = datetime.now(timezone.utc)
         with session_factory.begin() as session:
-            job = (
-                session.query(DetectionJob)
-                .filter(
+            result = session.connection().execute(
+                update(DetectionJob)
+                .where(
                     DetectionJob.id == message.job_id,
+                    DetectionJob.attempts == generation,
                     DetectionJob.status == STATUS_PENDING,
                     DetectionJob.enqueued_at.is_(None),
                 )
-                .with_for_update()
-                .one_or_none()
+                .values(enqueued_at=enqueued_at)
             )
-            if job is not None:
-                job.enqueued_at = now
+        if result.rowcount != 1:
+            LOGGER.warning(
+                "Detection recovery sweep could not mark a published job as enqueued; next sweep will retry"
+            )
 
     return expired_count + len(unqueued_jobs)
 
