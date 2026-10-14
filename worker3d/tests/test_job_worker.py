@@ -269,6 +269,80 @@ def test_non_404_claim_error_is_reported_and_acknowledged_after_failure_path() -
     assert queue.deleted == [delivery]
 
 
+def test_unclaimable_delivery_is_deleted_only_after_the_receive_cap(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    delivery = _delivery("receipt-claim-unavailable")
+
+    class RedeliveringQueue:
+        def __init__(self) -> None:
+            self.receive_count = 0
+            self.deleted: list[job_worker.QueueDelivery] = []
+
+        def receive(self) -> list[job_worker.QueueDelivery]:
+            if self.deleted:
+                return []
+            self.receive_count += 1
+            return [
+                job_worker.QueueDelivery(
+                    body=delivery.body,
+                    receipt_handle=delivery.receipt_handle,
+                    receive_count=self.receive_count,
+                )
+            ]
+
+        def delete(self, received: job_worker.QueueDelivery) -> None:
+            self.deleted.append(received)
+
+    class ClaimUnavailableHttpClient:
+        def __init__(self) -> None:
+            self.claims = 0
+            self.other_posts: list[str] = []
+
+        def post(
+            self,
+            url: str,
+            *,
+            headers: dict[str, str],
+            json: dict[str, Any] | None = None,
+        ) -> FakeResponse:
+            assert headers == {"Authorization": "Bearer service-token"}
+            assert json is None
+            if url.endswith("/claim"):
+                self.claims += 1
+                return FakeResponse(status_code=503)
+            self.other_posts.append(url)
+            raise AssertionError(f"claim error must not call {url}")
+
+        def get(self, url: str) -> FakeResponse:
+            raise AssertionError(f"claim error must not download an image: {url}")
+
+    queue = RedeliveringQueue()
+    http = ClaimUnavailableHttpClient()
+    worker = job_worker.DetectionJobWorker(
+        api_base_url="http://api:8000",
+        service_token="service-token",
+        queue=queue,
+        http_client=http,
+        detector=lambda _: pytest.fail("claim error must not run inference"),
+        claim_failure_receive_cap=2,
+    )
+
+    with pytest.raises(RuntimeError):
+        worker.run_once()
+    with pytest.raises(RuntimeError):
+        worker.run_once()
+    assert worker.run_once() is True
+    assert worker.run_once() is False
+
+    assert queue.receive_count == 3
+    assert [received.receive_count for received in queue.deleted] == [3]
+    assert http.claims == 3
+    assert http.other_posts == []
+    assert "after 3 receives" in caplog.text
+    assert "dropping delivery" in caplog.text
+
+
 def test_completed_job_is_discarded_without_download_or_detection() -> None:
     delivery = _delivery("receipt-completed")
     queue = FakeQueue([delivery])
@@ -291,6 +365,45 @@ def test_completed_job_is_discarded_without_download_or_detection() -> None:
     assert http.downloads == []
     assert not any(url.endswith(("/complete", "/fail")) for url, _ in http.posts)
     assert queue.deleted == [delivery]
+
+
+def test_sqs_delivery_includes_approximate_receive_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, Any] = {}
+
+    class FakeSqsClient:
+        def get_queue_url(self, *, QueueName: str) -> dict[str, str]:
+            return {"QueueUrl": f"http://floci:4566/{QueueName}"}
+
+        def receive_message(self, **kwargs: Any) -> dict[str, Any]:
+            observed.update(kwargs)
+            return {
+                "Messages": [
+                    {
+                        "Body": "{}",
+                        "ReceiptHandle": "receipt-4",
+                        "Attributes": {"ApproximateReceiveCount": "4"},
+                    }
+                ]
+            }
+
+    def fake_boto_client(service: str, **kwargs: Any) -> FakeSqsClient:
+        del service, kwargs
+        return FakeSqsClient()
+
+    monkeypatch.setitem(sys.modules, "boto3", SimpleNamespace(client=fake_boto_client))
+    queue = job_worker.SqsMessageQueue(
+        queue_name="roomforge-local-detection",
+        endpoint_url="http://floci:4566",
+        region="us-east-1",
+    )
+
+    deliveries = queue.receive()
+
+    assert observed["AttributeNames"] == ["ApproximateReceiveCount"]
+    assert len(deliveries) == 1
+    assert deliveries[0].receive_count == 4
 
 
 def test_queue_endpoint_must_be_local_and_uses_only_local_placeholder_credentials(

@@ -25,6 +25,9 @@ $flociEnvironment = $composeConfig.services.floci.environment
 $bucketName = [string]$flociEnvironment.S3_BUCKET_NAME
 $queueName = [string]$flociEnvironment.SQS_QUEUE_NAME
 $detectionQueueName = 'roomforge-local-detection'
+$detectionDeadLetterQueueName = 'roomforge-local-detection-dlq'
+$detectionReceiveCap = 3
+$detectionRedriveReceiveCount = $detectionReceiveCap + 1
 $s3Endpoint = [string]$flociEnvironment.S3_ENDPOINT_URL
 $sqsEndpoint = [string]$flociEnvironment.SQS_ENDPOINT_URL
 if ([string]::IsNullOrWhiteSpace($bucketName) -or
@@ -61,7 +64,7 @@ catch {
 }
 
 $bucketExists = @($bucketList.Buckets | Where-Object { $_.Name -ceq $bucketName }).Count -gt 0
-$queueNames = @($queueName, $detectionQueueName) | Select-Object -Unique
+$plainQueueNames = @($queueName, $detectionDeadLetterQueueName) | Select-Object -Unique
 
 if ($bucketExists) {
     Write-Host "S3 bucket '$bucketName' already exists; leaving it unchanged."
@@ -71,7 +74,7 @@ else {
     Write-Host "Created S3 bucket '$bucketName'."
 }
 
-foreach ($targetQueueName in $queueNames) {
+foreach ($targetQueueName in $plainQueueNames) {
     $queueSuffix = "/$targetQueueName"
     $queueExists = @($queueList.QueueUrls | Where-Object {
         ([string]$_).TrimEnd('/').EndsWith($queueSuffix, [StringComparison]::Ordinal)
@@ -85,3 +88,46 @@ foreach ($targetQueueName in $queueNames) {
         Write-Host "Created SQS queue '$targetQueueName'."
     }
 }
+
+$deadLetterQueueJson = Invoke-FlociAws -Endpoint $sqsEndpoint -AwsArguments @(
+    'sqs', 'get-queue-url', '--queue-name', $detectionDeadLetterQueueName, '--output', 'json'
+)
+$deadLetterQueueUrl = [string](ConvertFrom-Json -InputObject $deadLetterQueueJson).QueueUrl
+$deadLetterAttributesJson = Invoke-FlociAws -Endpoint $sqsEndpoint -AwsArguments @(
+    'sqs', 'get-queue-attributes', '--queue-url', $deadLetterQueueUrl,
+    '--attribute-names', 'QueueArn', '--output', 'json'
+)
+$deadLetterQueueArn = [string](ConvertFrom-Json -InputObject $deadLetterAttributesJson).Attributes.QueueArn
+if ([string]::IsNullOrWhiteSpace($deadLetterQueueArn)) {
+    throw "Could not resolve the ARN for detection dead-letter queue '$detectionDeadLetterQueueName'."
+}
+
+$updatedQueueListJson = Invoke-FlociAws -Endpoint $sqsEndpoint -AwsArguments @(
+    'sqs', 'list-queues', '--output', 'json'
+)
+$updatedQueueList = ConvertFrom-Json -InputObject $updatedQueueListJson
+$detectionQueueSuffix = "/$detectionQueueName"
+$detectionQueueExists = @($updatedQueueList.QueueUrls | Where-Object {
+    ([string]$_).TrimEnd('/').EndsWith($detectionQueueSuffix, [StringComparison]::Ordinal)
+}).Count -gt 0
+if (-not $detectionQueueExists) {
+    $null = Invoke-FlociAws -Endpoint $sqsEndpoint -AwsArguments @(
+        'sqs', 'create-queue', '--queue-name', $detectionQueueName, '--output', 'json'
+    )
+    Write-Host "Created SQS queue '$detectionQueueName'."
+}
+
+$detectionQueueJson = Invoke-FlociAws -Endpoint $sqsEndpoint -AwsArguments @(
+    'sqs', 'get-queue-url', '--queue-name', $detectionQueueName, '--output', 'json'
+)
+$detectionQueueUrl = [string](ConvertFrom-Json -InputObject $detectionQueueJson).QueueUrl
+$redrivePolicyJson = [ordered]@{
+    deadLetterTargetArn = $deadLetterQueueArn
+    maxReceiveCount = [string]$detectionRedriveReceiveCount
+} | ConvertTo-Json -Compress
+$queueAttributesJson = @{ RedrivePolicy = $redrivePolicyJson } | ConvertTo-Json -Compress
+$null = Invoke-FlociAws -Endpoint $sqsEndpoint -AwsArguments @(
+    'sqs', 'set-queue-attributes', '--queue-url', $detectionQueueUrl,
+    '--attributes', $queueAttributesJson, '--output', 'json'
+)
+Write-Host "Configured SQS redrive for '$detectionQueueName' after $detectionRedriveReceiveCount receives to '$detectionDeadLetterQueueName'."

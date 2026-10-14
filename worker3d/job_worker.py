@@ -31,6 +31,7 @@ class QueueDelivery:
 
     body: str
     receipt_handle: str
+    receive_count: int = 1
 
 
 class MessageQueue(Protocol):
@@ -113,10 +114,17 @@ class SqsMessageQueue:
             MaxNumberOfMessages=1,
             WaitTimeSeconds=self._wait_time_seconds,
             VisibilityTimeout=self._visibility_timeout_seconds,
+            AttributeNames=["ApproximateReceiveCount"],
         )
         messages = response.get("Messages", [])
         return [
-            QueueDelivery(body=str(message["Body"]), receipt_handle=str(message["ReceiptHandle"]))
+            QueueDelivery(
+                body=str(message["Body"]),
+                receipt_handle=str(message["ReceiptHandle"]),
+                receive_count=int(
+                    message.get("Attributes", {}).get("ApproximateReceiveCount", "1")
+                ),
+            )
             for message in messages
         ]
 
@@ -153,14 +161,18 @@ class DetectionJobWorker:
         queue: MessageQueue,
         http_client: HttpClient,
         detector: DetectionFunction = run_inference,
+        claim_failure_receive_cap: int = 3,
     ) -> None:
         if not service_token:
             raise ValueError("DETECTION_WORKER_TOKEN is required")
+        if claim_failure_receive_cap < 1:
+            raise ValueError("claim_failure_receive_cap must be positive")
         self._api_base_url = api_base_url.rstrip("/")
         self._service_token = service_token
         self._queue = queue
         self._http_client = http_client
         self._detector = detector
+        self._claim_failure_receive_cap = claim_failure_receive_cap
 
     def run_once(self) -> bool:
         """Receive and process at most one message; return False when the queue is empty."""
@@ -191,6 +203,15 @@ class DetectionJobWorker:
                     claim_token,
                     f"Job claim failed (HTTP {claim.status_code})",
                 )
+                return
+            if delivery.receive_count > self._claim_failure_receive_cap:
+                LOGGER.error(
+                    "Detection job claim failed without a claim token after %d receives "
+                    "(HTTP %d); dropping delivery",
+                    delivery.receive_count,
+                    claim.status_code,
+                )
+                self._queue.delete(delivery)
                 return
             self._require_success(claim, "Detection API could not claim the job")
         claimed = claim.json()
@@ -302,6 +323,9 @@ def main() -> int:
             service_token=service_token,
             queue=queue,
             http_client=http_client,
+            claim_failure_receive_cap=int(
+                os.environ.get("DETECTION_MAX_ATTEMPTS", "3")
+            ),
         )
         while True:
             try:

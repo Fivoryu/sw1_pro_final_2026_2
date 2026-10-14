@@ -77,6 +77,19 @@ def list_jobs(session: Session, *, agency_id: str, listing_id: str) -> list[Dete
     )
 
 
+def _is_enqueued_for_generation(
+    session_factory: sessionmaker[Session], *, job_id: str, generation: int
+) -> bool:
+    with session_factory() as session:
+        job = session.get(DetectionJob, job_id)
+        return (
+            job is not None
+            and job.attempts == generation
+            and job.status == STATUS_PENDING
+            and job.enqueued_at is not None
+        )
+
+
 def _find_by_dedupe_key(session: Session, dedupe_key: str) -> DetectionJob | None:
     return (
         session.query(DetectionJob).filter(DetectionJob.dedupe_key == dedupe_key).one_or_none()
@@ -142,7 +155,9 @@ def publish_pending_detection_job(
             )
             .values(enqueued_at=enqueued_at)
         )
-    return result.rowcount == 1
+    return result.rowcount == 1 or _is_enqueued_for_generation(
+        session_factory, job_id=job_id, generation=generation
+    )
 
 
 def run_detection_recovery_sweep(
@@ -268,7 +283,9 @@ def run_detection_recovery_sweep(
                 )
                 .values(enqueued_at=enqueued_at)
             )
-        if result.rowcount != 1:
+        if result.rowcount != 1 and not _is_enqueued_for_generation(
+            session_factory, job_id=message.job_id, generation=generation
+        ):
             LOGGER.warning(
                 "Detection recovery sweep could not mark a published job as enqueued; next sweep will retry"
             )

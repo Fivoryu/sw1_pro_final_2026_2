@@ -50,6 +50,8 @@ class Settings:
     s3_endpoint_url: str | None = None
     s3_bucket_name: str | None = None
     s3_public_endpoint_url: str | None = None
+    s3_access_key_id: str | None = None
+    s3_secret_access_key: str | None = None
     s3_allow_remote_endpoint: bool = False
     s3_region: str = "us-east-1"
     sqs_endpoint_url: str | None = None
@@ -105,6 +107,8 @@ class Settings:
             s3_endpoint_url=os.environ.get("S3_ENDPOINT_URL"),
             s3_bucket_name=os.environ.get("S3_BUCKET_NAME") or None,
             s3_public_endpoint_url=os.environ.get("S3_PUBLIC_ENDPOINT_URL") or None,
+            s3_access_key_id=os.environ.get("S3_ACCESS_KEY_ID") or None,
+            s3_secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY") or None,
             s3_allow_remote_endpoint=_boolean_from_env("S3_ALLOW_REMOTE_ENDPOINT", False),
             s3_region=os.environ.get("AWS_DEFAULT_REGION") or "us-east-1",
             sqs_endpoint_url=os.environ.get("SQS_ENDPOINT_URL") or None,

@@ -130,10 +130,40 @@ def test_local_s3_clients_use_placeholders_and_remote_opt_in_is_explicit(
             s3_bucket_name="photo-bucket",
             s3_endpoint_url="https://s3.us-east-1.amazonaws.com",
             s3_allow_remote_endpoint=True,
+            s3_access_key_id="explicit-access-key",
+            s3_secret_access_key="explicit-secret-key",
         )
     )
     assert isinstance(remote, S3PhotoStorage)
     assert len(client_calls) == 4
+    assert all(
+        call["aws_access_key_id"] == "explicit-access-key"
+        and call["aws_secret_access_key"] == "explicit-secret-key"
+        for call in client_calls[2:]
+    )
+
+
+def test_remote_s3_opt_in_fails_closed_without_explicit_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_calls: list[dict[str, Any]] = []
+
+    def fake_client(service: str, **kwargs: Any) -> object:
+        client_calls.append({"service": service, **kwargs})
+        return object()
+
+    monkeypatch.setattr(photo_storage_module.boto3, "client", fake_client)
+
+    with pytest.raises(ValueError, match="credentials"):
+        create_photo_storage(
+            _settings(
+                s3_bucket_name="photo-bucket",
+                s3_endpoint_url="https://s3.us-east-1.amazonaws.com",
+                s3_allow_remote_endpoint=True,
+            )
+        )
+
+    assert client_calls == []
 
 
 @pytest.fixture

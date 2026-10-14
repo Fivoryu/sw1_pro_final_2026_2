@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import importlib.util
+import sys
 from collections.abc import Iterator
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -21,7 +24,7 @@ from app.db.base import Base
 from app.modules.catalog.photo_storage import InMemoryPhotoStorage
 from app.main import _detection_recovery_loop
 from app.main import create_app
-from app.modules.detection.job_queue import InMemoryJobQueue
+from app.modules.detection.job_queue import InMemoryJobQueue, JobMessage
 from app.modules.detection.models import DetectionJob, dedupe_key_for
 from app.modules.detection.service import run_detection_recovery_sweep
 from app.modules.identity.session import get_active_staff
@@ -157,6 +160,120 @@ def test_expired_lease_consumes_an_attempt_and_fails_at_the_cap(
         assert isinstance(reason, str) and "lease" in reason.lower()
         assert context.queue.published == []
 
+
+
+def test_claim_failures_beyond_receive_cap_drop_delivery_and_recover_job(
+    context: RecoveryContext,
+) -> None:
+    worker_path = Path(__file__).resolve().parents[2] / "worker3d" / "job_worker.py"
+    spec = importlib.util.spec_from_file_location(
+        "roomforge_detection_worker_recovery_test", worker_path
+    )
+    assert spec is not None and spec.loader is not None
+    worker_module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = worker_module
+    spec.loader.exec_module(worker_module)
+
+    with context.session_factory.begin() as session:
+        session.add(
+            DetectionJob(
+                id=_JOB_ID,
+                agency_id="agency-one",
+                listing_id="listing-one",
+                photo_id="photo-one",
+                object_key="agencies/agency-one/listings/listing-one/photos/photo-one",
+                model_id=_MODEL_ID,
+                dedupe_key=dedupe_key_for("photo-one", _MODEL_ID),
+                status="pending",
+                attempts=0,
+                created_at=_NOW,
+                enqueued_at=None,
+            )
+        )
+
+    message = JobMessage(
+        version=1,
+        job_id=_JOB_ID,
+        photo_id="photo-one",
+        object_key="agencies/agency-one/listings/listing-one/photos/photo-one",
+        model_id=_MODEL_ID,
+        attempt=1,
+    )
+
+    class RedeliveringQueue:
+        def __init__(self) -> None:
+            self.receive_count = 0
+            self.deleted: list[object] = []
+
+        def receive(self) -> list[object]:
+            if self.deleted:
+                return []
+            self.receive_count += 1
+            return [
+                worker_module.QueueDelivery(
+                    body=message.as_body(),
+                    receipt_handle="receipt-claim-failure",
+                    receive_count=self.receive_count,
+                )
+            ]
+
+        def delete(self, delivery: object) -> None:
+            self.deleted.append(delivery)
+
+    class ApiHttpClient:
+        def post(
+            self,
+            url: str,
+            *,
+            headers: dict[str, str],
+            json: dict[str, object] | None = None,
+        ) -> object:
+            return context.client.post(
+                url.replace("http://api:8000", ""), headers=headers, json=json
+            )
+
+        def get(self, url: str) -> object:
+            return context.client.get(url.replace("http://api:8000", ""))
+
+    delivery_queue = RedeliveringQueue()
+    worker = worker_module.DetectionJobWorker(
+        api_base_url="http://api:8000",
+        service_token="wrong-worker-token",
+        queue=delivery_queue,
+        http_client=ApiHttpClient(),
+        claim_failure_receive_cap=2,
+    )
+
+    with pytest.raises(RuntimeError):
+        worker.run_once()
+    with pytest.raises(RuntimeError):
+        worker.run_once()
+    assert worker.run_once() is True
+    assert worker.run_once() is False
+    assert delivery_queue.receive_count == 3
+    assert len(delivery_queue.deleted) == 1
+
+    with context.session_factory() as session:
+        after_claim_errors = session.get(DetectionJob, _JOB_ID)
+        assert after_claim_errors is not None
+        assert after_claim_errors.status == "pending"
+        assert after_claim_errors.attempts == 0
+        assert after_claim_errors.claim_token is None
+        assert after_claim_errors.enqueued_at is None
+
+    recovered = run_detection_recovery_sweep(
+        context.session_factory,
+        context.queue,
+        now=_NOW,
+        max_attempts=_MAX_ATTEMPTS,
+    )
+    with context.session_factory() as session:
+        after_sweep = session.get(DetectionJob, _JOB_ID)
+        assert after_sweep is not None
+        assert after_sweep.status == "pending"
+        assert after_sweep.enqueued_at is not None
+    assert recovered == 1
+    assert [queued.attempt for queued in context.queue.published] == [1]
 
 
 def test_pending_job_that_was_never_enqueued_is_republished(context: RecoveryContext) -> None:

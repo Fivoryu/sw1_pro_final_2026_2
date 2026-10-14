@@ -5,8 +5,8 @@ Cada tarea cierra con su verificación y con un commit de unidad de trabajo. El 
 ## F08A-T1 — Modelo y migración
 
 - **Specs:** R1 (estados), R2 (unicidad de idempotencia), R7 (campos de lease).
-- **Entrega:** módulo `backend/app/modules/detection/` con `models.py` (`DetectionJob`), `schemas.py` y la migración `0019_detection_jobs` que sigue a `0018_listing_photos`.
-- **Verificación:** prueba de que los cuatro estados son los únicos admitidos y de que `dedupe_key` es único (segundo insert con la misma clave falla); migración aplicada y revertida contra SQLite en las pruebas, sin afirmar nada sobre PostgreSQL.
+- **Entrega:** módulo `backend/app/modules/detection/` con `models.py` (`DetectionJob`), `schemas.py`, la migración `0019_detection_jobs` que sigue a `0018_listing_photos` y la migración aditiva `0020_detection_job_claim_token` para el token de fencing por claim.
+- **Verificación:** prueba de que los cuatro estados son los únicos admitidos y de que `dedupe_key` es único (segundo insert con la misma clave falla); migraciones aplicadas y revertidas contra SQLite en las pruebas. La aplicación de `0020` a PostgreSQL real se registra aparte con evidencia aportada por el padre en `docs/ai/f08-async-jobs-verificacion.md`.
 - **Commit:** unidad propia.
 
 ## F08A-T2 — API que persiste y publica
@@ -19,7 +19,7 @@ Cada tarea cierra con su verificación y con un commit de unidad de trabajo. El 
 ## F08A-T3 — Consumidor
 
 - **Specs:** R4, R5, R9, R10.
-- **Entrega:** `worker3d/job_worker.py` con cola, cliente HTTP y función de inferencia inyectables; endpoints `claim`, `complete` y `fail` con token de servicio fail-closed; `infra/docker/inference/Dockerfile.worker` y `requirements-worker.txt`; servicio del worker en el overlay; cola `roomforge-local-detection` en el script de provisionamiento.
+- **Entrega:** `worker3d/job_worker.py` con cola, cliente HTTP y función de inferencia inyectables; endpoints `claim`, `complete` y `fail` con token de servicio fail-closed; cada claim genera un `claim_token` opaco vigente por trabajo y `complete`/`fail` exigen ese token (un token obsoleto devuelve `409` sin cambios); `infra/docker/inference/Dockerfile.worker` y `requirements-worker.txt`; servicio del worker en el overlay; cola `roomforge-local-detection` con cola DLQ y política de redrive en el script de provisionamiento.
 - **Verificación:** RED y GREEN de R4 (el worker reutiliza el módulo de inferencia y guarda clase, puntuación, caja y versión de modelo) y R5 (segundo procesamiento del mismo mensaje no vuelve a inferir ni a informar); el servicio de inferencia queda **sin cambios** y su digest intacto.
 - **Commit:** unidad propia.
 

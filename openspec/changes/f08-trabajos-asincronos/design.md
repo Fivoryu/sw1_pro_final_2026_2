@@ -92,7 +92,7 @@ Lección que se conserva: **una base y una cola no se confirman juntas.** Cualqu
 
 1. El trabajo se inserta y confirma con `enqueued_at` sin fijar.
 2. Antes de publicar, se lee `attempts` como generación de ese intento; se publica el mensaje.
-3. Después de que `publish` retorna, una actualización condicional fija `enqueued_at` sólo si siguen coincidiendo `attempts`, `status = pending` y `enqueued_at IS NULL`. La hora se captura después de publicar. Si la actualización afecta cero filas, la publicación se reporta como no marcada.
+3. Después de que `publish` retorna, una actualización condicional fija `enqueued_at` sólo si siguen coincidiendo `attempts`, `status = pending` y `enqueued_at IS NULL`. La hora se captura después de publicar. Si la actualización afecta cero filas, se relee el trabajo: se acepta como marcado si sigue `pending`, conserva la misma generación (`attempts`) y ya tiene `enqueued_at`; eso cubre a otro publicador de la misma generación que ganó la carrera. En cualquier otro caso se reporta como no marcado.
 
 La reconciliación aplica la misma condición y generación. Un publicador retrasado de una generación anterior no puede marcar la posterior como encolada; puede dejar un mensaje duplicado, lo cual es aceptable, pero la marca vacía permite que el barrido recupere el trabajo.
 
@@ -109,12 +109,12 @@ Van a configuración con default, y se declaran como **valores elegidos, no medi
 
 | Ajuste | Default | Por qué ese valor |
 |---|---|---|
-| `DETECTION_MAX_ATTEMPTS` | 3 | Acota el mensaje envenenado sin perder un fallo transitorio |
+| `DETECTION_MAX_ATTEMPTS` | 3 | Acota los intentos del trabajo y el número de recepciones del worker para fallos de claim no-404 sin token |
 | `DETECTION_VISIBILITY_TIMEOUT_SECONDS` | 60 | El mensaje vuelve a la cola si el worker muere procesándolo |
 | `DETECTION_LEASE_SECONDS` | 300 | Mayor que la visibilidad: un trabajo no se declara huérfano mientras un worker sano todavía puede estar trabajando |
 | `ROOMFORGE_DETECTION_SWEEP_SECONDS` | 60 | Frecuencia del barrido |
 
-**Barrido de recuperación.** Un barrido periódico —con el mismo patrón que el refresher de tasas de cambio, que ya corre como tarea de fondo— toma los trabajos `running` con `lease_expires_at` vencido y los devuelve a `pending` republicando, o los marca `failed` si ya agotaron los intentos. **Ésta es la respuesta a R7:** un worker que muere no deja un trabajo atascado para siempre.
+**Barrido de recuperación.** Un barrido periódico —con el mismo patrón que el refresher de tasas de cambio, que ya corre como tarea de fondo— toma los trabajos `running` con `lease_expires_at` vencido y los devuelve a `pending` republicando, o los marca `failed` si ya agotaron los intentos. También republica los trabajos `pending` con `enqueued_at` vacío. Si el worker no obtiene un token en un error de claim no-404, deja el mensaje disponible hasta que `ApproximateReceiveCount` supera `DETECTION_MAX_ATTEMPTS`; entonces registra el descarte y elimina la entrega. El barrido recupera el trabajo si sigue pendiente y sin marca de encolado. **Ésta es la respuesta a R7:** un worker que muere no deja un trabajo atascado para siempre.
 
 ## 8. Autenticación del worker y fencing del claim
 
@@ -132,7 +132,7 @@ El worker usa un Dockerfile propio (`Dockerfile.worker`, contexto `./inference`)
 
 ## 10. Cola dedicada y provisionamiento
 
-Cola propia `roomforge-local-detection`, separada de `roomforge-local-events`, para no mezclar eventos de negocio con trabajos de cómputo. Se agrega al script de provisionamiento local, que ya es idempotente y ya crea la otra cola.
+Cola propia `roomforge-local-detection`, separada de `roomforge-local-events`, para no mezclar eventos de negocio con trabajos de cómputo. El script de provisionamiento local crea además `roomforge-local-detection-dlq` y configura su `maxReceiveCount` en una recepción más que el límite del worker, para que éste pueda registrar y eliminar el mensaje al superar su cap antes del redrive de los mensajes no eliminados.
 
 ## 11. Endpoints
 
@@ -176,7 +176,7 @@ El worker se prueba sin torch, sin red y sin cola real: la cola, el cliente HTTP
 
 ## 13. Límites declarados
 
-1. **Almacenamiento local por defecto.** El endpoint S3 debe ser local y se usan credenciales placeholder explícitas; `S3_ALLOW_REMOTE_ENDPOINT` se mantiene en `false`. F11 es la fase autorizada para habilitar endpoints remotos de forma explícita.
+1. **Almacenamiento local por defecto.** El endpoint S3 debe ser local y se usan credenciales placeholder explícitas; `S3_ALLOW_REMOTE_ENDPOINT` se mantiene en `false`. Si se habilita, endpoints remotos requieren `S3_ACCESS_KEY_ID` y `S3_SECRET_ACCESS_KEY`; boto3 no puede resolver credenciales desde la cadena ambiental. F11 es la fase autorizada para habilitar endpoints remotos de forma explícita.
 2. **Floci no es SQS.** La emulación local puede diferir en visibilidad, orden y entrega; nada de lo verificado acá autoriza conclusiones sobre SQS real, que pertenece a F11.
 3. **Los valores de §7 son elegidos, no medidos.** No se presentan como óptimos.
 4. **Sin interfaz.** La única forma de ver un trabajo hoy es la API. La pantalla es F08.5.

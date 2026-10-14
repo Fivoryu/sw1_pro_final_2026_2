@@ -251,6 +251,40 @@ def test_a_repeated_request_republishes_an_unqueued_job(context: DetectionContex
     assert context.queue.published[0].job_id == job_id
 
 
+def test_concurrent_same_generation_enqueue_marker_is_successful(
+    context: DetectionContext,
+) -> None:
+    _seed_listing(context.session_factory)
+    _seed_photo(context.session_factory)
+
+    class ConcurrentMarkerQueue:
+        def __init__(self) -> None:
+            self.published: list[JobMessage] = []
+
+        def publish(self, message: JobMessage) -> None:
+            self.published.append(message)
+            with context.session_factory.begin() as session:
+                job = session.get(DetectionJob, message.job_id)
+                assert job is not None
+                assert job.status == "pending" and job.attempts == 0
+                job.enqueued_at = _NOW
+
+    queue = ConcurrentMarkerQueue()
+    context.app.state.job_queue = queue
+
+    response = context.client.post(_detections_url())
+
+    assert response.status_code == 201, response.text
+    assert len(queue.published) == 1
+    assert queue.published[0].job_id == response.json()["job_id"]
+    with context.session_factory() as session:
+        job = session.get(DetectionJob, response.json()["job_id"])
+        assert job is not None
+        assert job.status == "pending" and job.attempts == 0
+        assert job.enqueued_at is not None
+        assert job.enqueued_at.replace(tzinfo=UTC) == _NOW
+
+
 def test_stale_publisher_cannot_mark_a_later_attempt_enqueued(
     context: DetectionContext,
 ) -> None:

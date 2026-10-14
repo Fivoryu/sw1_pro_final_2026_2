@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -202,6 +203,41 @@ def test_non_ascii_stale_claim_tokens_are_conflicts_without_state_change(
             _url("fail"),
             headers=_headers(),
             json={"claim_token": "stale-é", "reason": "stale"},
+        )
+        after = client.get(staff_jobs_url)
+
+    assert stale_complete.status_code == 409, stale_complete.text
+    assert stale_fail.status_code == 409, stale_fail.text
+    assert after.status_code == 200, after.text
+    assert after.json()["jobs"] == before.json()["jobs"]
+    assert context.queue.published == []
+
+
+def test_unencodable_stale_claim_tokens_are_conflicts_without_state_change(
+    context: WorkerContext,
+) -> None:
+    staff_jobs_url = "/api/v1/staff/agencies/agency-one/listings/listing-one/detections"
+    with TestClient(context.app, raise_server_exceptions=False) as client:
+        claimed = client.post(_url("claim"), headers=_headers())
+        assert claimed.status_code == 200, claimed.text
+        before = client.get(staff_jobs_url)
+        assert before.status_code == 200, before.text
+        malformed_token = "\ud800"
+
+        request_headers = {**_headers(), "Content-Type": "application/json"}
+        stale_complete = client.post(
+            _url("complete"),
+            headers=request_headers,
+            content=json.dumps(
+                {"claim_token": malformed_token, "model_id": _MODEL_ID, "detections": []}
+            ).encode("ascii"),
+        )
+        stale_fail = client.post(
+            _url("fail"),
+            headers=request_headers,
+            content=json.dumps(
+                {"claim_token": malformed_token, "reason": "stale"}
+            ).encode("ascii"),
         )
         after = client.get(staff_jobs_url)
 

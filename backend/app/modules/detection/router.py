@@ -91,6 +91,15 @@ def _as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
+def _claim_token_matches(stored: str | None, supplied: str) -> bool:
+    if stored is None:
+        return False
+    try:
+        return secrets.compare_digest(stored.encode("utf-8"), supplied.encode("utf-8"))
+    except UnicodeEncodeError:
+        return False
+
+
 def job_response(job: DetectionJob) -> DetectionJobResponse:
     return DetectionJobResponse(
         job_id=job.id,
@@ -279,9 +288,7 @@ def complete_detection_job(
         )
         if job is None:
             raise HTTPException(status_code=404, detail=_WORKER_JOB_NOT_FOUND)
-        if job.claim_token is None or not secrets.compare_digest(
-            job.claim_token.encode("utf-8"), result.claim_token.encode("utf-8")
-        ):
+        if not _claim_token_matches(job.claim_token, result.claim_token):
             raise HTTPException(status_code=409, detail=_WORKER_STALE_CLAIM)
         if job.status == DETECTION_JOB_STATUS_COMPLETED:
             return job_response(job)
@@ -317,9 +324,7 @@ def fail_detection_job(
         )
         if job is None:
             raise HTTPException(status_code=404, detail=_WORKER_JOB_NOT_FOUND)
-        if job.claim_token is None or not secrets.compare_digest(
-            job.claim_token.encode("utf-8"), failure.claim_token.encode("utf-8")
-        ):
+        if not _claim_token_matches(job.claim_token, failure.claim_token):
             raise HTTPException(status_code=409, detail=_WORKER_STALE_CLAIM)
         if job.status == DETECTION_JOB_STATUS_RUNNING:
             job.attempts += 1

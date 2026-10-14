@@ -1,12 +1,12 @@
 # Worker 3D
 
-Dos responsabilidades conviven acá, ambas en construcción:
+Dos responsabilidades conviven acá: la reconstrucción Meshroom sigue pendiente y la detección de mobiliario incluye el piloto y los trabajos asíncronos F08.4 implementados.
 
 1. **Reconstrucción 3D con Meshroom** (F06/F07): pendiente de detalle.
    - Stack: ver `docs/scrum/sprint-0-requerimientos/09-infraestructura.md`
    - Repo destino futuro: `<pendiente de separación>`
    - Estado: estructura inicial, **sin código**.
-2. **Detección de mobiliario con IA preentrenada** (F08): piloto de inferencia implementado y ejecutado.
+2. **Detección de mobiliario con IA preentrenada** (F08/F08.4): piloto de inferencia implementado y ejecutado; el procesamiento asíncrono por cola también está implementado. La API es la única escritora del estado de los trabajos.
 
 ## Detección de mobiliario (F08)
 
@@ -15,6 +15,7 @@ Detector COCO preentrenado que **sugiere** mobiliario en una fotografía de un i
 | Pieza | Ruta |
 |---|---|
 | CLI de inferencia | `worker3d/detect.py` |
+| Consumidor de trabajos asíncronos | `worker3d/job_worker.py` |
 | Descargador del conjunto CC0 | `worker3d/fetch_cc0_pilot_set.py` |
 | Planchas de revisión manual | `worker3d/review_sheet.py` |
 | Pruebas de contrato (31) | `worker3d/tests/` |
@@ -69,4 +70,4 @@ Evidencia: `docs/ai/f08-bitacora-piloto.md`, `docs/ai/f08-revision-manual.json`,
 4. **Mediciones de un equipo.** Latencia y memoria son de CPU acá; no se extrapolan a un despliegue ni a un teléfono. Memoria de GPU y estado térmico quedan **no medidos**.
 5. **Revisión asistida.** La revisión manual del piloto la hizo el agente sobre las planchas, no una persona. No sustituye la validación humana.
 6. **Peso del servicio.** La imagen pesa 1.40 GB y el proceso 541 MB de RSS: no convive con el contenedor de la API en una instancia pequeña.
-7. **Sin integración.** F08.4 (trabajos asíncronos), F08.5 (confirmación humana e inventario) y F08.6 (mejora opcional) están pendientes; F08.5 espera el contrato de escena de F06.
+7. **Integración de sugerencias pendiente.** F08.4 (trabajos asíncronos de detección) está implementada; F08.5 (confirmación humana e inventario) y F08.6 (mejora opcional) siguen pendientes. F08.5 espera el contrato de escena de F06.

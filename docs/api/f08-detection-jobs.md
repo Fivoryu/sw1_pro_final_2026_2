@@ -2,7 +2,7 @@
 
 - **Estado:** implementado en la rama `feat/f08-furniture-ai-pilot`, sin integrar.
 - **Alcance:** trabajos asíncronos de detección de mobiliario sobre fotos de inmueble. **No** cubre inventario comercial ni la escena 3D: eso pertenece a F08.5.
-- **Entorno:** cola y almacenamiento **locales** (Floci). Esta entrega verifica el contrato del worker con dobles, no ejecuta la integración contra una instancia Floci. Nada de esto describe AWS real.
+- **Entorno:** cola y almacenamiento **locales** (Floci). El comportamiento del worker/API se prueba con dobles y también se registró una ida y vuelta real de la cola con `SqsJobQueue`; no se ejecutó el ciclo completo API → descarga firmada → inferencia del contenedor → resultado contra Floci. Nada de esto describe AWS real.
 
 ## 1. Rutas de personal
 
@@ -36,9 +36,9 @@ Prefijo: `/api/v1/detection/jobs/{job_id}`. Las tres rutas exigen `Authorization
 | | `409` | El token no corresponde al claim vigente; el estado del trabajo no cambia |
 | | `503` | No se pudo republicar; el trabajo persiste como `pending` y el consumidor no confirma el mensaje original |
 
-Cada claim exitoso genera un `claim_token` nuevo y lo guarda en la columna `claim_token` del trabajo. El worker debe incluirlo en `complete` o `fail`; tras vencer un lease y reclamarse el trabajo, cualquier reporte con el token anterior recibe `409` sin cambiar estado, intentos ni resultado. Si falla la firma del enlace tras guardar el claim, la API mantiene el trabajo `running`, devuelve el token en `X-Detection-Claim-Token` y el worker informa el error por `POST /fail`; así se consume el intento y se publica un mensaje nuevo o se alcanza `failed` al tope.
+Cada claim exitoso genera un `claim_token` nuevo y lo guarda en la columna `claim_token` del trabajo. El worker debe incluirlo en `complete` o `fail`; tras vencer un lease y reclamarse el trabajo, cualquier reporte con el token anterior recibe `409` sin cambiar estado, intentos ni resultado. Un token que no puede codificarse como UTF-8 (por ejemplo, un surrogate aislado) también recibe `409` y no altera el trabajo. Si falla la firma del enlace tras guardar el claim, la API mantiene el trabajo `running`, devuelve el token en `X-Detection-Claim-Token` y el worker informa el error por `POST /fail`; así se consume el intento y se publica un mensaje nuevo o se alcanza `failed` al tope.
 
-El worker no recibe credenciales de base de datos ni de S3. Sólo descarga el enlace firmado que devuelve `claim`; el enlace usa el endpoint local de Floci accesible desde la red de Compose. El productor y el consumidor rechazan endpoints SQS ausentes o no locales antes de crear el cliente boto3. El almacenamiento S3 también exige un endpoint configurado local por defecto, y sus clientes locales usan credenciales placeholder explícitas para no consultar la cadena ambiental de AWS. `S3_ALLOW_REMOTE_ENDPOINT` permanece en `false`; F11 es la fase que habilitaría endpoints remotos de manera explícita. La cola y el almacenamiento de este piloto no apuntan a AWS real.
+El worker no recibe credenciales de base de datos ni de S3. Sólo descarga el enlace firmado que devuelve `claim`; el enlace usa el endpoint local de Floci accesible desde la red de Compose. El productor y el consumidor rechazan endpoints SQS ausentes o no locales antes de crear el cliente boto3. El almacenamiento S3 también exige un endpoint configurado local por defecto, y sus clientes locales usan credenciales placeholder explícitas para no consultar la cadena ambiental de AWS. `S3_ALLOW_REMOTE_ENDPOINT` permanece en `false`; si se habilita, deben configurarse explícitamente `S3_ACCESS_KEY_ID` y `S3_SECRET_ACCESS_KEY`, que se pasan directamente a boto3. Sin ambas credenciales el almacenamiento remoto falla cerrado y nunca se delega en la cadena ambiental. F11 es la fase que habilitaría endpoints remotos de manera explícita. La cola y el almacenamiento de este piloto no apuntan a AWS real.
 
 ## 3. Estados
 
@@ -77,6 +77,8 @@ Campos serializados en JSON compacto y con claves ordenadas, para que el cuerpo 
 **Qué hacer ante un duplicado:** el consumidor **relee el estado del trabajo antes de trabajar**. Si ya está `completed`, no vuelve a inferir ni a informar y descarta el mensaje. La entrega repetida es normal, no un error.
 
 **Qué hacer cuando el trabajo no existe:** descartar el mensaje **sin reintentar**. Un mensaje puede sobrevivir a una confirmación perdida; reintentarlo sería trabajo infinito por un trabajo que nunca existió.
+
+**Fallo de claim no-404 sin token:** el worker conserva la entrega para reintento hasta que `ApproximateReceiveCount` supera `DETECTION_MAX_ATTEMPTS`; entonces registra el fallo en su log y elimina el mensaje. El trabajo no se modifica desde el worker. El barrido de la API puede republicarlo si continúa `pending` y sin marca `enqueued_at`. El provisionamiento local configura `roomforge-local-detection-dlq` con `maxReceiveCount` igual al tope más una recepción, de modo que el worker pueda observar y eliminar la entrega al superar su límite; el DLQ queda como destino de mensajes que el consumidor no logra eliminar.
 
 ## 6. El mensaje es autosuficiente
 

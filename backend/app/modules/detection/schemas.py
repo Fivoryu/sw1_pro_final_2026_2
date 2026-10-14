@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MAX_DETECTIONS = 100
 SUGGESTION_BOX_SIZE = 4
@@ -26,12 +26,21 @@ class DetectionSuggestion(BaseModel):
     box: Annotated[list[float], Field(min_length=SUGGESTION_BOX_SIZE, max_length=SUGGESTION_BOX_SIZE)]
 
 
+def _validate_claim_token(value: Any) -> str:
+    if not isinstance(value, str) or not 1 <= len(value) <= 64:
+        raise ValueError("claim_token must be a string between 1 and 64 characters")
+    return value
+
+
 class DetectionResultPayload(BaseModel):
     """What the worker reports back for one image and active claim."""
 
     model_config = ConfigDict(extra="forbid")
 
-    claim_token: Annotated[str, Field(min_length=1, max_length=64)]
+    claim_token: Any = Field(
+        json_schema_extra={"type": "string", "minLength": 1, "maxLength": 64}
+    )
+    _validate_claim_token = field_validator("claim_token")(_validate_claim_token)
     model_id: Annotated[str, Field(min_length=1, max_length=64)]
     detections: Annotated[list[DetectionSuggestion], Field(max_length=MAX_DETECTIONS)]
 
@@ -41,7 +50,10 @@ class DetectionJobFailure(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    claim_token: Annotated[str, Field(min_length=1, max_length=64)]
+    claim_token: Any = Field(
+        json_schema_extra={"type": "string", "minLength": 1, "maxLength": 64}
+    )
+    _validate_claim_token = field_validator("claim_token")(_validate_claim_token)
     reason: Annotated[str, Field(min_length=1, max_length=255)]
 
 

@@ -114,21 +114,25 @@ class S3PhotoStorage:
                     "aws_access_key_id": access_key_id,
                     "aws_secret_access_key": secret_access_key,
                 }
-            return {}
+            raise ValueError(
+                "Explicit S3 credentials (S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY) are required for remote endpoints"
+            )
 
+        internal_credentials = credentials_for(internal_endpoint)
+        signer_credentials = credentials_for(signer_endpoint)
         self._client: Any = boto3.client(
             "s3",
             endpoint_url=internal_endpoint,
             region_name=region,
             config=config,
-            **credentials_for(internal_endpoint),
+            **internal_credentials,
         )
         self._signer: Any = boto3.client(
             "s3",
             endpoint_url=signer_endpoint,
             region_name=region,
             config=config,
-            **credentials_for(signer_endpoint),
+            **signer_credentials,
         )
 
     def presign_upload(self, key: str, *, content_type: str, expires_in: int) -> str:
@@ -219,5 +223,7 @@ def create_photo_storage(settings: Settings) -> PhotoStorage | None:
         endpoint_url=settings.s3_endpoint_url,
         public_endpoint_url=public.rstrip("/") if public else None,
         region=settings.s3_region,
+        access_key_id=settings.s3_access_key_id,
+        secret_access_key=settings.s3_secret_access_key,
         allow_remote_endpoint=settings.s3_allow_remote_endpoint,
     )
