@@ -1,11 +1,34 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+
+
+def test_compose_overlay_passes_the_shared_attempt_limit_to_api_and_worker() -> None:
+    overlay_path = (
+        Path(__file__).resolve().parents[2]
+        / "infra"
+        / "docker"
+        / "compose.inference.yml"
+    )
+    overlay = overlay_path.read_text(encoding="utf-8")
+    service_blocks = {
+        name: body
+        for name, body in re.findall(
+            r"(?ms)^  ([\w-]+):\n(.*?)(?=^  [\w-]+:\n|\Z)", overlay
+        )
+    }
+
+    for service in ("api", "worker"):
+        assert re.search(
+            r"(?m)^      DETECTION_MAX_ATTEMPTS: \$\{DETECTION_MAX_ATTEMPTS:-3\}$",
+            service_blocks[service],
+        ), f"{service} must receive the same host-configured retry cap as provisioning"
 
 
 def test_local_detection_queue_is_provisioned_with_a_dead_letter_redrive_policy() -> None:

@@ -273,9 +273,99 @@ def test_claim_failures_beyond_receive_cap_drop_delivery_and_recover_job(
         after_sweep = session.get(DetectionJob, _JOB_ID)
         assert after_sweep is not None
         assert after_sweep.status == "pending"
+        assert after_sweep.attempts == 1
         assert after_sweep.enqueued_at is not None
     assert recovered == 1
-    assert [queued.attempt for queued in context.queue.published] == [1]
+    assert [queued.attempt for queued in context.queue.published] == [2]
+
+
+def test_unclaimed_pending_republishes_consume_attempts_and_fail_at_the_cap(
+    context: RecoveryContext,
+) -> None:
+    with context.session_factory.begin() as session:
+        session.add(
+            DetectionJob(
+                id=_JOB_ID,
+                agency_id="agency-one",
+                listing_id="listing-one",
+                photo_id="photo-one",
+                object_key="agencies/agency-one/listings/listing-one/photos/photo-one",
+                model_id=_MODEL_ID,
+                dedupe_key=dedupe_key_for("photo-one", _MODEL_ID),
+                status="pending",
+                attempts=0,
+                created_at=_NOW - timedelta(minutes=10),
+                enqueued_at=None,
+            )
+        )
+
+    sweep_now = datetime.now(UTC)
+    for sweep_number in range(1, _MAX_ATTEMPTS + 1):
+        sweep_now += timedelta(seconds=_LEASE_SECONDS + 1)
+        recovered = run_detection_recovery_sweep(
+            context.session_factory,
+            context.queue,
+            now=sweep_now,
+            max_attempts=_MAX_ATTEMPTS,
+        )
+        job = _listed_jobs(context)[0]
+
+        assert recovered == 1
+        assert job["attempts"] == sweep_number
+        expected_status = "failed" if sweep_number == _MAX_ATTEMPTS else "pending"
+        assert job["status"] == expected_status
+        assert len(context.queue.published) == min(sweep_number, _MAX_ATTEMPTS - 1)
+        if expected_status == "failed":
+            reason = job["failure_reason"]
+            assert isinstance(reason, str) and "delivery" in reason.lower()
+            assert str(_MAX_ATTEMPTS) in reason
+
+    final_job = _listed_jobs(context)[0]
+    later = run_detection_recovery_sweep(
+        context.session_factory,
+        context.queue,
+        now=sweep_now + timedelta(days=1),
+        max_attempts=_MAX_ATTEMPTS,
+    )
+
+    assert later == 0
+    assert _listed_jobs(context)[0] == final_job
+    assert len(context.queue.published) == _MAX_ATTEMPTS - 1
+
+
+def test_recent_pending_delivery_with_attempts_remaining_is_not_failed(
+    context: RecoveryContext,
+) -> None:
+    with context.session_factory.begin() as session:
+        session.add(
+            DetectionJob(
+                id=_JOB_ID,
+                agency_id="agency-one",
+                listing_id="listing-one",
+                photo_id="photo-one",
+                object_key="agencies/agency-one/listings/listing-one/photos/photo-one",
+                model_id=_MODEL_ID,
+                dedupe_key=dedupe_key_for("photo-one", _MODEL_ID),
+                status="pending",
+                attempts=_MAX_ATTEMPTS - 1,
+                created_at=_NOW,
+                enqueued_at=_NOW,
+            )
+        )
+
+    recovered = run_detection_recovery_sweep(
+        context.session_factory,
+        context.queue,
+        now=_NOW,
+        max_attempts=_MAX_ATTEMPTS,
+    )
+
+    job = _listed_jobs(context)[0]
+    assert recovered == 0
+    assert job["status"] == "pending"
+    assert job["attempts"] == _MAX_ATTEMPTS - 1
+    assert job["failure_reason"] is None
+    assert context.queue.published == []
 
 
 def test_pending_job_that_was_never_enqueued_is_republished(context: RecoveryContext) -> None:
@@ -308,9 +398,9 @@ def test_pending_job_that_was_never_enqueued_is_republished(context: RecoveryCon
     assert before[0]["status"] == "pending"
     assert recovered == 1
     assert after[0]["status"] == "pending"
-    assert after[0]["attempts"] == 0
+    assert after[0]["attempts"] == 1
     assert [message.job_id for message in context.queue.published] == [_JOB_ID]
-    assert [message.attempt for message in context.queue.published] == [1]
+    assert [message.attempt for message in context.queue.published] == [2]
 
 
 def test_pending_job_with_stale_enqueue_marker_is_republished(context: RecoveryContext) -> None:
@@ -341,11 +431,12 @@ def test_pending_job_with_stale_enqueue_marker_is_republished(context: RecoveryC
 
     assert recovered == 1
     assert [message.job_id for message in context.queue.published] == [_JOB_ID]
-    assert [message.attempt for message in context.queue.published] == [1]
+    assert [message.attempt for message in context.queue.published] == [2]
     with context.session_factory() as session:
         job = session.get(DetectionJob, _JOB_ID)
         assert job is not None
         assert job.status == "pending"
+        assert job.attempts == 1
         assert job.enqueued_at is not None
         assert job.enqueued_at.replace(tzinfo=UTC) != _NOW - timedelta(seconds=_LEASE_SECONDS)
 

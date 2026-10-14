@@ -27,7 +27,7 @@ Cada tarea cierra con su verificación y con un commit de unidad de trabajo. El 
 
 - **Specs:** R6, R7.
 - **Entrega:** tope de intentos y motivo en `fail`; barrido de leases vencidos como tarea de fondo, con el patrón del refresher de tasas; ajustes declarados en configuración.
-- **Verificación:** RED y GREEN de R6 (fallo permanente termina `failed` tras exactamente el tope, con motivo) y R7 (`running` con lease vencido se republica; con intentos agotados pasa a `failed`; `pending` con marca ausente o más vieja que `DETECTION_LEASE_SECONDS` se republica; marca reciente y lease activo no se duplican en cada barrido). El DLQ usa `DETECTION_MAX_ATTEMPTS + 1`, igual que el límite del worker más la recepción que permite eliminar antes del redrive.
+- **Verificación:** RED y GREEN de R6 (fallo permanente reportado, crasheos repetidos y republicaciones de `pending` no reclamados terminan `failed` tras exactamente el tope, con motivo; otro barrido no los cambia) y R7 (`running` con lease vencido se republica; con intentos agotados pasa a `failed`; `pending` con marca ausente o más vieja que `DETECTION_LEASE_SECONDS` se republica; marca reciente y lease activo no se duplican en cada barrido). El DLQ usa `DETECTION_MAX_ATTEMPTS + 1`, igual que el límite del worker más la recepción que permite eliminar antes del redrive.
 - **Commit:** unidad propia.
 
 ## F08A-T5 — Verificación integrada

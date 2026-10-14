@@ -73,6 +73,7 @@ Se declara, no se disimula:
 1. **Inferencia real dentro del contenedor del worker.** No se construyó la imagen `Dockerfile.worker` (~1,5 GB con torch) ni se corrió el ciclo completo `claim → descarga firmada desde S3 → inferencia → complete`. La lógica está probada con dobles y el detector está probado por separado en F08.2; **la unión de las dos cosas contra infraestructura real, no**.
 2. **Floci no es SQS.** Visibilidad, orden y garantías de entrega pueden diferir. Nada de esto autoriza conclusiones sobre SQS real, que pertenece a F11.
 3. **Los valores de reintento, visibilidad y lease siguen siendo elegidos, no medidos.**
+4. **No hay heartbeat del lease durante inferencia.** Una inferencia sana que dure más que `DETECTION_LEASE_SECONDS` puede recuperarse como abandonada y hacer que empiece un segundo intento. El fencing rechaza el reporte tardío del intento anterior, pero no puede detener esa computación. La duración real de la inferencia nunca se midió.
 
 ## 5. Hallazgos operativos (cuestan tiempo si se redescubren)
 
@@ -91,6 +92,98 @@ Se declara, no se disimula:
 **Validación observada en el worktree:** desde `backend/`, `python.exe -m pytest tests -q` → `711 passed, 3 skipped`; `python.exe -m ruff check app tests` → limpio; `pyright.exe app tests` → 18 errores preexistentes de imports `eth_account`/`eth_utils`, sin diagnósticos en los archivos de esta unidad. Desde la raíz, `python.exe -m pytest worker3d/tests -q` → `44 passed`. La prueba de provisionamiento ejecutó el script PowerShell con un Docker simulado y comprobó el `RedrivePolicy` (dead-letter ARN y `maxReceiveCount=4`); el parser de Windows PowerShell también informó `PowerShell syntax OK`.
 
 **No ejecutado en este cierre:** el script de provisionamiento contra Docker/Floci, el redrive real de Floci/SQS ni PostgreSQL. La migración `0020` y su columna `claim_token` se registran únicamente según evidencia aportada por el padre; ver §1.1.
+
+## 8. Cierre de R6 y los dos hallazgos medios de la quinta verificación
+
+### K1 — R6: las republicaciones sin claim consumen el tope
+
+El barrido ahora consume un intento por cada republicación de un `pending` cuyo marcador está ausente o vencido, como hace con un lease expirado. Si el contador llega al tope, fija `failed`, `finished_at` y un motivo legible, sin publicar otra entrega. Un barrido posterior no modifica el trabajo. El contador se mantiene en el tope, nunca lo supera. Una marca reciente sigue dando tiempo al delivery: con intentos aún disponibles no se declara fallido un trabajo que todavía progresa normalmente.
+
+**RED observado antes de implementar:**
+
+```text
+cd backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m pytest -p no:cacheprovider tests/test_detection_recovery.py -q -k 'unclaimed_pending_republishes or recent_pending_delivery_with_attempts_remaining'
+F.                                                                       [100%]
+FAILED tests/test_detection_recovery.py::test_unclaimed_pending_republishes_consume_attempts_and_fail_at_the_cap
+1 failed, 1 passed, 11 deselected, 1 warning in 3.76s
+```
+
+La aserción falló observando `attempts == 0` donde se esperaba `1`. La prueba de marca reciente pasó antes de implementar; por tanto, no se presenta como RED.
+
+**GREEN observado** (incluye el capped-drop real con doble, expiración de lease, marcador ausente/vencido/reciente, leases activos y crashes repetidos):
+
+```text
+cd backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m pytest -p no:cacheprovider tests/test_detection_recovery.py -q -k 'claim_failures_beyond_receive_cap or unclaimed_pending_republishes or recent_pending_delivery_with_attempts_remaining or expired_lease_consumes_an_attempt or pending_job_that_was_never_enqueued or pending_job_with_stale_enqueue_marker or recent_enqueue_marker or running_job_with_active_lease or repeated_worker_crashes'
+11 passed, 2 deselected, 1 warning in 4.31s
+```
+
+### K2 — Compose, API, worker y provisionamiento comparten el límite
+
+`compose.inference.yml` pasa `${DETECTION_MAX_ATTEMPTS:-3}` tanto a `api` como a `worker`. El script de provisionamiento ya lee esa variable del entorno del host y elige `maxReceiveCount = valor + 1`; el requisito de definir el mismo override para Compose y provisionamiento queda documentado en el diseño y el contrato API. Sin Docker se validó el texto de configuración por servicio; esto no equivale a validar la configuración efectiva de Compose.
+
+**RED observado:**
+
+```text
+cd backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m pytest -p no:cacheprovider tests/test_detection_local_provisioning.py -q -k compose_overlay_passes_the_shared_attempt_limit_to_api_and_worker
+FAILED tests/test_detection_local_provisioning.py::test_compose_overlay_passes_the_shared_attempt_limit_to_api_and_worker
+1 failed, 1 deselected in 0.14s
+```
+
+Fallo observado: el bloque `api` no contenía `DETECTION_MAX_ATTEMPTS`.
+
+**GREEN observado:**
+
+```text
+cd backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m pytest -p no:cacheprovider tests/test_detection_local_provisioning.py -q -k compose_overlay_passes_the_shared_attempt_limit_to_api_and_worker
+1 passed, 1 deselected in 0.03s
+```
+
+### K3 — Una publicación aceptada no devuelve 503 por progreso concurrente
+
+Si la actualización condicional de `enqueued_at` afecta cero filas, la API relee el trabajo. Acepta progreso `running`, `completed` o `failed` de la generación publicada, y también el avance a una generación posterior causado por un fallo rápido; no escribe una marca sobre esa generación posterior. La prueba de completado ejecuta claim y complete dentro de `publish`; la prueba adicional ejecuta claim y fail y confirma que la generación de reintento queda republicada.
+
+**RED observado:**
+
+```text
+cd backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m pytest -p no:cacheprovider tests/test_detection_jobs_api.py -q -k 'publisher_accepts_completion_during_publish or publisher_accepts_fast_failure_that_advances_to_a_retry'
+FAILED tests/test_detection_jobs_api.py::test_publisher_accepts_completion_during_publish
+FAILED tests/test_detection_jobs_api.py::test_publisher_accepts_fast_failure_that_advances_to_a_retry
+2 failed, 17 deselected, 1 warning in 3.32s
+```
+
+Ambas respuestas observadas fueron `503` (`dependency_unavailable`) en vez de `201`, aunque la cola había aceptado la entrega y el trabajo había progresado.
+
+**GREEN observado:**
+
+```text
+cd backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m pytest -p no:cacheprovider tests/test_detection_jobs_api.py -q -k 'publisher_accepts_completion_during_publish or publisher_accepts_fast_failure_that_advances_to_a_retry or publisher_accepts_a_same_generation_job_claimed_during_publish'
+3 passed, 16 deselected, 1 warning in 2.68s
+```
+
+**Corrida de integración intermedia:** la primera ejecución de todos los `test_detection_*.py` tras K1/K3 dio `1 failed, 58 passed, 1 warning in 8.48s`: una aserción existente esperaba que el intento no cambiara tras una republicación, y el caso de publicador retrasado esperaba `503`. Se actualizaron para verificar el contador consumido, la respuesta exitosa por publicación aceptada y que el trabajo siguiera sin marca y recuperable. La corrida final quedó verde:
+
+```text
+cd backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m pytest -p no:cacheprovider tests/test_detection_*.py -q
+59 passed, 1 warning in 7.69s
+```
+
+### Validación final observada
+
+```text
+/mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m pytest -p no:cacheprovider worker3d/tests -q
+44 passed in 1.84s
+
+cd backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m pytest -p no:cacheprovider tests -q
+720 passed, 3 skipped, 4 warnings in 63.24s
+
+cd backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/python.exe -B -m ruff check app tests
+All checks passed!
+
+cd backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.venv/Scripts/pyright.exe app tests
+18 errors, 0 warnings, 0 informations
+```
+
+Pyright conserva los 18 errores preexistentes de resolución de `eth_account`/`eth_utils`; no señala los archivos de esta unidad. No se ejecutaron Docker Compose efectivo, provisionamiento contra Floci, redrive real, PostgreSQL, inferencia dentro del contenedor ni SQS de AWS. La duración de inferencia tampoco se midió; el límite de no tener heartbeat del lease queda declarado en §4 y en `openspec/changes/f08-trabajos-asincronos/design.md`.
 
 ## 7. Cierre de los hallazgos de la cuarta verificación
 

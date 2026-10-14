@@ -41,6 +41,8 @@ from app.modules.detection.models import DetectionJob, dedupe_key_for
 PHOTO_STATUS_CONFIRMED = "confirmed"
 STATUS_PENDING = "pending"
 STATUS_RUNNING = "running"
+STATUS_COMPLETED = "completed"
+STATUS_FAILED = "failed"
 LOGGER = logging.getLogger("roomforge.detection.recovery")
 
 
@@ -79,19 +81,16 @@ def list_jobs(session: Session, *, agency_id: str, listing_id: str) -> list[Dete
     )
 
 
-def _is_enqueued_for_generation(
+def _has_publication_progressed_for_generation(
     session_factory: sessionmaker[Session], *, job_id: str, generation: int
 ) -> bool:
     with session_factory() as session:
         job = session.get(DetectionJob, job_id)
-        return (
-            job is not None
-            and job.attempts == generation
-            and (
-                job.status == STATUS_RUNNING
-                or (job.status == STATUS_PENDING and job.enqueued_at is not None)
-            )
-        )
+        if job is None or job.attempts < generation:
+            return False
+        if job.status == STATUS_PENDING:
+            return job.attempts > generation or job.enqueued_at is not None
+        return job.status in {STATUS_RUNNING, STATUS_COMPLETED, STATUS_FAILED}
 
 
 def _find_by_dedupe_key(session: Session, dedupe_key: str) -> DetectionJob | None:
@@ -159,7 +158,7 @@ def publish_pending_detection_job(
             )
             .values(enqueued_at=enqueued_at)
         )
-    return result.rowcount == 1 or _is_enqueued_for_generation(
+    return result.rowcount == 1 or _has_publication_progressed_for_generation(
         session_factory, job_id=job_id, generation=generation
     )
 
@@ -257,11 +256,26 @@ def run_detection_recovery_sweep(
             if job.attempts >= max_attempts:
                 job.status = "failed"
                 job.failure_reason = (
-                    f"Detection attempts exhausted at {max_attempts} without queue delivery"
+                    f"Detection delivery was not claimed after {max_attempts} attempts"
                 )
                 job.claim_token = None
+                job.lease_expires_at = None
                 job.finished_at = now
                 continue
+
+            # A delivery discarded by the worker never reaches /fail, so this
+            # republish consumes the same retry budget as an expired lease.
+            job.attempts += 1
+            job.claim_token = None
+            if job.attempts >= max_attempts:
+                job.status = "failed"
+                job.failure_reason = (
+                    f"Detection delivery was not claimed after {job.attempts} attempts"
+                )
+                job.lease_expires_at = None
+                job.finished_at = now
+                continue
+
             messages.setdefault(
                 job.id,
                 (
@@ -299,7 +313,7 @@ def run_detection_recovery_sweep(
                 )
                 .values(enqueued_at=enqueued_at)
             )
-        if result.rowcount != 1 and not _is_enqueued_for_generation(
+        if result.rowcount != 1 and not _has_publication_progressed_for_generation(
             session_factory, job_id=message.job_id, generation=generation
         ):
             LOGGER.warning(

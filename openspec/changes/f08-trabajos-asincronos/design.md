@@ -92,9 +92,9 @@ Lección que se conserva: **una base y una cola no se confirman juntas.** Cualqu
 
 1. El trabajo se inserta y confirma con `enqueued_at` sin fijar.
 2. Antes de publicar, se lee `attempts` como generación de ese intento; se publica el mensaje.
-3. Después de que `publish` retorna, una actualización condicional fija `enqueued_at` sólo si siguen coincidiendo `attempts`, `status = pending` y `enqueued_at IS NULL`. La hora se captura después de publicar. Si la actualización afecta cero filas, se relee el trabajo: se acepta como marcado si sigue `pending`, conserva la misma generación (`attempts`) y ya tiene `enqueued_at`, o si ya pasó a `running` en esa misma generación porque el worker reclamó el mensaje. En cualquier otro caso se reporta como no marcado.
+3. Después de que `publish` retorna, una actualización condicional fija `enqueued_at` sólo si siguen coincidiendo `attempts`, `status = pending` y `enqueued_at IS NULL`. La hora se captura después de publicar. Si la actualización afecta cero filas, se relee el trabajo: cuenta como publicación exitosa si sigue `pending` con marca de la misma generación, o si el mensaje ya avanzó a `running`, `completed` o `failed`. Si un fallo rápido consumió un intento y avanzó `attempts`, el estado de esa generación posterior también acredita progreso; el publicador no escribe una marca sobre ella. En otro caso se reporta como no marcado.
 
-La reconciliación aplica la misma condición y generación. Un publicador retrasado de una generación anterior no puede marcar la posterior como encolada; puede dejar un mensaje duplicado, lo cual es aceptable. El barrido publica trabajos `pending` con marca vacía, o con marca que alcanzó la antigüedad configurada para `DETECTION_LEASE_SECONDS`, y borra la marca antigua antes de publicar. Si la publicación falla o el worker elimina una entrega sin cambiar el estado, el trabajo vuelve a ser inmediatamente elegible; tras una publicación exitosa la nueva marca da un lease completo antes de otro reintento.
+La reconciliación aplica la misma condición y generación. Un publicador retrasado de una generación anterior no puede marcar la posterior como encolada; puede dejar un mensaje duplicado, lo cual es aceptable. El barrido publica trabajos `pending` con marca vacía, o con marca que alcanzó la antigüedad configurada para `DETECTION_LEASE_SECONDS`, y borra la marca antigua antes de publicar. Cada republicación de un trabajo pendiente consume un intento, como la recuperación de un lease vencido; si alcanza `DETECTION_MAX_ATTEMPTS`, queda `failed` con motivo en vez de republicarse. Si la publicación falla o el worker elimina una entrega sin cambiar el estado, el trabajo sigue siendo elegible por el barrido; tras una publicación exitosa la nueva marca da un lease completo antes de otro reintento.
 
 Consecuencias, las dos cubiertas:
 
@@ -132,7 +132,7 @@ El worker usa un Dockerfile propio (`Dockerfile.worker`, contexto `./inference`)
 
 ## 10. Cola dedicada y provisionamiento
 
-Cola propia `roomforge-local-detection`, separada de `roomforge-local-events`, para no mezclar eventos de negocio con trabajos de cómputo. El script de provisionamiento local crea además `roomforge-local-detection-dlq` y configura `maxReceiveCount = DETECTION_MAX_ATTEMPTS + 1`, leyendo la misma variable que el worker; si está ausente, ambos usan el default 3. Así el worker puede registrar y eliminar el mensaje al superar su cap antes del redrive de los mensajes que no logró eliminar.
+Cola propia `roomforge-local-detection`, separada de `roomforge-local-events`, para no mezclar eventos de negocio con trabajos de cómputo. El script de provisionamiento local crea además `roomforge-local-detection-dlq` y configura `maxReceiveCount = DETECTION_MAX_ATTEMPTS + 1`. El overlay `compose.inference.yml` pasa la misma variable interpolada a la API y al worker; el script de provisionamiento la lee del entorno del host. Si está ausente, los tres usan el default 3. Si se elige un override, hay que definir `DETECTION_MAX_ATTEMPTS` en el entorno que ejecuta tanto Compose como el provisionamiento, para que el límite de reintentos, el cap de recepción y el redrive no diverjan. Así el worker puede registrar y eliminar el mensaje al superar su cap antes del redrive de los mensajes que no logró eliminar.
 
 ## 11. Endpoints
 
@@ -182,3 +182,4 @@ El worker se prueba sin torch, sin red y sin cola real: la cola, el cliente HTTP
 4. **Sin interfaz.** La única forma de ver un trabajo hoy es la API. La pantalla es F08.5.
 5. **Sin confirmación humana.** Los resultados son sugerencias sin dueño; nada se publica ni se vende con ellos.
 6. **Sin retención decidida.** P4 sigue abierta.
+7. **Sin heartbeat del lease durante inferencia.** Una inferencia sana que dure más que `DETECTION_LEASE_SECONDS` puede recuperarse como abandonada y hacer que empiece un segundo intento. El fencing rechaza el reporte tardío del intento anterior, pero no puede detener esa computación que ya está ejecutándose. La duración real de la inferencia nunca se midió.

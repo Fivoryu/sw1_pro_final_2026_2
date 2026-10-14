@@ -323,6 +323,87 @@ def test_publisher_accepts_a_same_generation_job_claimed_during_publish(
         assert job.enqueued_at is None
 
 
+def test_publisher_accepts_completion_during_publish(context: DetectionContext) -> None:
+    _seed_listing(context.session_factory)
+    _seed_photo(context.session_factory)
+    context.app.state.settings = _settings(detection_worker_token="test-worker-token")
+
+    class CompletingQueue:
+        def __init__(self) -> None:
+            self.published: list[JobMessage] = []
+
+        def publish(self, message: JobMessage) -> None:
+            self.published.append(message)
+            claim = context.client.post(
+                f"/api/v1/detection/jobs/{message.job_id}/claim",
+                headers={"Authorization": "Bearer test-worker-token"},
+            )
+            assert claim.status_code == 200, claim.text
+            completed = context.client.post(
+                f"/api/v1/detection/jobs/{message.job_id}/complete",
+                headers={"Authorization": "Bearer test-worker-token"},
+                json={
+                    "claim_token": claim.json()["claim_token"],
+                    "model_id": MODEL_ID,
+                    "detections": [
+                        {"label": "chair", "score": 0.9, "box": [1, 2, 30, 40]}
+                    ],
+                },
+            )
+            assert completed.status_code == 200, completed.text
+
+    queue = CompletingQueue()
+    context.app.state.job_queue = queue
+
+    response = context.client.post(_detections_url())
+
+    assert response.status_code == 201, response.text
+    assert len(queue.published) == 1
+    assert _listed_jobs(context)[0]["status"] == "completed"
+
+
+def test_publisher_accepts_fast_failure_that_advances_to_a_retry(
+    context: DetectionContext,
+) -> None:
+    _seed_listing(context.session_factory)
+    _seed_photo(context.session_factory)
+    context.app.state.settings = _settings(detection_worker_token="test-worker-token")
+
+    class FailingFirstDeliveryQueue:
+        def __init__(self) -> None:
+            self.published: list[JobMessage] = []
+
+        def publish(self, message: JobMessage) -> None:
+            self.published.append(message)
+            if message.attempt != 1:
+                return
+            claim = context.client.post(
+                f"/api/v1/detection/jobs/{message.job_id}/claim",
+                headers={"Authorization": "Bearer test-worker-token"},
+            )
+            assert claim.status_code == 200, claim.text
+            failed = context.client.post(
+                f"/api/v1/detection/jobs/{message.job_id}/fail",
+                headers={"Authorization": "Bearer test-worker-token"},
+                json={
+                    "claim_token": claim.json()["claim_token"],
+                    "reason": "transient inference error",
+                },
+            )
+            assert failed.status_code == 200, failed.text
+
+    queue = FailingFirstDeliveryQueue()
+    context.app.state.job_queue = queue
+
+    response = context.client.post(_detections_url())
+
+    assert response.status_code == 201, response.text
+    assert [message.attempt for message in queue.published] == [1, 2]
+    retried = _listed_jobs(context)[0]
+    assert retried["status"] == "pending"
+    assert retried["attempts"] == 1
+
+
 def test_stale_publisher_cannot_mark_a_later_attempt_enqueued(
     context: DetectionContext,
 ) -> None:
@@ -384,6 +465,14 @@ def test_stale_publisher_cannot_mark_a_later_attempt_enqueued(
             release.set()
         stale_response = first_request.result(timeout=5)
 
+    assert stale_response.status_code == 201, stale_response.text
+    with context.session_factory() as session:
+        progressed_job = session.get(DetectionJob, first_message.job_id)
+        assert progressed_job is not None
+        assert progressed_job.status == "pending"
+        assert progressed_job.attempts == 1
+        assert progressed_job.enqueued_at is None
+
     run_detection_recovery_sweep(
         context.session_factory, queue, now=_NOW + timedelta(seconds=1), max_attempts=3
     )
@@ -391,10 +480,9 @@ def test_stale_publisher_cannot_mark_a_later_attempt_enqueued(
     retry_message = queue.receive()
 
     assert recovered["status"] == "pending"
-    assert recovered["attempts"] == 1
-    assert retry_message is not None and retry_message.attempt == 2
-    assert stale_response.status_code == 503, stale_response.text
-    assert [message.attempt for message in queue.received] == [1, 2]
+    assert recovered["attempts"] == 2
+    assert retry_message is not None and retry_message.attempt == 3
+    assert [message.attempt for message in queue.received] == [1, 3]
 
 
 def test_another_agency_cannot_request_detection(context: DetectionContext) -> None:

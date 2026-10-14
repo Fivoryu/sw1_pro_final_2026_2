@@ -14,11 +14,13 @@
 #
 # Sólo CPU: no se declara GPU porque no se midió ninguna. El token de worker por
 # defecto sólo sirve para desarrollo local; puede sobreescribirse en el entorno.
+# DETECTION_MAX_ATTEMPTS is shared by the API, worker, and host-side provisioner.
 
 services:
   api:
     environment:
       DETECTION_QUEUE_NAME: roomforge-local-detection
+      DETECTION_MAX_ATTEMPTS: ${DETECTION_MAX_ATTEMPTS:-3}
       DETECTION_WORKER_TOKEN: ${DETECTION_WORKER_TOKEN:-roomforge-local-only-worker-token}
       SQS_ENDPOINT_URL: ${SQS_ENDPOINT_URL:-http://floci:4566}
 
@@ -44,6 +46,7 @@ services:
     environment:
       DETECTION_API_BASE_URL: http://api:8000
       DETECTION_QUEUE_NAME: roomforge-local-detection
+      DETECTION_MAX_ATTEMPTS: ${DETECTION_MAX_ATTEMPTS:-3}
       DETECTION_VISIBILITY_TIMEOUT_SECONDS: "60"
       DETECTION_WORKER_TOKEN: ${DETECTION_WORKER_TOKEN:-roomforge-local-only-worker-token}
       SQS_ENDPOINT_URL: ${SQS_ENDPOINT_URL:-http://floci:4566}
