@@ -28,7 +28,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.modules.catalog.models import ListingPhoto
 from app.modules.catalog.photos import lock_staff_listing
@@ -111,6 +111,114 @@ def _publish(job: DetectionJob, job_queue: JobQueue, now: datetime) -> bool:
         return False
     job.enqueued_at = now
     return True
+
+
+def run_detection_recovery_sweep(
+    session_factory: sessionmaker[Session],
+    job_queue: JobQueue | None,
+    *,
+    now: datetime,
+    max_attempts: int,
+) -> int:
+    """Recover expired leases and republish pending jobs that were never queued.
+
+    The state transition is committed before publishing so a worker that receives
+    the message can claim the now-pending job. If publication fails, the job stays
+    pending with no ``enqueued_at`` and a later sweep retries it.
+    """
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be positive")
+
+    messages: dict[str, JobMessage] = {}
+    expired_count = 0
+    with session_factory.begin() as session:
+        expired_jobs = (
+            session.query(DetectionJob)
+            .filter(
+                DetectionJob.status == "running",
+                DetectionJob.lease_expires_at.is_not(None),
+                DetectionJob.lease_expires_at <= now,
+            )
+            .with_for_update()
+            .all()
+        )
+        unqueued_jobs = (
+            session.query(DetectionJob)
+            .filter(
+                DetectionJob.status == STATUS_PENDING,
+                DetectionJob.enqueued_at.is_(None),
+            )
+            .with_for_update()
+            .all()
+        )
+        expired_count = len(expired_jobs)
+
+        for job in expired_jobs:
+            if job.attempts >= max_attempts:
+                job.status = "failed"
+                job.failure_reason = (
+                    f"Worker lease expired after {max_attempts} attempts without completion"
+                )
+                job.lease_expires_at = None
+                job.finished_at = now
+                continue
+
+            job.status = STATUS_PENDING
+            job.lease_expires_at = None
+            job.enqueued_at = None
+            job.failure_reason = None
+            messages[job.id] = JobMessage(
+                version=MESSAGE_VERSION,
+                job_id=job.id,
+                photo_id=job.photo_id,
+                object_key=job.object_key,
+                model_id=job.model_id,
+                attempt=job.attempts + 1,
+            )
+
+        for job in unqueued_jobs:
+            if job.attempts >= max_attempts:
+                job.status = "failed"
+                job.failure_reason = (
+                    f"Detection attempts exhausted at {max_attempts} without queue delivery"
+                )
+                job.finished_at = now
+                continue
+            messages.setdefault(
+                job.id,
+                JobMessage(
+                    version=MESSAGE_VERSION,
+                    job_id=job.id,
+                    photo_id=job.photo_id,
+                    object_key=job.object_key,
+                    model_id=job.model_id,
+                    attempt=job.attempts + 1,
+                ),
+            )
+
+    for message in messages.values():
+        if job_queue is None:
+            continue
+        try:
+            job_queue.publish(message)
+        except Exception:
+            # The unqueued marker remains unset so the next sweep can retry.
+            continue
+        with session_factory.begin() as session:
+            job = (
+                session.query(DetectionJob)
+                .filter(
+                    DetectionJob.id == message.job_id,
+                    DetectionJob.status == STATUS_PENDING,
+                    DetectionJob.enqueued_at.is_(None),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if job is not None:
+                job.enqueued_at = now
+
+    return expired_count + len(unqueued_jobs)
 
 
 def request_detection_job(

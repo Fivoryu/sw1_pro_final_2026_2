@@ -213,6 +213,46 @@ def test_fail_counts_attempts_republishes_then_stops_at_the_limit() -> None:
         limited.close()
 
 
+def test_permanent_failure_stops_at_the_exact_attempt_cap_and_stays_failed() -> None:
+    limited = WorkerContext()
+    limited.app.state.settings = _settings(
+        detection_worker_token=_TOKEN, detection_max_attempts=3
+    )
+    try:
+        failure_reason = "The referenced image is permanently unavailable"
+        for attempt in range(1, 4):
+            claimed = limited.client.post(_url("claim"), headers=_headers())
+            assert claimed.status_code == 200, claimed.text
+            assert claimed.json()["status"] == "running"
+
+            failed = limited.client.post(
+                _url("fail"), headers=_headers(), json={"reason": failure_reason}
+            )
+            assert failed.status_code == 200, failed.text
+            expected_status = "failed" if attempt == 3 else "pending"
+            assert failed.json()["status"] == expected_status
+            assert failed.json()["attempts"] == attempt
+
+        assert failed.json()["failure_reason"] == failure_reason
+        assert [message.attempt for message in limited.queue.published] == [2, 3]
+
+        later_claim = limited.client.post(_url("claim"), headers=_headers())
+        later_failure = limited.client.post(
+            _url("fail"), headers=_headers(), json={"reason": "must not replace the reason"}
+        )
+
+        assert later_claim.status_code == 200, later_claim.text
+        assert later_claim.json()["status"] == "failed"
+        assert later_claim.json()["attempts"] == 3
+        assert later_failure.status_code == 200, later_failure.text
+        assert later_failure.json()["status"] == "failed"
+        assert later_failure.json()["attempts"] == 3
+        assert later_failure.json()["failure_reason"] == failure_reason
+        assert [message.attempt for message in limited.queue.published] == [2, 3]
+    finally:
+        limited.close()
+
+
 def test_worker_routes_never_echo_or_log_the_service_token(
     context: WorkerContext, caplog: pytest.LogCaptureFixture
 ) -> None:

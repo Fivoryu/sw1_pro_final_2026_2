@@ -32,6 +32,7 @@ from app.modules.customer_identity.router import wallet_router as customer_walle
 from app.modules.detection.job_queue import JobQueue, create_job_queue
 from app.modules.detection.router import router as detection_router
 from app.modules.detection.router import worker_router as detection_worker_router
+from app.modules.detection.service import run_detection_recovery_sweep
 from app.modules.health.router import router as health_router
 from app.modules.exchange_rates.router import (
     platform_router as platform_exchange_rates_router,
@@ -90,8 +91,52 @@ async def _official_rate_refresh_loop(
             continue
 
 
+def _run_detection_recovery_sweep(
+    session_factory: sessionmaker[Session],
+    job_queue: JobQueue,
+    *,
+    now: datetime,
+    max_attempts: int,
+) -> int:
+    """Run one detection recovery sweep inside the API process."""
+    return run_detection_recovery_sweep(
+        session_factory,
+        job_queue,
+        now=now,
+        max_attempts=max_attempts,
+    )
+
+
+async def _detection_recovery_loop(
+    session_factory: sessionmaker[Session],
+    job_queue: JobQueue,
+    *,
+    clock: Callable[[], datetime],
+    max_attempts: int,
+    interval_seconds: float,
+) -> None:
+    """Periodically recover jobs whose workers stopped reporting."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await asyncio.to_thread(
+                _run_detection_recovery_sweep,
+                session_factory,
+                job_queue,
+                now=clock(),
+                max_attempts=max_attempts,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a later sweep retries transient failures
+            continue
+
+
 def _build_lifespan(
     session_factory: sessionmaker[Session],
+    settings: Settings,
+    job_queue: JobQueue,
+    clock: Callable[[], datetime],
 ) -> StatelessLifespan[FastAPI]:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -105,13 +150,25 @@ def _build_lifespan(
                     session_factory, interval_seconds=interval
                 )
             )
+        detection_sweeper: asyncio.Task[None] | None = None
+        if settings.detection_sweep_seconds > 0:
+            detection_sweeper = asyncio.create_task(
+                _detection_recovery_loop(
+                    session_factory,
+                    job_queue,
+                    clock=clock,
+                    max_attempts=settings.detection_max_attempts,
+                    interval_seconds=settings.detection_sweep_seconds,
+                )
+            )
         try:
             yield
         finally:
-            if refresher is not None:
-                refresher.cancel()
-                with suppress(asyncio.CancelledError):
-                    await refresher
+            for task in (refresher, detection_sweeper):
+                if task is not None:
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
 
     return lifespan
 
@@ -138,15 +195,19 @@ def create_app(
         )
     protect_session_factory(session_factory)
 
+    resolved_clock = clock or (lambda: datetime.now(timezone.utc))
+    resolved_job_queue = job_queue if job_queue is not None else create_job_queue(resolved_settings)
     app = FastAPI(
         title="RoomForge Staff API",
         version="1.0.0",
-        lifespan=_build_lifespan(session_factory),
+        lifespan=_build_lifespan(
+            session_factory, resolved_settings, resolved_job_queue, resolved_clock
+        ),
     )
     app.state.settings = resolved_settings
     app.state.session_factory = session_factory
     app.state.email_sender = email_sender
-    app.state.clock = clock or (lambda: datetime.now(timezone.utc))
+    app.state.clock = resolved_clock
     app.state.engine = engine
     app.state.photo_storage = (
         photo_storage if photo_storage is not None else create_photo_storage(resolved_settings)
@@ -154,7 +215,7 @@ def create_app(
     app.state.worker_photo_storage = _create_worker_photo_storage(
         resolved_settings, injected_storage=photo_storage
     )
-    app.state.job_queue = job_queue if job_queue is not None else create_job_queue(resolved_settings)
+    app.state.job_queue = resolved_job_queue
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[resolved_settings.web_origin.rstrip("/")],
