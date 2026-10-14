@@ -1,0 +1,32 @@
+# Overlay de inferencia de F08 (F08.2).
+#
+# No modifica `compose.local.yml`: ese archivo es evidencia verificada de F01
+# (cuatro servicios, persistencia y proxies). Este overlay es aditivo y sólo se
+# usa cuando se necesita el detector.
+#
+# Uso, desde la raíz del repositorio:
+#   docker compose -f infra/docker/compose.local.yml -f infra/docker/compose.inference.yml \
+#     run --rm inference --list-classes
+#   docker compose -f infra/docker/compose.local.yml -f infra/docker/compose.inference.yml \
+#     run --rm inference --images /work/pilot/input --out /work/pilot/out/detections.jsonl
+#
+# Sólo CPU: no se declara GPU porque no se midió ninguna.
+
+services:
+  inference:
+    build:
+      context: ./inference
+      dockerfile: Dockerfile
+    environment:
+      TORCH_HOME: /cache/torch
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      # Caché de pesos: se descargan una sola vez y sobreviven a `run --rm`.
+      - inference_torch_cache:/cache/torch
+      # Código y datos del piloto (entradas y salidas sin seguimiento en git).
+      - ../../worker3d:/work
+    working_dir: /work
+    shm_size: "256m"
+
+volumes:
+  inference_torch_cache:

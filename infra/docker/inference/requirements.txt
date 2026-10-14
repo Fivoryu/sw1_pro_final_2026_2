@@ -1,0 +1,14 @@
+# Dependencias del servicio de inferencia (F08.2).
+#
+# El índice extra de PyTorch sólo aporta los paquetes construidos por PyTorch; el
+# resto (Pillow y compañía) se resuelve desde PyPI, que es el índice por defecto.
+# La etiqueta local `+cpu` hace que el pin sea inequívoco: esa versión existe
+# únicamente en el índice de PyTorch, así que no hay ambigüedad entre índices.
+#
+# Versiones resueltas el 2026-10-14 contra https://download.pytorch.org/whl/cpu:
+#   torch-2.14.1+cpu-cp312-cp312-manylinux_2_28_x86_64.whl
+#   torchvision-0.29.1+cpu-cp312-cp312-manylinux_2_28_x86_64.whl
+# torchvision 0.29.1 declara `torch>=2.14.0`, y 2.14.1 es la última estable del par.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1+cpu
+torchvision==0.29.1+cpu
