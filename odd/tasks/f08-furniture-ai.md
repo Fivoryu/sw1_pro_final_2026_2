@@ -27,10 +27,10 @@ S10. Commits (AGENTS.md regla dura 1): «No commitear/pushear sin autorización 
 
 ## Tasks
 
-- **F08T-T1 — F08.1 ficha de candidato** (S4). Salida `docs/ai/f08-ficha-candidato.md`. Commit: pendiente de autorización.
-- **F08T-T2 — F08.2 servicio de inferencia + piloto** (S5, S6). Superficie `infra/docker/`, `worker3d/`, `docs/ai/`. Commit: pendiente de autorización.
-- **F08T-T3 — F08.3 decisión de ubicación y empaquetado** (S6). Salida `docs/ai/f08-decision-empaquetado.md`. Commit: pendiente de autorización.
-- **F08T-T4 — verificación y trazabilidad** (S1–S7). Plan maestro §1.4.1/§F08, `worker3d/README.md`, registro en este documento. Commit: pendiente de autorización.
+- **F08T-T1 — F08.1 ficha de candidato** (S4). Salida `docs/ai/f08-ficha-candidato.md`. Commit: `09dbb6d`.
+- **F08T-T2 — F08.2 servicio de inferencia + piloto** (S5, S6). Superficie `infra/docker/`, `worker3d/`, `docs/ai/`. Commits: `79ba71b` servicio, `88ca47f` CLI del detector, `71d7ac8` descargador CC0, `71bf6bf` planchas de revisión, `09dbb6d` evidencia.
+- **F08T-T3 — F08.3 decisión de ubicación y empaquetado** (S6). Salida `docs/ai/f08-decision-empaquetado.md`. Commit: `09dbb6d`.
+- **F08T-T4 — verificación y trazabilidad** (S1–S7). Plan maestro §1.4.1/§F08, `worker3d/README.md`, registro en este documento. Commits: `af931be` artefactos SDD y registro ODD, `675e66a` plan maestro y README del worker.
 
 ## Log
 
@@ -74,3 +74,20 @@ L7 (verificación y correcciones, 2026-10-14): la verificación independiente di
 El noveno (el build instala desde `requirements.txt` y no desde el lock) **se deja declarado como límite, no corregido**: instalar desde el lock daría otro digest de imagen e invalidaría toda la evidencia medida. Quien lo cambie tiene que volver a correr el piloto.
 
 Se comprobó además que el refactor del bucle de inferencia es **equivalente**: repetir el piloto completo devolvió 24 imágenes y 30 detecciones con la misma tabla de etiquetas, puntuaciones y cajas; sólo cambió la latencia.
+
+L8 (usuario, verbatim, 2026-10-14): «AUtorizo los commits.
+No hay otra opción o si o si es mejor usar torchvision?»
+
+L9 (commits de unidad de trabajo, 2026-10-14, rama `feat/f08-furniture-ai-pilot`, sin push):
+
+```
+79ba71b feat(infra): add CPU-only inference service overlay for F08
+88ca47f feat(worker3d): add furniture detection CLI with contract tests
+71d7ac8 feat(worker3d): add CC0 pilot set fetcher with license guard
+71bf6bf feat(worker3d): add manual review sheet builder
+09dbb6d docs(f08): record candidate model sheet and pilot evidence
+af931be docs(f08): add SDD artifacts and ODD task record
+675e66a docs(plan): mark the F08 inference pilot as partial
+```
+
+Siete unidades, cada una con sus pruebas o su documentación adentro, en inglés y con conventional commits según AGENTS.md. **Sin push**: publicar es una decisión del dueño del repositorio.
