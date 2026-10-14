@@ -490,7 +490,7 @@ void main() {
       );
       await _tapVisible(tester, 'listing-item-d-1');
 
-      expect(find.text('Fotos (2 de 10)'), findsOneWidget);
+      expect(find.text('Fotos (2 de 20)'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('listing-photo-photo-a')),
         findsOneWidget,
@@ -523,7 +523,7 @@ void main() {
       await _settleUpload(tester);
 
       expect(backend.confirmedPhotos('d-1'), hasLength(1));
-      expect(find.text('Fotos (1 de 10)'), findsOneWidget);
+      expect(find.text('Fotos (1 de 20)'), findsOneWidget);
     });
 
     testWidgets('deletes a photo after confirmation', (tester) async {

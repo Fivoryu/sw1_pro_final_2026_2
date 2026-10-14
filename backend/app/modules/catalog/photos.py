@@ -1,9 +1,8 @@
 """Listing photos (F04.2): upload requests, confirmation, listing and removal.
 
-Uploads go straight to object storage through a signed link. A photo only
-counts once the API confirms it: it reads the object back, checks it is a real
-image of the declared type and rewrites it without metadata (EXIF, including
-GPS), so a published photo cannot reveal the private address.
+Uploads go straight to a temporary object-storage key through a signed link. A
+photo only counts once the API validates it, preserves its exact bytes under a
+separate private key, and writes a sanitized public derivative without EXIF.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ from enum import Enum
 from uuid import uuid4
 
 from PIL import Image, ImageOps, UnidentifiedImageError
+from pillow_heif import register_heif_opener
 from sqlalchemy.orm import Session
 
 from app.modules.catalog.models import (
@@ -30,7 +30,16 @@ UPLOAD_WINDOW = timedelta(minutes=15)
 DOWNLOAD_LINK_SECONDS = 600
 MAX_PHOTO_PIXELS = 40_000_000
 
-_PIL_FORMATS = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}
+register_heif_opener()
+
+_PIL_FORMATS = {
+    "image/jpeg": "JPEG",
+    "image/png": "PNG",
+    "image/webp": "WEBP",
+    "image/heic": "HEIF",
+    "image/heif": "HEIF",
+}
+_HEIF_CONTENT_TYPES = frozenset({"image/heic", "image/heif"})
 
 
 class PhotoLimitReachedError(Exception):
@@ -67,6 +76,31 @@ def _as_utc(value: datetime) -> datetime:
 
 def photo_key(agency_id: str, listing_id: str, photo_id: str) -> str:
     return f"agencies/{agency_id}/listings/{listing_id}/photos/{photo_id}"
+
+
+def photo_upload_key(agency_id: str, listing_id: str, photo_id: str) -> str:
+    return f"{photo_key(agency_id, listing_id, photo_id)}/upload"
+
+
+def photo_public_key(agency_id: str, listing_id: str, photo_id: str) -> str:
+    return f"{photo_key(agency_id, listing_id, photo_id)}/public"
+
+
+def photo_original_key(agency_id: str, listing_id: str, photo_id: str) -> str:
+    return f"{photo_key(agency_id, listing_id, photo_id)}/original"
+
+
+def _pending_object_keys(photo: ListingPhoto) -> tuple[str, ...]:
+    upload_key = photo.upload_object_key or photo.object_key
+    public_key = (
+        photo.object_key
+        if photo.upload_object_key is not None
+        else photo_public_key(photo.agency_id, photo.listing_id, photo.id)
+    )
+    original_key = photo.original_object_key or photo_original_key(
+        photo.agency_id, photo.listing_id, photo.id
+    )
+    return tuple(dict.fromkeys((upload_key, public_key, original_key)))
 
 
 def lock_staff_listing(session: Session, *, agency_id: str, listing_id: str) -> Listing | None:
@@ -108,6 +142,52 @@ def count_confirmed_photos(session: Session, listing_id: str) -> int:
     )
 
 
+def cleanup_expired_photo_uploads(
+    session: Session,
+    storage: PhotoStorage,
+    *,
+    now: datetime,
+    listing_id: str | None = None,
+    batch_size: int | None = None,
+    skip_locked: bool = False,
+) -> int:
+    """Delete expired pending assets and confirmed photos' staging copies only."""
+    expires_at = _as_utc(now)
+    pending = session.query(ListingPhoto).filter(
+        ListingPhoto.status == "pending",
+        ListingPhoto.expires_at <= expires_at,
+    )
+    confirmed_staging = session.query(ListingPhoto).filter(
+        ListingPhoto.status == "confirmed",
+        ListingPhoto.upload_object_key.isnot(None),
+        ListingPhoto.expires_at <= expires_at,
+    )
+    cleaned = 0
+    for status, query in (("pending", pending), ("confirmed", confirmed_staging)):
+        if listing_id is not None:
+            query = query.filter(ListingPhoto.listing_id == listing_id)
+        query = query.order_by(ListingPhoto.expires_at, ListingPhoto.id).with_for_update(
+            skip_locked=skip_locked
+        )
+        if batch_size is not None:
+            query = query.limit(batch_size)
+        for photo in query.all():
+            if status == "pending":
+                for key in _pending_object_keys(photo):
+                    storage.delete(key)
+                session.delete(photo)
+            else:
+                upload_key = photo.upload_object_key
+                if upload_key is None:
+                    continue
+                storage.delete(upload_key)
+                photo.upload_object_key = None
+            cleaned += 1
+    if cleaned:
+        session.flush()
+    return cleaned
+
+
 def request_photo_upload(
     session: Session,
     storage: PhotoStorage,
@@ -118,26 +198,27 @@ def request_photo_upload(
     now: datetime,
 ) -> UploadGrant:
     """Reserve a pending photo and sign its upload link."""
-    photos = (
-        session.query(ListingPhoto).filter(ListingPhoto.listing_id == listing.id).all()
+    cleanup_expired_photo_uploads(
+        session,
+        storage,
+        now=now,
+        listing_id=listing.id,
     )
-    live = 0
-    for photo in photos:
-        if photo.status == "pending" and _as_utc(photo.expires_at) <= now:
-            storage.delete(photo.object_key)
-            session.delete(photo)
-        else:
-            live += 1
+    live = session.query(ListingPhoto).filter(ListingPhoto.listing_id == listing.id).count()
     if live >= LISTING_PHOTO_MAX_COUNT:
         raise PhotoLimitReachedError
 
     photo_id = str(uuid4())
     expires_at = now + UPLOAD_WINDOW
+    upload_key = photo_upload_key(listing.agency_id, listing.id, photo_id)
     photo = ListingPhoto(
         id=photo_id,
         agency_id=listing.agency_id,
         listing_id=listing.id,
-        object_key=photo_key(listing.agency_id, listing.id, photo_id),
+        object_key=photo_public_key(listing.agency_id, listing.id, photo_id),
+        upload_object_key=upload_key,
+        original_object_key=None,
+        public_content_type=None,
         status="pending",
         content_type=content_type,
         size_bytes=size_bytes,
@@ -148,48 +229,52 @@ def request_photo_upload(
     session.add(photo)
     session.flush()
     upload_url = storage.presign_upload(
-        photo.object_key,
+        upload_key,
         content_type=content_type,
         expires_in=int(UPLOAD_WINDOW.total_seconds()),
     )
     return UploadGrant(photo=photo, upload_url=upload_url, expires_at=expires_at)
 
 
-def clean_photo(data: bytes, content_type: str) -> bytes:
-    """Return the photo re-encoded without metadata, or raise InvalidPhotoError."""
+def clean_photo(data: bytes, content_type: str) -> tuple[bytes, str]:
+    """Return sanitized derivative bytes and MIME type, or raise InvalidPhotoError."""
     expected = _PIL_FORMATS[content_type]
     try:
         with Image.open(io.BytesIO(data)) as image:
-            if image.format != expected:
+            accepted_formats = {expected, "HEIC"} if expected == "HEIF" else {expected}
+            if image.format not in accepted_formats:
                 raise InvalidPhotoError
             if image.width * image.height > MAX_PHOTO_PIXELS:
                 raise InvalidPhotoError
             image.load()
             icc_profile = image.info.get("icc_profile")
             oriented = ImageOps.exif_transpose(image)
-    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+    except (UnidentifiedImageError, OSError, ValueError, EOFError, Image.DecompressionBombError):
         raise InvalidPhotoError from None
 
+    # HEIC/HEIF inputs are decoded but published as JPEG for viewer compatibility.
+    output_format = "JPEG" if content_type in _HEIF_CONTENT_TYPES else expected
+    output_content_type = "image/jpeg" if output_format == "JPEG" else content_type
     # Drop every metadata block the encoders could carry over (EXIF, XMP, comments).
     oriented.info = {}
     options: dict[str, object] = {}
     if icc_profile:
         options["icc_profile"] = icc_profile
-    if expected == "JPEG":
+    if output_format == "JPEG":
         if oriented.mode not in ("RGB", "L", "CMYK"):
             oriented = oriented.convert("RGB")
         options["quality"] = 90
-    elif expected == "WEBP":
+    elif output_format == "WEBP":
         if oriented.mode not in ("RGB", "RGBA"):
             oriented = oriented.convert("RGBA" if "A" in oriented.getbands() else "RGB")
         options["quality"] = 90
 
     output = io.BytesIO()
-    oriented.save(output, format=expected, **options)
+    oriented.save(output, format=output_format, **options)
     cleaned = output.getvalue()
     if len(cleaned) > LISTING_PHOTO_MAX_BYTES:
         raise InvalidPhotoError
-    return cleaned
+    return cleaned, output_content_type
 
 
 def _reopen_listing(
@@ -226,7 +311,7 @@ def confirm_photo(
     actor_role: str,
     now: datetime,
 ) -> tuple[ConfirmOutcome, ListingPhoto] | None:
-    """Validate and clean an uploaded photo; None when the photo does not exist."""
+    """Validate, preserve, and publish an upload; None when it does not exist."""
     photo = _find_photo(session, listing, photo_id)
     if photo is None:
         return None
@@ -235,20 +320,45 @@ def confirm_photo(
     if _as_utc(photo.expires_at) <= now:
         raise PhotoUploadExpiredError
 
+    upload_key = photo.upload_object_key or photo.object_key
+    legacy_pending = photo.upload_object_key is None
+    public_key = (
+        photo_public_key(photo.agency_id, photo.listing_id, photo.id)
+        if legacy_pending
+        else photo.object_key
+    )
+    original_key = photo.original_object_key or photo_original_key(
+        photo.agency_id, photo.listing_id, photo.id
+    )
+
     try:
-        data = storage.read(photo.object_key, max_bytes=LISTING_PHOTO_MAX_BYTES)
+        # A previously written original may survive a failed DB commit. Reuse it
+        # rather than ever replacing immutable source bytes on a retry.
+        data = storage.read(original_key, max_bytes=LISTING_PHOTO_MAX_BYTES)
+        original_exists = data is not None
         if data is None:
-            raise PhotoNotUploadedError
-        cleaned = clean_photo(data, photo.content_type)
+            data = storage.read(upload_key, max_bytes=LISTING_PHOTO_MAX_BYTES)
+            if data is None:
+                raise PhotoNotUploadedError
+        cleaned, public_content_type = clean_photo(data, photo.content_type)
+        if not original_exists:
+            storage.write(original_key, data, content_type=photo.content_type)
+        storage.write(public_key, cleaned, content_type=public_content_type)
     except (PhotoTooLargeError, InvalidPhotoError):
-        storage.delete(photo.object_key)
+        for key in _pending_object_keys(photo):
+            storage.delete(key)
         session.delete(photo)
         session.flush()
         return ConfirmOutcome.DISCARDED, photo
 
-    storage.write(photo.object_key, cleaned, content_type=photo.content_type)
+    photo.object_key = public_key
+    photo.upload_object_key = upload_key
+    photo.original_object_key = original_key
+    photo.public_content_type = public_content_type
+    # Keep the staging key until its signed PUT expires; a later sweep removes
+    # only that temporary object and leaves the confirmed original/derivative.
     photo.status = "confirmed"
-    photo.size_bytes = len(cleaned)
+    photo.size_bytes = len(data)
     photo.confirmed_at = now
     session.flush()
     _reopen_listing(session, listing, actor_id=actor_id, actor_role=actor_role, now=now)

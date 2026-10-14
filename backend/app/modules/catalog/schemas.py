@@ -272,14 +272,17 @@ class ListingTransitionResponse(BaseModel):
     created_at: datetime
 
 
+ListingPhotoUploadContentType = Literal[
+    "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"
+]
 ListingPhotoContentType = Literal["image/jpeg", "image/png", "image/webp"]
 
 
 class ListingPhotoUploadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    content_type: ListingPhotoContentType
-    size_bytes: Annotated[StrictInt, Field(ge=1, le=5 * 1024 * 1024)]
+    content_type: ListingPhotoUploadContentType
+    size_bytes: Annotated[StrictInt, Field(ge=1, le=20 * 1024 * 1024)]
 
 
 class ListingPhotoUploadResponse(BaseModel):

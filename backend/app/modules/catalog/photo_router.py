@@ -56,7 +56,9 @@ def _as_utc(value: datetime) -> datetime:
 
 
 def photo_response(storage: PhotoStorage, photo: ListingPhoto) -> ListingPhotoResponse:
-    content_type: ListingPhotoContentType = photo.content_type  # type: ignore[assignment]
+    content_type: ListingPhotoContentType = (
+        photo.public_content_type or photo.content_type
+    )  # type: ignore[assignment]
     return ListingPhotoResponse(
         photo_id=photo.id,
         content_type=content_type,

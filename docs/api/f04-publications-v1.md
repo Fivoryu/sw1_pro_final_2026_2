@@ -140,7 +140,7 @@ Un parámetro fuera de contrato responde `422`; un `offset` posterior al último
 
 ### Fotografías (F04.2)
 
-Patrón estándar de S3: la API autoriza y firma, el cliente sube los bytes directamente al almacenamiento, y la API confirma. Los binarios nunca pasan por PostgreSQL; la tabla `listing_photo` (migración `0018_listing_photos.py`) guarda solo metadatos.
+Patrón estándar de S3: la API autoriza y firma, el cliente sube los bytes directamente al almacenamiento, y la API confirma. Para las cargas nuevas, la API conserva byte a byte el original en una clave privada y genera una derivada pública separada y sanitizada; HEIC/HEIF solo se convierten a JPEG en la derivada. Los binarios nunca pasan por PostgreSQL; la tabla `listing_photo`, creada en `0018_listing_photos.py`, guarda metadatos. La migración `0019_listing_photo_assets.py` agrega las referencias separadas de staging, original y derivada pública.
 
 1. **Pedir subida.** `POST .../photos` con este cuerpo, sin campos adicionales:
 
@@ -148,7 +148,7 @@ Patrón estándar de S3: la API autoriza y firma, el cliente sube los bytes dire
    {"content_type": "image/jpeg", "size_bytes": 2048}
    ```
 
-   `content_type` es `image/jpeg`, `image/png` o `image/webp`; `size_bytes` es un entero de 1 a 5 242 880 (5 MB). La respuesta `201`:
+   `content_type` es `image/jpeg`, `image/png`, `image/webp`, `image/heic` o `image/heif`; `size_bytes` es un entero de 1 a 20 971 520 (20 MiB). La respuesta `201`:
 
    ```json
    {
@@ -160,9 +160,9 @@ Patrón estándar de S3: la API autoriza y firma, el cliente sube los bytes dire
    }
    ```
 
-   La clave del objeto la decide el servidor: `agencies/{agency_id}/listings/{listing_id}/photos/{photo_id}`. El enlace y la foto pendiente vencen a los 15 minutos. Un inmueble admite hasta 10 fotos, contando las confirmadas y las pendientes vigentes; las pendientes vencidas se borran al pedir otra subida. Superar el límite responde `409`.
+   El servidor decide las claves y mantiene separadas la clave de staging, la del original privado y la de la derivada pública. El enlace de subida vence a los 15 minutos; desde `expires_at`, la carga queda elegible para limpieza. El proceso API barre cada 60 segundos mientras está activo, por lo que la eliminación puede demorarse hasta un ciclo después del vencimiento. Si falla un borrado, se registra en el log de la API y se reintenta en el siguiente ciclo. En pendientes se eliminan solo los assets no confirmados; en fotos confirmadas, solo la copia de staging cuyo PUT venció: nunca el original privado ni la derivada pública. Un inmueble admite hasta 20 fotos, contando las confirmadas y las pendientes vigentes. Superar el límite responde `409`.
 2. **Subir.** El cliente envía los bytes con `PUT` al `upload_url`, con las cabeceras de `upload_headers` y sin la sesión de personal.
-3. **Confirmar.** `POST .../photos/{photo_id}/confirm`, sin cuerpo. La API lee el objeto y exige que sea una imagen del tipo declarado, de hasta 5 MB y 40 megapíxeles. Aplica la orientación y vuelve a codificar la imagen sin metadatos (EXIF, incluida la ubicación GPS, y XMP), para que una foto publicada no revele la dirección privada. Respuestas:
+3. **Confirmar.** `POST .../photos/{photo_id}/confirm`, sin cuerpo. La API lee el staging y exige que sea una imagen del tipo declarado, de hasta 20 MiB y 40 megapíxeles. Conserva sus bytes exactos en la clave privada del original y crea una derivada pública con orientación aplicada y sin metadatos (EXIF, incluida la ubicación GPS, y XMP), para que una foto publicada no revele la dirección privada; para HEIC/HEIF, la derivada es JPEG. Respuestas:
    - `200` con la foto confirmada. Confirmar de nuevo una foto ya confirmada también responde `200`, sin otro efecto.
    - `422` si el archivo no es una foto válida; el objeto y la reserva se borran.
    - `409` si todavía no hay objeto subido o si venció la ventana de subida; la foto sigue pendiente.
@@ -227,7 +227,7 @@ El catálogo público sigue siendo transversal entre agencias, sin exponer el hi
 | `401` | Sin sesión de personal válida (incluye tokens de cliente). |
 | `403` | Rol no autorizado, `platform_admin` o tenant distinto. |
 | `404` | Inmueble inexistente o de otra agencia, pedido con la ruta de la agencia autorizada. |
-| `409` | Acción incompatible con el estado actual; envío sin foto confirmada; límite de 10 fotos; foto todavía no subida o fuera de su ventana de subida. |
+| `409` | Acción incompatible con el estado actual; envío sin foto confirmada; límite de 20 fotos; foto todavía no subida o fuera de su ventana de subida. |
 | `422` | Cuerpo inválido, campo extra, precio no positivo, motivo de rechazo vacío, tipo o tamaño de foto no admitidos, o archivo subido que no es una foto válida. |
 | `503` | Almacenamiento de fotos no configurado o no disponible. |
 
@@ -283,7 +283,7 @@ Las líneas de cotización de un extra importan `price × quantity`, y los total
 
 ## Límites y estado de validación
 
-- F04.2, fotografías: implementado el 2026-10-06 (`odd/tasks/f04-photos.md`). La columna antigua `listing.photos` sigue sin uso y no se acepta en los cuerpos. En el stack local, Floci no valida firmas: acepta enlaces alterados, vencidos o sin firma. El control de firma, vencimiento y `Content-Type` en el almacenamiento solo lo aplica S3 real y no se verificó en un entorno desplegado. No hay política de retención ni borrado automático de fotos; al retirar un inmueble, sus fotos se conservan.
+- F04.2, fotografías: implementación original del 2026-10-06 (`odd/tasks/f04-photos.md`); la columna antigua `listing.photos` sigue sin uso y no se acepta en los cuerpos. Política aprobada el 2026-10-14 y en alineación en `feat/f04-photo-policy`: hasta 20 fotos por inmueble, 20 MiB por foto, JPEG/PNG/WebP/HEIC/HEIF, originales nuevos privados y preservados byte a byte, derivadas públicas separadas y sanitizadas, y limpieza de staging no confirmado a los 15 minutos. Las fotos confirmadas se retienen sin TTL en todos los estados; solo `agency_admin` inicia el borrado permanente y los fallos se registran/reintentan. La implementación durable y su autorización quedan pendientes de T2. Al retirar un inmueble, sus fotos no se borran automáticamente. En el stack local, Floci no valida firmas: acepta enlaces alterados, vencidos o sin firma; el control de firma y `Content-Type` en el almacenamiento solo lo aplica S3 real y no se verificó en un entorno desplegado.
 - No se crean revisiones inmutables versionadas del inmueble. La edición modifica el registro existente y una publicación vuelve a requerir aprobación.
 - La migración `0012_listing_transitions.py` se verificó después contra un PostgreSQL descartable (`docs/plan-maestro-roomforge.md` §1.4.2.bis) y el 2026-10-01 se aplicó en el PostgreSQL del stack local de desarrollo; no hay verificación en un entorno desplegado.
 - Las rutas de listado y consulta de personal no requieren migración: usan columnas existentes.
