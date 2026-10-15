@@ -153,6 +153,8 @@ def test_in_memory_storage_round_trip_and_size_cap() -> None:
 
 _NOW = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
 _MAX_BYTES = 20 * 1024 * 1024
+# Mirrors the policy grace the deletion journal keeps after the upload window closes.
+_DELETION_GRACE = timedelta(minutes=15)
 _TRUNCATED_HEIF_FIXTURE = base64.b64decode(
     "AAAAHGZ0eXBoZWljAAAAAG1pZjFoZWljbWlhZgAAAXxtZXRhAAAAAAAAACFoZGxyAAAAAAAAAABwaWN0AAAAAAAAAAAAAAAAAAAAACJpbG9jAAAAAERAAAEAAQAAAAABoAABAAAAAAAAADYAAAAjaWluZgAAAAAAAQAAABVpbmZlAgAAAAABAABodmMxAAAAAA5waXRtAAAAAAABAAAA/GlwcnAAAADcaXBjbwAAAHVodmNDAQNwAAAAkAAAAAAAHvAA/P34+AAADwNgAAEAGEABDAH//wNwAAADAJAAAAMAAAMAHroCQGEAAQApQgEBA3AAAAMAkAAAAwAAAwAeoCCBBZbqrprm4CGgwIAAAAyAAAADAIRiAAEABkQBwXPBiQAAABNjb2xybmNseAABAA0ABoAAAAAUaXNwZQAAAAAAAABAAAAAQAAAAChjbGFwAAAABAAAAAEAAAACAAAAAf///wQAAAAC////wgAAAAIAAAAQcGl4aQAAAAADCAgIAAAAGGlwbWEAAAAAAAAAAQABBYECAwWEAAAAPm1kYXRhAAAAyKAGvBPIWhzRxZNLf/Fd///6nY7L9qdcEm1Qjs/RSxGAmv3XroGTEzROpbNAoK6inXqY="
 )
@@ -458,6 +460,30 @@ def test_signed_upload_url_never_outlives_the_stored_expiry() -> None:
         context_generator.close()
 
 
+def test_staging_assets_live_under_a_prefix_that_cannot_reach_confirmed_photos(
+    photo_context: PhotoContext,
+) -> None:
+    context = photo_context
+    _seed_listing(context)
+    _staff(context)
+    upload = _request_upload(context).json()
+    upload_key = _photo_key(context, upload["photo_id"])
+    context.storage.write(upload_key, _image_bytes("JPEG"), content_type="image/jpeg")
+
+    confirmed = context.client.post(_photos_url() + f"/{upload['photo_id']}/confirm")
+
+    assert confirmed.status_code == 200, confirmed.text
+    photo = _photo(context, upload["photo_id"])
+    assert photo is not None
+    # A bucket lifecycle rule can only filter by prefix, so the key a presigned PUT can
+    # recreate has to sit under its own top-level prefix. The confirmed original and its
+    # public derivative never expire, so the staging rule must never reach them.
+    assert upload_key.startswith("staging/")
+    assert photo.original_object_key is not None
+    assert photo.object_key.startswith("agencies/")
+    assert photo.original_object_key.startswith("agencies/")
+
+
 def _listing(context: PhotoContext, listing_id: str = "listing-one") -> Listing:
     with context.session_factory() as session:
         listing = session.get(Listing, listing_id)
@@ -504,7 +530,7 @@ def test_upload_request_signs_a_server_chosen_key_and_keeps_the_photo_pending(
     expected_prefix = f"agencies/agency-one/listings/listing-one/photos/{body['photo_id']}"
     upload_key = getattr(photo, "upload_object_key", None)
     assert photo.object_key == f"{expected_prefix}/public"
-    assert upload_key == f"{expected_prefix}/upload"
+    assert upload_key == f"staging/{expected_prefix}"
     assert photo.object_key != upload_key
     assert (photo.status, photo.content_type, photo.size_bytes) == ("pending", "image/webp", 4096)
     assert body["upload_method"] == "PUT"
@@ -832,11 +858,10 @@ def test_discarded_invalid_upload_is_swept_once_its_signed_put_expires(
 
     context.storage.write(key, b"late-put", content_type="image/jpeg")
 
-    context.clock[0] = _NOW + UPLOAD_WINDOW + timedelta(seconds=1)
+    context.clock[0] = _NOW + UPLOAD_WINDOW + _DELETION_GRACE + timedelta(seconds=1)
     _sweep_deletions(context)
 
     assert context.storage.read(key, max_bytes=_MAX_BYTES) is None
-    assert _deletion_intent_count(context) == 0
 
 
 def test_confirm_after_the_upload_window_is_rejected(photo_context: PhotoContext) -> None:
@@ -1080,10 +1105,35 @@ def test_late_presigned_upload_is_swept_after_a_confirmed_photo_is_deleted(
     storage.write(upload_key, b"late-put", content_type="image/png")
     assert storage.read(upload_key, max_bytes=_MAX_BYTES) == b"late-put"
 
-    context.clock[0] = _NOW + UPLOAD_WINDOW + timedelta(seconds=1)
+    context.clock[0] = _NOW + UPLOAD_WINDOW + _DELETION_GRACE + timedelta(seconds=1)
     _sweep_deletions(context)
 
     assert storage.read(upload_key, max_bytes=_MAX_BYTES) is None
+
+
+def test_deletion_journal_survives_the_grace_after_the_upload_window_closes(
+    photo_deletion_manual_context: PhotoContext,
+) -> None:
+    context = photo_deletion_manual_context
+    _seed_listing(context, approval_status="approved", is_published=True)
+    _staff(context, role="agency_admin")
+    upload_key = "staging/photo-grace"
+    _seed_photo(context, "photo-grace", upload_object_key=upload_key)
+
+    response = context.client.delete(_photos_url() + "/photo-grace")
+
+    assert response.status_code == 204
+    _sweep_deletions(context)
+    assert _deletion_intent_count(context) == 1
+
+    context.clock[0] = _NOW + UPLOAD_WINDOW + timedelta(seconds=1)
+    _sweep_deletions(context)
+    # A PUT authorized before the window closed can still be landing, so the record is
+    # kept for one more grace period before it is dropped.
+    assert _deletion_intent_count(context) == 1
+
+    context.clock[0] = _NOW + UPLOAD_WINDOW + _DELETION_GRACE + timedelta(seconds=1)
+    _sweep_deletions(context)
     assert _deletion_intent_count(context) == 0
 
 
@@ -1108,11 +1158,10 @@ def test_late_presigned_upload_is_swept_after_a_pending_photo_is_deleted(
 
     storage.write(upload_key, b"late-put", content_type="image/png")
 
-    context.clock[0] = _NOW + UPLOAD_WINDOW + timedelta(seconds=1)
+    context.clock[0] = _NOW + UPLOAD_WINDOW + _DELETION_GRACE + timedelta(seconds=1)
     _sweep_deletions(context)
 
     assert storage.read(upload_key, max_bytes=_MAX_BYTES) is None
-    assert _deletion_intent_count(context) == 0
 
 
 def test_deleting_a_pending_photo_does_not_reopen_the_listing(

@@ -37,6 +37,12 @@ logger = logging.getLogger(__name__)
 
 UPLOAD_WINDOW = timedelta(minutes=15)
 DOWNLOAD_LINK_SECONDS = 600
+# Staging objects live under their own top-level prefix so a bucket lifecycle rule can
+# filter them by prefix without ever reaching a confirmed original or public derivative.
+STAGING_KEY_PREFIX = "staging"
+# Policy grace after the upload window closes. A PUT authorized before it closed can still
+# be finishing, so the deletion record outlives the window by this much before it is dropped.
+PHOTO_DELETION_RETENTION_GRACE = UPLOAD_WINDOW
 MAX_PHOTO_PIXELS = 40_000_000
 
 register_heif_opener()
@@ -88,7 +94,12 @@ def photo_key(agency_id: str, listing_id: str, photo_id: str) -> str:
 
 
 def photo_upload_key(agency_id: str, listing_id: str, photo_id: str) -> str:
-    return f"{photo_key(agency_id, listing_id, photo_id)}/upload"
+    """Return the staging key a presigned PUT may write.
+
+    A lifecycle rule can only filter by prefix, so staging must not share a prefix with
+    the confirmed original and its public derivative, which never expire.
+    """
+    return f"{STAGING_KEY_PREFIX}/{photo_key(agency_id, listing_id, photo_id)}"
 
 
 def photo_public_key(agency_id: str, listing_id: str, photo_id: str) -> str:
@@ -247,12 +258,17 @@ def cleanup_photo_deletion_intents(
             )
         else:
             upload_expires_at = intent.upload_expires_at
-            if upload_expires_at is not None and due_at < _as_utc(upload_expires_at):
-                # The signed staging PUT is still authorized, so a late upload could
-                # recreate that key after this sweep. Keep the intent until the window
-                # closes and delete the key again; the photo row no longer exists, so
+            retention_deadline = (
+                None
+                if upload_expires_at is None
+                else _as_utc(upload_expires_at) + PHOTO_DELETION_RETENTION_GRACE
+            )
+            if retention_deadline is not None and due_at < retention_deadline:
+                # The signed staging PUT was authorized until upload_expires_at, so an
+                # upload that started before it could still be finishing. Keep the record
+                # and sweep the keys once more after the grace: the photo row is gone, so
                 # no other sweep could ever find that object.
-                intent.next_attempt_at = _as_utc(upload_expires_at)
+                intent.next_attempt_at = retention_deadline
             else:
                 session.delete(intent)
     if attempted:
