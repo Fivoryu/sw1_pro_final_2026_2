@@ -970,6 +970,25 @@ def test_delete_removes_the_object_and_returns_the_listing_to_draft(
     assert _actions(context) == ["edit"]
 
 
+def test_photo_workers_start_even_when_the_rate_refresh_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The photo workers answer to the photo storage, not to the rate refresher.
+
+    A review claimed the deletion worker was created inside the rate-refresh gate. It was
+    not, and this pins that: with the refresher disabled the journal would never drain and
+    a confirmed photo the admin deleted would keep its objects forever.
+    """
+    monkeypatch.setenv("ROOMFORGE_RATE_REFRESH_SECONDS", "0")
+    context_generator = _build_context(_CleanupObservedPhotoStorage())
+    context = next(context_generator)
+    try:
+        assert getattr(context.app.state, "photo_cleaner_task", None) is not None
+        assert getattr(context.app.state, "photo_deleter_task", None) is not None
+    finally:
+        context_generator.close()
+
+
 def test_photo_deletion_intent_survives_restart_and_retries_storage_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -205,6 +205,10 @@ def _build_lifespan(
                     interval_seconds=PHOTO_DELETION_RETRY_INTERVAL_SECONDS,
                 )
             )
+            # Exposed so an operator, and the tests, can confirm the workers started: they
+            # answer to the photo storage, never to the exchange-rate refresher.
+            application.state.photo_cleaner_task = photo_cleaner
+            application.state.photo_deleter_task = photo_deleter
         try:
             yield
         finally:
