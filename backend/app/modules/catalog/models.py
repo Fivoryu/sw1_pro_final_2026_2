@@ -157,6 +157,35 @@ class ListingPhoto(Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class ListingPhotoDeletion(Base):
+    """Durable intent to delete every object for a confirmed photo."""
+
+    __tablename__ = "listing_photo_deletion"
+    __table_args__ = (
+        CheckConstraint("attempts >= 0", name="ck_listing_photo_deletion_attempts"),
+        UniqueConstraint("photo_id", name="uq_listing_photo_deletion_photo_id"),
+        Index("ix_listing_photo_deletion_due", "next_attempt_at", "id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    agency_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    listing_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    photo_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    object_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    original_object_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    upload_object_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    upload_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_error: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
 class ListingTransition(Base):
     __tablename__ = "listing_transition"
     __table_args__ = (

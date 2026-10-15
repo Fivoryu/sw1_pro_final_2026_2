@@ -8,6 +8,8 @@ separate private key, and writes a sanitized public derivative without EXIF.
 from __future__ import annotations
 
 import io
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -22,9 +24,16 @@ from app.modules.catalog.models import (
     LISTING_PHOTO_MAX_COUNT,
     Listing,
     ListingPhoto,
+    ListingPhotoDeletion,
     ListingTransition,
 )
-from app.modules.catalog.photo_storage import PhotoStorage, PhotoTooLargeError
+from app.modules.catalog.photo_storage import (
+    PhotoStorage,
+    PhotoStorageUnavailableError,
+    PhotoTooLargeError,
+)
+
+logger = logging.getLogger(__name__)
 
 UPLOAD_WINDOW = timedelta(minutes=15)
 DOWNLOAD_LINK_SECONDS = 600
@@ -188,6 +197,69 @@ def cleanup_expired_photo_uploads(
     return cleaned
 
 
+def cleanup_photo_deletion_intents(
+    session: Session,
+    storage: PhotoStorage,
+    *,
+    now: datetime,
+    retry_after: timedelta,
+    batch_size: int | None = None,
+    skip_locked: bool = False,
+) -> int:
+    """Delete due photo assets and retain the intent while it is still needed.
+
+    An intent is dropped only once every key is gone and the signed staging PUT can
+    no longer recreate one of them; a failure keeps the intent for a later retry.
+    """
+    due_at = _as_utc(now)
+    query = (
+        session.query(ListingPhotoDeletion)
+        .filter(ListingPhotoDeletion.next_attempt_at <= due_at)
+        .order_by(ListingPhotoDeletion.next_attempt_at, ListingPhotoDeletion.id)
+        .with_for_update(skip_locked=skip_locked)
+    )
+    if batch_size is not None:
+        query = query.limit(batch_size)
+
+    attempted = 0
+    for intent in query.all():
+        attempted += 1
+        keys = tuple(
+            dict.fromkeys(
+                key
+                for key in (
+                    intent.object_key,
+                    intent.original_object_key,
+                    intent.upload_object_key,
+                )
+                if key is not None
+            )
+        )
+        try:
+            for key in keys:
+                storage.delete(key)
+        except PhotoStorageUnavailableError:
+            intent.attempts += 1
+            intent.next_attempt_at = due_at + retry_after
+            intent.last_error = "storage_unavailable"
+            logger.warning(
+                "Listing photo deletion intent %s failed; retry scheduled", intent.id
+            )
+        else:
+            upload_expires_at = intent.upload_expires_at
+            if upload_expires_at is not None and due_at < _as_utc(upload_expires_at):
+                # The signed staging PUT is still authorized, so a late upload could
+                # recreate that key after this sweep. Keep the intent until the window
+                # closes and delete the key again; the photo row no longer exists, so
+                # no other sweep could ever find that object.
+                intent.next_attempt_at = _as_utc(upload_expires_at)
+            else:
+                session.delete(intent)
+    if attempted:
+        session.flush()
+    return attempted
+
+
 def request_photo_upload(
     session: Session,
     storage: PhotoStorage,
@@ -196,6 +268,7 @@ def request_photo_upload(
     content_type: str,
     size_bytes: int,
     now: datetime,
+    clock: Callable[[], datetime],
 ) -> UploadGrant:
     """Reserve a pending photo and sign its upload link."""
     cleanup_expired_photo_uploads(
@@ -233,6 +306,11 @@ def request_photo_upload(
         content_type=content_type,
         expires_in=int(UPLOAD_WINDOW.total_seconds()),
     )
+    # The signer stamps the URL with its own clock while signing, so the deadline is
+    # anchored after that call returns: the URL can never outlive the deadline that the
+    # deletion journal trusts. Anchoring it before the call would leave that gap open.
+    expires_at = _as_utc(clock()) + UPLOAD_WINDOW
+    photo.expires_at = expires_at
     return UploadGrant(photo=photo, upload_url=upload_url, expires_at=expires_at)
 
 
@@ -347,6 +425,9 @@ def confirm_photo(
     except (PhotoTooLargeError, InvalidPhotoError):
         for key in _pending_object_keys(photo):
             storage.delete(key)
+        _journal_photo_deletion(
+            session, photo, actor_id=actor_id, requested_at=_as_utc(now)
+        )
         session.delete(photo)
         session.flush()
         return ConfirmOutcome.DISCARDED, photo
@@ -365,9 +446,45 @@ def confirm_photo(
     return ConfirmOutcome.CONFIRMED, photo
 
 
+def _journal_photo_deletion(
+    session: Session,
+    photo: ListingPhoto,
+    *,
+    actor_id: str,
+    requested_at: datetime,
+) -> None:
+    """Journal every object a deleted photo can still own.
+
+    The record outlives the photo row until the signed staging PUT expires: an upload
+    that completes after the row is gone would otherwise recreate an object that no
+    photo-row sweep could ever find.
+    """
+    expires_at = photo.expires_at
+    session.add(
+        ListingPhotoDeletion(
+            agency_id=photo.agency_id,
+            listing_id=photo.listing_id,
+            photo_id=photo.id,
+            actor_id=actor_id,
+            object_key=photo.object_key,
+            original_object_key=photo.original_object_key,
+            upload_object_key=photo.upload_object_key,
+            requested_at=requested_at,
+            upload_expires_at=_as_utc(expires_at) if expires_at is not None else None,
+            attempts=0,
+            next_attempt_at=requested_at,
+            last_error=None,
+        )
+    )
+
+
+class ConfirmedPhotoDeletionForbiddenError(Exception):
+    """Raised when a non-agency-admin tries to permanently delete a photo."""
+
+
 def delete_photo(
     session: Session,
-    storage: PhotoStorage,
+    storage: PhotoStorage | None,
     *,
     listing: Listing,
     photo_id: str,
@@ -375,12 +492,21 @@ def delete_photo(
     actor_role: str,
     now: datetime,
 ) -> bool:
-    """Remove a photo and its object; False when the photo does not exist."""
+    """Remove a photo and journal every deleted key until its upload window closes."""
     photo = _find_photo(session, listing, photo_id)
     if photo is None:
         return False
     was_confirmed = photo.status == "confirmed"
-    storage.delete(photo.object_key)
+    if was_confirmed and actor_role != "agency_admin":
+        raise ConfirmedPhotoDeletionForbiddenError
+    if not was_confirmed:
+        # Discarding a pending photo stays synchronous for agency editors.
+        if storage is None:
+            raise PhotoStorageUnavailableError
+        for key in _pending_object_keys(photo):
+            storage.delete(key)
+
+    _journal_photo_deletion(session, photo, actor_id=actor_id, requested_at=_as_utc(now))
     session.delete(photo)
     session.flush()
     if was_confirmed:
