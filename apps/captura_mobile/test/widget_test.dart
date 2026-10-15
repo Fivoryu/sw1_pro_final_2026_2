@@ -69,7 +69,7 @@ void main() {
     expect(find.text('Acceso del agente'), findsOneWidget);
     expect(find.byKey(const ValueKey('access-email-field')), findsOneWidget);
     expect(
-      find.textContaining('La captura con cámara todavía no está disponible'),
+      find.textContaining('La captura espacial todavía no está disponible'),
       findsOneWidget,
     );
     expect(find.byKey(const ValueKey('access-continue-button')), findsNothing);

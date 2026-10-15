@@ -501,6 +501,32 @@ void main() {
       );
     });
 
+    testWidgets('keeps the last photo origin clear of the navigation bar', (
+      tester,
+    ) async {
+      // A three-button navigation bar takes the bottom inset. The sheet used to draw the
+      // last option underneath it, so the option was untappable where it was drawn.
+      // The test view takes physical pixels: 135 physical at a ratio of 3 is 45 logical,
+      // which is the inset the sheet has to clear in logical pixels.
+      const bottomInset = 135.0;
+      tester.view.viewPadding = const FakeViewPadding(bottom: bottomInset);
+      tester.view.padding = const FakeViewPadding(bottom: bottomInset);
+      addTearDown(tester.view.reset);
+
+      await _pumpListings(tester, seed: (backend) => backend.seed(id: 'd-1'));
+      await _tapVisible(tester, 'listing-item-d-1');
+      await _tapVisible(tester, 'listing-photos-add');
+
+      final screenHeight =
+          tester.view.physicalSize.height / tester.view.devicePixelRatio;
+      final logicalInset = bottomInset / tester.view.devicePixelRatio;
+      final gallery = tester.getRect(
+        find.byKey(const ValueKey('photo-origin-gallery')),
+      );
+
+      expect(gallery.bottom, lessThanOrEqualTo(screenHeight - logicalInset));
+    });
+
     testWidgets('retries a failed upload from its tile', (tester) async {
       final backend = await _pumpListings(
         tester,
