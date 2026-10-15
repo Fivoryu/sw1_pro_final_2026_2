@@ -79,25 +79,12 @@ else {
 # granularity is days, and 1 is the minimum, so it bounds retention instead of closing a
 # race. A lifecycle filter can only match a prefix, which is exactly why staging must not
 # share a prefix with the confirmed original and its public derivative: those never expire.
-$stagingLifecyclePath = '/tmp/roomforge-staging-lifecycle.json'
-$stagingLifecycleJson = @'
-{
-  "Rules": [
-    {
-      "ID": "expire-listing-photo-staging",
-      "Status": "Enabled",
-      "Filter": { "Prefix": "staging/" },
-      "Expiration": { "Days": 1 }
-    }
-  ]
-}
-'@
-$stagingLifecycleJson | & docker compose --env-file $envFile -f $composeFile exec -T floci sh -c "cat > $stagingLifecyclePath"
-if ($LASTEXITCODE -ne 0) {
-    throw 'Could not write the S3 lifecycle configuration inside the Floci container.'
-}
-$null = Invoke-FlociAws -Endpoint $s3Endpoint -AwsArguments @('s3api', 'put-bucket-lifecycle-configuration', '--bucket', $bucketName, '--lifecycle-configuration', "file://$stagingLifecyclePath", '--output', 'json')
-Write-Host "Applied the staging lifecycle rule to bucket '$bucketName' (expire staging/ after 1 day)."
+& (Join-Path -Path $PSScriptRoot -ChildPath 'set-staging-lifecycle.ps1') `
+    -BucketName $bucketName `
+    -Endpoint $s3Endpoint `
+    -RuleId 'expire-listing-photo-staging' `
+    -RulePrefix 'staging/' `
+    -ExpirationDays 1
 
 if ($queueExists) {
     Write-Host "SQS queue '$queueName' already exists; leaving it unchanged."
