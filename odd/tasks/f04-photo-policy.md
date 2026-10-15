@@ -41,6 +41,20 @@ El usuario preguntó “QUe regla podemos añadir?” y eligió “Gracia en có
 - **T3 — Verificar el flujo y cerrar el registro** (S1–S7) — ruta: inline; estado: pending; commit: pending. Windows `flutter.bat` ya corre; después de T2, verificar cámara y galería en un dispositivo Android disponible (el Galaxy S23 del owner es opcional), sin fotos personales, y registrar evidencia. `adb.exe devices` ve `R5CWA0BTAKH` en estado `offline`: requiere que el owner desbloquee el teléfono y reautorice la depuración USB.
 - **T4 — Cerrar el residual de la subida en vuelo** (S4, S5, S8) — ruta: inline; estado: done; commit: `614fd81` (código y pruebas) + `60811ad` (infraestructura). La clave de staging pasó a su prefijo propio, el diario se conserva una gracia tras cerrar la ventana de subida, y la regla de ciclo de vida quedó aplicada y verificada en Floci. Detalle y evidencia en L111.
 
+## Verificación en dispositivo (T3)
+
+Preparación hecha por el agente: la base local de Docker quedó al head de la rama, la API se publica en la red local con `API_BIND_ADDRESS=0.0.0.0` (por defecto sigue en loopback, así que nada se expone si no se pide) y la app se compila con `--dart-define=ROOMFORGE_API_BASE_URL=http://<ip-lan-del-equipo>:8000`. El firewall de Windows no bloquea: la Wi-Fi está clasificada como perfil Público y las reglas entrantes de Docker Desktop son `Allow` para ese perfil.
+
+Pasos en el teléfono (**los hace el humano**; sin fotos personales):
+
+1. Iniciar sesión con la cuenta de personal y el código TOTP.
+2. Abrir un inmueble en borrador y entrar a la sección de fotografías.
+3. Agregar una foto **desde la cámara**, apuntando a algo inofensivo (una pared, un objeto), y confirmarla.
+4. Agregar una foto **desde la galería**, con una imagen sintética que no tenga personas.
+5. Observar y anotar, paso por paso: que la app no reduzca ni recomprima antes de subir (no se piden `maxWidth`/`maxHeight`/`imageQuality`), que se respeten los límites de 20 fotos × 20 MiB, y que la foto confirmada aparezca en el listado.
+
+Evidencia a registrar: capturas de pantalla de cada paso, modelo del dispositivo (`SM_S711B`), versión de Android y el resultado observado en cada paso. **Un fallo se registra como fallo**; no se deduce del código ni se afirma un resultado que no se observó.
+
 ## Log
 
 - **L1 — Solicitud original:** “Cerremos la fase 4 del @docs/plan-maestro-roomforge.md Tengo el móvil conectado. Si tienes preguntas hazla al detalle”.
