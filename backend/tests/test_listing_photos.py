@@ -303,17 +303,6 @@ def photo_cleanup_context(monkeypatch: pytest.MonkeyPatch) -> Iterator[PhotoCont
 
 
 @pytest.fixture
-def photo_deletion_context(monkeypatch: pytest.MonkeyPatch) -> Iterator[PhotoContext]:
-    monkeypatch.setattr(
-        main_module,
-        "PHOTO_DELETION_RETRY_INTERVAL_SECONDS",
-        0.1,
-        raising=False,
-    )
-    yield from _build_context(_CleanupObservedPhotoStorage())
-
-
-@pytest.fixture
 def photo_deletion_manual_context(monkeypatch: pytest.MonkeyPatch) -> Iterator[PhotoContext]:
     """Deletion context whose periodic worker never fires, so sweeps are driven by hand."""
     monkeypatch.setattr(
@@ -945,9 +934,9 @@ def test_agent_cannot_delete_a_confirmed_photo(photo_context: PhotoContext) -> N
 
 
 def test_delete_removes_the_object_and_returns_the_listing_to_draft(
-    photo_deletion_context: PhotoContext,
+    photo_deletion_manual_context: PhotoContext,
 ) -> None:
-    context = photo_deletion_context
+    context = photo_deletion_manual_context
     _seed_listing(context, approval_status="approved", is_published=True)
     _staff(context, role="agency_admin")
     original_key = "private/original/photo-a"
@@ -965,10 +954,13 @@ def test_delete_removes_the_object_and_returns_the_listing_to_draft(
     response = context.client.delete(_photos_url() + "/photo-a")
 
     assert response.status_code == 204
+    # The sweep is driven by hand, like the rest of the deletion tests: the periodic worker
+    # shares this single in-memory SQLite connection, and two threads executing on one
+    # connection deadlock instead of failing.
+    _sweep_deletions(context)
     listed = context.client.get(_photos_url())
     assert listed.status_code == 200, listed.text
     assert listed.json()["photos"] == []
-    assert storage.expected_deletes_complete.wait(timeout=3)
     assert all(
         storage.read(key, max_bytes=_MAX_BYTES) is None
         for key in storage.expected_deleted_keys
