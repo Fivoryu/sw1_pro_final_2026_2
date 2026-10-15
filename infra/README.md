@@ -25,7 +25,7 @@ Los servicios se publican solo en loopback; los puertos del host se configuran e
 | API FastAPI | `http://127.0.0.1:8000` (`API_PORT`) | `8000` |
 | Panel staff-shell | `http://127.0.0.1:5173` (`PANEL_PORT`) | `5173` |
 
-Dentro de Compose, la API se conecta a PostgreSQL por el hostname `postgres` y recibe los endpoints de Floci por `http://floci:4566`. El proxy Vite del panel apunta a `http://api:8000`; al ejecutar Vite directamente en el host, su valor por defecto existente sigue siendo `http://127.0.0.1:8000`. La plantilla contiene secretos ficticios solo para desarrollo local; Compose fija credenciales AWS de prueba (`local-test-key`/`local-test-secret`) y nunca debe recibir credenciales reales.
+Dentro de Compose, la API se conecta a PostgreSQL por el hostname `postgres` y recibe los endpoints de Floci por `http://floci:4566`. El proxy Vite del panel apunta a `http://api:8000`; al ejecutar Vite directamente en el host, su valor por defecto existente sigue siendo `http://127.0.0.1:8000`. La plantilla contiene secretos ficticios solo para desarrollo local; Compose fija credenciales AWS de prueba (`local-test-key`/`local-test-secret`) y nunca debe recibir credenciales reales. Para verificar la app móvil desde un teléfono en la misma red, `API_BIND_ADDRESS=0.0.0.0` publica la API en la interfaz LAN; por defecto queda solo en loopback y no expone nada fuera del equipo.
 
 ## Salud del stack, API y panel
 
