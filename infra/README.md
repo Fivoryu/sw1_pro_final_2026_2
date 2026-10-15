@@ -70,7 +70,13 @@ Con Floci ya iniciado y en estado `healthy`, ejecutar desde la raíz:
 .\infra\docker\init-local-resources.ps1
 ```
 
-El script consulta primero S3 y SQS con AWS CLI dentro del contenedor Floci. Solo crea el bucket o la cola configurados si no existen; repetirlo deja intactos los recursos existentes. Si una consulta falla por servicio, autenticación o red, el proceso termina con error en lugar de interpretar el fallo como un recurso ausente. No inicia ni detiene servicios y no elimina recursos.
+El script consulta primero S3 y SQS con AWS CLI dentro del contenedor Floci. Solo crea el bucket o la cola configurados si no existen; repetirlo deja intactos los recursos existentes. Si una consulta falla por servicio, autenticación o red, el proceso termina con error en lugar de interpretar el fallo como un recurso ausente. No inicia ni detiene servicios. Sí instala la regla de ciclo de vida del staging que se describe abajo, de modo que a partir de ahí el propio bucket expira esos objetos temporales por su cuenta.
+
+### Ciclo de vida del staging de fotografías
+
+Los objetos de staging de F04.2 viven bajo el prefijo de primer nivel `staging/` — `staging/agencies/<agencia>/listings/<inmueble>/photos/<foto>` —, separados del original privado y de la derivada pública, que **no** vencen. El inicializador aplica `put-bucket-lifecycle-configuration` con una única regla: `Filter: Prefix "staging/"` y `Expiration: Days 1`.
+
+El piso de S3 para `Days` es 1 día y el servicio puede tardar hasta unas 48 h en actuar, así que la regla **acota la retención** de cualquier objeto que se escape del barrido de la API; no cierra por sí sola la carrera de una subida en vuelo, que es lo que cubre la gracia del diario de borrado. En Floci la operación está implementada (`GetBucketLifecycleConfiguration` responde `NoSuchLifecycleConfiguration` cuando todavía no hay regla), pero un emulador prueba que acepta la configuración, no que borre sola. En el despliegue real la misma regla debe existir sobre el bucket de producción.
 
 PostgreSQL conserva sus datos en el volumen nombrado `roomforge-local-dev_postgres_data`. Floci usa otro volumen nombrado, `roomforge-local-dev_floci_data`, montado en `/app/data`; su modo persistente y ruta se configuran mediante `FLOCI_STORAGE_MODE` y `FLOCI_STORAGE_PERSISTENT_PATH`. El prefijo corresponde al proyecto Compose: un nombre de proyecto distinto crea volúmenes separados sin reutilizar ni modificar los del stack habitual.
 

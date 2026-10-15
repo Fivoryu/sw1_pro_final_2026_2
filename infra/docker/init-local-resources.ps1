@@ -73,6 +73,32 @@ else {
     Write-Host "Created S3 bucket '$bucketName'."
 }
 
+# Listing-photo staging objects are the only ones a presigned PUT can (re)create, so they
+# live under their own top-level prefix. The API's deletion journal already sweeps them;
+# this rule is the backstop that bounds whatever escapes that sweep. S3 lifecycle
+# granularity is days, and 1 is the minimum, so it bounds retention instead of closing a
+# race. A lifecycle filter can only match a prefix, which is exactly why staging must not
+# share a prefix with the confirmed original and its public derivative: those never expire.
+$stagingLifecyclePath = '/tmp/roomforge-staging-lifecycle.json'
+$stagingLifecycleJson = @'
+{
+  "Rules": [
+    {
+      "ID": "expire-listing-photo-staging",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "staging/" },
+      "Expiration": { "Days": 1 }
+    }
+  ]
+}
+'@
+$stagingLifecycleJson | & docker compose --env-file $envFile -f $composeFile exec -T floci sh -c "cat > $stagingLifecyclePath"
+if ($LASTEXITCODE -ne 0) {
+    throw 'Could not write the S3 lifecycle configuration inside the Floci container.'
+}
+$null = Invoke-FlociAws -Endpoint $s3Endpoint -AwsArguments @('s3api', 'put-bucket-lifecycle-configuration', '--bucket', $bucketName, '--lifecycle-configuration', "file://$stagingLifecyclePath", '--output', 'json')
+Write-Host "Applied the staging lifecycle rule to bucket '$bucketName' (expire staging/ after 1 day)."
+
 if ($queueExists) {
     Write-Host "SQS queue '$queueName' already exists; leaving it unchanged."
 }
