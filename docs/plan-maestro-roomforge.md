@@ -29,8 +29,9 @@
 17. [F11 — Despliegue real en AWS](#f11--despliegue-real-en-aws)
 18. [F12 — Calidad, seguridad y recuperación](#f12--calidad-seguridad-y-recuperación)
 19. [F13 — Evidencia académica, demostración y entrega](#f13--evidencia-académica-demostración-y-entrega)
-20. [Decisiones abiertas y riesgos](#6-decisiones-abiertas-y-riesgos)
-21. [Criterio de producto terminado y mejoras posteriores](#7-criterio-de-producto-terminado-y-mejoras-posteriores)
+20. [F14 — Pulido profesional del producto](#f14--pulido-profesional-del-producto)
+21. [Decisiones abiertas y riesgos](#6-decisiones-abiertas-y-riesgos)
+22. [Criterio de producto terminado y mejoras posteriores](#7-criterio-de-producto-terminado-y-mejoras-posteriores)
 
 ## 1. Lectura, fuentes y estado de partida
 
@@ -118,6 +119,7 @@ Esa evidencia cubre servicios de desarrollo, no API, panel, IA ni contratos. En 
 | F11 — Despliegue en AWS | F02 | ⬜ Pendiente | No se verificó despliegue en AWS; sólo existe el stack local con Floci. | ☐ Libre |
 | F12 — Calidad, seguridad y recuperación | transversal | 🟡 Parcial | CI con cuatro jobs en verde, suite backend más Flutter/panel, Pyright y Ruff sin diagnósticos nuevos frente a la línea base, y verificación real de la cadena de migraciones contra PostgreSQL. Límite: faltan pruebas integradas entre superficies, E2E de la trayectoria crítica, matriz de los siete criterios con mediciones y ensayo de fallos. | ☐ Libre |
 | F13 — Evidencia académica y entrega | F12 | 🟡 Parcial | `docs/avance/` registra seis historias con verificación técnica y mantiene los casos académicos pendientes visibles; CP-001 y CP-002 cuentan con evidencia en `docs/scrum/sprint-1/evidencia/`. Límite: sin guion de demostración, sin evidencia integral y sin inventario final de recursos. | ☐ Libre |
+| F14 — Pulido profesional | según subfase | ⬜ Pendiente | Sin implementación integrada; el alcance proviene del benchmark de productos comparables registrado en la sección F14 y sus issues de GitHub (ver §1.4.5). | ☐ Libre |
 
 **Nota de interpretación:** F03 en el cuadro histórico de §1.4 figura como subconjunto backend, F04–F05 y F09 como no integrados y F02 como parcial; esas filas describen el corte de 2026-09-26 y no deben leerse como estado actual. Actualizar este cuadro tras cada merge y conservar §1.4 sin ediciones.
 
@@ -222,6 +224,7 @@ Las superficies son las rutas que existen hoy (corte 2026-09-30). Una fase que n
 | F11 | `infra/`, Dockerfiles, configuración de despliegue nueva | F01 (Dockerfiles) |
 | F12 | `backend/tests/`, `.github/workflows/`, `docs/ci/` | todo lo que se prueba |
 | F13 | `docs/`, `odd/tasks/`, evidencia académica | F12 |
+| F14 | `apps/cliente_mobile/lib/`, `panel/staff-shell/src/`, `apps/captura_mobile/lib/` | F06 (tour de panorámicas comparte superficie con el visor), F07 (captura guiada), F10 (favoritos y dashboard son transversales de lectura) |
 
 **Reglas de convivencia**
 
@@ -234,6 +237,30 @@ Las superficies son las rutas que existen hoy (corte 2026-09-30). Una fase que n
 7. **Si dos ramas agregan migraciones, la segunda rebasa.** Al integrar la segunda, se cambia su `down_revision` al head nuevo, se vuelve a correr la migración en SQLite y recién entonces se integra. Nunca se reescribe una migración ya integrada en `main`.
 8. **Una rama y un worktree por fase**, nombrados `feat/<fase>-<tema>` (por ejemplo `feat/f05-furniture-inventory`), partiendo de `main` actualizado. La rama se rebasa sobre `main` y se integra por fast-forward; no se hace merge entre ramas de features. Al cerrar, la rama se borra una vez contenida.
 9. **Nadie espera a otra fase para empezar lo que no comparte.** Si dos fases solo comparten la cadena de migraciones, cada una avanza con su código y con un fixture propio; lo único que se serializa es la integración, no el desarrollo.
+
+### 1.4.5 Espejo de issues de GitHub
+
+**Para qué sirve.** Cada unidad de trabajo pendiente tiene una issue en `Fivoryu/sw1_pro_final_2026_2`, con detalle ejecutable (estado actual verificado, alcance, tareas, criterios de aceptación y referencias). Esta tabla es el espejo oficial: la fila de fase de §1.4.1 sigue siendo la fuente de verdad del estado, y la issue es la unidad que un dev y su modelo de IA toman para trabajar.
+
+**Reglas del espejo.**
+
+1. **Una issue no puede ampliar el plan.** Si el detalle de una issue necesita un requisito nuevo, primero se actualiza este plan maestro (o la redefinición), después la issue. Es la misma regla que §1.4.3 aplica a OpenSpec.
+2. **Flujo de trabajo:** tomar issue → rama `feat/<fase>-<tema>` desde `main` actualizado → PR con `Closes #N` → revisión y merge → actualizar la fila de §1.4.1 con la evidencia, igual que se hace tras cada merge.
+3. **Al cerrar una issue** se registra en esta tabla su cierre; la issue no se reabre para nuevo alcance: eso es una issue nueva (y, si cambia requisitos, primero el plan).
+4. **Labels:** cada issue lleva el label de su fase (`f06`…`f14`) y `type:feature` o `mejora` según corresponda.
+5. **Las issues no reemplazan `odd/tasks/`:** el registro de ejecución por unidad sigue en el repositorio, conforme a §1.4.4 y la sección F correspondiente.
+
+| Fase | Issues abiertas | Issues cerradas |
+|---|---|---|
+| F06 | [#21](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/21) editor 2D↔3D, [#22](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/22) visor en app cliente | — |
+| F07 | [#23](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/23) ARCore básico, [#24](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/24) contornos/alturas, [#25](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/25) multi-ambiente y sync | — |
+| F08 | [#26](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/26) confirmación humana e inventario | — |
+| F09 | [#27](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/27) Reown/on-chain, [#28](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/28) salidas y cierre | — |
+| F10 | [#29](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/29) E2E agencia→cliente | — |
+| F11 | [#30](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/30) cuenta y primer servicio, [#31](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/31) S3/SQS, [#32](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/32) publicación integral | — |
+| F12 | [#33](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/33) matriz de criterios, [#34](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/34) ensayo de fallos | — |
+| F13 | [#35](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/35) demo y cierre | — |
+| F14 | [#36](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/36) tour panorámicas, [#37](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/37) captura guiada, [#38](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/38) favoritos, [#39](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/39) dashboard | — |
 
 ### 1.5 Restricciones
 
@@ -928,6 +955,41 @@ No se presenta esta lista como certificación ISO. Los umbrales de FPS, respuest
 - **Acciones:** después de presentar, acordar qué servicios AWS quedan activos; apagar/eliminar únicamente recursos autorizados, conservar backups según política. Revisar costos residuales de discos, almacenamiento, IPs y logs.
 - **Salida:** inventario final de recursos y pendientes.
 - **Aceptación:** no prometer costo cero por apagar una instancia ni borrar todo para ahorrar. El backlog futuro conserva mejoras sin declararlas entregadas.
+
+## F14 — Pulido profesional del producto
+
+**Estado (corte 2026-10-16):** ⬜ Pendiente — sin implementación integrada.
+**Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
+**Origen:** benchmark de productos comparables (Matterport, Zillow 3D Home, Sphere, Polycam, portales inmobiliarios y tours 360° open-source) realizado el 2026-10-16. El objetivo es que el producto se perciba profesional en la demostración, sin alterar los requisitos obligatorios de §2.2.
+**Dependencias:** por subfase (ver cada una). Ninguna subfase es requisito de entrega de §7.1; son mejoras posteriores formalizadas desde §7.2.
+
+### F14.1 — Tour de panorámicas 360° con hotspots
+
+- **Qué:** recorrido alternativo por panorámicas 360° conectadas con hotspots y pisos, como primer hito de recorrido explorable y respaldo del recorrido en primera persona paramétrico de F06. Link/embed compartible del inmueble publicado.
+- **Referencias:** andarama, robust-virtual-tour-builder, Matterport (modos coexistentes), Zillow 3D Home.
+- **Depende de:** F04 (inmuebles publicados). Puede arrancar en paralelo con F06/F07; comparte superficie de app cliente con F09 (coordinar archivos).
+- **Aceptación:** un inmueble publicado se recorre por panorámicas con hotspots en la app cliente, con estados honestos si no hay captura disponible.
+
+### F14.2 — Captura guiada con checklist
+
+- **Qué:** guía paso a paso de la sesión de captura en la app de captura: orden de ambientes, checklist de calidad (luz, cobertura, nitidez) y validación antes de subir, sin depender del AR de F07.
+- **Referencias:** Zillow 3D Home, Sphere, Polycam (guía de captura como diferenciador).
+- **Depende de:** F04.2 (fotos). No requiere ARCore; F07 puede reutilizar el checklist.
+- **Aceptación:** el agente completa una sesión guiada y el borrador solo se envía a revisión cuando la validación pasa, con motivos claros cuando falla.
+
+### F14.3 — Favoritos y búsquedas guardadas en la app cliente
+
+- **Qué:** favoritos por cliente y búsquedas guardadas con filtros aplicables al catálogo público.
+- **Referencias:** Zillow/Redfin (guardar búsqueda y favoritos como núcleo del engagement).
+- **Depende de:** F04.4 (catálogo). Independiente del resto de F14.
+- **Aceptación:** el cliente guarda, lista y elimina favoritos y búsquedas con persistencia de sesión; el catálogo no cambia de comportamiento para quien no los usa.
+
+### F14.4 — Dashboard de métricas del panel
+
+- **Qué:** panel de lectura pura para la agencia: publicaciones por estado, cotizaciones vigentes y reservas por estado; sin edición ni acciones nuevas.
+- **Referencias:** CRMs de agencia (Gmore, GREM, IRM365) — métricas mínimas del equipo.
+- **Depende de:** F04, F05 y F09 (datos existentes). Solo consulta.
+- **Aceptación:** el administrador ve métricas consistentes con la base, sin exponer datos de otra agencia (aislamiento F03.3).
 
 ## 6. Decisiones abiertas y riesgos
 
