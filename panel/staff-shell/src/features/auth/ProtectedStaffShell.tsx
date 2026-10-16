@@ -9,6 +9,7 @@ import {
   type StaffRole,
   type StaffSession,
 } from "../../application/staffSession";
+import { SceneEditor } from "../editor3d/SceneEditor";
 import { AgencyReviewQueue } from "../listings/AgencyReviewQueue";
 import { ExchangeRatesAdmin } from "../rates/ExchangeRatesAdmin";
 import { StaffLoginShell } from "./StaffLoginShell";
@@ -42,6 +43,7 @@ export function ProtectedStaffShell() {
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<"unavailable" | "denied" | null>(null);
+  const [agencyWorkspace, setAgencyWorkspace] = useState<"home" | "scenes">("home");
 
   function applySession(nextSession: StaffSession | null) {
     if (
@@ -147,6 +149,7 @@ export function ProtectedStaffShell() {
     setLogoutError(null);
     try {
       await endStaffSession(session);
+      setAgencyWorkspace("home");
       setSession(null);
     } catch {
       setLogoutError("No se pudo cerrar la sesión. Inténtalo nuevamente.");
@@ -213,6 +216,8 @@ export function ProtectedStaffShell() {
 
   const presentation = rolePresentation[session.user.role];
   const agencyId = session.user.tenant_id;
+  const isAgencyStaff =
+    (session.user.role === "agency_admin" || session.user.role === "agent") && agencyId !== null;
 
   return (
     <div className="protected-staff-workspace">
@@ -239,7 +244,28 @@ export function ProtectedStaffShell() {
 
       <div className="protected-staff-body">
         <nav aria-label="Navegación principal" className="protected-staff-navigation">
-          <span aria-current="page">{presentation.navigation}</span>
+          {isAgencyStaff ? (
+            <>
+              <button
+                aria-current={agencyWorkspace === "home" ? "page" : undefined}
+                className="protected-staff-navigation__item"
+                onClick={() => setAgencyWorkspace("home")}
+                type="button"
+              >
+                {presentation.navigation}
+              </button>
+              <button
+                aria-current={agencyWorkspace === "scenes" ? "page" : undefined}
+                className="protected-staff-navigation__item"
+                onClick={() => setAgencyWorkspace("scenes")}
+                type="button"
+              >
+                Editor de escenas
+              </button>
+            </>
+          ) : (
+            <span aria-current="page">{presentation.navigation}</span>
+          )}
         </nav>
         <main className="protected-staff-content">
           <p className="eyebrow">ESPACIO PRIVADO</p>
@@ -249,7 +275,9 @@ export function ProtectedStaffShell() {
               {logoutError}
             </p>
           ) : null}
-          {session.user.role === "agency_admin" && agencyId ? (
+          {isAgencyStaff && agencyWorkspace === "scenes" ? (
+            <SceneEditor accessToken={session.accessToken} agencyId={agencyId ?? ""} />
+          ) : session.user.role === "agency_admin" && agencyId ? (
             <AgencyReviewQueue accessToken={session.accessToken} agencyId={agencyId} />
           ) : session.user.role === "platform_admin" ? (
             <ExchangeRatesAdmin accessToken={session.accessToken} />

@@ -23,6 +23,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -111,6 +112,21 @@ LISTING_PHOTO_CONTENT_TYPES = (
 LISTING_PHOTO_PUBLIC_CONTENT_TYPES = ("image/jpeg", "image/png", "image/webp")
 LISTING_PHOTO_MAX_BYTES = 20 * 1024 * 1024
 LISTING_PHOTO_MAX_COUNT = 20
+
+
+class ListingScene(Base):
+    """The complete editable parametric scene associated with one listing."""
+
+    __tablename__ = "listing_scene"
+
+    listing_id: Mapped[str] = mapped_column(
+        ForeignKey("listing.id", ondelete="CASCADE"), primary_key=True
+    )
+    scene: Mapped[dict[str, object]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
 
 class ListingPhoto(Base):

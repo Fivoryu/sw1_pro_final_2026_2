@@ -1,130 +1,259 @@
-import React, { useEffect, useRef, useState } from 'react';
-import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { DragControls } from 'three/examples/jsm/controls/DragControls.js';
+import React, { useEffect, useRef, useState } from "react";
+import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import type {
+  SceneDocument,
+  SceneObject,
+  SceneOpening,
+  ScenePoint2D,
+  SceneRoom,
+} from "../../application/sceneContract";
+import { DEFAULT_SCENE_DOCUMENT } from "../../application/sceneContract";
 
-const roomData = {
-  "version": "1.0",
-  "unit": "meters",
-  "rooms": [
-    {
-      "id": "room_main",
-      "height": 2.4,
-      "contours": [
-        { "x": 0, "z": 0 },
-        { "x": 4, "z": 0 },
-        { "x": 4, "z": 3 },
-        { "x": 0, "z": 3 }
-      ]
-    }
-  ],
-  "objects": [
-    {
-      "id": "ref_cube_1",
-      "type": "placeholder",
-      "name": "Sofá Modular Rojo",
-      "price": 599.99,
-      "position": { "x": 1, "y": 0, "z": 1 },
-      "dimensions": { "width": 0.5, "height": 0.5, "depth": 0.5 },
-      "color": "red"
-    }
-  ]
-};
+interface SceneViewerProps {
+  sceneDocument?: SceneDocument;
+  selectedObjectId?: string | null;
+  onObjectSelect?: (objectId: string | null) => void;
+}
 
-export const SceneViewer: React.FC = () => {
+interface SelectedObject {
+  id: string;
+  type: string;
+}
+
+interface WallOpeningSpan {
+  start: number;
+  end: number;
+  bottom: number;
+  top: number;
+}
+
+function openingSpansForWall(
+  room: SceneRoom,
+  start: ScenePoint2D,
+  end: ScenePoint2D,
+  wallLength: number,
+): WallOpeningSpan[] {
+  const dx = end.x - start.x;
+  const dz = end.z - start.z;
+
+  return room.openings.flatMap((opening: SceneOpening) => {
+    const offsetX = opening.position.x - start.x;
+    const offsetZ = opening.position.z - start.z;
+    const center = (offsetX * dx + offsetZ * dz) / wallLength;
+    const distance = Math.abs(offsetX * dz - offsetZ * dx) / wallLength;
+    if (distance > 0.05 || center < -opening.width / 2 || center > wallLength + opening.width / 2) {
+      return [];
+    }
+
+    const span = {
+      start: Math.max(0, center - opening.width / 2),
+      end: Math.min(wallLength, center + opening.width / 2),
+      bottom: Math.max(0, opening.position.y),
+      top: Math.min(room.height, opening.position.y + opening.height),
+    };
+    return span.start < span.end && span.bottom < span.top ? [span] : [];
+  });
+}
+
+function addWall(
+  group: THREE.Group,
+  room: SceneRoom,
+  start: ScenePoint2D,
+  end: ScenePoint2D,
+  material: THREE.MeshBasicMaterial,
+  lineMaterial: THREE.LineBasicMaterial,
+) {
+  const dx = end.x - start.x;
+  const dz = end.z - start.z;
+  const length = Math.hypot(dx, dz);
+  if (length === 0) return;
+
+  const openings = openingSpansForWall(room, start, end, length);
+  const horizontalCuts = [0, length];
+  const verticalCuts = [0, room.height];
+  openings.forEach((opening) => {
+    horizontalCuts.push(opening.start, opening.end);
+    verticalCuts.push(opening.bottom, opening.top);
+  });
+  const sortedUnique = (values: number[]) =>
+    [...new Set(values.map((value) => Number(value.toFixed(6))))].sort((a, b) => a - b);
+  const xs = sortedUnique(horizontalCuts);
+  const ys = sortedUnique(verticalCuts);
+  const rotation = Math.atan2(-dz, dx);
+
+  for (let xIndex = 0; xIndex < xs.length - 1; xIndex += 1) {
+    const left = xs[xIndex];
+    const right = xs[xIndex + 1];
+    if (right <= left) continue;
+
+    for (let yIndex = 0; yIndex < ys.length - 1; yIndex += 1) {
+      const bottom = ys[yIndex];
+      const top = ys[yIndex + 1];
+      if (top <= bottom) continue;
+      const centerX = (left + right) / 2;
+      const centerY = (bottom + top) / 2;
+      const insideOpening = openings.some(
+        (opening) =>
+          centerX > opening.start &&
+          centerX < opening.end &&
+          centerY > opening.bottom &&
+          centerY < opening.top,
+      );
+      if (insideOpening) continue;
+
+      const geometry = new THREE.PlaneGeometry(right - left, top - bottom);
+      const wall = new THREE.Mesh(geometry, material);
+      const distanceFromStart = (left + right) / 2;
+      wall.position.set(
+        start.x + (dx / length) * distanceFromStart,
+        centerY,
+        start.z + (dz / length) * distanceFromStart,
+      );
+      wall.rotation.y = rotation;
+      const edges = new THREE.EdgesGeometry(geometry);
+      wall.add(new THREE.LineSegments(edges, lineMaterial));
+      group.add(wall);
+    }
+  }
+}
+
+function addRoom(group: THREE.Group, room: SceneRoom) {
+  if (room.contours.length < 3) return;
+
+  const shape = new THREE.Shape();
+  shape.moveTo(room.contours[0].x, room.contours[0].z);
+  room.contours.slice(1).forEach((point) => shape.lineTo(point.x, point.z));
+  shape.closePath();
+
+  const floor = new THREE.Mesh(
+    new THREE.ShapeGeometry(shape),
+    new THREE.MeshBasicMaterial({
+      color: "#3a7bd5",
+      transparent: true,
+      opacity: 0.5,
+      side: THREE.DoubleSide,
+    }),
+  );
+  floor.rotation.x = Math.PI / 2;
+  group.add(floor);
+
+  const wallMaterial = new THREE.MeshBasicMaterial({
+    color: "#e67e22",
+    transparent: true,
+    opacity: 0.8,
+    side: THREE.DoubleSide,
+  });
+  const lineMaterial = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 });
+  room.contours.forEach((point, index) => {
+    addWall(
+      group,
+      room,
+      point,
+      room.contours[(index + 1) % room.contours.length],
+      wallMaterial,
+      lineMaterial,
+    );
+  });
+}
+
+function addObject(group: THREE.Group, object: SceneObject, isSelected: boolean): THREE.Mesh {
+  const geometry = new THREE.BoxGeometry(
+    object.dimensions.width,
+    object.dimensions.height,
+    object.dimensions.depth,
+  );
+  const mesh = new THREE.Mesh(
+    geometry,
+    new THREE.MeshBasicMaterial({ color: isSelected ? "#f4c95d" : object.color }),
+  );
+  mesh.position.set(
+    object.position.x,
+    object.position.y + object.dimensions.height / 2,
+    object.position.z,
+  );
+  mesh.userData = { id: object.id, type: object.type };
+  mesh.add(
+    new THREE.LineSegments(
+      new THREE.EdgesGeometry(geometry),
+      new THREE.LineBasicMaterial({ color: 0x000000 }),
+    ),
+  );
+  group.add(mesh);
+  return mesh;
+}
+
+function disposeGroup(group: THREE.Group) {
+  group.traverse((child: THREE.Object3D) => {
+    if (!("geometry" in child)) return;
+    const renderable = child as THREE.Mesh;
+    renderable.geometry.dispose();
+    const materials: THREE.Material[] = Array.isArray(renderable.material)
+      ? renderable.material
+      : [renderable.material];
+    materials.forEach((material: THREE.Material) => material.dispose());
+  });
+  group.clear();
+}
+
+function focusPoint(document: SceneDocument) {
+  const points = document.rooms.flatMap((room) => room.contours);
+  if (points.length === 0) return { x: 2, z: 1.5, height: 2.4 };
+  const minX = Math.min(...points.map((point) => point.x));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const minZ = Math.min(...points.map((point) => point.z));
+  const maxZ = Math.max(...points.map((point) => point.z));
+  return {
+    x: (minX + maxX) / 2,
+    z: (minZ + maxZ) / 2,
+    height: Math.max(...document.rooms.map((room) => room.height)),
+  };
+}
+
+export const SceneViewer: React.FC<SceneViewerProps> = ({
+  sceneDocument = DEFAULT_SCENE_DOCUMENT,
+  selectedObjectId,
+  onObjectSelect,
+}) => {
   const mountRef = useRef<HTMLDivElement>(null);
-  const [selectedItem, setSelectedItem] = useState<{ name: string; price: number } | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const groupRef = useRef<THREE.Group | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
+  const gridRef = useRef<THREE.GridHelper | null>(null);
+  const objectMeshesRef = useRef<THREE.Mesh[]>([]);
+  const hasFocusedSceneRef = useRef(false);
+  const [clickedObject, setClickedObject] = useState<SelectedObject | null>(null);
 
   useEffect(() => {
-    if (!mountRef.current) return;
-    mountRef.current.innerHTML = '';
+    const mount = mountRef.current;
+    if (!mount) return;
+    mount.innerHTML = "";
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#222222');
+    scene.background = new THREE.Color("#222222");
+    sceneRef.current = scene;
 
-    const gridHelper = new THREE.GridHelper(10, 10, '#888888', '#444444');
-    gridHelper.position.set(2, 0, 1.5);
-    scene.add(gridHelper);
+    const grid = new THREE.GridHelper(10, 10, "#888888", "#444444");
+    grid.position.set(2, 0, 1.5);
+    gridRef.current = grid;
+    scene.add(grid);
 
     const camera = new THREE.PerspectiveCamera(75, 800 / 600, 0.1, 1000);
-    // Cámara inicial desde afuera (perspectiva de maqueta)
     camera.position.set(5, 6, 7);
+    cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(800, 500); // Ajustamos un poco la altura para que encaje mejor en el diseño
-    mountRef.current.appendChild(renderer.domElement);
+    renderer.setSize(800, 500);
+    rendererRef.current = renderer;
+    mount.appendChild(renderer.domElement);
 
     const orbitControls = new OrbitControls(camera, renderer.domElement);
     orbitControls.enableDamping = true;
     orbitControls.target.set(2, 1.6, 1.5);
     orbitControls.maxPolarAngle = Math.PI / 2;
-
-    const room = roomData.rooms[0];
-    const floorGeometry = new THREE.PlaneGeometry(4, 3);
-    const floorMaterial = new THREE.MeshBasicMaterial({ color: '#3a7bd5', transparent: true, opacity: 0.5, side: THREE.DoubleSide });
-    const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-    floor.rotation.x = Math.PI / 2;
-    floor.position.set(2, 0, 1.5);
-    scene.add(floor);
-
-    const wallMaterial = new THREE.MeshBasicMaterial({ color: '#e67e22', transparent: true, opacity: 0.8, side: THREE.DoubleSide });
-    const lineMaterial = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 });
-    
-    const contours = room.contours;
-    for (let i = 0; i < contours.length; i++) {
-      const p1 = contours[i];
-      const p2 = contours[(i + 1) % contours.length];
-      const width = Math.hypot(p2.x - p1.x, p2.z - p1.z);
-      const wallGeometry = new THREE.PlaneGeometry(width, room.height);
-      const wall = new THREE.Mesh(wallGeometry, wallMaterial);
-      wall.position.x = (p1.x + p2.x) / 2;
-      wall.position.z = (p1.z + p2.z) / 2;
-      wall.position.y = room.height / 2;
-      wall.rotation.y = Math.atan2(p1.z - p2.z, p2.x - p1.x);
-      const edges = new THREE.EdgesGeometry(wallGeometry);
-      const line = new THREE.LineSegments(edges, lineMaterial);
-      wall.add(line);
-      scene.add(wall);
-    }
-
-    const draggableObjects: THREE.Mesh[] = [];
-    roomData.objects.forEach(obj => {
-      const geometry = new THREE.BoxGeometry(obj.dimensions.width, obj.dimensions.height, obj.dimensions.depth);
-      const material = new THREE.MeshBasicMaterial({ color: obj.color });
-      const mesh = new THREE.Mesh(geometry, material);
-      const yPosition = obj.position.y + (obj.dimensions.height / 2);
-      mesh.position.set(obj.position.x, yPosition, obj.position.z);
-      
-      mesh.userData = { 
-        originalY: yPosition, 
-        halfWidth: obj.dimensions.width / 2, 
-        halfDepth: obj.dimensions.depth / 2,
-        name: obj.name,
-        price: obj.price
-      };
-
-      const edges = new THREE.EdgesGeometry(geometry);
-      const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000 }));
-      mesh.add(line);
-      scene.add(mesh);
-      draggableObjects.push(mesh);
-    });
-
-    const dragControls = new DragControls(draggableObjects, camera, renderer.domElement);
-    dragControls.addEventListener('dragstart', () => orbitControls.enabled = false);
-    dragControls.addEventListener('drag', (event) => {
-      const obj = event.object;
-      obj.position.y = obj.userData.originalY;
-      const minX = obj.userData.halfWidth;
-      const maxX = 4 - obj.userData.halfWidth;
-      const minZ = obj.userData.halfDepth;
-      const maxZ = 3 - obj.userData.halfDepth;
-      if (obj.position.x < minX) obj.position.x = minX;
-      if (obj.position.x > maxX) obj.position.x = maxX;
-      if (obj.position.z < minZ) obj.position.z = minZ;
-      if (obj.position.z > maxZ) obj.position.z = maxZ;
-    });
-    dragControls.addEventListener('dragend', () => orbitControls.enabled = true);
+    controlsRef.current = orbitControls;
 
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
@@ -133,27 +262,30 @@ export const SceneViewer: React.FC = () => {
       mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObjects(draggableObjects);
-      if (intersects.length > 0) {
-        const object = intersects[0].object;
-        setSelectedItem({ name: object.userData.name, price: object.userData.price });
+      const intersects = raycaster.intersectObjects(objectMeshesRef.current);
+      const object = intersects[0]?.object;
+      if (object) {
+        const selected = { id: object.userData.id as string, type: object.userData.type as string };
+        setClickedObject(selected);
+        onObjectSelect?.(selected.id);
       } else {
-        setSelectedItem(null);
+        setClickedObject(null);
+        onObjectSelect?.(null);
       }
     };
-    renderer.domElement.addEventListener('click', onClick);
+    renderer.domElement.addEventListener("click", onClick);
 
     const keys = { w: false, a: false, s: false, d: false };
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      if (keys.hasOwnProperty(key)) keys[key as keyof typeof keys] = true;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if (key in keys) keys[key as keyof typeof keys] = true;
     };
-    const handleKeyUp = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      if (keys.hasOwnProperty(key)) keys[key as keyof typeof keys] = false;
+    const handleKeyUp = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if (key in keys) keys[key as keyof typeof keys] = false;
     };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
 
     let animationId: number;
     const animate = () => {
@@ -161,15 +293,27 @@ export const SceneViewer: React.FC = () => {
       const speed = 0.05;
       const direction = new THREE.Vector3();
       camera.getWorldDirection(direction);
-      direction.y = 0; 
+      direction.y = 0;
       direction.normalize();
       const right = new THREE.Vector3();
       right.crossVectors(camera.up, direction).normalize();
 
-      if (keys.w) { camera.position.addScaledVector(direction, speed); orbitControls.target.addScaledVector(direction, speed); }
-      if (keys.s) { camera.position.addScaledVector(direction, -speed); orbitControls.target.addScaledVector(direction, -speed); }
-      if (keys.a) { camera.position.addScaledVector(right, speed); orbitControls.target.addScaledVector(right, speed); }
-      if (keys.d) { camera.position.addScaledVector(right, -speed); orbitControls.target.addScaledVector(right, -speed); }
+      if (keys.w) {
+        camera.position.addScaledVector(direction, speed);
+        orbitControls.target.addScaledVector(direction, speed);
+      }
+      if (keys.s) {
+        camera.position.addScaledVector(direction, -speed);
+        orbitControls.target.addScaledVector(direction, -speed);
+      }
+      if (keys.a) {
+        camera.position.addScaledVector(right, speed);
+        orbitControls.target.addScaledVector(right, speed);
+      }
+      if (keys.d) {
+        camera.position.addScaledVector(right, -speed);
+        orbitControls.target.addScaledVector(right, -speed);
+      }
 
       orbitControls.update();
       renderer.render(scene, camera);
@@ -178,71 +322,74 @@ export const SceneViewer: React.FC = () => {
 
     return () => {
       cancelAnimationFrame(animationId);
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-      renderer.domElement.removeEventListener('click', onClick);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      renderer.domElement.removeEventListener("click", onClick);
       orbitControls.dispose();
-      dragControls.dispose();
+      if (groupRef.current) {
+        scene.remove(groupRef.current);
+        disposeGroup(groupRef.current);
+      }
       renderer.dispose();
-      if (mountRef.current) mountRef.current.innerHTML = '';
+      mount.innerHTML = "";
+      sceneRef.current = null;
+      groupRef.current = null;
+      cameraRef.current = null;
+      rendererRef.current = null;
+      controlsRef.current = null;
+      gridRef.current = null;
+      objectMeshesRef.current = [];
+      hasFocusedSceneRef.current = false;
     };
   }, []);
 
-  // --- NUEVA ESTRUCTURA HTML BASADA EN EL DISEÑO DE TU COMPAÑERO ---
-  return (
-    <div className="protected-staff-workspace">
-      <header className="protected-staff-header">
-        <div className="protected-staff-brand" aria-label="RoomForge">
-          <span className="protected-staff-brand__mark" aria-hidden="true">RF</span>
-          <span className="brand-wordmark">ROOMFORGE</span>
-        </div>
-        <div className="protected-staff-identity">
-          <span>Área de diseño</span>
-          <span>agente@roomforge.test</span>
-        </div>
-        <button className="staff-logout-action" type="button">
-          Cerrar sesión
-        </button>
-      </header>
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
 
-      <div className="protected-staff-body">
-        <nav aria-label="Navegación principal" className="protected-staff-navigation">
-          <span aria-current="page">Visor 3D</span>
-        </nav>
-        
-        <main className="protected-staff-content">
-          <p className="eyebrow">ESPACIO PRIVADO</p>
-          <h1>Editor 3D de Inmuebles</h1>
-          
-          <div style={{ position: 'relative', marginTop: '20px', backgroundColor: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
-            <p style={{ marginBottom: '15px', color: '#4a5568' }}>Utiliza el ratón para rotar la cámara y hacer clic en los muebles. Usa <b>W, A, S, D</b> para moverte.</p>
-            
-            <div style={{ position: 'relative', display: 'flex', justifyContent: 'center' }}>
-              <div ref={mountRef} style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden', cursor: 'crosshair' }} />
-              
-              {selectedItem && (
-                <div style={{
-                  position: 'absolute',
-                  top: '20px',
-                  right: '20px',
-                  backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                  padding: '15px',
-                  borderRadius: '8px',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                  borderLeft: '5px solid #0f766e',
-                  fontFamily: 'sans-serif',
-                  pointerEvents: 'none'
-                }}>
-                  <h3 style={{ margin: '0 0 8px 0', color: '#1f2937', fontSize: '16px' }}>{selectedItem.name}</h3>
-                  <p style={{ margin: 0, color: '#0f766e', fontWeight: 'bold', fontSize: '18px' }}>
-                    ${selectedItem.price.toFixed(2)}
-                  </p>
-                </div>
-              )}
-            </div>
+    if (groupRef.current) {
+      scene.remove(groupRef.current);
+      disposeGroup(groupRef.current);
+    }
+    const group = new THREE.Group();
+    sceneDocument.rooms.forEach((room) => addRoom(group, room));
+    objectMeshesRef.current = sceneDocument.objects.map((object) =>
+      addObject(group, object, object.id === selectedObjectId),
+    );
+    scene.add(group);
+    groupRef.current = group;
+
+    const focus = focusPoint(sceneDocument);
+    gridRef.current?.position.set(focus.x, 0, focus.z);
+    if (!hasFocusedSceneRef.current) {
+      cameraRef.current?.position.set(focus.x + 3, focus.height + 3.6, focus.z + 4.5);
+      controlsRef.current?.target.set(focus.x, focus.height * 0.65, focus.z);
+      hasFocusedSceneRef.current = true;
+    }
+  }, [sceneDocument, selectedObjectId]);
+
+  const activeObjectId = selectedObjectId === undefined ? clickedObject?.id ?? null : selectedObjectId;
+  const activeObject = sceneDocument.objects.find((object) => object.id === activeObjectId);
+
+  return (
+    <section aria-label="Visor 3D de la escena" className="scene-viewer">
+      <p className="scene-viewer__hint">
+        Arrastra para rotar la cámara. Usa <strong>W, A, S, D</strong> para desplazarte y haz clic
+        en un objeto para seleccionarlo.
+      </p>
+      <div className="scene-viewer__canvas-wrap">
+        <div
+          aria-label="Renderizado interactivo de la escena"
+          className="scene-viewer__canvas"
+          ref={mountRef}
+        />
+        {activeObject ? (
+          <div className="scene-viewer__selection" role="status">
+            <strong>{activeObject.id}</strong>
+            <span>{activeObject.type}</span>
           </div>
-        </main>
+        ) : null}
       </div>
-    </div>
+    </section>
   );
 };

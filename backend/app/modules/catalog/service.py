@@ -35,6 +35,7 @@ from app.modules.catalog.models import (
     Listing,
     ListingExtra,
     ListingPhoto,
+    ListingScene,
     ListingTransition,
     QuoteRateLimitEvent,
     QuoteSnapshot,
@@ -59,6 +60,47 @@ class ListingCursor:
 
 def normalize_geo_key(value: str) -> str:
     return value.strip().casefold()
+
+
+def get_listing_scene(session: Session, listing_id: str) -> ListingScene | None:
+    return session.get(ListingScene, listing_id)
+
+
+def upsert_listing_scene(
+    session: Session,
+    *,
+    agency_id: str,
+    listing_id: str,
+    scene: dict[str, object],
+    updated_at: datetime,
+    updated_by: str,
+) -> ListingScene | None:
+    """Replace a listing's full scene after locking its parent listing row."""
+    listing = (
+        session.query(Listing)
+        .filter(Listing.id == listing_id, Listing.agency_id == agency_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if listing is None:
+        return None
+
+    stored = session.get(ListingScene, listing_id)
+    if stored is None:
+        stored = ListingScene(
+            listing_id=listing_id,
+            scene=scene,
+            updated_at=updated_at,
+            updated_by=updated_by,
+        )
+        session.add(stored)
+    else:
+        stored.scene = scene
+        stored.updated_at = updated_at
+        stored.updated_by = updated_by
+
+    session.flush()
+    return stored
 
 
 def _as_utc(value: datetime) -> datetime:

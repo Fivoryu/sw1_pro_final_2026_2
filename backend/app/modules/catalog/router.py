@@ -5,7 +5,9 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
+from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -29,6 +31,7 @@ from app.modules.catalog.schemas import (
     CatalogListingItem,
     CatalogPhotoItem,
     CatalogListingPage,
+    ListingSceneDocument,
     CatalogMoney,
     ListingApprovalStatus,
     ListingOperation,
@@ -61,10 +64,12 @@ from app.modules.catalog.service import (
     create_quote_snapshot,
     encode_cursor,
     get_public_listing,
+    get_listing_scene,
     list_listing_extras,
     normalize_geo_key,
     search_public_listings,
     transition_staff_listing,
+    upsert_listing_scene,
 )
 from app.modules.identity.session import ActiveStaff, get_active_staff
 
@@ -699,6 +704,71 @@ def get_agency_listing_transitions(
             ListingTransitionResponse.model_validate(row)
             for row in list_listing_transitions(session, listing_id)
         ]
+
+
+def _scene_error_response(status_code: int, detail: str, code: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={"detail": detail, "code": code},
+    )
+
+
+@router.get(
+    "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/scene",
+    response_model=ListingSceneDocument,
+)
+def get_agency_listing_scene(
+    agency_id: str,
+    listing_id: str,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> ListingSceneDocument | JSONResponse:
+    _require_listing_editor(staff, agency_id)
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    with session_factory() as session:
+        listing = get_staff_listing(session, agency_id=agency_id, listing_id=listing_id)
+        if listing is None:
+            raise HTTPException(status_code=404, detail="Listing not found")
+        stored = get_listing_scene(session, listing.id)
+        if stored is None:
+            return _scene_error_response(
+                404, "Scene is not defined for this listing", "scene_not_defined"
+            )
+        return ListingSceneDocument.model_validate(stored.scene)
+
+
+@router.put(
+    "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/scene",
+    response_model=ListingSceneDocument,
+)
+def replace_agency_listing_scene(
+    agency_id: str,
+    listing_id: str,
+    request: Request,
+    body: object = Body(...),
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> ListingSceneDocument | JSONResponse:
+    _require_listing_editor(staff, agency_id)
+    try:
+        scene = ListingSceneDocument.model_validate(body)
+    except ValidationError:
+        return _scene_error_response(
+            422, "Scene document does not match the v1 contract", "scene_invalid"
+        )
+
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    with session_factory.begin() as session:
+        stored = upsert_listing_scene(
+            session,
+            agency_id=agency_id,
+            listing_id=listing_id,
+            scene=scene.model_dump(mode="json"),
+            updated_at=request.app.state.clock(),
+            updated_by=staff["id"],
+        )
+        if stored is None:
+            return _scene_error_response(404, "Listing not found", "listing_not_found")
+        return ListingSceneDocument.model_validate(stored.scene)
 
 
 router.include_router(listings_router)
