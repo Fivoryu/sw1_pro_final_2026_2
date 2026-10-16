@@ -31,12 +31,20 @@ def test_compose_overlay_passes_the_shared_attempt_limit_to_api_and_worker() -> 
         ), f"{service} must receive the same host-configured retry cap as provisioning"
 
 
+def _find_powershell() -> str | None:
+    # The lifecycle scripts are plain PowerShell, so pwsh (cross-platform, present
+    # on Linux CI runners) works as well as Windows PowerShell 5.1.
+    for executable in ("pwsh", "pwsh.exe", "powershell.exe"):
+        resolved = shutil.which(executable)
+        if resolved is not None:
+            return resolved
+    return None
+
+
 def test_local_detection_queue_is_provisioned_with_a_dead_letter_redrive_policy() -> None:
-    powershell = shutil.which("powershell.exe") or (
-        r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-    )
-    if not Path(powershell).is_file():
-        pytest.skip("Windows PowerShell is unavailable")
+    powershell = _find_powershell()
+    if powershell is None:
+        pytest.skip("PowerShell (pwsh or Windows PowerShell) is unavailable")
 
     script_path = (
         Path(__file__).resolve().parents[2]
@@ -74,6 +82,19 @@ function docker {{
     if ($joined -match 'sqs get-queue-attributes') {{
         return '{{"Attributes":{{"QueueArn":"arn:aws:sqs:us-east-1:000000000000:roomforge-local-detection-dlq"}}}}'
     }}
+    if ($joined -match 's3api get-bucket-lifecycle-configuration') {{
+        # Mimic AWS CLI behavior for a bucket without a lifecycle configuration:
+        # nonzero exit and a NoSuchLifecycleConfiguration error payload, which the
+        # lifecycle script treats as "no current configuration".
+        $global:LASTEXITCODE = 1
+        return '{{"Error":{{"Code":"NoSuchLifecycleConfiguration"}}}}'
+    }}
+    if ($joined -match 'exec -T floci sh -c') {{
+        return '{{}}'
+    }}
+    if ($joined -match 's3api put-bucket-lifecycle-configuration') {{
+        return '{{}}'
+    }}
     if ($joined -match 'sqs set-queue-attributes') {{
         $attributesIndex = [Array]::IndexOf($args, '--attributes')
         $global:capturedAttributes = [string]$args[$attributesIndex + 1]
@@ -81,6 +102,9 @@ function docker {{
     }}
     throw "Unexpected mocked Docker invocation: $joined"
 }}
+# set-staging-lifecycle.ps1 invokes docker.exe with the extension, which bypasses
+# a function named only `docker` and would reach the real CLI; mirror the mock.
+function docker.exe {{ docker @args }}
 . '{script_literal}'
 Write-Output ("CAPTURED-ATTRIBUTES:" + $global:capturedAttributes)
 Write-Output ("CAPTURED-QUEUES:" + ($global:queueNames -join ','))
