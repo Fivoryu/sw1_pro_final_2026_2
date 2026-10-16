@@ -201,7 +201,12 @@ def _normalize_sql(value: str | None) -> str | None:
     )
     normalized = _DEFAULT_TRIM_ARGUMENTS.sub("trim(", normalized)
     normalized = normalized.replace("(", " ").replace(")", " ")
-    return " ".join(normalized.split())
+    normalized = " ".join(normalized.split())
+    # pg_get_expr renders literal defaults quoted ('manual'); the metadata side of
+    # the comparison is the bare literal value, so drop one wrapping quote pair.
+    if len(normalized) >= 2 and normalized.startswith("'") and normalized.endswith("'"):
+        normalized = normalized[1:-1]
+    return normalized
 
 
 def _expected_default(column: Column[object], engine: Engine) -> str | None:
@@ -719,6 +724,17 @@ def _metadata_differences(engine: Engine) -> list[str]:
                 )
             expected_default = _expected_default(metadata_column, engine)
             actual_default = _normalize_sql(actual_column["default"])
+            if (
+                expected_default is None
+                and metadata_column.primary_key
+                and actual_default is not None
+                and actual_default.startswith("nextval")
+            ):
+                # An autoincrement integer primary key carries no server_default in
+                # SQLAlchemy metadata: the dialect supplies the sequence at DDL time.
+                # PostgreSQL fairly reflects that nextval default, so both sides
+                # describe the same schema.
+                continue
             if expected_default != actual_default:
                 differences.append(
                     f"{table_name}.{column_name} server default: expected {expected_default!r}, "
