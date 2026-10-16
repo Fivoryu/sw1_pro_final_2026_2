@@ -208,7 +208,7 @@ def test_agency_to_customer_journey_e2e(journey_postgres_engine: Engine) -> None
         # --- Panel surface: review and publication (F04.3, admin transitions) --
         submitted = client.post(f"{listing_url}/submit")
         assert submitted.status_code == 200, submitted.text
-        assert submitted.json()["approval_status"] == "pending_review"
+        assert submitted.json()["approval_status"] == "pending"
         approved = client.post(f"{listing_url}/approve")
         assert approved.status_code == 200, approved.text
         assert approved.json()["approval_status"] == "approved"
