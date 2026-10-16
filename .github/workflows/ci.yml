@@ -14,6 +14,9 @@ jobs:
   backend:
     name: Backend (Python 3.11)
     runs-on: ubuntu-latest
+    # A hung test must never burn the 6-hour GitHub limit again: cap the job and
+    # make pytest fail fast, dumping the stacks of every thread when a test stalls.
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
@@ -23,7 +26,30 @@ jobs:
         with:
           python-version: "3.11"
       - run: python -m pip install ".[dev]"
-      - run: python -m pytest tests -q
+      # pytest-timeout (thread method) cannot break a hang that happens inside
+      # native code holding the GIL: its timer thread is starved too, which is
+      # exactly what the stall at 48% of the suite showed. py-spy reads the
+      # process from outside, so every 30 seconds past ~2.5 minutes it dumps the
+      # native stack of every thread into this log before killing the run.
+      - name: Pytest with native stack dumps on stall
+        run: |
+          python -m pip install py-spy
+          python -m pytest tests -q --timeout=120 --timeout-method=thread &
+          PYTEST_PID=$!
+          for _ in 1 2 3 4 5; do
+            sleep 30
+            if ! kill -0 "$PYTEST_PID" 2>/dev/null; then
+              wait "$PYTEST_PID"
+              exit $?
+            fi
+          done
+          echo "::error::pytest did not finish in ~150s; dumping native thread stacks (py-spy)"
+          py-spy dump --pid "$PYTEST_PID" --nonblocking || true
+          sleep 10
+          py-spy dump --pid "$PYTEST_PID" --nonblocking || true
+          kill -9 "$PYTEST_PID" 2>/dev/null || true
+          wait "$PYTEST_PID" 2>/dev/null || true
+          exit 1
       - run: ruff check app tests
       - run: pyright app tests
       # Two feature branches once numbered their migrations from the same parent, which
@@ -42,6 +68,7 @@ jobs:
   panel:
     name: Staff panel (Node 22)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: panel/staff-shell
@@ -57,6 +84,7 @@ jobs:
   customer-flutter:
     name: Customer app (Flutter 3.41.8)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/cliente_mobile
@@ -73,6 +101,7 @@ jobs:
   capture-flutter:
     name: Capture app (Flutter 3.41.8)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/captura_mobile
