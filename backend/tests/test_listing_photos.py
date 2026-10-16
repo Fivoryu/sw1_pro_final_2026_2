@@ -3,11 +3,12 @@ from __future__ import annotations
 import base64
 import importlib.util
 import io
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from threading import Event
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -15,17 +16,25 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+import app.main as main_module
 from app.core.config import Settings
 from app.db.base import Base
 from app.main import create_app
 from app.modules.catalog import photo_storage as photo_storage_module
-from app.modules.catalog.models import Listing, ListingPhoto, ListingTransition
+from app.modules.catalog.models import (
+    Listing,
+    ListingPhoto,
+    ListingPhotoDeletion,
+    ListingTransition,
+)
+from app.modules.catalog.photos import UPLOAD_WINDOW, cleanup_photo_deletion_intents
 from app.modules.catalog.photo_storage import (
     InMemoryPhotoStorage,
+    PhotoStorageUnavailableError,
     PhotoTooLargeError,
     S3PhotoStorage,
     create_photo_storage,
@@ -224,7 +233,21 @@ def test_in_memory_storage_round_trip_and_size_cap() -> None:
 # --- Staff photo routes ------------------------------------------------------
 
 _NOW = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
-_MAX_BYTES = 5 * 1024 * 1024
+_MAX_BYTES = 20 * 1024 * 1024
+# Mirrors the policy grace the deletion journal keeps after the upload window closes.
+_DELETION_GRACE = timedelta(minutes=15)
+_TRUNCATED_HEIF_FIXTURE = base64.b64decode(
+    "AAAAHGZ0eXBoZWljAAAAAG1pZjFoZWljbWlhZgAAAXxtZXRhAAAAAAAAACFoZGxyAAAAAAAAAABwaWN0AAAAAAAAAAAAAAAAAAAAACJpbG9jAAAAAERAAAEAAQAAAAABoAABAAAAAAAAADYAAAAjaWluZgAAAAAAAQAAABVpbmZlAgAAAAABAABodmMxAAAAAA5waXRtAAAAAAABAAAA/GlwcnAAAADcaXBjbwAAAHVodmNDAQNwAAAAkAAAAAAAHvAA/P34+AAADwNgAAEAGEABDAH//wNwAAADAJAAAAMAAAMAHroCQGEAAQApQgEBA3AAAAMAkAAAAwAAAwAeoCCBBZbqrprm4CGgwIAAAAyAAAADAIRiAAEABkQBwXPBiQAAABNjb2xybmNseAABAA0ABoAAAAAUaXNwZQAAAAAAAABAAAAAQAAAAChjbGFwAAAABAAAAAEAAAACAAAAAf///wQAAAAC////wgAAAAIAAAAQcGl4aQAAAAADCAgIAAAAGGlwbWEAAAAAAAAAAQABBYECAwWEAAAAPm1kYXRhAAAAyKAGvBPIWhzRxZNLf/Fd///6nY7L9qdcEm1Qjs/RSxGAmv3XroGTEzROpbNAoK6inXqY="
+)
+
+
+def _encode_heif_fixture() -> bytes:
+    output = io.BytesIO()
+    Image.new("RGB", (4, 2), color=(80, 120, 200)).save(output, format="HEIF", quality=90)
+    return output.getvalue()
+
+
+_HEIF_FIXTURE = _encode_heif_fixture()
 
 
 @dataclass
@@ -234,6 +257,56 @@ class PhotoContext:
     session_factory: sessionmaker[Session]
     storage: InMemoryPhotoStorage
     clock: list[datetime]
+
+
+class _CleanupObservedPhotoStorage(InMemoryPhotoStorage):
+    def __init__(self) -> None:
+        super().__init__()
+        self.expected_deleted_keys: set[str] = set()
+        self.deleted_keys: set[str] = set()
+        self.expected_deletes_complete = Event()
+
+    def delete(self, key: str) -> None:
+        super().delete(key)
+        self.deleted_keys.add(key)
+        if self.expected_deleted_keys and self.expected_deleted_keys <= self.deleted_keys:
+            self.expected_deletes_complete.set()
+
+
+class _RetryObservedPhotoStorage(InMemoryPhotoStorage):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fail_key: str | None = None
+        self.failed = False
+        self.failure_observed = Event()
+        self.expected_deleted_keys: set[str] = set()
+        self.deleted_keys: set[str] = set()
+        self.deletions_complete = Event()
+
+    def fail_once_on(self, key: str) -> None:
+        self.fail_key = key
+
+    def delete(self, key: str) -> None:
+        if key == self.fail_key and not self.failed:
+            self.failed = True
+            self.failure_observed.set()
+            raise PhotoStorageUnavailableError
+        super().delete(key)
+        self.deleted_keys.add(key)
+        if self.expected_deleted_keys and self.expected_deleted_keys <= self.deleted_keys:
+            self.deletions_complete.set()
+
+
+class _LateSigningPhotoStorage(InMemoryPhotoStorage):
+    """Signer stamps the URL later than the request instant, as a real signer does."""
+
+    def __init__(self, clock: list[datetime]) -> None:
+        super().__init__()
+        self.clock = clock
+
+    def presign_upload(self, key: str, *, content_type: str, expires_in: int) -> str:
+        self.clock[0] = self.clock[0] + timedelta(seconds=30)
+        return super().presign_upload(key, content_type=content_type, expires_in=expires_in)
 
 
 def _install_offer_version_triggers(engine: Engine) -> None:
@@ -246,28 +319,46 @@ def _install_offer_version_triggers(engine: Engine) -> None:
     from alembic.operations import Operations
 
     with engine.begin() as connection:
+        # The 0007 bootstrap runs once per database; a second context over the same
+        # file database already owns the guard table and its triggers.
+        guard_installed = connection.execute(
+            text(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'listing_offer_version_guard'"
+            )
+        ).first()
+        if guard_installed is not None:
+            return
         with Operations.context(MigrationContext.configure(connection)):
             migration._install_sqlite_offer_version_triggers()
 
 
-def _build_context(storage: InMemoryPhotoStorage | None) -> Iterator[PhotoContext]:
-    engine = create_engine(
-        "sqlite+pysqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+def _build_context(
+    storage: InMemoryPhotoStorage | None,
+    *,
+    database_url: str = "sqlite+pysqlite:///:memory:",
+    clock: list[datetime] | None = None,
+) -> Generator[PhotoContext, None, None]:
+    if database_url == "sqlite+pysqlite:///:memory:":
+        engine = create_engine(
+            database_url,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    else:
+        engine = create_engine(database_url, connect_args={"check_same_thread": False})
     factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     Base.metadata.create_all(engine)
     _install_offer_version_triggers(engine)
-    clock = [_NOW]
+    clock_state = clock if clock is not None else [_NOW]
     app = create_app(
-        settings=_settings(),
+        settings=_settings(database_url=database_url),
         session_factory=factory,
-        clock=lambda: clock[0],
+        clock=lambda: clock_state[0],
         photo_storage=storage,
     )
     with TestClient(app) as client:
-        yield PhotoContext(client, app, factory, storage or InMemoryPhotoStorage(), clock)
+        yield PhotoContext(client, app, factory, storage or InMemoryPhotoStorage(), clock_state)
     engine.dispose()
 
 
@@ -279,6 +370,29 @@ def photo_context() -> Iterator[PhotoContext]:
 @pytest.fixture
 def storageless_context() -> Iterator[PhotoContext]:
     yield from _build_context(None)
+
+
+@pytest.fixture
+def photo_cleanup_context(monkeypatch: pytest.MonkeyPatch) -> Iterator[PhotoContext]:
+    monkeypatch.setattr(
+        main_module,
+        "PHOTO_UPLOAD_CLEANUP_INTERVAL_SECONDS",
+        0.1,
+        raising=False,
+    )
+    yield from _build_context(_CleanupObservedPhotoStorage())
+
+
+@pytest.fixture
+def photo_deletion_manual_context(monkeypatch: pytest.MonkeyPatch) -> Iterator[PhotoContext]:
+    """Deletion context whose periodic worker never fires, so sweeps are driven by hand."""
+    monkeypatch.setattr(
+        main_module,
+        "PHOTO_DELETION_RETRY_INTERVAL_SECONDS",
+        3600.0,
+        raising=False,
+    )
+    yield from _build_context(_CleanupObservedPhotoStorage())
 
 
 def _staff(
@@ -333,6 +447,8 @@ def _seed_photo(
     status: str = "confirmed",
     created_at: datetime = _NOW,
     expires_at: datetime | None = None,
+    original_object_key: str | None = None,
+    upload_object_key: str | None = None,
 ) -> str:
     key = f"agencies/{agency_id}/listings/{listing_id}/photos/{photo_id}"
     with context.session_factory.begin() as session:
@@ -342,6 +458,8 @@ def _seed_photo(
                 agency_id=agency_id,
                 listing_id=listing_id,
                 object_key=key,
+                original_object_key=original_object_key,
+                upload_object_key=upload_object_key,
                 status=status,
                 content_type="image/png",
                 size_bytes=10,
@@ -350,7 +468,8 @@ def _seed_photo(
                 confirmed_at=created_at if status == "confirmed" else None,
             )
         )
-    context.storage.objects[key] = _image_bytes("PNG")
+    for asset_key in {key, original_object_key, upload_object_key} - {None}:
+        context.storage.write(asset_key, _image_bytes("PNG"), content_type="image/png")
     return key
 
 
@@ -392,6 +511,49 @@ def _request_upload(
     )
 
 
+def test_signed_upload_url_never_outlives_the_stored_expiry() -> None:
+    clock = [_NOW]
+    storage = _LateSigningPhotoStorage(clock)
+    context_generator = _build_context(storage, clock=clock)
+    context = next(context_generator)
+    try:
+        _seed_listing(context)
+        _staff(context)
+        upload = _request_upload(context).json()
+
+        photo = _photo(context, upload["photo_id"])
+        assert photo is not None
+        # The URL was signed 30s after the request instant, so the deadline the deletion
+        # journal trusts must cover that URL instead of falling short of it.
+        assert photo.expires_at - photo.created_at == UPLOAD_WINDOW + timedelta(seconds=30)
+    finally:
+        context_generator.close()
+
+
+def test_staging_assets_live_under_a_prefix_that_cannot_reach_confirmed_photos(
+    photo_context: PhotoContext,
+) -> None:
+    context = photo_context
+    _seed_listing(context)
+    _staff(context)
+    upload = _request_upload(context).json()
+    upload_key = _photo_key(context, upload["photo_id"])
+    context.storage.write(upload_key, _image_bytes("JPEG"), content_type="image/jpeg")
+
+    confirmed = context.client.post(_photos_url() + f"/{upload['photo_id']}/confirm")
+
+    assert confirmed.status_code == 200, confirmed.text
+    photo = _photo(context, upload["photo_id"])
+    assert photo is not None
+    # A bucket lifecycle rule can only filter by prefix, so the key a presigned PUT can
+    # recreate has to sit under its own top-level prefix. The confirmed original and its
+    # public derivative never expire, so the staging rule must never reach them.
+    assert upload_key.startswith("staging/")
+    assert photo.original_object_key is not None
+    assert photo.object_key.startswith("agencies/")
+    assert photo.original_object_key.startswith("agencies/")
+
+
 def _listing(context: PhotoContext, listing_id: str = "listing-one") -> Listing:
     with context.session_factory() as session:
         listing = session.get(Listing, listing_id)
@@ -407,7 +569,7 @@ def _photo(context: PhotoContext, photo_id: str) -> ListingPhoto | None:
 def _photo_key(context: PhotoContext, photo_id: str) -> str:
     photo = _photo(context, photo_id)
     assert photo is not None
-    return photo.object_key
+    return getattr(photo, "upload_object_key", None) or photo.object_key
 
 
 def _actions(context: PhotoContext, listing_id: str = "listing-one") -> list[str]:
@@ -435,12 +597,15 @@ def test_upload_request_signs_a_server_chosen_key_and_keeps_the_photo_pending(
     assert set(body) == {"photo_id", "upload_url", "upload_method", "upload_headers", "expires_at"}
     photo = _photo(context, body["photo_id"])
     assert photo is not None
-    expected_key = f"agencies/agency-one/listings/listing-one/photos/{body['photo_id']}"
-    assert photo.object_key == expected_key
+    expected_prefix = f"agencies/agency-one/listings/listing-one/photos/{body['photo_id']}"
+    upload_key = getattr(photo, "upload_object_key", None)
+    assert photo.object_key == f"{expected_prefix}/public"
+    assert upload_key == f"staging/{expected_prefix}"
+    assert photo.object_key != upload_key
     assert (photo.status, photo.content_type, photo.size_bytes) == ("pending", "image/webp", 4096)
     assert body["upload_method"] == "PUT"
     assert body["upload_headers"] == {"Content-Type": "image/webp"}
-    assert urlsplit(body["upload_url"]).path.endswith(expected_key)
+    assert urlsplit(body["upload_url"]).path.endswith(upload_key)
     assert datetime.fromisoformat(body["expires_at"]) == _NOW + timedelta(minutes=15)
     assert _actions(context) == []
 
@@ -475,7 +640,7 @@ def test_upload_limit_counts_confirmed_and_live_pending_photos_only(
     context = photo_context
     _seed_listing(context)
     _staff(context)
-    for index in range(9):
+    for index in range(19):
         _seed_photo(context, f"confirmed-{index}")
     expired_key = _seed_photo(
         context,
@@ -484,48 +649,220 @@ def test_upload_limit_counts_confirmed_and_live_pending_photos_only(
         created_at=_NOW - timedelta(minutes=20),
     )
 
-    tenth = _request_upload(context)
-    eleventh = _request_upload(context)
+    twentieth = _request_upload(context)
+    twenty_first = _request_upload(context)
 
-    assert tenth.status_code == 201, tenth.text
-    assert eleventh.status_code == 409
+    assert twentieth.status_code == 201, twentieth.text
+    assert twenty_first.status_code == 409
     assert _photo(context, "expired") is None
     assert expired_key not in context.storage.objects
 
 
-def test_confirm_validates_and_rewrites_the_photo_without_metadata(
+@pytest.mark.parametrize("content_type", ["image/heic", "image/heif"])
+def test_upload_request_accepts_heif_formats_at_the_20_mib_limit(
+    photo_context: PhotoContext, content_type: str
+) -> None:
+    context = photo_context
+    _seed_listing(context)
+    _staff(context)
+
+    response = _request_upload(context, content_type, _MAX_BYTES)
+
+    assert response.status_code == 201, response.text
+    photo = _photo(context, response.json()["photo_id"])
+    assert photo is not None
+    assert photo.content_type == content_type
+    assert photo.size_bytes == _MAX_BYTES
+
+
+def test_confirm_preserves_the_original_and_sanitizes_a_separate_public_derivative(
     photo_context: PhotoContext,
 ) -> None:
     context = photo_context
     _seed_listing(context)
     _staff(context)
     upload = _request_upload(context).json()
-    key = _photo_key(context, upload["photo_id"])
+    upload_key = _photo_key(context, upload["photo_id"])
     original = _image_bytes("JPEG", (4, 2), orientation=6, gps=True)
     assert len(Image.open(io.BytesIO(original)).getexif().get_ifd(0x8825)) > 0
-    context.storage.objects[key] = original
+    context.storage.objects[upload_key] = original
 
     response = context.client.post(_photos_url() + f"/{upload['photo_id']}/confirm")
 
     assert response.status_code == 200, response.text
     body = response.json()
     assert set(body) == {"photo_id", "content_type", "size_bytes", "url", "created_at"}
-    stored = context.storage.objects[key]
-    cleaned = Image.open(io.BytesIO(stored))
+    confirmed = _photo(context, upload["photo_id"])
+    assert confirmed is not None
+    assert confirmed.status == "confirmed"
+    original_key = getattr(confirmed, "original_object_key", None)
+    assert original_key is not None
+    assert context.storage.read(original_key, max_bytes=_MAX_BYTES) == original
+    assert confirmed.object_key != upload_key
+    derivative = context.storage.objects[confirmed.object_key]
+    cleaned = Image.open(io.BytesIO(derivative))
     assert cleaned.format == "JPEG"
     assert len(cleaned.getexif()) == 0
     assert cleaned.size == (2, 4)
-    assert context.storage.content_types[key] == "image/jpeg"
-    confirmed = _photo(context, upload["photo_id"])
-    assert confirmed is not None
-    assert (confirmed.status, confirmed.size_bytes) == ("confirmed", len(stored))
+    assert context.storage.content_types[confirmed.object_key] == "image/jpeg"
+    assert confirmed.size_bytes == len(original)
     assert confirmed.confirmed_at is not None
-    assert body["size_bytes"] == len(stored)
-    assert urlsplit(body["url"]).path.endswith(key)
+    assert body["size_bytes"] == len(original)
+    assert urlsplit(body["url"]).path.endswith(confirmed.object_key)
+    assert context.storage.objects[upload_key] == original
+
+    context.clock[0] = _NOW + timedelta(minutes=15)
+    next_upload = _request_upload(context)
+    assert next_upload.status_code == 201, next_upload.text
+    assert upload_key not in context.storage.objects
+    assert original_key in context.storage.objects
+    assert confirmed.object_key in context.storage.objects
+    refreshed = _photo(context, upload["photo_id"])
+    assert refreshed is not None and refreshed.upload_object_key is None
 
     again = context.client.post(_photos_url() + f"/{upload['photo_id']}/confirm")
     assert again.status_code == 200
     assert _actions(context) == ["edit"]
+
+
+def test_legacy_pending_upload_preserves_its_signed_key_and_expires_only_staging(
+    photo_context: PhotoContext,
+) -> None:
+    context = photo_context
+    _seed_listing(context)
+    _staff(context)
+    upload = _request_upload(context).json()
+    photo_id = upload["photo_id"]
+    legacy_key = f"agencies/agency-one/listings/listing-one/photos/{photo_id}"
+    original = _image_bytes("JPEG", (4, 2), orientation=6, gps=True)
+    with context.session_factory.begin() as session:
+        photo = session.get(ListingPhoto, photo_id)
+        assert photo is not None
+        photo.object_key = legacy_key
+        photo.upload_object_key = None
+        photo.original_object_key = None
+        photo.public_content_type = None
+    context.storage.objects[legacy_key] = original
+
+    response = context.client.post(_photos_url() + f"/{photo_id}/confirm")
+
+    assert response.status_code == 200, response.text
+    public_key = f"{legacy_key}/public"
+    original_key = f"{legacy_key}/original"
+    confirmed = _photo(context, photo_id)
+    assert confirmed is not None
+    assert confirmed.object_key == public_key
+    assert confirmed.upload_object_key == legacy_key
+    assert confirmed.original_object_key == original_key
+    assert context.storage.objects[legacy_key] == original
+    assert context.storage.objects[original_key] == original
+    assert context.storage.content_types[public_key] == "image/jpeg"
+    assert response.json()["content_type"] == "image/jpeg"
+    assert response.json()["size_bytes"] == len(original)
+
+    context.clock[0] = _NOW + timedelta(minutes=15)
+    next_upload = _request_upload(context)
+    assert next_upload.status_code == 201, next_upload.text
+    assert legacy_key not in context.storage.objects
+    assert public_key in context.storage.objects
+    assert original_key in context.storage.objects
+    expired_stage = _photo(context, photo_id)
+    assert expired_stage is not None and expired_stage.upload_object_key is None
+
+
+def test_expired_staging_is_cleaned_without_another_upload_request(
+    photo_cleanup_context: PhotoContext,
+) -> None:
+    context = photo_cleanup_context
+    _seed_listing(context)
+    storage = context.storage
+    assert isinstance(storage, _CleanupObservedPhotoStorage)
+
+    prefix = "agencies/agency-one/listings/listing-one/photos"
+    pending_upload_key = f"{prefix}/pending/upload"
+    confirmed_upload_key = f"{prefix}/confirmed/upload"
+    confirmed_public_key = f"{prefix}/confirmed/public"
+    confirmed_original_key = f"{prefix}/confirmed/original"
+    storage.expected_deleted_keys = {pending_upload_key, confirmed_upload_key}
+    storage.write(pending_upload_key, b"partial", content_type="image/png")
+    storage.write(confirmed_upload_key, b"late-put", content_type="image/png")
+    storage.write(confirmed_public_key, b"public-photo", content_type="image/png")
+    storage.write(confirmed_original_key, b"exact-original", content_type="image/png")
+
+    expired_at = _NOW - timedelta(minutes=1)
+    created_at = _NOW - timedelta(minutes=16)
+    with context.session_factory.begin() as session:
+        session.add(
+            ListingPhoto(
+                id="expired-pending",
+                agency_id="agency-one",
+                listing_id="listing-one",
+                object_key=f"{prefix}/pending/public",
+                upload_object_key=pending_upload_key,
+                original_object_key=None,
+                public_content_type=None,
+                status="pending",
+                content_type="image/png",
+                size_bytes=7,
+                created_at=created_at,
+                expires_at=expired_at,
+                confirmed_at=None,
+            )
+        )
+        session.add(
+            ListingPhoto(
+                id="confirmed-photo",
+                agency_id="agency-one",
+                listing_id="listing-one",
+                object_key=confirmed_public_key,
+                upload_object_key=confirmed_upload_key,
+                original_object_key=confirmed_original_key,
+                public_content_type="image/png",
+                status="confirmed",
+                content_type="image/png",
+                size_bytes=13,
+                created_at=created_at,
+                expires_at=expired_at,
+                confirmed_at=created_at,
+            )
+        )
+
+    assert storage.expected_deletes_complete.wait(timeout=2.0), (
+        "Expired staging objects were not cleaned while the listing was idle"
+    )
+    assert storage.read(pending_upload_key, max_bytes=64) is None
+    assert storage.read(confirmed_upload_key, max_bytes=64) is None
+    assert storage.read(confirmed_public_key, max_bytes=64) == b"public-photo"
+    assert storage.read(confirmed_original_key, max_bytes=64) == b"exact-original"
+
+    _staff(context)
+    listed = context.client.get(_photos_url())
+    assert listed.status_code == 200, listed.text
+    assert [photo["photo_id"] for photo in listed.json()["photos"]] == ["confirmed-photo"]
+
+
+def test_confirm_preserves_heic_original_and_publishes_a_jpeg_derivative(
+    photo_context: PhotoContext,
+) -> None:
+    context = photo_context
+    _seed_listing(context)
+    _staff(context)
+    upload = _request_upload(context, "image/heic", len(_HEIF_FIXTURE)).json()
+    upload_key = _photo_key(context, upload["photo_id"])
+    context.storage.write(upload_key, _HEIF_FIXTURE, content_type="image/heic")
+
+    response = context.client.post(_photos_url() + f"/{upload['photo_id']}/confirm")
+
+    assert response.status_code == 200, response.text
+    original_key = f"agencies/agency-one/listings/listing-one/photos/{upload['photo_id']}/original"
+    public_key = f"agencies/agency-one/listings/listing-one/photos/{upload['photo_id']}/public"
+    assert context.storage.read(original_key, max_bytes=_MAX_BYTES) == _HEIF_FIXTURE
+    derivative = context.storage.read(public_key, max_bytes=_MAX_BYTES)
+    assert derivative is not None
+    assert Image.open(io.BytesIO(derivative)).format == "JPEG"
+    assert context.storage.content_types[public_key] == "image/jpeg"
+    assert response.json()["size_bytes"] == len(_HEIF_FIXTURE)
+    assert urlsplit(response.json()["url"]).path.endswith(public_key)
 
 
 def test_confirm_before_upload_keeps_the_photo_pending(photo_context: PhotoContext) -> None:
@@ -548,8 +885,9 @@ def test_confirm_before_upload_keeps_the_photo_pending(photo_context: PhotoConte
         ("image/jpeg", b"not an image at all"),
         ("image/png", _image_bytes("PNG", (9000, 5000), mode="1")),
         ("image/jpeg", b"x" * (_MAX_BYTES + 1)),
+        ("image/heic", _TRUNCATED_HEIF_FIXTURE),
     ],
-    ids=["format-mismatch", "not-an-image", "too-many-pixels", "too-large"],
+    ids=["format-mismatch", "not-an-image", "too-many-pixels", "too-large", "truncated-heif"],
 )
 def test_confirm_discards_uploads_that_are_not_valid_photos(
     photo_context: PhotoContext, declared: str, data: bytes
@@ -567,6 +905,33 @@ def test_confirm_discards_uploads_that_are_not_valid_photos(
     assert _photo(context, upload["photo_id"]) is None
     assert key not in context.storage.objects
     assert _actions(context) == []
+
+
+def test_discarded_invalid_upload_is_swept_once_its_signed_put_expires(
+    photo_deletion_manual_context: PhotoContext,
+) -> None:
+    context = photo_deletion_manual_context
+    _seed_listing(context)
+    _staff(context)
+    upload = _request_upload(context, "image/jpeg").json()
+    key = _photo_key(context, upload["photo_id"])
+    context.storage.objects[key] = b"not an image at all"
+
+    response = context.client.post(_photos_url() + f"/{upload['photo_id']}/confirm")
+
+    assert response.status_code == 422
+    assert _photo(context, upload["photo_id"]) is None
+    # Discarding deletes the row, so the journal is the only thing that can still
+    # remove an object the signed PUT of that key is still allowed to recreate.
+    _sweep_deletions(context)
+    assert _deletion_intent_count(context) == 1
+
+    context.storage.write(key, b"late-put", content_type="image/jpeg")
+
+    context.clock[0] = _NOW + UPLOAD_WINDOW + _DELETION_GRACE + timedelta(seconds=1)
+    _sweep_deletions(context)
+
+    assert context.storage.read(key, max_bytes=_MAX_BYTES) is None
 
 
 def test_confirm_after_the_upload_window_is_rejected(photo_context: PhotoContext) -> None:
@@ -631,22 +996,264 @@ def test_photo_changes_return_the_listing_to_draft(
     assert _actions(context) == ["edit"]
 
 
-def test_delete_removes_the_object_and_returns_the_listing_to_draft(
-    photo_context: PhotoContext,
-) -> None:
+def test_agent_cannot_delete_a_confirmed_photo(photo_context: PhotoContext) -> None:
     context = photo_context
     _seed_listing(context, approval_status="approved", is_published=True)
-    _staff(context)
+    _staff(context, role="agent")
     key = _seed_photo(context, "photo-a")
 
     response = context.client.delete(_photos_url() + "/photo-a")
 
+    assert response.status_code == 403
+    listed = context.client.get(_photos_url())
+    assert listed.status_code == 200, listed.text
+    assert [photo["photo_id"] for photo in listed.json()["photos"]] == ["photo-a"]
+    assert context.storage.read(key, max_bytes=_MAX_BYTES) is not None
+    listing = _listing(context)
+    assert (listing.approval_status, listing.is_published) == ("approved", True)
+    assert _actions(context) == []
+
+
+def test_delete_removes_the_object_and_returns_the_listing_to_draft(
+    photo_deletion_manual_context: PhotoContext,
+) -> None:
+    context = photo_deletion_manual_context
+    _seed_listing(context, approval_status="approved", is_published=True)
+    _staff(context, role="agency_admin")
+    original_key = "private/original/photo-a"
+    upload_key = "staging/photo-a"
+    public_key = _seed_photo(
+        context,
+        "photo-a",
+        original_object_key=original_key,
+        upload_object_key=upload_key,
+    )
+    storage = context.storage
+    assert isinstance(storage, _CleanupObservedPhotoStorage)
+    storage.expected_deleted_keys = {public_key, original_key, upload_key}
+
+    response = context.client.delete(_photos_url() + "/photo-a")
+
     assert response.status_code == 204
-    assert _photo(context, "photo-a") is None
-    assert key not in context.storage.objects
+    # The sweep is driven by hand, like the rest of the deletion tests: the periodic worker
+    # shares this single in-memory SQLite connection, and two threads executing on one
+    # connection deadlock instead of failing.
+    _sweep_deletions(context)
+    listed = context.client.get(_photos_url())
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["photos"] == []
+    assert all(
+        storage.read(key, max_bytes=_MAX_BYTES) is None
+        for key in storage.expected_deleted_keys
+    )
     listing = _listing(context)
     assert (listing.approval_status, listing.is_published) == ("draft", False)
     assert _actions(context) == ["edit"]
+
+
+def test_photo_workers_start_even_when_the_rate_refresh_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The photo workers answer to the photo storage, not to the rate refresher.
+
+    A review claimed the deletion worker was created inside the rate-refresh gate. It was
+    not, and this pins that: with the refresher disabled the journal would never drain and
+    a confirmed photo the admin deleted would keep its objects forever.
+    """
+    monkeypatch.setenv("ROOMFORGE_RATE_REFRESH_SECONDS", "0")
+    context_generator = _build_context(_CleanupObservedPhotoStorage())
+    context = next(context_generator)
+    try:
+        assert getattr(context.app.state, "photo_cleaner_task", None) is not None
+        assert getattr(context.app.state, "photo_deleter_task", None) is not None
+    finally:
+        context_generator.close()
+
+
+def test_photo_deletion_intent_survives_restart_and_retries_storage_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_url = f"sqlite+pysqlite:///{tmp_path / 'photo-deletion.sqlite'}"
+    storage = _RetryObservedPhotoStorage()
+    clock = [_NOW]
+    public_key = "agencies/agency-one/listings/listing-one/photos/photo-retry"
+    original_key = "private/original/photo-retry"
+    upload_key = "staging/photo-retry"
+    expected_keys = {public_key, original_key, upload_key}
+    monkeypatch.setattr(
+        main_module,
+        "PHOTO_DELETION_RETRY_INTERVAL_SECONDS",
+        3600.0,
+        raising=False,
+    )
+
+    first_context_generator = _build_context(
+        storage, database_url=database_url, clock=clock
+    )
+    first_context = next(first_context_generator)
+    try:
+        _seed_listing(first_context, approval_status="approved", is_published=True)
+        _staff(first_context, role="agency_admin")
+        _seed_photo(
+            first_context,
+            "photo-retry",
+            original_object_key=original_key,
+            upload_object_key=upload_key,
+        )
+
+        response = first_context.client.delete(_photos_url() + "/photo-retry")
+
+        assert response.status_code == 204
+        listed = first_context.client.get(_photos_url())
+        assert listed.status_code == 200, listed.text
+        assert listed.json()["photos"] == []
+        assert _listing(first_context).approval_status == "draft"
+        assert _actions(first_context) == ["edit"]
+        assert all(
+            storage.read(key, max_bytes=_MAX_BYTES) is not None
+            for key in expected_keys
+        )
+    finally:
+        first_context_generator.close()
+
+    storage.fail_once_on(public_key)
+    storage.expected_deleted_keys = expected_keys
+    monkeypatch.setattr(
+        main_module,
+        "PHOTO_DELETION_RETRY_INTERVAL_SECONDS",
+        0.1,
+        raising=False,
+    )
+    second_context_generator = _build_context(
+        storage, database_url=database_url, clock=clock
+    )
+    second_context = next(second_context_generator)
+    try:
+        assert storage.failure_observed.wait(timeout=5)
+        assert all(
+            storage.read(key, max_bytes=_MAX_BYTES) is not None
+            for key in expected_keys
+        )
+        clock[0] = _NOW + timedelta(seconds=1)
+        assert storage.deletions_complete.wait(timeout=5)
+        assert all(
+            storage.read(key, max_bytes=_MAX_BYTES) is None
+            for key in expected_keys
+        )
+        _staff(second_context, role="agency_admin")
+        listed = second_context.client.get(_photos_url())
+        assert listed.status_code == 200, listed.text
+        assert listed.json()["photos"] == []
+    finally:
+        second_context_generator.close()
+
+
+def _sweep_deletions(context: PhotoContext) -> None:
+    """Run the deletion sweep once, exactly as the periodic worker does."""
+    with context.session_factory.begin() as session:
+        cleanup_photo_deletion_intents(
+            session,
+            context.storage,
+            now=context.clock[0],
+            retry_after=timedelta(seconds=1),
+            batch_size=100,
+        )
+
+
+def _deletion_intent_count(context: PhotoContext) -> int:
+    with context.session_factory.begin() as session:
+        return session.query(ListingPhotoDeletion).count()
+
+
+def test_late_presigned_upload_is_swept_after_a_confirmed_photo_is_deleted(
+    photo_deletion_manual_context: PhotoContext,
+) -> None:
+    context = photo_deletion_manual_context
+    _seed_listing(context, approval_status="approved", is_published=True)
+    _staff(context, role="agency_admin")
+    storage = context.storage
+    upload_key = "staging/photo-late"
+    original_key = "private/original/photo-late"
+    public_key = _seed_photo(
+        context,
+        "photo-late",
+        original_object_key=original_key,
+        upload_object_key=upload_key,
+    )
+
+    response = context.client.delete(_photos_url() + "/photo-late")
+
+    assert response.status_code == 204
+    _sweep_deletions(context)
+    assert all(
+        storage.read(key, max_bytes=_MAX_BYTES) is None
+        for key in (public_key, original_key, upload_key)
+    )
+    # That staging key's presigned PUT stays authorized for a whole window, so the
+    # deletion record must outlive the successful deletion instead of being dropped.
+    assert _deletion_intent_count(context) == 1
+
+    storage.write(upload_key, b"late-put", content_type="image/png")
+    assert storage.read(upload_key, max_bytes=_MAX_BYTES) == b"late-put"
+
+    context.clock[0] = _NOW + UPLOAD_WINDOW + _DELETION_GRACE + timedelta(seconds=1)
+    _sweep_deletions(context)
+
+    assert storage.read(upload_key, max_bytes=_MAX_BYTES) is None
+
+
+def test_deletion_journal_survives_the_grace_after_the_upload_window_closes(
+    photo_deletion_manual_context: PhotoContext,
+) -> None:
+    context = photo_deletion_manual_context
+    _seed_listing(context, approval_status="approved", is_published=True)
+    _staff(context, role="agency_admin")
+    upload_key = "staging/photo-grace"
+    _seed_photo(context, "photo-grace", upload_object_key=upload_key)
+
+    response = context.client.delete(_photos_url() + "/photo-grace")
+
+    assert response.status_code == 204
+    _sweep_deletions(context)
+    assert _deletion_intent_count(context) == 1
+
+    context.clock[0] = _NOW + UPLOAD_WINDOW + timedelta(seconds=1)
+    _sweep_deletions(context)
+    # A PUT authorized before the window closed can still be landing, so the record is
+    # kept for one more grace period before it is dropped.
+    assert _deletion_intent_count(context) == 1
+
+    context.clock[0] = _NOW + UPLOAD_WINDOW + _DELETION_GRACE + timedelta(seconds=1)
+    _sweep_deletions(context)
+    assert _deletion_intent_count(context) == 0
+
+
+def test_late_presigned_upload_is_swept_after_a_pending_photo_is_deleted(
+    photo_deletion_manual_context: PhotoContext,
+) -> None:
+    context = photo_deletion_manual_context
+    _seed_listing(context, approval_status="pending")
+    _staff(context, role="agent")
+    storage = context.storage
+    upload_key = "staging/photo-pending-late"
+    _seed_photo(context, "pending-late", status="pending", upload_object_key=upload_key)
+
+    response = context.client.delete(_photos_url() + "/pending-late")
+
+    # Discarding a pending photo stays synchronous for agency editors.
+    assert response.status_code == 204
+    assert storage.read(upload_key, max_bytes=_MAX_BYTES) is None
+    assert _listing(context).approval_status == "pending"
+    _sweep_deletions(context)
+    assert _deletion_intent_count(context) == 1
+
+    storage.write(upload_key, b"late-put", content_type="image/png")
+
+    context.clock[0] = _NOW + UPLOAD_WINDOW + _DELETION_GRACE + timedelta(seconds=1)
+    _sweep_deletions(context)
+
+    assert storage.read(upload_key, max_bytes=_MAX_BYTES) is None
 
 
 def test_deleting_a_pending_photo_does_not_reopen_the_listing(
@@ -654,12 +1261,13 @@ def test_deleting_a_pending_photo_does_not_reopen_the_listing(
 ) -> None:
     context = photo_context
     _seed_listing(context, approval_status="pending")
-    _staff(context)
-    _seed_photo(context, "pending-a", status="pending")
+    _staff(context, role="agent")
+    key = _seed_photo(context, "pending-a", status="pending")
 
     response = context.client.delete(_photos_url() + "/pending-a")
 
     assert response.status_code == 204
+    assert context.storage.read(key, max_bytes=_MAX_BYTES) is None
     assert _listing(context).approval_status == "pending"
     assert _actions(context) == []
 

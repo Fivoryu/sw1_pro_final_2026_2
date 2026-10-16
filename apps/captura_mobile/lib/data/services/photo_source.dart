@@ -15,7 +15,7 @@ class PickedPhoto {
   final String contentType;
 }
 
-/// Thrown when the chosen file is not a JPEG, PNG or WebP image.
+/// Thrown when the chosen file is not a JPEG, PNG, WebP, HEIC or HEIF image.
 class UnsupportedPhotoFormat implements Exception {
   const UnsupportedPhotoFormat();
 }
@@ -44,19 +44,33 @@ String? detectPhotoContentType(Uint8List bytes) {
   if (startsWith('RIFF'.codeUnits) && startsWith('WEBP'.codeUnits, 8)) {
     return 'image/webp';
   }
+  if (startsWith('ftyp'.codeUnits, 4) && bytes.length >= 12) {
+    final brand = String.fromCharCodes(bytes.sublist(8, 12));
+    if (const {'heic', 'heix', 'hevc', 'hevx'}.contains(brand)) {
+      return 'image/heic';
+    }
+    if (const {
+      'heif',
+      'heim',
+      'heis',
+      'hevm',
+      'hevs',
+      'mif1',
+      'msf1',
+    }.contains(brand)) {
+      return 'image/heif';
+    }
+  }
   return null;
 }
 
 /// Device camera and gallery through `image_picker`.
 ///
-/// Photos are reduced on the device so they upload faster and stay well under
-/// the API's 5 MB limit; the API still validates and cleans every photo.
+/// The selected file's original bytes are uploaded unchanged; the API validates
+/// them and creates a separate sanitized public derivative.
 class ImagePickerPhotoSource implements PhotoSource {
   ImagePickerPhotoSource({ImagePicker? picker})
     : _picker = picker ?? ImagePicker();
-
-  static const double maxDimension = 2560;
-  static const int imageQuality = 85;
 
   final ImagePicker _picker;
 
@@ -66,9 +80,6 @@ class ImagePickerPhotoSource implements PhotoSource {
       source: origin == PhotoOrigin.camera
           ? ImageSource.camera
           : ImageSource.gallery,
-      maxWidth: maxDimension,
-      maxHeight: maxDimension,
-      imageQuality: imageQuality,
       requestFullMetadata: false,
     );
     if (file == null) return null;

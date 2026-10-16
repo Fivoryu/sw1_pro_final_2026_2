@@ -490,7 +490,7 @@ void main() {
       );
       await _tapVisible(tester, 'listing-item-d-1');
 
-      expect(find.text('Fotos (2 de 10)'), findsOneWidget);
+      expect(find.text('Fotos (2 de 20)'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('listing-photo-photo-a')),
         findsOneWidget,
@@ -499,6 +499,32 @@ void main() {
         find.byKey(const ValueKey('listing-photo-photo-b')),
         findsOneWidget,
       );
+    });
+
+    testWidgets('keeps the last photo origin clear of the navigation bar', (
+      tester,
+    ) async {
+      // A three-button navigation bar takes the bottom inset. The sheet used to draw the
+      // last option underneath it, so the option was untappable where it was drawn.
+      // The test view takes physical pixels: 135 physical at a ratio of 3 is 45 logical,
+      // which is the inset the sheet has to clear in logical pixels.
+      const bottomInset = 135.0;
+      tester.view.viewPadding = const FakeViewPadding(bottom: bottomInset);
+      tester.view.padding = const FakeViewPadding(bottom: bottomInset);
+      addTearDown(tester.view.reset);
+
+      await _pumpListings(tester, seed: (backend) => backend.seed(id: 'd-1'));
+      await _tapVisible(tester, 'listing-item-d-1');
+      await _tapVisible(tester, 'listing-photos-add');
+
+      final screenHeight =
+          tester.view.physicalSize.height / tester.view.devicePixelRatio;
+      final logicalInset = bottomInset / tester.view.devicePixelRatio;
+      final gallery = tester.getRect(
+        find.byKey(const ValueKey('photo-origin-gallery')),
+      );
+
+      expect(gallery.bottom, lessThanOrEqualTo(screenHeight - logicalInset));
     });
 
     testWidgets('retries a failed upload from its tile', (tester) async {
@@ -523,7 +549,7 @@ void main() {
       await _settleUpload(tester);
 
       expect(backend.confirmedPhotos('d-1'), hasLength(1));
-      expect(find.text('Fotos (1 de 10)'), findsOneWidget);
+      expect(find.text('Fotos (1 de 20)'), findsOneWidget);
     });
 
     testWidgets('deletes a photo after confirmation', (tester) async {

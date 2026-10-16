@@ -5,7 +5,7 @@ import logging
 from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -27,6 +27,10 @@ from app.modules.agencies.router import agency_wallet_router, router as agencies
 from app.modules.catalog.errors import QuoteApiError
 from app.modules.catalog.photo_router import router as catalog_photo_router
 from app.modules.catalog.photo_storage import PhotoStorage, create_photo_storage
+from app.modules.catalog.photos import (
+    cleanup_expired_photo_uploads,
+    cleanup_photo_deletion_intents,
+)
 from app.modules.catalog.router import router as catalog_router
 from app.modules.customer_identity.router import router as customer_identity_router
 from app.modules.customer_identity.router import wallet_router as customer_wallet_router
@@ -70,6 +74,13 @@ def _create_worker_photo_storage(
     # Browser photo links keep using S3_PUBLIC_ENDPOINT_URL. Worker links need a
     # signature for the service-to-service Floci hostname reachable in Compose.
     return create_photo_storage(replace(settings, s3_public_endpoint_url=endpoint))
+
+
+logger = logging.getLogger(__name__)
+PHOTO_UPLOAD_CLEANUP_INTERVAL_SECONDS = 60.0
+PHOTO_UPLOAD_CLEANUP_BATCH_SIZE = 100
+PHOTO_DELETION_RETRY_INTERVAL_SECONDS = 60.0
+PHOTO_DELETION_CLEANUP_BATCH_SIZE = 100
 
 
 def _run_official_rate_refresh(session_factory: sessionmaker[Session]) -> None:
@@ -140,6 +151,104 @@ async def _detection_recovery_loop(
             continue
 
 
+def _run_photo_upload_cleanup(
+    session_factory: sessionmaker[Session],
+    storage: PhotoStorage,
+    clock: Callable[[], datetime],
+) -> int:
+    with session_factory.begin() as session:
+        return cleanup_expired_photo_uploads(
+            session,
+            storage,
+            now=clock(),
+            batch_size=PHOTO_UPLOAD_CLEANUP_BATCH_SIZE,
+            skip_locked=True,
+        )
+
+
+def _run_photo_deletion_cleanup(
+    session_factory: sessionmaker[Session],
+    storage: PhotoStorage,
+    clock: Callable[[], datetime],
+    *,
+    retry_interval_seconds: float,
+) -> int:
+    with session_factory.begin() as session:
+        return cleanup_photo_deletion_intents(
+            session,
+            storage,
+            now=clock(),
+            retry_after=timedelta(seconds=retry_interval_seconds),
+            batch_size=PHOTO_DELETION_CLEANUP_BATCH_SIZE,
+            skip_locked=True,
+        )
+
+
+async def _photo_upload_cleanup_loop(
+    application: FastAPI,
+    session_factory: sessionmaker[Session],
+    *,
+    interval_seconds: float,
+) -> None:
+    """Sweep expired staging assets periodically and retry failures next interval."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        storage = application.state.photo_storage
+        if storage is None:
+            continue
+        try:
+            cleaned = 0
+            while True:
+                batch_count = await asyncio.to_thread(
+                    _run_photo_upload_cleanup,
+                    session_factory,
+                    storage,
+                    application.state.clock,
+                )
+                if batch_count == 0:
+                    break
+                cleaned += batch_count
+            if cleaned:
+                logger.info("Cleaned %d expired listing-photo records", cleaned)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - retain rows and retry on the next interval
+            logger.exception("Expired listing-photo cleanup failed")
+
+
+async def _photo_deletion_cleanup_loop(
+    application: FastAPI,
+    session_factory: sessionmaker[Session],
+    *,
+    interval_seconds: float,
+) -> None:
+    """Delete due confirmed-photo assets and keep retrying failed intents."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        storage = application.state.photo_storage
+        if storage is None:
+            continue
+        try:
+            attempted = 0
+            while True:
+                batch_count = await asyncio.to_thread(
+                    _run_photo_deletion_cleanup,
+                    session_factory,
+                    storage,
+                    application.state.clock,
+                    retry_interval_seconds=interval_seconds,
+                )
+                if batch_count == 0:
+                    break
+                attempted += batch_count
+            if attempted:
+                logger.info("Attempted %d listing photo deletion intents", attempted)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - keep intents and retry on the next interval
+            logger.exception("Listing photo deletion sweep failed")
+
+
 def _build_lifespan(
     session_factory: sessionmaker[Session],
     settings: Settings,
@@ -147,9 +256,11 @@ def _build_lifespan(
     clock: Callable[[], datetime],
 ) -> StatelessLifespan[FastAPI]:
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         interval = official_rate_refresh_interval_seconds()
         refresher: asyncio.Task[None] | None = None
+        photo_cleaner: asyncio.Task[None] | None = None
+        photo_deleter: asyncio.Task[None] | None = None
         if interval > 0:
             # The first run happens only after the first full interval, so startup
             # never touches the network and the test suite never fetches.
@@ -158,6 +269,27 @@ def _build_lifespan(
                     session_factory, interval_seconds=interval
                 )
             )
+        if application.state.photo_storage is not None:
+            # Expired objects are eligible at 15 minutes and are swept at most a
+            # minute later while the API process is running.
+            photo_cleaner = asyncio.create_task(
+                _photo_upload_cleanup_loop(
+                    application,
+                    session_factory,
+                    interval_seconds=PHOTO_UPLOAD_CLEANUP_INTERVAL_SECONDS,
+                )
+            )
+            photo_deleter = asyncio.create_task(
+                _photo_deletion_cleanup_loop(
+                    application,
+                    session_factory,
+                    interval_seconds=PHOTO_DELETION_RETRY_INTERVAL_SECONDS,
+                )
+            )
+            # Exposed so an operator, and the tests, can confirm the workers started: they
+            # answer to the photo storage, never to the exchange-rate refresher.
+            application.state.photo_cleaner_task = photo_cleaner
+            application.state.photo_deleter_task = photo_deleter
         detection_sweeper: asyncio.Task[None] | None = None
         if settings.detection_sweep_seconds > 0:
             detection_sweeper = asyncio.create_task(
@@ -173,7 +305,7 @@ def _build_lifespan(
         try:
             yield
         finally:
-            for task in (refresher, detection_sweeper):
+            for task in (refresher, photo_cleaner, photo_deleter, detection_sweeper):
                 if task is not None:
                     task.cancel()
                     with suppress(asyncio.CancelledError):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from collections.abc import Iterator, Mapping
 from typing import Any
 
@@ -10,6 +11,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 
 _SQLITE_OFFER_VERSION_GUARD = "listing_offer_version_guard"
+# Marks a pooled connection whose catalog authorizer is already installed.
+_SQLITE_AUTHORIZER_INFO_KEY = "roomforge_sqlite_offer_version_authorizer"
+_SQLITE_AUTHORIZER_LOCK = threading.Lock()
 # Keep these names in sync with the SQLite triggers in 0007_catalog_offers.py.
 _SQLITE_OFFER_VERSION_TRIGGER_SOURCES = frozenset(
     {
@@ -106,10 +110,25 @@ def _authorize_sqlite_offer_version_guard(
 
 def _apply_sqlite_offer_version_authorizer(
     dbapi_connection: sqlite3.Connection,
-    _connection_record: object,
+    connection_record: Any,
     _connection_proxy: object | None = None,
 ) -> None:
-    dbapi_connection.set_authorizer(_authorize_sqlite_offer_version_guard)
+    """Install the catalog guard at most once per pooled connection.
+
+    The authorizer belongs to the DBAPI connection, so reinstalling it on every
+    checkout is both pointless and unsafe: a single-connection pool (for example
+    the in-memory StaticPool used by tests) is shared by several threads, and
+    ``set_authorizer`` blocks against a statement another thread is running on
+    that same connection. The record's ``info`` dict outlives checkouts, so it
+    records that the guard is already installed; SQLAlchemy clears that dict
+    whenever it reconnects on the same record, so a recycled connection installs
+    the guard again from the ``connect`` event.
+    """
+    with _SQLITE_AUTHORIZER_LOCK:
+        if connection_record.info.get(_SQLITE_AUTHORIZER_INFO_KEY):
+            return
+        dbapi_connection.set_authorizer(_authorize_sqlite_offer_version_guard)
+        connection_record.info[_SQLITE_AUTHORIZER_INFO_KEY] = True
 
 
 def _install_sqlite_offer_version_authorizer(engine: Engine) -> None:
@@ -118,7 +137,8 @@ def _install_sqlite_offer_version_authorizer(engine: Engine) -> None:
 
     if not event.contains(engine, "connect", _apply_sqlite_offer_version_authorizer):
         event.listen(engine, "connect", _apply_sqlite_offer_version_authorizer)
-    # Existing pooled connections also receive the guard before they are checked out.
+    # Existing pooled connections receive the guard on their first checkout; later
+    # checkouts skip it so the authorizer is never reinstalled concurrently.
     if not event.contains(engine, "checkout", _apply_sqlite_offer_version_authorizer):
         event.listen(engine, "checkout", _apply_sqlite_offer_version_authorizer)
 

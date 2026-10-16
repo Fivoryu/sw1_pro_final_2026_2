@@ -711,3 +711,311 @@ def test_listing_photo_migration_upgrades_and_downgrades_sqlite() -> None:
             assert "listing" in inspect(connection).get_table_names()
     finally:
         engine.dispose()
+
+
+def test_listing_photo_policy_migration_preserves_legacy_rows_and_guards_downgrade() -> None:
+    catalog = _load_migration(
+        _MIGRATIONS / "0007_catalog_offers.py", "catalog_offers_0007_for_photo_policy_test"
+    )
+    photos_0018 = _load_migration(
+        _MIGRATIONS / "0018_listing_photos.py", "listing_photos_0018_for_policy_test"
+    )
+    migration_path = _MIGRATIONS / "0019_listing_photo_assets.py"
+    assert migration_path.is_file(), "F04.2 policy must add the 0019 photo assets migration"
+    migration = _load_migration(migration_path, "listing_photo_assets_0019_for_test")
+    assert migration.revision == "0019_listing_photo_assets"
+    assert migration.down_revision == "0018_listing_photos"
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+            connection.execute(text("CREATE TABLE agency (id VARCHAR(36) PRIMARY KEY)"))
+            connection.execute(text("INSERT INTO agency (id) VALUES ('agency-one')"))
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                catalog.upgrade()
+                photos_0018.upgrade()
+            _insert_listing(connection)
+
+            insert = (
+                "INSERT INTO listing_photo "
+                "(id, agency_id, listing_id, object_key, status, content_type, size_bytes, "
+                "created_at, expires_at, confirmed_at) VALUES "
+                "(:id, 'agency-one', 'listing-one', :object_key, :status, :content_type, "
+                ":size_bytes, '2026-10-04 12:00:00', '2026-10-04 12:15:00', :confirmed_at)"
+            )
+            legacy_pending = {
+                "id": "legacy-pending",
+                "object_key": "agencies/agency-one/listings/listing-one/photos/legacy-pending",
+                "status": "pending",
+                "content_type": "image/jpeg",
+                "size_bytes": 1024,
+                "confirmed_at": None,
+            }
+            legacy_confirmed = {
+                **legacy_pending,
+                "id": "legacy-confirmed",
+                "object_key": "agencies/agency-one/listings/listing-one/photos/legacy-confirmed",
+                "status": "confirmed",
+                "content_type": "image/webp",
+                "size_bytes": 8192,
+                "confirmed_at": "2026-10-04 12:01:00",
+            }
+            connection.execute(text(insert), legacy_pending)
+            connection.execute(text(insert), legacy_confirmed)
+
+            with Operations.context(context):
+                migration.upgrade()
+
+            inspector = inspect(connection)
+            columns = {column["name"] for column in inspector.get_columns("listing_photo")}
+            assert {
+                "upload_object_key",
+                "original_object_key",
+                "public_content_type",
+            } <= columns
+            photo_indexes = {index["name"] for index in inspector.get_indexes("listing_photo")}
+            assert "ix_listing_photo_status_expires_at" in photo_indexes
+            legacy_rows = {
+                row["id"]: row
+                for row in connection.execute(
+                    text(
+                        "SELECT id, object_key, status, content_type, size_bytes, confirmed_at, "
+                        "upload_object_key, original_object_key, public_content_type "
+                        "FROM listing_photo"
+                    )
+                ).mappings()
+            }
+            for expected in (legacy_pending, legacy_confirmed):
+                actual = legacy_rows[expected["id"]]
+                assert actual["object_key"] == expected["object_key"]
+                assert actual["status"] == expected["status"]
+                assert actual["content_type"] == expected["content_type"]
+                assert actual["size_bytes"] == expected["size_bytes"]
+                assert actual["upload_object_key"] is None
+                assert actual["original_object_key"] is None
+                assert actual["public_content_type"] is None
+
+            for photo_id, content_type in (
+                ("new-heic", "image/heic"),
+                ("new-heif", "image/heif"),
+            ):
+                connection.execute(
+                    text(insert),
+                    {
+                        **legacy_pending,
+                        "id": photo_id,
+                        "object_key": f"agencies/agency-one/listings/listing-one/photos/{photo_id}",
+                        "content_type": content_type,
+                        "size_bytes": 20 * 1024 * 1024,
+                    },
+                )
+            modern = {
+                **legacy_pending,
+                "id": "new-photo-with-staging-key",
+                "object_key": "agencies/agency-one/listings/listing-one/photos/new-photo/public",
+            }
+            connection.execute(text(insert), modern)
+            connection.execute(
+                text(
+                    "UPDATE listing_photo SET upload_object_key = :upload_key "
+                    "WHERE id = 'new-photo-with-staging-key'"
+                ),
+                {"upload_key": "agencies/agency-one/listings/listing-one/photos/new-photo/upload"},
+            )
+
+            _assert_integrity_error(
+                connection,
+                insert,
+                {
+                    **legacy_pending,
+                    "id": "unsupported-photo-type",
+                    "object_key": "unsupported-photo-type",
+                    "content_type": "image/gif",
+                },
+            )
+            _assert_integrity_error(
+                connection,
+                insert,
+                {
+                    **legacy_pending,
+                    "id": "photo-over-20-mib",
+                    "object_key": "photo-over-20-mib",
+                    "content_type": "image/heic",
+                    "size_bytes": 20 * 1024 * 1024 + 1,
+                },
+            )
+
+            with pytest.raises(RuntimeError, match="new photo assets"):
+                with Operations.context(context):
+                    migration.downgrade()
+            assert "original_object_key" in {
+                column["name"] for column in inspect(connection).get_columns("listing_photo")
+            }
+            assert "ix_listing_photo_status_expires_at" in {
+                index["name"] for index in inspect(connection).get_indexes("listing_photo")
+            }
+            assert connection.scalar(
+                text("SELECT count(*) FROM listing_photo WHERE id LIKE 'new-%'")
+            ) == 3
+
+            connection.execute(text("DELETE FROM listing_photo WHERE id LIKE 'new-%'"))
+            with Operations.context(context):
+                migration.downgrade()
+            assert "original_object_key" not in {
+                column["name"] for column in inspect(connection).get_columns("listing_photo")
+            }
+            assert "ix_listing_photo_status_expires_at" not in {
+                index["name"] for index in inspect(connection).get_indexes("listing_photo")
+            }
+            with Operations.context(context):
+                photos_0018.downgrade()
+                catalog.downgrade()
+            assert "listing_photo" not in inspect(connection).get_table_names()
+    finally:
+        engine.dispose()
+
+
+def test_listing_photo_deletion_migration_preserves_legacy_rows_and_guards_downgrade() -> None:
+    catalog = _load_migration(
+        _MIGRATIONS / "0007_catalog_offers.py",
+        "catalog_offers_0007_for_photo_deletion_test",
+    )
+    photos_0018 = _load_migration(
+        _MIGRATIONS / "0018_listing_photos.py",
+        "listing_photos_0018_for_photo_deletion_test",
+    )
+    assets_0019 = _load_migration(
+        _MIGRATIONS / "0019_listing_photo_assets.py",
+        "listing_photo_assets_0019_for_deletion_test",
+    )
+    migration_path = _MIGRATIONS / "0020_listing_photo_deletion.py"
+    assert migration_path.is_file(), "F04.2 durable deletion must add the 0020 migration"
+    migration = _load_migration(migration_path, "listing_photo_deletion_0020_for_test")
+    assert migration.revision == "0020_listing_photo_deletion"
+    assert migration.down_revision == assets_0019.revision
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+            connection.execute(text("CREATE TABLE agency (id VARCHAR(36) PRIMARY KEY)"))
+            connection.execute(text("INSERT INTO agency (id) VALUES ('agency-one')"))
+            context = MigrationContext.configure(connection)
+            with Operations.context(context):
+                catalog.upgrade()
+                photos_0018.upgrade()
+            _insert_listing(connection)
+
+            insert_photo = text(
+                "INSERT INTO listing_photo "
+                "(id, agency_id, listing_id, object_key, status, content_type, size_bytes, "
+                "created_at, expires_at, confirmed_at) VALUES "
+                "(:id, 'agency-one', 'listing-one', :object_key, :status, :content_type, "
+                ":size_bytes, '2026-10-04 12:00:00', '2026-10-04 12:15:00', :confirmed_at)"
+            )
+            legacy_pending = {
+                "id": "legacy-pending",
+                "object_key": "agencies/agency-one/listings/listing-one/photos/legacy-pending",
+                "status": "pending",
+                "content_type": "image/jpeg",
+                "size_bytes": 1024,
+                "confirmed_at": None,
+            }
+            legacy_confirmed = {
+                **legacy_pending,
+                "id": "legacy-confirmed",
+                "object_key": "agencies/agency-one/listings/listing-one/photos/legacy-confirmed",
+                "status": "confirmed",
+                "content_type": "image/webp",
+                "size_bytes": 8192,
+                "confirmed_at": "2026-10-04 12:01:00",
+            }
+            connection.execute(insert_photo, legacy_pending)
+            connection.execute(insert_photo, legacy_confirmed)
+            with Operations.context(context):
+                assets_0019.upgrade()
+
+            select_legacy = text(
+                "SELECT id, object_key, status, content_type, size_bytes, confirmed_at, "
+                "upload_object_key, original_object_key, public_content_type "
+                "FROM listing_photo ORDER BY id"
+            )
+            legacy_before = [dict(row) for row in connection.execute(select_legacy).mappings()]
+            with Operations.context(context):
+                migration.upgrade()
+
+            inspector = inspect(connection)
+            assert "listing_photo_deletion" in inspector.get_table_names()
+            deletion_columns = {
+                column["name"]
+                for column in inspector.get_columns("listing_photo_deletion")
+            }
+            assert {
+                "id",
+                "agency_id",
+                "listing_id",
+                "photo_id",
+                "actor_id",
+                "object_key",
+                "original_object_key",
+                "upload_object_key",
+                "requested_at",
+                "upload_expires_at",
+                "attempts",
+                "next_attempt_at",
+                "last_error",
+            } <= deletion_columns
+            assert "ix_listing_photo_deletion_due" in {
+                index["name"] for index in inspector.get_indexes("listing_photo_deletion")
+            }
+            assert "uq_listing_photo_deletion_photo_id" in {
+                constraint["name"]
+                for constraint in inspector.get_unique_constraints("listing_photo_deletion")
+            }
+            assert [dict(row) for row in connection.execute(select_legacy).mappings()] == legacy_before
+
+            connection.execute(
+                text(
+                    "INSERT INTO listing_photo_deletion "
+                    "(id, agency_id, listing_id, photo_id, actor_id, object_key, "
+                    "original_object_key, upload_object_key, requested_at, attempts, "
+                    "next_attempt_at, last_error) VALUES "
+                    "(:id, :agency_id, :listing_id, :photo_id, :actor_id, :object_key, "
+                    ":original_object_key, :upload_object_key, :requested_at, :attempts, "
+                    ":next_attempt_at, :last_error)"
+                ),
+                {
+                    "id": "delete-job-one",
+                    "agency_id": "agency-one",
+                    "listing_id": "listing-one",
+                    "photo_id": "legacy-confirmed",
+                    "actor_id": "staff-one",
+                    "object_key": legacy_confirmed["object_key"],
+                    "original_object_key": None,
+                    "upload_object_key": None,
+                    "requested_at": "2026-10-04 12:02:00",
+                    "attempts": 1,
+                    "next_attempt_at": "2026-10-04 12:03:00",
+                    "last_error": "storage_unavailable",
+                },
+            )
+            with pytest.raises(RuntimeError, match="pending photo deletion intents"):
+                with Operations.context(context):
+                    migration.downgrade()
+            assert "listing_photo_deletion" in inspect(connection).get_table_names()
+            assert connection.scalar(
+                text("SELECT count(*) FROM listing_photo_deletion")
+            ) == 1
+            assert [dict(row) for row in connection.execute(select_legacy).mappings()] == legacy_before
+
+            connection.execute(
+                text("DELETE FROM listing_photo_deletion WHERE id = 'delete-job-one'")
+            )
+            with Operations.context(context):
+                migration.downgrade()
+            assert "listing_photo_deletion" not in inspect(connection).get_table_names()
+            assert [dict(row) for row in connection.execute(select_legacy).mappings()] == legacy_before
+    finally:
+        engine.dispose()
