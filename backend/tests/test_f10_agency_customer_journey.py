@@ -280,6 +280,7 @@ def test_agency_to_customer_journey_e2e(journey_postgres_engine: Engine) -> None
         assert [line["kind"] for line in quote_snapshot["lines"]] == ["base", "extra"]
 
         # --- Wallets linked through the real challenge/signature flow ----------
+        act_as("agency_admin", _AGENCY_ONE, "f10-admin-one")
         agency_challenge = client.post(
             f"/api/v1/staff/agencies/{_AGENCY_ONE}/wallet-challenges",
             json={"address": _wallet_address(_AGENCY_WALLET_KEY)},
