@@ -41,3 +41,8 @@ cache/
 *.egg-info/
 .ruff_cache/
 .codegraph/
+
+# F08 — piloto de detección: fotos autorizadas, pesos, sondas y resultados locales.
+# Nunca versionados: son datos de terceros y artefactos de evidencia, no código.
+worker3d/pilot/
+worker3d/.cache/

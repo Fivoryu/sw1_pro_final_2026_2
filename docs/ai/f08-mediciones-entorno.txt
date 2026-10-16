@@ -1,0 +1,72 @@
+# F08.2 — Entorno y condiciones de medición
+
+- **Fecha de las mediciones:** 2026-10-14
+- **Artefacto:** imagen `roomforge-local-dev-inference`, digest `sha256:100a36e164ad99057ad456c04bd8ca774ddb360685774d50a03addc08650cb4d`
+- **Motivo de este archivo:** el requisito R5 pide **comando, versión, hardware y condiciones** por medición. La verificación independiente observó que sólo se decía «en este equipo». Acá quedan las salidas crudas.
+
+## 1. Comandos y salidas
+
+### 1.1 Entorno de ejecución, medido **dentro** del contenedor
+
+```bash
+docker compose -f infra/docker/compose.local.yml -f infra/docker/compose.inference.yml \
+  run -T --rm --entrypoint sh inference -c \
+  "nproc; grep -m1 'model name' /proc/cpuinfo; grep -E '^MemTotal|^MemAvailable' /proc/meminfo; \
+   python -c \"import torch, platform; print('torch', torch.__version__, '| hilos', torch.get_num_threads(), '| python', platform.python_version())\""
+```
+
+```
+12
+model name	: Intel(R) Core(TM) 5 120U
+MemTotal:        6069044 kB
+MemAvailable:    5031604 kB
+torch 2.14.1+cpu | hilos 6 | python 3.12.15
+```
+
+Lectura: la inferencia usa **6 hilos** de 12 CPUs visibles y dispone de **≈ 5.8 GiB** de memoria (`MemTotal`), con ≈ 4.8 GiB libres al momento de consultar.
+
+### 1.2 Host
+
+```powershell
+(Get-CimInstance Win32_Processor).Name
+[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1GB,1)
+(Get-CimInstance Win32_OperatingSystem).Caption + " build " + (Get-CimInstance Win32_OperatingSystem).BuildNumber
+docker version --format '{{.Server.Version}}'
+```
+
+```
+Intel(R) Core(TM) 5 120U
+RAM_GB=15.6
+Microsoft Windows 11 Home build 26200
+29.8.2
+```
+
+### 1.3 Tamaños del artefacto
+
+```bash
+docker image inspect roomforge-local-dev-inference --format '{{.Size}} bytes | {{.Id}}'
+docker compose ... run -T --rm --entrypoint sh inference -c \
+  "du -sh /cache/torch; find /cache/torch -name '*.pth' -exec ls -la {} \; ; du -sh /usr/local/lib/python3.12/site-packages/torch"
+```
+
+```
+1497591016 bytes | sha256:100a36e164ad99057ad456c04bd8ca774ddb360685774d50a03addc08650cb4d
+14M	/cache/torch
+-rw-r--r-- 1 root root 14069355 Oct 14 02:38 /cache/torch/hub/checkpoints/ssdlite320_mobilenet_v3_large_coco-a79551df.pth
+769M	/usr/local/lib/python3.12/site-packages/torch
+```
+
+### 1.4 Versiones resueltas
+
+El árbol completo instalado está en `infra/docker/inference/requirements.lock.txt`, generado con `pip freeze` dentro de la imagen.
+
+## 2. Condiciones: lo que NO está controlado
+
+Se declara para que nadie lea estos números como un benchmark:
+
+1. **Sin control de carga.** Las corridas se hicieron con la máquina en uso normal (Docker Desktop, editor, servicios abiertos). No se fijó afinidad de CPU, prioridad ni se apagó nada. Las latencias son **indicativas**, no reproducibles al milisegundo.
+2. **Memoria compartida.** El contenedor corre dentro de la máquina virtual WSL 2 de Docker Desktop. Los 5.8 GiB declarados son los que el contenedor **ve**, no la memoria del host (15.6 GB). Ningún otro contenedor estaba ejecutándose durante la inferencia, porque cada corrida usa `run --rm`.
+3. **Memoria residente pico.** `peak_rss_mb` (541 MB) mide el proceso de Python, no el consumo del motor de Docker ni el del sistema operativo.
+4. **Sin GPU.** Ninguna medición usa GPU; memoria y utilización de GPU quedan **no medidos**, declarados así en cada registro.
+5. **Un sólo equipo.** Todo lo medido es de esta máquina. No se extrapola a un despliegue, a un teléfono ni a otro hardware.
+6. **Determinismo.** El detector es determinista en CPU: repetir la corrida con el mismo código devuelve las mismas etiquetas, puntuaciones y cajas. Lo único que cambia entre corridas es la latencia.

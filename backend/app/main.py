@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
+from dataclasses import replace
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from cryptography.fernet import Fernet
@@ -17,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.config import Settings
+from app.core.config import DETECTION_LEASE_SECONDS_DEFAULT, Settings
 from app.core.errors import ErrorResponse, error_code_for_status
 from app.core.rate_source import official_rate_refresh_interval_seconds
 from app.db.session import create_session_factory, protect_session_factory
@@ -32,6 +34,10 @@ from app.modules.catalog.photos import (
 from app.modules.catalog.router import router as catalog_router
 from app.modules.customer_identity.router import router as customer_identity_router
 from app.modules.customer_identity.router import wallet_router as customer_wallet_router
+from app.modules.detection.job_queue import JobQueue, create_job_queue
+from app.modules.detection.router import router as detection_router
+from app.modules.detection.router import worker_router as detection_worker_router
+from app.modules.detection.service import run_detection_recovery_sweep
 from app.modules.health.router import router as health_router
 from app.modules.exchange_rates.router import (
     platform_router as platform_exchange_rates_router,
@@ -42,6 +48,32 @@ from app.modules.identity.router import router as identity_router
 from app.modules.reservations.errors import ReservationApiError
 from app.modules.reservations.router import router as reservations_router
 from app.modules.reservations.router import staff_router as staff_reservations_router
+
+LOGGER = logging.getLogger("roomforge.detection.recovery")
+
+
+def _create_worker_photo_storage(
+    settings: Settings,
+    *,
+    injected_storage: PhotoStorage | None,
+) -> PhotoStorage | None:
+    """Sign worker downloads for the local service network, never a public AWS host."""
+    if injected_storage is not None:
+        return injected_storage
+    endpoint = settings.s3_endpoint_url
+    if not settings.s3_bucket_name or not endpoint:
+        return None
+    parsed = urlparse(endpoint)
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in {
+        "floci",
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }:
+        return None
+    # Browser photo links keep using S3_PUBLIC_ENDPOINT_URL. Worker links need a
+    # signature for the service-to-service Floci hostname reachable in Compose.
+    return create_photo_storage(replace(settings, s3_public_endpoint_url=endpoint))
 
 
 logger = logging.getLogger(__name__)
@@ -70,6 +102,52 @@ async def _official_rate_refresh_loop(
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - the refresher must keep running
+            continue
+
+
+def _run_detection_recovery_sweep(
+    session_factory: sessionmaker[Session],
+    job_queue: JobQueue,
+    *,
+    now: datetime,
+    max_attempts: int,
+    pending_republish_after_seconds: int = DETECTION_LEASE_SECONDS_DEFAULT,
+) -> int:
+    """Run one detection recovery sweep inside the API process."""
+    return run_detection_recovery_sweep(
+        session_factory,
+        job_queue,
+        now=now,
+        max_attempts=max_attempts,
+        pending_republish_after_seconds=pending_republish_after_seconds,
+    )
+
+
+async def _detection_recovery_loop(
+    session_factory: sessionmaker[Session],
+    job_queue: JobQueue,
+    *,
+    clock: Callable[[], datetime],
+    max_attempts: int,
+    interval_seconds: float,
+    pending_republish_after_seconds: int = DETECTION_LEASE_SECONDS_DEFAULT,
+) -> None:
+    """Periodically recover jobs whose workers stopped reporting."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await asyncio.to_thread(
+                _run_detection_recovery_sweep,
+                session_factory,
+                job_queue,
+                now=clock(),
+                max_attempts=max_attempts,
+                pending_republish_after_seconds=pending_republish_after_seconds,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a later sweep retries transient failures
+            LOGGER.warning("Detection recovery loop failed; the next sweep will retry")
             continue
 
 
@@ -173,6 +251,9 @@ async def _photo_deletion_cleanup_loop(
 
 def _build_lifespan(
     session_factory: sessionmaker[Session],
+    settings: Settings,
+    job_queue: JobQueue,
+    clock: Callable[[], datetime],
 ) -> StatelessLifespan[FastAPI]:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -209,10 +290,22 @@ def _build_lifespan(
             # answer to the photo storage, never to the exchange-rate refresher.
             application.state.photo_cleaner_task = photo_cleaner
             application.state.photo_deleter_task = photo_deleter
+        detection_sweeper: asyncio.Task[None] | None = None
+        if settings.detection_sweep_seconds > 0:
+            detection_sweeper = asyncio.create_task(
+                _detection_recovery_loop(
+                    session_factory,
+                    job_queue,
+                    clock=clock,
+                    max_attempts=settings.detection_max_attempts,
+                    interval_seconds=settings.detection_sweep_seconds,
+                    pending_republish_after_seconds=settings.detection_lease_seconds,
+                )
+            )
         try:
             yield
         finally:
-            for task in (refresher, photo_cleaner, photo_deleter):
+            for task in (refresher, photo_cleaner, photo_deleter, detection_sweeper):
                 if task is not None:
                     task.cancel()
                     with suppress(asyncio.CancelledError):
@@ -228,6 +321,7 @@ def create_app(
     email_sender: Any = None,
     clock: Callable[[], datetime] | None = None,
     photo_storage: PhotoStorage | None = None,
+    job_queue: JobQueue | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_env()
     resolved_settings.validate()
@@ -242,19 +336,27 @@ def create_app(
         )
     protect_session_factory(session_factory)
 
+    resolved_clock = clock or (lambda: datetime.now(timezone.utc))
+    resolved_job_queue = job_queue if job_queue is not None else create_job_queue(resolved_settings)
     app = FastAPI(
         title="RoomForge Staff API",
         version="1.0.0",
-        lifespan=_build_lifespan(session_factory),
+        lifespan=_build_lifespan(
+            session_factory, resolved_settings, resolved_job_queue, resolved_clock
+        ),
     )
     app.state.settings = resolved_settings
     app.state.session_factory = session_factory
     app.state.email_sender = email_sender
-    app.state.clock = clock or (lambda: datetime.now(timezone.utc))
+    app.state.clock = resolved_clock
     app.state.engine = engine
     app.state.photo_storage = (
         photo_storage if photo_storage is not None else create_photo_storage(resolved_settings)
     )
+    app.state.worker_photo_storage = _create_worker_photo_storage(
+        resolved_settings, injected_storage=photo_storage
+    )
+    app.state.job_queue = resolved_job_queue
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[resolved_settings.web_origin.rstrip("/")],
@@ -272,6 +374,8 @@ def create_app(
     app.include_router(public_exchange_rates_router)
     app.include_router(catalog_router)
     app.include_router(catalog_photo_router)
+    app.include_router(detection_router)
+    app.include_router(detection_worker_router)
     app.include_router(reservations_router)
     app.include_router(staff_reservations_router)
 
