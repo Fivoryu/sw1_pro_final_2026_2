@@ -32,3 +32,5 @@ services:
       - ../../backend/tests:/app/tests:ro
       - ../../backend/alembic:/app/alembic:ro
       - ../../backend/alembic.ini:/app/alembic.ini:ro
+      - ../../infra:/infra:ro
+      - ../../worker3d:/worker3d:ro
