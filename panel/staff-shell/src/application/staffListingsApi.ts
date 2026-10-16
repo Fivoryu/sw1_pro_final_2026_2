@@ -1,3 +1,5 @@
+import type { SceneDocument } from "./sceneContract";
+
 export type ListingApprovalStatus = "draft" | "pending" | "approved" | "rejected";
 
 export type ListingReviewAction = "approve" | "reject" | "publish" | "unpublish";
@@ -58,6 +60,7 @@ export class StaffListingsApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code?: string,
   ) {
     super(message);
     this.name = "StaffListingsApiError";
@@ -79,22 +82,23 @@ async function requestJson<T>(url: string, init: RequestInit): Promise<T> {
 
   if (!response.ok) {
     let message = "Listing request failed.";
+    let code: string | undefined;
 
     try {
       const payload: unknown = await response.json();
-      if (
-        typeof payload === "object" &&
-        payload !== null &&
-        "detail" in payload &&
-        typeof payload.detail === "string"
-      ) {
-        message = payload.detail;
+      if (typeof payload === "object" && payload !== null) {
+        if ("detail" in payload && typeof payload.detail === "string") {
+          message = payload.detail;
+        }
+        if ("code" in payload && typeof payload.code === "string") {
+          code = payload.code;
+        }
       }
     } catch {
       // Retain the generic message when the server has no JSON error body.
     }
 
-    throw new StaffListingsApiError(response.status, message);
+    throw new StaffListingsApiError(response.status, message, code);
   }
 
   return (await response.json()) as T;
@@ -128,6 +132,33 @@ export function getAgencyListing(
     listingPath(agencyId, listingId),
     authorizedGet(accessToken),
   );
+}
+
+export function getListingScene(
+  accessToken: string,
+  agencyId: string,
+  listingId: string,
+): Promise<SceneDocument> {
+  return requestJson<SceneDocument>(
+    `${listingPath(agencyId, listingId)}/scene`,
+    authorizedGet(accessToken),
+  );
+}
+
+export function putListingScene(
+  accessToken: string,
+  agencyId: string,
+  listingId: string,
+  scene: SceneDocument,
+): Promise<SceneDocument> {
+  return requestJson<SceneDocument>(`${listingPath(agencyId, listingId)}/scene`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(scene),
+  });
 }
 
 export function listListingTransitions(
