@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import importlib.util
 import io
+import shutil
+import tempfile
 from collections.abc import Generator, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -18,7 +20,6 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 
 import app.main as main_module
 from app.core.config import Settings
@@ -339,14 +340,20 @@ def _build_context(
     database_url: str = "sqlite+pysqlite:///:memory:",
     clock: list[datetime] | None = None,
 ) -> Generator[PhotoContext, None, None]:
+    # In-memory SQLite under StaticPool is a single connection shared by every
+    # session, and the periodic photo workers run on thread-pool threads while
+    # the test thread also uses the database: two threads on one pysqlite
+    # connection deadlock inside native code, which is the CI stall seen at 48%
+    # of the suite. A temporary file-backed database gives each session its own
+    # connection, so the sharing that enables the deadlock no longer exists.
+    temp_directory: Path | None = None
     if database_url == "sqlite+pysqlite:///:memory:":
-        engine = create_engine(
-            database_url,
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-    else:
-        engine = create_engine(database_url, connect_args={"check_same_thread": False})
+        temp_directory = Path(tempfile.mkdtemp(prefix="roomforge-photos-test-"))
+        database_url = f"sqlite+pysqlite:///{temp_directory / 'photos.db'}"
+    engine = create_engine(
+        database_url,
+        connect_args={"check_same_thread": False, "timeout": 30},
+    )
     factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     Base.metadata.create_all(engine)
     _install_offer_version_triggers(engine)
@@ -357,9 +364,15 @@ def _build_context(
         clock=lambda: clock_state[0],
         photo_storage=storage,
     )
-    with TestClient(app) as client:
-        yield PhotoContext(client, app, factory, storage or InMemoryPhotoStorage(), clock_state)
-    engine.dispose()
+    try:
+        with TestClient(app) as client:
+            yield PhotoContext(
+                client, app, factory, storage or InMemoryPhotoStorage(), clock_state
+            )
+    finally:
+        engine.dispose()
+        if temp_directory is not None:
+            shutil.rmtree(temp_directory, ignore_errors=True)
 
 
 @pytest.fixture
@@ -385,7 +398,7 @@ def photo_cleanup_context(monkeypatch: pytest.MonkeyPatch) -> Iterator[PhotoCont
 
 @pytest.fixture
 def photo_deletion_manual_context(monkeypatch: pytest.MonkeyPatch) -> Iterator[PhotoContext]:
-    """Deletion context whose periodic worker never fires, so sweeps are driven by hand."""
+    """Deletion context whose periodic worker never fires, so sweeps run deterministically by hand."""
     monkeypatch.setattr(
         main_module,
         "PHOTO_DELETION_RETRY_INTERVAL_SECONDS",
@@ -1035,9 +1048,8 @@ def test_delete_removes_the_object_and_returns_the_listing_to_draft(
     response = context.client.delete(_photos_url() + "/photo-a")
 
     assert response.status_code == 204
-    # The sweep is driven by hand, like the rest of the deletion tests: the periodic worker
-    # shares this single in-memory SQLite connection, and two threads executing on one
-    # connection deadlock instead of failing.
+    # The sweep is driven by hand, like the rest of the deletion tests: it asserts exact
+    # retry journal behavior, not the periodic worker's timing.
     _sweep_deletions(context)
     listed = context.client.get(_photos_url())
     assert listed.status_code == 200, listed.text
