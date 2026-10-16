@@ -442,11 +442,14 @@ def test_refresh_rotation_requires_origin_and_csrf_and_logout_revokes_session(de
     new_refresh = client.cookies.get("roomforge_refresh")
     assert new_refresh and new_refresh != old_refresh
 
+    # Starlette deprecates per-request cookies because persistence is ambiguous; swap
+    # the client cookie explicitly and restore the rotated one afterwards.
+    client.cookies.set("roomforge_refresh", old_refresh)
     old_replay = client.post(
         "/api/v1/auth/refresh",
-        cookies={"roomforge_refresh": old_refresh},
         headers={"Origin": "https://panel.example.test", "X-CSRF-Token": rotated.json()["csrf_token"]},
     )
+    client.cookies.set("roomforge_refresh", new_refresh)
     assert old_replay.status_code == 401
 
     logout = client.post(

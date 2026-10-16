@@ -30,6 +30,8 @@ from app.db.session import (
 from app.main import create_app
 from app.modules.identity.models import Agency, StaffAccount, StaffSession
 
+from testclient_app import client_app
+
 
 _CATALOG_TEST_JWT_SECRET = "catalog-test-secret-that-is-at-least-thirty-two-bytes"
 
@@ -1375,7 +1377,7 @@ def test_quote_openapi_and_public_creation_make_a_new_snapshot_per_post(
     catalog_api_context: CatalogApiContext,
 ) -> None:
     context = catalog_api_context
-    context.client.app.state.clock = lambda: datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+    client_app(context.client).state.clock = lambda: datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
     _seed_listing(
         context,
         listing_id="quote-listing",
@@ -1435,7 +1437,7 @@ def test_quote_ttl_starts_after_rate_limiter_wait(
     initial_time = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
     snapshot_time = initial_time + timedelta(minutes=7)
     clock_time = [initial_time]
-    context.client.app.state.clock = lambda: clock_time[0]
+    client_app(context.client).state.clock = lambda: clock_time[0]
     _seed_listing(context, listing_id="quote-listing")
 
     from app.modules.catalog import router as catalog_router
@@ -1484,7 +1486,7 @@ def test_quote_sale_and_rent_charge_periods_and_round_half_up_totals(
 ) -> None:
     context = catalog_api_context
     now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
-    context.client.app.state.clock = lambda: now
+    client_app(context.client).state.clock = lambda: now
     _seed_listing(
         context,
         listing_id="sale-rounding",
@@ -1582,7 +1584,7 @@ def test_quote_snapshot_stays_immutable_and_later_use_checks_expiry_and_version(
 ) -> None:
     context = catalog_api_context
     now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
-    context.client.app.state.clock = lambda: now
+    client_app(context.client).state.clock = lambda: now
     _seed_listing(
         context,
         listing_id="quote-listing",
@@ -1649,7 +1651,7 @@ def test_quote_rate_limit_counts_semantic_failures_and_sets_retry_after_at_bound
 ) -> None:
     context = catalog_api_context
     now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
-    context.client.app.state.clock = lambda: now
+    client_app(context.client).state.clock = lambda: now
     invalid_payload = _quote_payload(listing_id="missing-listing", offer_version=1)
 
     for _ in range(10):
@@ -1658,12 +1660,12 @@ def test_quote_rate_limit_counts_semantic_failures_and_sets_retry_after_at_bound
     _assert_quote_error(limited, status_code=429, code="rate_limit_exceeded")
     assert limited.headers["Retry-After"] == "60"
 
-    context.client.app.state.clock = lambda: now + timedelta(seconds=59, milliseconds=100)
+    client_app(context.client).state.clock = lambda: now + timedelta(seconds=59, milliseconds=100)
     almost_ready = context.client.post("/api/v1/quotes", json=invalid_payload)
     _assert_quote_error(almost_ready, status_code=429, code="rate_limit_exceeded")
     assert almost_ready.headers["Retry-After"] == "1"
 
-    context.client.app.state.clock = lambda: now + timedelta(minutes=1)
+    client_app(context.client).state.clock = lambda: now + timedelta(minutes=1)
     _assert_quote_error(
         context.client.post("/api/v1/quotes", json=invalid_payload),
         status_code=404,

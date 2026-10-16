@@ -11,6 +11,8 @@ from app.modules.identity.models import Agency
 from app.modules.reservations import chain
 from app.modules.reservations import models as reservation_models
 from app.modules.reservations.errors import ReservationApiError
+
+from testclient_app import client_app
 from app.modules.reservations.models import Reservation
 from app.modules.reservations.service import (
     expire_unpaid_reservations,
@@ -518,8 +520,8 @@ def test_reconciliation_guards_customer_action_scope_before_verifying(
     with pytest.raises(ReservationApiError) as raised:
         reconcile_chain_transaction(
             session_factory=context.session_factory,
-            settings=context.client.app.state.settings,
-            transport=getattr(context.client.app.state, "reservation_rpc_transport", None),
+            settings=client_app(context.client).state.settings,
+            transport=getattr(client_app(context.client).state, "reservation_rpc_transport", None),
             reservation_id=reservation["reservation_id"],
             actor={"id": customer_id, "email": "permit-customer@example.test"},
             action="accept",
@@ -538,7 +540,7 @@ def test_reconciliation_guards_customer_action_scope_before_verifying(
 def test_chain_transaction_openapi_limits_actions_per_route(
     reservations_context: ReservationsContext,
 ) -> None:
-    schema = cast(Any, reservations_context.client.app.openapi())
+    schema = cast(Any, client_app(reservations_context.client).openapi())
     components = schema["components"]["schemas"]
     customer_operation = schema["paths"][
         "/api/v1/reservations/{reservation_id}/chain-transactions"

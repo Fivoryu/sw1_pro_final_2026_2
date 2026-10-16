@@ -25,18 +25,39 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      # The PostgreSQL-backed (F04, R6) and Floci lifecycle tests skip when their
+      # services are missing. Run them for real: one Postgres with two virgin
+      # databases and one Floci container, exactly like the local Compose setup.
+      - name: Start integration services
+        working-directory: .
+        run: |
+          docker compose -f infra/docker/compose.postgres.yml up -d --wait
+          docker compose -f infra/docker/compose.postgres.yml exec -T postgres psql \
+            -U roomforge -d roomforge \
+            -c "CREATE DATABASE roomforge_f04_runner" \
+            -c "CREATE DATABASE roomforge_r6_runner"
+          docker compose -f infra/docker/compose.local.yml up -d floci --wait
+          # The lifecycle tests require the bucket and queues that the local
+          # provisioning script creates, so provision them exactly like local dev.
+          pwsh -NoProfile -File infra/docker/init-local-resources.ps1
       - run: python -m pip install ".[dev]"
       # pytest-timeout (thread method) cannot break a hang that happens inside
       # native code holding the GIL: its timer thread is starved too, which is
       # exactly what the stall at 48% of the suite showed. py-spy reads the
-      # process from outside, so every 30 seconds past ~2.5 minutes it dumps the
-      # native stack of every thread into this log before killing the run.
+      # process from outside, so every 30 seconds past the watchdog it dumps the
+      # native stack of every thread into this log before killing the run. The
+      # watchdog (12 x 30s) must exceed the healthy suite duration, which the
+      # real PostgreSQL and Floci integration tests have stretched well past
+      # the 2.5 minutes the pure-unit suite used to take.
       - name: Pytest with native stack dumps on stall
+        env:
+          ROOMFORGE_POSTGRES_DATABASE_URL: postgresql+psycopg://roomforge:valor-dev-local@127.0.0.1:5434/roomforge_f04_runner
+          ROOMFORGE_R6_DATABASE_URL: postgresql+psycopg://roomforge:valor-dev-local@127.0.0.1:5434/roomforge_r6_runner
         run: |
           python -m pip install py-spy
-          python -m pytest tests -q --timeout=120 --timeout-method=thread &
+          python -m pytest tests -q -rs --timeout=120 --timeout-method=thread &
           PYTEST_PID=$!
-          for _ in 1 2 3 4 5; do
+          for _ in $(seq 1 12); do
             sleep 30
             if ! kill -0 "$PYTEST_PID" 2>/dev/null; then
               wait "$PYTEST_PID"
