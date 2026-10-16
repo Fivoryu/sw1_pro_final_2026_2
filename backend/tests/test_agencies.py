@@ -18,6 +18,8 @@ from app.core.security import create_access_token, hash_secret, totp_code
 from app.db.base import Base
 from app.main import create_app
 from app.modules.identity.bootstrap import issue_platform_admin_invitation
+
+from testclient_app import client_app
 from app.modules.identity.models import (
     Agency,
     StaffAccount,
@@ -567,7 +569,7 @@ def test_admin_invitation_is_tenant_scoped_and_raw_token_is_only_delivered_by_em
 ) -> None:
     context = agency_api_context
     token = _platform_admin_token(context)
-    context.client.app.state.settings = replace(
+    client_app(context.client).state.settings = replace(
         context.settings, email_send_timeout_seconds=13
     )
     with context.session_factory.begin() as session:
