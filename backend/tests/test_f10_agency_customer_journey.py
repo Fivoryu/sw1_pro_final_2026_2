@@ -295,7 +295,7 @@ def test_agency_to_customer_journey_e2e(journey_postgres_engine: Engine) -> None
                 ),
             },
         )
-        assert agency_wallet.status_code == 200, agency_wallet.text
+        assert agency_wallet.status_code == 201, agency_wallet.text
 
         customer_challenge = client.post(
             "/api/v1/customer/wallet-challenges",
