@@ -37,6 +37,9 @@ jobs:
             -c "CREATE DATABASE roomforge_f04_runner" \
             -c "CREATE DATABASE roomforge_r6_runner"
           docker compose -f infra/docker/compose.local.yml up -d floci --wait
+          # The lifecycle tests require the bucket and queues that the local
+          # provisioning script creates, so provision them exactly like local dev.
+          pwsh -NoProfile -File infra/docker/init-local-resources.ps1
       - run: python -m pip install ".[dev]"
       # pytest-timeout (thread method) cannot break a hang that happens inside
       # native code holding the GIL: its timer thread is starved too, which is
@@ -52,7 +55,7 @@ jobs:
           ROOMFORGE_R6_DATABASE_URL: postgresql+psycopg://roomforge:valor-dev-local@127.0.0.1:5434/roomforge_r6_runner
         run: |
           python -m pip install py-spy
-          python -m pytest tests -q --timeout=120 --timeout-method=thread &
+          python -m pytest tests -q -rs --timeout=120 --timeout-method=thread &
           PYTEST_PID=$!
           for _ in $(seq 1 12); do
             sleep 30
