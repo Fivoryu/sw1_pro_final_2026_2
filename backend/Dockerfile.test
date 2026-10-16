@@ -15,7 +15,7 @@ COPY tests ./tests
 COPY alembic ./alembic
 COPY alembic.ini ./
 
-RUN python -m pip install --no-cache-dir ".[dev]"
+RUN python -m pip install --no-cache-dir --timeout 120 --retries 5 ".[dev]"
 
 ENTRYPOINT ["python", "-m", "pytest"]
 CMD ["tests", "-q"]
