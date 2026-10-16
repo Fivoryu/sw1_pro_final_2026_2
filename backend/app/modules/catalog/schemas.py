@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, StrictStr
 
 from app.core.money import SupportedCurrency
 
@@ -14,6 +14,61 @@ from app.core.money import SupportedCurrency
 # string guarded by a CHECK constraint, so routers cast database values to this alias.
 ListingOperation = Literal["sale", "rent"]
 ListingApprovalStatus = Literal["draft", "pending", "approved", "rejected"]
+
+# JSON has one number type, but the contract must reject strings and booleans.
+# StrictInt | StrictFloat preserves integer-valued coordinates from the fixture.
+SceneNumber = StrictInt | StrictFloat
+
+
+class SceneContractModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class SceneContourPoint(SceneContractModel):
+    x: SceneNumber
+    z: SceneNumber
+
+
+class ScenePosition(SceneContractModel):
+    x: SceneNumber
+    y: SceneNumber
+    z: SceneNumber
+
+
+class SceneDimensions(SceneContractModel):
+    width: SceneNumber
+    height: SceneNumber
+    depth: SceneNumber
+
+
+class SceneOpening(SceneContractModel):
+    id: StrictStr
+    type: StrictStr
+    position: ScenePosition
+    width: SceneNumber
+    height: SceneNumber
+
+
+class SceneRoom(SceneContractModel):
+    id: StrictStr
+    height: SceneNumber
+    contours: list[SceneContourPoint]
+    openings: list[SceneOpening]
+
+
+class SceneObject(SceneContractModel):
+    id: StrictStr
+    type: StrictStr
+    position: ScenePosition
+    dimensions: SceneDimensions
+    color: StrictStr
+
+
+class ListingSceneDocument(SceneContractModel):
+    version: Literal["1.0"]
+    unit: Literal["meters"]
+    rooms: list[SceneRoom]
+    objects: list[SceneObject]
 
 
 class CatalogMoney(BaseModel):
