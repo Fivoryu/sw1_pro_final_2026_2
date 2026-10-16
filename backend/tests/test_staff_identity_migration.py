@@ -208,9 +208,12 @@ def _expected_default(column: Column[object], engine: Engine) -> str | None:
     server_default = getattr(column, "server_default")
     if server_default is None:
         return None
-    compiled = server_default.arg.compile(
-        dialect=engine.dialect, compile_kwargs={"literal_binds": True}
-    )
+    raw = getattr(server_default, "arg", server_default)
+    if isinstance(raw, str):
+        # A plain-string server default is not a SQL expression object; there is
+        # nothing to compile against the dialect.
+        return _normalize_sql(raw)
+    compiled = raw.compile(dialect=engine.dialect, compile_kwargs={"literal_binds": True})
     return _normalize_sql(str(compiled))
 
 
