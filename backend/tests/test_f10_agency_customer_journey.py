@@ -175,7 +175,10 @@ def test_agency_to_customer_journey_e2e(journey_postgres_engine: Engine) -> None
         listing_url = f"{collection_url}/{listing_id}"
         assert listing["approval_status"] == "draft"
         assert listing["is_published"] is False
-        assert listing["offer_version"] == 1
+        # Creating the listing with an extra is already an offer change: the
+        # PostgreSQL offer-version trigger counts the extra insert, so the
+        # authored listing starts at version 2.
+        assert listing["offer_version"] == 2
         assert len(listing["extras"]) == 1
         extra_id = listing["extras"][0]["extra_id"]
 
@@ -267,7 +270,7 @@ def test_agency_to_customer_journey_e2e(journey_postgres_engine: Engine) -> None
             "/api/v1/quotes",
             json={
                 "listing_id": listing_id,
-                "offer_version": 1,
+                "offer_version": listing["offer_version"],
                 "selected_extra_ids": [extra_id],
             },
         )
@@ -356,12 +359,12 @@ def test_agency_to_customer_journey_e2e(journey_postgres_engine: Engine) -> None
             json={**_payload(), "base_price": "140000.00"},
         )
         assert repriced.status_code == 200, repriced.text
-        assert repriced.json()["offer_version"] == 2
+        assert repriced.json()["offer_version"] == 3
 
         own_after_reprice = client.get("/api/v1/reservations", headers=customer_headers)
         assert own_after_reprice.status_code == 200
         still_reserved = own_after_reprice.json()[0]
         assert still_reserved["reservation_id"] == reservation_id
-        assert still_reserved["quote_snapshot"]["offer_version"] == 1, (
+        assert still_reserved["quote_snapshot"]["offer_version"] == 2, (
             "the reservation snapshot must stay immutable after a repricing"
         )
