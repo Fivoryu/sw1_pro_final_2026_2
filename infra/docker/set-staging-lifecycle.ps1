@@ -51,7 +51,7 @@ function Invoke-FlociAws {
         [Parameter(Mandatory = $true)][string[]]$AwsArguments
     )
 
-    $output = & docker.exe compose --env-file $envFile -f $composeFile exec -T floci aws --endpoint-url $EndpointUrl @AwsArguments 2>&1
+    $output = & $dockerCommand compose --env-file $envFile -f $composeFile exec -T floci aws --endpoint-url $EndpointUrl @AwsArguments 2>&1
     $exitCode = $LASTEXITCODE
     $outputText = ($output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
 
@@ -63,9 +63,17 @@ function Invoke-FlociAws {
 
 $composeFile = Join-Path -Path $PSScriptRoot -ChildPath 'compose.local.yml'
 $envFile = Join-Path -Path $PSScriptRoot -ChildPath 'local-env.example'
-$dockerCommand = Get-Command docker.exe -ErrorAction SilentlyContinue
+# Windows ships docker.exe; pwsh on Linux only exposes plain docker. Resolve once
+# so the script runs identically under Windows PowerShell and cross-platform pwsh.
+$dockerCommand = $null
+foreach ($dockerCandidate in @('docker.exe', 'docker')) {
+    $dockerCommand = Get-Command $dockerCandidate -ErrorAction SilentlyContinue
+    if ($null -ne $dockerCommand) {
+        break
+    }
+}
 if ($null -eq $dockerCommand -and (-not $DryRun -or -not $PSBoundParameters.ContainsKey('CurrentConfigurationJson'))) {
-    throw 'Docker CLI (docker.exe) is required to read or update the local Floci lifecycle configuration.'
+    throw 'Docker CLI (docker or docker.exe) is required to read or update the local Floci lifecycle configuration.'
 }
 
 if ($PSBoundParameters.ContainsKey('CurrentConfigurationJson')) {
@@ -126,7 +134,7 @@ if ($DryRun) {
 }
 
 $lifecycleConfigurationPath = '/tmp/roomforge-staging-lifecycle.json'
-$fileWriteOutput = $mergedConfigurationJson | & docker.exe compose --env-file $envFile -f $composeFile exec -T floci sh -c "cat > $lifecycleConfigurationPath" 2>&1
+$fileWriteOutput = $mergedConfigurationJson | & $dockerCommand compose --env-file $envFile -f $composeFile exec -T floci sh -c "cat > $lifecycleConfigurationPath" 2>&1
 $fileWriteExitCode = $LASTEXITCODE
 if ($fileWriteExitCode -ne 0) {
     $fileWriteText = ($fileWriteOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
