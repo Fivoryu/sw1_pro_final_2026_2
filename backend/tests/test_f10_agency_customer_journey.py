@@ -230,7 +230,7 @@ def test_agency_to_customer_journey_e2e(journey_postgres_engine: Engine) -> None
         other_agency_list = client.get(f"/api/v1/staff/agencies/{_AGENCY_TWO}/listings")
         assert other_agency_list.status_code == 200
         assert all(
-            item["listing_id"] != listing_id for item in other_agency_list.json()
+            item["listing_id"] != listing_id for item in other_agency_list.json()["listings"]
         )
         foreign_edit = client.put(listing_url, json=_payload())
         assert foreign_edit.status_code == 403, foreign_edit.text
