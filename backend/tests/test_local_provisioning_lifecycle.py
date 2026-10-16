@@ -27,6 +27,15 @@ def _find_powershell() -> str | None:
     return None
 
 
+def _find_docker() -> str | None:
+    # Windows installs docker.exe; Linux runners and shells expose plain docker.
+    for executable in ("docker.exe", "docker"):
+        resolved = shutil.which(executable)
+        if resolved is not None:
+            return resolved
+    return None
+
+
 def _expected_staging_rule() -> dict[str, Any]:
     return {
         "ID": RULE_ID,
@@ -329,9 +338,9 @@ def test_floci_provisioning_preserves_an_unrelated_lifecycle_rule() -> None:
     if pwsh is None:
         pytest.skip("PowerShell is unavailable; it is required for the Floci integration test.")
 
-    docker_executable = shutil.which("docker.exe")
+    docker_executable = _find_docker()
     if docker_executable is None:
-        pytest.skip("docker.exe is unavailable; Floci cannot be queried by this integration test.")
+        pytest.skip("docker is unavailable; Floci cannot be queried by this integration test.")
 
     bucket_names = _list_floci_bucket_names(docker_executable)
     if BUCKET_NAME not in bucket_names:
@@ -378,9 +387,9 @@ def test_floci_provisioning_creates_lifecycle_configuration_when_missing() -> No
     if powershell is None:
         pytest.skip("PowerShell is unavailable; it is required for the Floci integration test.")
 
-    docker_executable = shutil.which("docker.exe")
+    docker_executable = _find_docker()
     if docker_executable is None:
-        pytest.skip("docker.exe is unavailable; Floci cannot be queried by this integration test.")
+        pytest.skip("docker is unavailable; Floci cannot be queried by this integration test.")
 
     _list_floci_bucket_names(docker_executable)
     bucket_name = f"roomforge-lifecycle-test-{uuid.uuid4().hex}"
