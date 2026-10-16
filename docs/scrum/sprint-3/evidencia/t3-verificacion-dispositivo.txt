@@ -1,0 +1,72 @@
+# T3 — Verificacion de camara y galeria en un dispositivo Android
+
+Fecha: 2026-10-15. Grupo #12, SW1 2026-2.
+Dispositivo: SM_S711B (Android), serie adb R5CWA0BTAKH.
+APK: app-debug.apk (build debug) compilado con ROOMFORGE_API_BASE_URL=http://127.0.0.1:8000
+
+## Por que tuneles y no la red local
+Telefono 192.168.0.14 y equipo 192.168.0.30 estan en la misma /24, pero la Wi-Fi tiene
+aislamiento de clientes: abrir http://192.168.0.30:8000/health/ready en el navegador del
+telefono devuelve ERR_ADDRESS_UNREACHABLE. El firewall de Windows no bloquea: la red esta
+clasificada como Publica y Docker Desktop tiene reglas Allow para ese perfil. La via que
+funciona es el tunel USB y hacen falta los DOS puertos, la API 8000 y el almacenamiento
+4566, porque el enlace de subida se firma con S3_PUBLIC_ENDPOINT_URL=127.0.0.1:4566.
+
+## Tuneles activos
+UsbFfs tcp:8000 tcp:8000
+UsbFfs tcp:4566 tcp:4566
+
+
+## Revision de la base local
+0021_merge_photos_detection
+
+## Filas de foto
+                  id                  |  status   |              listing_id              | size_bytes | content_type 
+--------------------------------------+-----------+--------------------------------------+------------+--------------
+ bf0e5110-cce4-4d1d-9f16-57a13760501e | confirmed | 861ed0c1-1f36-4975-a4de-7e91bf7d6149 |      39989 | image/heic
+ ed5d8f4e-82cb-4ce4-bdac-d0a724144bc5 | confirmed | 861ed0c1-1f36-4975-a4de-7e91bf7d6149 |    1207951 | image/jpeg
+(2 rows)
+
+
+## Objetos en el bucket
+{
+    "Contents": [
+        {
+            "Key": "agencies/1a113d0b-0772-4f35-a116-cfe1b7a6d627/listings/861ed0c1-1f36-4975-a4de-7e91bf7d6149/photos/bf0e5110-cce4-4d1d-9f16-57a13760501e/original",
+            "LastModified": "2026-10-15T14:05:08+00:00",
+            "ETag": "\"0c1052810e355a593e6e82f9f80a97ad\"",
+            "Size": 39989,
+            "StorageClass": "STANDARD"
+        },
+        {
+            "Key": "agencies/1a113d0b-0772-4f35-a116-cfe1b7a6d627/listings/861ed0c1-1f36-4975-a4de-7e91bf7d6149/photos/bf0e5110-cce4-4d1d-9f16-57a13760501e/public",
+            "LastModified": "2026-10-15T14:05:08+00:00",
+            "ETag": "\"fc4ecaa919cdddbb32fbfe208c33d50c\"",
+            "Size": 70054,
+            "StorageClass": "STANDARD"
+        },
+        {
+            "Key": "agencies/1a113d0b-0772-4f35-a116-cfe1b7a6d627/listings/861ed0c1-1f36-4975-a4de-7e91bf7d6149/photos/ed5d8f4e-82cb-4ce4-bdac-d0a724144bc5/original",
+            "LastModified": "2026-10-15T14:09:38+00:00",
+            "ETag": "\"7688d93bee59fdcd051c1056d0dca7c7\"",
+            "Size": 1207951,
+            "StorageClass": "STANDARD"
+        },
+        {
+            "Key": "agencies/1a113d0b-0772-4f35-a116-cfe1b7a6d627/listings/861ed0c1-1f36-4975-a4de-7e91bf7d6149/photos/ed5d8f4e-82cb-4ce4-bdac-d0a724144bc5/public",
+            "LastModified": "2026-10-15T14:09:38+00:00",
+            "ETag": "\"0f5e3b800176c0ec8eb07a3e39deb5f1\"",
+            "Size": 563411,
+            "StorageClass": "STANDARD"
+        }
+    ],
+    "RequestCharged": null,
+    "Prefix": ""
+}
+
+## Resultado
+Camara y galeria completaron las dos: la app leyo el archivo, pidio la autorizacion de
+subida, subio los bytes y confirmo la foto. La galeria uso un fixture sintetico HEIC de
+39989 bytes y la camara un JPEG real de 12 MP de 1207951 bytes. En los dos casos quedaron
+tres objetos separados: original privado, derivada publica y clave de staging bajo el
+prefijo staging/. No se usaron fotos personales.

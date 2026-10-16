@@ -134,7 +134,8 @@ Para un cambio nuevo: seguir el pipeline SDD completo y persistir ambos backends
 
 ## 10. Gaps abiertos relevantes
 
-- **GAP-092**: migraciones del Sprint 1 pendientes contra PostgreSQL real — solo `0001`/`0002` ejecutadas; quedan 12 tablas.
+- **GAP-092**: migraciones del Sprint 1 pendientes contra PostgreSQL real — solo `0001`/`0002` ejecutadas; quedan 12 tablas. **Actualizado 2026-10-15:** la base local de Docker quedó en el head de la rama (`0021_merge_photos_detection`), con **25 tablas** en el esquema `public`; `alembic upgrade head` se aplicó contra ese PostgreSQL real partiendo de `0020_detection_job_claim_token`.
+- **GAP-093**: dos ramas numeraron migraciones desde el mismo padre (`0018_listing_photos`), así que al integrarlas la cadena Alembic queda con **dos heads** y `alembic upgrade head` deja de funcionar. Resuelto con la revisión de merge `0021_merge_photos_detection`, que hoy vive solo en `feat/alembic-merge-f04-f08`: **quien integre debe llevarla**. Causa de fondo: la numeración secuencial por rama; ya se agregó al CI el chequeo que falla cuando hay más de un head.
 - **GAP-087**: CP-003..CP-013 sin ejecutar; CP-001 y CP-002 cuentan con evidencia.
 - **GAP-073**: asignación de responsables de pruebas/documentación pendiente.
 - **GAP-088**: diagramas UML del Sprint 1 pendientes de creación en Enterprise Architect.

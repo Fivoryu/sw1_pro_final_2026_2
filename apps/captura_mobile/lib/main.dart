@@ -16,11 +16,12 @@ const _apiBaseUrl = String.fromEnvironment(
   defaultValue: 'http://10.0.2.2:8000',
 );
 
-/// What the agent can rely on: listings are saved in RoomForge (F04), while
-/// camera capture belongs to a later phase and stays unavailable.
+/// What the agent can rely on: listings and their photos, from the camera or the gallery,
+/// are saved in RoomForge, while spatial capture belongs to a later phase and stays
+/// unavailable.
 const _accessNotice =
-    'La captura con cámara todavía no está disponible. Los inmuebles que '
-    'cargues se guardan en RoomForge.';
+    'La captura espacial todavía no está disponible. Los inmuebles y sus fotos, '
+    'desde la cámara o la galería, se guardan en RoomForge.';
 
 const _credentialsNotice =
     'El acceso valida tus credenciales y el código de tu segundo factor.';

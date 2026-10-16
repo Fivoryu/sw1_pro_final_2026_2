@@ -26,6 +26,18 @@ jobs:
       - run: python -m pytest tests -q
       - run: ruff check app tests
       - run: pyright app tests
+      # Two feature branches once numbered their migrations from the same parent, which
+      # left the chain with two heads and made `alembic upgrade head` unusable once they
+      # met. Fail here instead, where the pull request can still add a merge revision.
+      - name: Alembic chain has a single head
+        run: |
+          python -m alembic heads > "$RUNNER_TEMP/alembic-heads.txt"
+          cat "$RUNNER_TEMP/alembic-heads.txt"
+          heads="$(grep -c '(head)' "$RUNNER_TEMP/alembic-heads.txt" || true)"
+          if [ "$heads" -ne 1 ]; then
+            echo "::error::Expected exactly one Alembic head, found $heads. Add a merge revision for the diverged chains."
+            exit 1
+          fi
 
   panel:
     name: Staff panel (Node 22)

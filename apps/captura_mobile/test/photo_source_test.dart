@@ -2,12 +2,29 @@ import 'dart:typed_data';
 
 import 'package:captura_mobile/data/services/photo_source.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image_picker/image_picker.dart';
 
 Uint8List _bytes(List<int> head) =>
     Uint8List.fromList([...head, ...List.filled(16, 0)]);
 
+class _RecordingPicker implements ImagePicker {
+  _RecordingPicker(this.file);
+
+  final XFile? file;
+  Invocation? pickInvocation;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) {
+    if (invocation.memberName == #pickImage) {
+      pickInvocation = invocation;
+      return Future<XFile?>.value(file);
+    }
+    return super.noSuchMethod(invocation);
+  }
+}
+
 void main() {
-  test('detects the supported formats from their signatures', () {
+  test('detects JPEG, PNG, WebP, HEIC, and HEIF signatures', () {
     expect(
       detectPhotoContentType(_bytes([0xFF, 0xD8, 0xFF, 0xE0])),
       'image/jpeg',
@@ -22,20 +39,43 @@ void main() {
       detectPhotoContentType(_bytes('RIFF\x00\x00\x00\x00WEBP'.codeUnits)),
       'image/webp',
     );
+    expect(
+      detectPhotoContentType(_bytes('\x00\x00\x00\x18ftypheic'.codeUnits)),
+      'image/heic',
+    );
+    expect(
+      detectPhotoContentType(_bytes('\x00\x00\x00\x18ftypmif1'.codeUnits)),
+      'image/heif',
+    );
   });
 
   test('rejects other formats and truncated files', () {
     expect(detectPhotoContentType(_bytes('GIF89a'.codeUnits)), isNull);
     expect(
-      detectPhotoContentType(_bytes('\x00\x00\x00\x18ftypheic'.codeUnits)),
+      detectPhotoContentType(_bytes('\x00\x00\x00\x18ftypxxxx'.codeUnits)),
       isNull,
     );
-    expect(detectPhotoContentType(Uint8List.fromList([0xFF, 0xD8])), isNull);
+    expect(detectPhotoContentType(_bytes([0xFF, 0xD8])), isNull);
     expect(detectPhotoContentType(Uint8List(0)), isNull);
   });
 
-  test('device photos are reduced before upload', () {
-    expect(ImagePickerPhotoSource.maxDimension, 2560);
-    expect(ImagePickerPhotoSource.imageQuality, 85);
-  });
+  test(
+    'uploads the exact picked bytes without requesting resize or re-encoding',
+    () async {
+      final original = Uint8List.fromList([0xFF, 0xD8, 0xFF, 0xE0, 0x01, 0x02]);
+      final picker = _RecordingPicker(
+        XFile.fromData(original, mimeType: 'image/jpeg'),
+      );
+
+      final picked = await ImagePickerPhotoSource(
+        picker: picker,
+      ).pick(PhotoOrigin.gallery);
+
+      expect(picked?.bytes, orderedEquals(original));
+      final arguments = picker.pickInvocation!.namedArguments;
+      expect(arguments[const Symbol('maxWidth')], isNull);
+      expect(arguments[const Symbol('maxHeight')], isNull);
+      expect(arguments[const Symbol('imageQuality')], isNull);
+    },
+  );
 }
