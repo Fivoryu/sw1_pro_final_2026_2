@@ -35,6 +35,16 @@ from sqlalchemy.schema import CheckConstraint, UniqueConstraint
 from app.db.base import Base
 from app.modules.identity import models as identity_models  # noqa: F401
 
+# The R6 schema defines a unique index over an expression
+# (lower(trim(normalized_email))) on pending invitations. SQLAlchemy cannot
+# reflect expression-based indexes, so every metadata comparison over a
+# migrated database emits this SAWarning. The index is intentional; silencing
+# the reflection notice here is the documented accommodation, not a schema
+# problem.
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:Skipped unsupported reflection of expression-based index"
+)
+
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 _R6_DATABASE_PREFIX = "roomforge_r6_"
 _R6_ENGINE_INFO_KEY = "roomforge.r6.isolated_engine"
