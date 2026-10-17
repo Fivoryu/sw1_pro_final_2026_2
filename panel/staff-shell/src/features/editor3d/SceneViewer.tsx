@@ -15,9 +15,21 @@ const roomData = {
         { "x": 4, "z": 0 },
         { "x": 4, "z": 3 },
         { "x": 0, "z": 3 }
+      ],
+      // Abertura simple (puerta) según docs/api/f06-scene-contract.md:
+      // centrada en x = 2 sobre la pared z = 0, de 0,9 m de ancho y 2,1 m de alto.
+      "openings": [
+        {
+          "id": "door_1",
+          "type": "door",
+          "position": { "x": 2, "y": 0, "z": 0 },
+          "width": 0.9,
+          "height": 2.1
+        }
       ]
     }
   ],
+  // Tres cubos de color como referencias (fixture del plan maestro, F06).
   "objects": [
     {
       "id": "ref_cube_1",
@@ -27,9 +39,33 @@ const roomData = {
       "position": { "x": 1, "y": 0, "z": 1 },
       "dimensions": { "width": 0.5, "height": 0.5, "depth": 0.5 },
       "color": "red"
+    },
+    {
+      "id": "ref_cube_2",
+      "type": "placeholder",
+      "name": "Mesa de Centro Verde",
+      "price": 249.5,
+      "position": { "x": 3, "y": 0, "z": 1 },
+      "dimensions": { "width": 0.5, "height": 0.5, "depth": 0.5 },
+      "color": "green"
+    },
+    {
+      "id": "ref_cube_3",
+      "type": "placeholder",
+      "name": "Estantería Amarilla",
+      "price": 179.9,
+      "position": { "x": 3.2, "y": 0, "z": 2.3 },
+      "dimensions": { "width": 0.5, "height": 0.5, "depth": 0.5 },
+      "color": "yellow"
     }
   ]
 };
+
+// Altura de los ojos de la cámara inicial (fixture: 1,6 m).
+const EYE_HEIGHT = 1.6;
+// Tamaño del lienzo (viewport) del visor.
+const VIEWPORT_WIDTH = 800;
+const VIEWPORT_HEIGHT = 500;
 
 export const SceneViewer: React.FC = () => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -46,17 +82,18 @@ export const SceneViewer: React.FC = () => {
     gridHelper.position.set(2, 0, 1.5);
     scene.add(gridHelper);
 
-    const camera = new THREE.PerspectiveCamera(75, 800 / 600, 0.1, 1000);
-    // Cámara inicial desde afuera (perspectiva de maqueta)
-    camera.position.set(5, 6, 7);
+    const camera = new THREE.PerspectiveCamera(75, VIEWPORT_WIDTH / VIEWPORT_HEIGHT, 0.1, 1000);
+    // Cámara inicial dentro de la habitación, a la altura de los ojos (1,6 m),
+    // junto a la pared del fondo y mirando hacia la puerta.
+    camera.position.set(2, EYE_HEIGHT, 2.8);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(800, 500); // Ajustamos un poco la altura para que encaje mejor en el diseño
+    renderer.setSize(VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
     mountRef.current.appendChild(renderer.domElement);
 
     const orbitControls = new OrbitControls(camera, renderer.domElement);
     orbitControls.enableDamping = true;
-    orbitControls.target.set(2, 1.6, 1.5);
+    orbitControls.target.set(2, 1.0, 1.2);
     orbitControls.maxPolarAngle = Math.PI / 2;
 
     const room = roomData.rooms[0];
@@ -70,21 +107,59 @@ export const SceneViewer: React.FC = () => {
     const wallMaterial = new THREE.MeshBasicMaterial({ color: '#e67e22', transparent: true, opacity: 0.8, side: THREE.DoubleSide });
     const lineMaterial = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 });
     
+    // Cada pared se arma con uno o más paños rectangulares. Si una abertura cae
+    // sobre la pared, se deja el hueco: paño izquierdo, paño derecho y dintel.
+    type WallPanel = { start: number; end: number; bottom: number; top: number };
+
     const contours = room.contours;
     for (let i = 0; i < contours.length; i++) {
       const p1 = contours[i];
       const p2 = contours[(i + 1) % contours.length];
-      const width = Math.hypot(p2.x - p1.x, p2.z - p1.z);
-      const wallGeometry = new THREE.PlaneGeometry(width, room.height);
-      const wall = new THREE.Mesh(wallGeometry, wallMaterial);
-      wall.position.x = (p1.x + p2.x) / 2;
-      wall.position.z = (p1.z + p2.z) / 2;
-      wall.position.y = room.height / 2;
-      wall.rotation.y = Math.atan2(p1.z - p2.z, p2.x - p1.x);
-      const edges = new THREE.EdgesGeometry(wallGeometry);
-      const line = new THREE.LineSegments(edges, lineMaterial);
-      wall.add(line);
-      scene.add(wall);
+      const length = Math.hypot(p2.x - p1.x, p2.z - p1.z);
+      const dirX = (p2.x - p1.x) / length;
+      const dirZ = (p2.z - p1.z) / length;
+      const rotationY = Math.atan2(p1.z - p2.z, p2.x - p1.x);
+
+      // Aberturas que están sobre este tramo de pared, expresadas como distancia
+      // desde p1 a lo largo de la pared.
+      const wallOpenings = (room.openings ?? [])
+        .map((opening) => {
+          const relX = opening.position.x - p1.x;
+          const relZ = opening.position.z - p1.z;
+          const along = relX * dirX + relZ * dirZ;
+          const offset = Math.abs(relX * dirZ - relZ * dirX);
+          return { along, offset, opening };
+        })
+        .filter(({ along, offset }) => offset < 0.01 && along > 0 && along < length)
+        .sort((a, b) => a.along - b.along);
+
+      const panels: WallPanel[] = [];
+      let cursor = 0;
+      for (const { along, opening } of wallOpenings) {
+        const holeStart = Math.max(0, along - opening.width / 2);
+        const holeEnd = Math.min(length, along + opening.width / 2);
+        const holeBottom = opening.position.y;
+        const holeTop = Math.min(room.height, holeBottom + opening.height);
+        if (holeStart > cursor) panels.push({ start: cursor, end: holeStart, bottom: 0, top: room.height });
+        if (holeBottom > 0) panels.push({ start: holeStart, end: holeEnd, bottom: 0, top: holeBottom });
+        if (holeTop < room.height) panels.push({ start: holeStart, end: holeEnd, bottom: holeTop, top: room.height });
+        cursor = holeEnd;
+      }
+      if (cursor < length) panels.push({ start: cursor, end: length, bottom: 0, top: room.height });
+
+      for (const panel of panels) {
+        const panelGeometry = new THREE.PlaneGeometry(panel.end - panel.start, panel.top - panel.bottom);
+        const wall = new THREE.Mesh(panelGeometry, wallMaterial);
+        const center = (panel.start + panel.end) / 2;
+        wall.position.x = p1.x + dirX * center;
+        wall.position.z = p1.z + dirZ * center;
+        wall.position.y = (panel.bottom + panel.top) / 2;
+        wall.rotation.y = rotationY;
+        const edges = new THREE.EdgesGeometry(panelGeometry);
+        const line = new THREE.LineSegments(edges, lineMaterial);
+        wall.add(line);
+        scene.add(wall);
+      }
     }
 
     const draggableObjects: THREE.Mesh[] = [];
@@ -111,6 +186,8 @@ export const SceneViewer: React.FC = () => {
     });
 
     const dragControls = new DragControls(draggableObjects, camera, renderer.domElement);
+    // Solo se arrastra el cubo, nunca su contorno de líneas (objeto hijo).
+    dragControls.recursive = false;
     dragControls.addEventListener('dragstart', () => orbitControls.enabled = false);
     dragControls.addEventListener('drag', (event) => {
       const obj = event.object;
@@ -133,10 +210,12 @@ export const SceneViewer: React.FC = () => {
       mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObjects(draggableObjects);
-      if (intersects.length > 0) {
-        const object = intersects[0].object;
-        setSelectedItem({ name: object.userData.name, price: object.userData.price });
+      // Sin recursión: el contorno de líneas de cada cubo no debe capturar el clic,
+      // porque no tiene nombre ni precio.
+      const intersects = raycaster.intersectObjects(draggableObjects, false);
+      const data = intersects.length > 0 ? intersects[0].object.userData : null;
+      if (data && typeof data.name === 'string' && typeof data.price === 'number') {
+        setSelectedItem({ name: data.name, price: data.price });
       } else {
         setSelectedItem(null);
       }
