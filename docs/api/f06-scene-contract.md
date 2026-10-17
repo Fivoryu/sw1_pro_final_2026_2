@@ -64,3 +64,20 @@ Las rutas de staff requieren un miembro de la agencia del inmueble (`agency_admi
 Los errores conservan el sobre común `{ "detail": "...", "code": "..." }`. La escena se crea
 al primer `PUT`; cada guardado posterior sustituye el documento y actualiza `updated_at` y
 `updated_by`.
+
+## Lectura pública (F06.4)
+
+La app cliente lee la escena de un inmueble publicado sin sesión ni credenciales:
+
+- `GET /api/v1/listings/{listing_id}/scene` devuelve `200` con el documento completo del
+  contrato v1. Es de solo lectura: no expone `updated_by` ni rutas de escritura.
+- Si el inmueble no existe o no está publicado y aprobado, responde `404` con el error común
+  `{ "detail": "Listing not found", "code": "listing_not_found" }`: un borrador o rechazado es
+  indistinguible de un inmueble inexistente.
+- Si el inmueble está publicado pero todavía no tiene escena, responde `404` con
+  `{ "detail": "Scene is not defined for this listing", "code": "scene_not_defined" }`, el mismo
+  código de la ruta de staff, para que el cliente muestre su estado honesto de "recorrido no
+  disponible".
+
+El documento servido es exactamente el almacenado por F06.3; el cliente valida `version` y
+`unit` antes de construir el recorrido y degrada con su estado de error si no coinciden.
