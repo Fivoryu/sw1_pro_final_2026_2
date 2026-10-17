@@ -7,6 +7,7 @@ import 'domain/catalog_controller.dart';
 import 'domain/customer_session_controller.dart';
 import 'ui/features/auth/views/customer_account_screen.dart';
 import 'ui/features/catalog/views/catalog_screen.dart';
+import 'ui/features/visor3d/views/visor3d_screen.dart';
 
 /// Backend used by the running app. Override it per environment with
 /// `--dart-define=ROOMFORGE_API_BASE_URL=https://host`.
@@ -93,6 +94,9 @@ class _CustomerShellState extends State<CustomerShell> {
           Icons.event_note_outlined,
         ),
         CustomerAccountScreen(controller: widget.sessionController),
+        // Piloto F06: solo se construye al abrir la pestaña para no cargar
+        // el WebView en segundo plano.
+        if (_selectedIndex == 3) const Visor3dScreen() else const SizedBox(),
       ],
     ),
     bottomNavigationBar: NavigationBar(
@@ -113,6 +117,11 @@ class _CustomerShellState extends State<CustomerShell> {
           icon: Icon(Icons.person_outline),
           selectedIcon: Icon(Icons.person),
           label: 'Cuenta',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.view_in_ar_outlined),
+          selectedIcon: Icon(Icons.view_in_ar),
+          label: 'Visor 3D',
         ),
       ],
     ),
