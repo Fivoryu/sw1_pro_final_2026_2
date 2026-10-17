@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../data/models/catalog_models.dart';
+import '../../../../data/services/scene_api.dart';
 import '../../../../domain/catalog_controller.dart';
 import 'catalog_filters_sheet.dart';
 import 'catalog_format.dart';
@@ -10,9 +11,12 @@ import 'listing_photo.dart';
 /// The "Explorar" tab: published listings with filters, paging and honest
 /// loading, empty and error states.
 class CatalogScreen extends StatefulWidget {
-  const CatalogScreen({super.key, required this.controller});
+  const CatalogScreen({super.key, required this.controller, this.sceneApi});
 
   final CatalogController controller;
+
+  /// When provided, the detail can offer the 3D walkthrough of a listing.
+  final SceneApi? sceneApi;
 
   @override
   State<CatalogScreen> createState() => _CatalogScreenState();
@@ -45,6 +49,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
         builder: (_) => ListingDetailScreen(
           controller: _controller,
           listingId: listing.listingId,
+          sceneApi: widget.sceneApi,
         ),
       ),
     );

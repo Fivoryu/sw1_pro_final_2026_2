@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../../../data/models/catalog_models.dart';
+import '../../../../data/services/scene_api.dart';
 import '../../../../domain/catalog_controller.dart';
 import 'catalog_format.dart';
 import 'listing_photo.dart';
+import '../../viewer/views/listing_viewer_screen.dart';
 
 /// Public detail of one published listing.
 ///
@@ -14,10 +16,15 @@ class ListingDetailScreen extends StatefulWidget {
     super.key,
     required this.controller,
     required this.listingId,
+    this.sceneApi,
   });
 
   final CatalogController controller;
   final String listingId;
+
+  /// When provided, the detail probes whether a walkthrough exists and offers
+  /// it; without it, the section stays in the honest catalog state.
+  final SceneApi? sceneApi;
 
   @override
   State<ListingDetailScreen> createState() => _ListingDetailScreenState();
@@ -25,6 +32,7 @@ class ListingDetailScreen extends StatefulWidget {
 
 class _ListingDetailScreenState extends State<ListingDetailScreen> {
   CatalogListingDetail? _detail;
+  SceneLoadResult? _sceneResult;
   int _photoIndex = 0;
   String? _message;
   bool _loading = true;
@@ -41,11 +49,15 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
       _message = null;
     });
     final result = await widget.controller.loadDetail(widget.listingId);
+    final scene = widget.sceneApi == null
+        ? null
+        : await widget.sceneApi!.getScene(widget.listingId);
     if (!mounted) return;
     setState(() {
       _loading = false;
       _detail = result.detail;
       _message = result.message;
+      _sceneResult = scene;
     });
   }
 
@@ -139,12 +151,39 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
         const SizedBox(height: 24),
         Text('Recorrido 3D', style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),
-        const Text('Recorrido 3D no disponible.'),
+        _sceneSection(context),
         const SizedBox(height: 24),
         Text('Disponibilidad', style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),
         const Text('Disponibilidad no consultada ni confirmada.'),
       ],
+    );
+  }
+
+  /// Offers the walkthrough only when the API actually has a scene; every
+  /// other outcome keeps the honest catalog wording.
+  Widget _sceneSection(BuildContext context) {
+    if (_sceneResult is SceneReady) {
+      return OutlinedButton.icon(
+        key: const ValueKey('detail-open-viewer'),
+        icon: const Icon(Icons.view_in_ar_outlined),
+        label: const Text('Recorrer en 3D'),
+        onPressed: _openViewer,
+      );
+    }
+    return const Text('Recorrido 3D no disponible.');
+  }
+
+  void _openViewer() {
+    final sceneApi = widget.sceneApi;
+    if (sceneApi == null) return;
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ListingViewerScreen(
+          sceneApi: sceneApi,
+          listingId: widget.listingId,
+        ),
+      ),
     );
   }
 
