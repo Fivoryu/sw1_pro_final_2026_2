@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'data/services/catalog_api.dart';
 import 'data/services/customer_auth_api.dart';
 import 'data/services/customer_token_store.dart';
+import 'data/services/quote_api.dart';
 import 'data/services/scene_api.dart';
 import 'domain/catalog_controller.dart';
 import 'domain/customer_session_controller.dart';
@@ -24,6 +25,7 @@ void main() => runApp(
     ),
     catalogApi: CatalogApi(baseUrl: _apiBaseUrl),
     sceneApi: SceneApi(baseUrl: _apiBaseUrl),
+    quoteApi: QuoteApi(baseUrl: _apiBaseUrl),
   ),
 );
 
@@ -33,11 +35,13 @@ class RoomForgeApp extends StatelessWidget {
     required this.sessionController,
     required this.catalogApi,
     this.sceneApi,
+    this.quoteApi,
   });
 
   final CustomerSessionController sessionController;
   final CatalogApi catalogApi;
   final SceneApi? sceneApi;
+  final QuoteApi? quoteApi;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -50,6 +54,7 @@ class RoomForgeApp extends StatelessWidget {
       sessionController: sessionController,
       catalogApi: catalogApi,
       sceneApi: sceneApi,
+      quoteApi: quoteApi,
     ),
   );
 }
@@ -60,11 +65,13 @@ class CustomerShell extends StatefulWidget {
     required this.sessionController,
     required this.catalogApi,
     this.sceneApi,
+    this.quoteApi,
   });
 
   final CustomerSessionController sessionController;
   final CatalogApi catalogApi;
   final SceneApi? sceneApi;
+  final QuoteApi? quoteApi;
 
   @override
   State<CustomerShell> createState() => _CustomerShellState();
@@ -92,7 +99,7 @@ class _CustomerShellState extends State<CustomerShell> {
     body: IndexedStack(
       index: _selectedIndex,
       children: [
-        CatalogScreen(controller: _catalog, sceneApi: widget.sceneApi),
+        CatalogScreen(controller: _catalog, sceneApi: widget.sceneApi, quoteApi: widget.quoteApi),
         _placeholder(
           context,
           'Prototipo de reservas',

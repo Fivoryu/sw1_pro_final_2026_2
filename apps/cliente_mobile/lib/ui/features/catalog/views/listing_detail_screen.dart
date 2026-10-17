@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../../../../data/models/catalog_models.dart';
+import '../../../../data/services/quote_api.dart';
 import '../../../../data/services/scene_api.dart';
 import '../../../../domain/catalog_controller.dart';
 import 'catalog_format.dart';
 import 'listing_photo.dart';
 import '../../viewer/views/listing_viewer_screen.dart';
+import '../../viewer/views/object_hotspot_sheet.dart';
 
 /// Public detail of one published listing.
 ///
@@ -17,6 +19,7 @@ class ListingDetailScreen extends StatefulWidget {
     required this.controller,
     required this.listingId,
     this.sceneApi,
+    this.quoteApi,
   });
 
   final CatalogController controller;
@@ -25,6 +28,9 @@ class ListingDetailScreen extends StatefulWidget {
   /// When provided, the detail probes whether a walkthrough exists and offers
   /// it; without it, the section stays in the honest catalog state.
   final SceneApi? sceneApi;
+
+  /// When provided, tapping a scene object opens its commercial hotspot.
+  final QuoteApi? quoteApi;
 
   @override
   State<ListingDetailScreen> createState() => _ListingDetailScreenState();
@@ -177,11 +183,20 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
   void _openViewer() {
     final sceneApi = widget.sceneApi;
     if (sceneApi == null) return;
+    final detail = _detail;
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => ListingViewerScreen(
           sceneApi: sceneApi,
           listingId: widget.listingId,
+          onObjectSelected: detail == null || widget.quoteApi == null
+              ? null
+              : (objectId) => showObjectHotspotSheet(
+                    context,
+                    objectId: objectId!,
+                    detail: detail,
+                    quoteApi: widget.quoteApi!,
+                  ),
         ),
       ),
     );
