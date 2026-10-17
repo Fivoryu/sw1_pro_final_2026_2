@@ -211,6 +211,28 @@ def get_public_listing_detail(
         )
 
 
+@listings_router.get(
+    "/{listing_id}/scene",
+    response_model=ListingSceneDocument,
+    responses={404: {"description": "Listing or scene not found"}},
+)
+def get_public_listing_scene(
+    listing_id: Annotated[str, Path(min_length=1, max_length=36)], request: Request
+) -> ListingSceneDocument | JSONResponse:
+    """Scene document of a published listing; customers cannot see draft scenes."""
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    with session_factory() as session:
+        listing = get_public_listing(session, listing_id)
+        if listing is None:
+            raise HTTPException(status_code=404, detail="listing_not_found")
+        stored = get_listing_scene(session, listing.id)
+        if stored is None:
+            return _scene_error_response(
+                404, "Scene is not defined for this listing", "scene_not_defined"
+            )
+        return ListingSceneDocument.model_validate(stored.scene)
+
+
 def _quote_response(quote: QuoteSnapshot) -> QuoteSnapshotResponse:
     response = QuoteSnapshotResponse(
         quote_id=quote.id,
