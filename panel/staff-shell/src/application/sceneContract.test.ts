@@ -1,9 +1,6 @@
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { describe, expect, it } from "vitest";
 
+import canonicalFixture from "../../../../docs/api/f06-scene-fixture.json";
 import { DEFAULT_SCENE_DOCUMENT } from "./sceneContract";
 
 /**
@@ -11,17 +8,8 @@ import { DEFAULT_SCENE_DOCUMENT } from "./sceneContract";
  * this package: the panel, the backend and the customer app must all accept the
  * same bytes. This test fails the moment one surface drifts from it (S13).
  */
-const CANONICAL_FIXTURE = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../../../docs/api/f06-scene-fixture.json",
-);
-
-function canonicalFixture(): unknown {
-  return JSON.parse(readFileSync(CANONICAL_FIXTURE, "utf8"));
-}
-
 describe("scene contract", () => {
   it("keeps the editable starting document identical to the canonical fixture", () => {
-    expect(DEFAULT_SCENE_DOCUMENT).toEqual(canonicalFixture());
+    expect(DEFAULT_SCENE_DOCUMENT).toEqual(canonicalFixture);
   });
 });
