@@ -22,4 +22,5 @@ flutter:
   assets:
     - assets/viewer/index.html
     - assets/viewer/viewer.js
+    - assets/viewer/geometry.mjs
     - assets/viewer/three.module.min.js

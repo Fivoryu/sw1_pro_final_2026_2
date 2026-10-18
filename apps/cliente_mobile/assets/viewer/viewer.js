@@ -3,10 +3,19 @@
 // left-half joystick moves, right-half drag looks, taps select objects.
 // All content is local (vendored Three.js); the only outbound channel is the
 // RoomForgeBridge JavaScript channel posting JSON messages to Flutter.
+// Collisions, openings, limits and scene validation live in ./geometry.mjs,
+// a dependency-free module covered by node --test (test_js/).
+import {
+  buildColliders,
+  openingSpansForWall,
+  resolveMove,
+  sortedUnique,
+  spawnPoint,
+  validateScene,
+} from "./geometry.mjs";
 
 const EYE_HEIGHT = 1.6;
 const WALK_SPEED = 1.8; // meters per second
-const CAMERA_RADIUS = 0.25; // collision margin around the camera
 const JOYSTICK_RANGE = 60; // pixels of full deflection
 const LOOK_RADIANS_PER_PIXEL = 0.005;
 const MAX_PITCH = Math.PI / 2 - 0.05;
@@ -19,8 +28,7 @@ let scene = null;
 let camera = null;
 let worldGroup = null;
 let objectMeshes = [];
-let colliderSegments = [];
-let colliderBoxes = [];
+let colliders = { segments: [], boxes: [] };
 let yaw = 0;
 let pitch = 0;
 let moveVector = { x: 0, y: 0 };
@@ -34,35 +42,6 @@ function postMessage(message) {
 
 function reportLoadError(detail) {
   postMessage({ type: "load_error", detail: String(detail) });
-}
-
-// --- Geometry (ported from the panel SceneViewer) ---------------------------
-
-function openingSpansForWall(room, start, end, wallLength) {
-  const dx = end.x - start.x;
-  const dz = end.z - start.z;
-  const spans = [];
-  (room.openings || []).forEach((opening) => {
-    const offsetX = opening.position.x - start.x;
-    const offsetZ = opening.position.z - start.z;
-    const center = (offsetX * dx + offsetZ * dz) / wallLength;
-    const distance = Math.abs(offsetX * dz - offsetZ * dx) / wallLength;
-    if (distance > 0.05 || center < -opening.width / 2 || center > wallLength + opening.width / 2) {
-      return;
-    }
-    const span = {
-      start: Math.max(0, center - opening.width / 2),
-      end: Math.min(wallLength, center + opening.width / 2),
-      bottom: Math.max(0, opening.position.y),
-      top: Math.min(room.height, opening.position.y + opening.height),
-    };
-    if (span.start < span.end && span.bottom < span.top) spans.push(span);
-  });
-  return spans;
-}
-
-function sortedUnique(values) {
-  return [...new Set(values.map((value) => Number(value.toFixed(6))))].sort((a, b) => a - b);
 }
 
 function addWall(group, room, start, end, material, lineMaterial) {
@@ -163,100 +142,7 @@ function addObject(group, object) {
   objectMeshes.push(mesh);
 }
 
-// --- Collisions -------------------------------------------------------------
-
-function buildColliders(document_) {
-  colliderSegments = [];
-  colliderBoxes = [];
-  document_.rooms.forEach((room) => {
-    const contours = room.contours;
-    for (let index = 0; index < contours.length; index += 1) {
-      const start = contours[index];
-      const end = contours[(index + 1) % contours.length];
-      const dx = end.x - start.x;
-      const dz = end.z - start.z;
-      const length = Math.hypot(dx, dz);
-      if (length === 0) continue;
-      const spans = openingSpansForWall(room, start, end, length);
-      // Doorways (floor-level openings) are passable; everything else blocks.
-      const passable = spans
-        .filter((span) => span.bottom <= 0.01)
-        .sort((a, b) => a.start - b.start);
-      let cursor = 0;
-      const blockers = [];
-      passable.forEach((span) => {
-        if (span.start > cursor) blockers.push([cursor, span.start]);
-        cursor = Math.max(cursor, span.end);
-      });
-      if (cursor < length) blockers.push([cursor, length]);
-      blockers.forEach(([from, to]) => {
-        if (to - from < 0.05) return;
-        colliderSegments.push({
-          ax: start.x + (dx / length) * from,
-          az: start.z + (dz / length) * from,
-          bx: start.x + (dx / length) * to,
-          bz: start.z + (dz / length) * to,
-        });
-      });
-    }
-  });
-  document_.objects.forEach((object) => {
-    colliderBoxes.push({
-      minX: object.position.x - object.dimensions.width / 2 - CAMERA_RADIUS,
-      maxX: object.position.x + object.dimensions.width / 2 + CAMERA_RADIUS,
-      minZ: object.position.z - object.dimensions.depth / 2 - CAMERA_RADIUS,
-      maxZ: object.position.z + object.dimensions.depth / 2 + CAMERA_RADIUS,
-    });
-  });
-}
-
-function distanceToSegment(px, pz, segment) {
-  const dx = segment.bx - segment.ax;
-  const dz = segment.bz - segment.az;
-  const squaredLength = dx * dx + dz * dz;
-  let t = squaredLength === 0
-    ? 0
-    : ((px - segment.ax) * dx + (pz - segment.az) * dz) / squaredLength;
-  t = Math.max(0, Math.min(1, t));
-  const nearestX = segment.ax + t * dx;
-  const nearestZ = segment.az + t * dz;
-  return Math.hypot(px - nearestX, pz - nearestZ);
-}
-
-function isBlocked(x, z) {
-  for (let index = 0; index < colliderSegments.length; index += 1) {
-    if (distanceToSegment(x, z, colliderSegments[index]) < CAMERA_RADIUS) return true;
-  }
-  for (let index = 0; index < colliderBoxes.length; index += 1) {
-    const box = colliderBoxes[index];
-    if (x > box.minX && x < box.maxX && z > box.minZ && z < box.maxZ) return true;
-  }
-  return false;
-}
-
-/// Slide along walls: try the full move, then each axis alone.
-function resolveMove(fromX, fromZ, deltaX, deltaZ) {
-  if (!isBlocked(fromX + deltaX, fromZ + deltaZ)) return { x: fromX + deltaX, z: fromZ + deltaZ };
-  if (deltaX !== 0 && !isBlocked(fromX + deltaX, fromZ)) return { x: fromX + deltaX, z: fromZ };
-  if (deltaZ !== 0 && !isBlocked(fromX, fromZ + deltaZ)) return { x: fromX, z: fromZ + deltaZ };
-  return { x: fromX, z: fromZ };
-}
-
 // --- Scene lifecycle --------------------------------------------------------
-
-function validateScene(document_) {
-  if (!document_ || typeof document_ !== "object") return "Scene document is not an object.";
-  if (document_.version !== "1.0") return "Unsupported scene version.";
-  if (document_.unit !== "meters") return "Unsupported scene unit.";
-  if (!Array.isArray(document_.rooms) || document_.rooms.length === 0) return "Scene has no rooms.";
-  for (let index = 0; index < document_.rooms.length; index += 1) {
-    const room = document_.rooms[index];
-    if (!Array.isArray(room.contours) || room.contours.length < 3) return `Room ${index} has fewer than three contours.`;
-    if (!(room.height > 0)) return `Room ${index} has no height.`;
-  }
-  if (!Array.isArray(document_.objects)) return "Scene objects are missing.";
-  return null;
-}
 
 function disposeWorld() {
   if (!worldGroup) return;
@@ -272,27 +158,10 @@ function disposeWorld() {
 }
 
 function spawnCamera(document_) {
-  const room = document_.rooms[0];
-  const points = room.contours;
-  const xs = points.map((point) => point.x);
-  const zs = points.map((point) => point.z);
-  const centerX = (Math.min(...xs) + Math.max(...xs)) / 2;
-  const centerZ = (Math.min(...zs) + Math.max(...zs)) / 2;
-  // Candidates inside the room, best first: bounding-box center then vertices.
-  const candidates = [
-    { x: centerX, z: centerZ },
-    ...points.map((point) => ({
-      x: (point.x + centerX) / 2,
-      z: (point.z + centerZ) / 2,
-    })),
-  ];
-  let spawn = candidates.find((candidate) => !isBlocked(candidate.x, candidate.z));
-  if (!spawn) spawn = { x: centerX, z: centerZ };
+  const spawn = spawnPoint(document_, colliders);
   camera.position.set(spawn.x, EYE_HEIGHT, spawn.z);
-  const dx = centerX - spawn.x;
-  const dz = centerZ - spawn.z;
-  yaw = Math.atan2(-dx, -dz);
-  pitch = 0;
+  yaw = spawn.yaw;
+  pitch = spawn.pitch;
 }
 
 let loadedDocument = null;
@@ -310,7 +179,7 @@ function loadScene(document_) {
     document_.rooms.forEach((room) => addRoom(worldGroup, room));
     document_.objects.forEach((object) => addObject(worldGroup, object));
     scene.add(worldGroup);
-    buildColliders(document_);
+    colliders = buildColliders(document_);
     spawnCamera(document_);
     postMessage({ type: "scene_loaded", objects: document_.objects.map((object) => object.id) });
   } catch (error) {
@@ -418,7 +287,7 @@ function animate(time) {
     const distance = WALK_SPEED * deltaSeconds;
     const deltaX = (forwardX * -moveVector.y + rightX * moveVector.x) * distance;
     const deltaZ = (forwardZ * -moveVector.y + rightZ * moveVector.x) * distance;
-    const next = resolveMove(camera.position.x, camera.position.z, deltaX, deltaZ);
+    const next = resolveMove(camera.position.x, camera.position.z, deltaX, deltaZ, colliders);
     camera.position.x = next.x;
     camera.position.z = next.z;
   }
