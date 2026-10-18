@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import base64
+import json
 from collections.abc import Iterator
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from fastapi import FastAPI
@@ -240,3 +242,36 @@ def test_scene_routes_return_404_for_unknown_listing(
         assert response.json() == {"detail": "Listing not found", "code": "not_found"}
     else:
         assert response.json()["code"] == "listing_not_found"
+
+
+# The canonical document every surface must accept verbatim (S13). The backend
+# validates and stores it without adding, dropping or retyping a single field.
+_CANONICAL_FIXTURE = (
+    Path(__file__).resolve().parents[2] / "docs" / "api" / "f06-scene-fixture.json"
+)
+
+
+def _canonical_scene_document() -> dict[str, Any]:
+    return cast(
+        "dict[str, Any]",
+        json.loads(_CANONICAL_FIXTURE.read_text(encoding="utf-8")),
+    )
+
+
+def test_scene_round_trip_stores_the_canonical_fixture_verbatim(
+    scene_context: SceneContext,
+) -> None:
+    context = scene_context
+    _seed_listing(context)
+    _staff(context)
+
+    document = _canonical_scene_document()
+    saved = context.client.put(_scene_url(), json=document)
+
+    assert saved.status_code == 200, saved.text
+    assert saved.json() == document, "a valid scene must be stored exactly as received"
+
+    stored = context.client.get(_scene_url())
+
+    assert stored.status_code == 200, stored.text
+    assert stored.json() == document

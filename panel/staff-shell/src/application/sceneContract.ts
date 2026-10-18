@@ -43,7 +43,13 @@ export interface SceneDocument {
   objects: SceneObject[];
 }
 
-/** A contract-valid editable starting point used before a listing has a saved scene. */
+/**
+ * A contract-valid editable starting point used before a listing has a saved scene.
+ *
+ * It must stay equal to the canonical fixture shared by every surface,
+ * `docs/api/f06-scene-fixture.json`; `sceneContract.test.ts` fails the moment
+ * the two drift apart.
+ */
 export const DEFAULT_SCENE_DOCUMENT: SceneDocument = {
   version: "1.0",
   unit: "meters",
@@ -75,6 +81,20 @@ export const DEFAULT_SCENE_DOCUMENT: SceneDocument = {
       position: { x: 1, y: 0, z: 1 },
       dimensions: { width: 0.5, height: 0.5, depth: 0.5 },
       color: "red",
+    },
+    {
+      id: "ref_cube_2",
+      type: "placeholder",
+      position: { x: 3, y: 0, z: 1 },
+      dimensions: { width: 0.5, height: 0.5, depth: 0.5 },
+      color: "green",
+    },
+    {
+      id: "ref_cube_3",
+      type: "placeholder",
+      position: { x: 2, y: 0, z: 2 },
+      dimensions: { width: 0.5, height: 0.5, depth: 0.5 },
+      color: "blue",
     },
   ],
 };

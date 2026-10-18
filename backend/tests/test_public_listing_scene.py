@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import base64
+import json
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from fastapi import FastAPI
@@ -83,13 +85,17 @@ def _seed_listing(
         )
 
 
-def _store_scene(context: SceneContext, listing_id: str = "scene-listing") -> None:
+def _store_scene(
+    context: SceneContext,
+    listing_id: str = "scene-listing",
+    document: dict[str, Any] | None = None,
+) -> None:
     with context.session_factory.begin() as session:
         upsert_listing_scene(
             session,
             agency_id="agency-one",
             listing_id=listing_id,
-            scene=_scene_document(),
+            scene=document if document is not None else _scene_document(),
             updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
             updated_by="scene-actor",
         )
@@ -169,3 +175,31 @@ def test_public_scene_for_unknown_listing_returns_listing_not_found(
     response = scene_context.client.get("/api/v1/listings/missing-listing/scene")
     assert response.status_code == 404
     assert response.json()["detail"] == "listing_not_found"
+
+
+# The canonical document every surface must accept verbatim (S13).
+_CANONICAL_FIXTURE = (
+    Path(__file__).resolve().parents[2] / "docs" / "api" / "f06-scene-fixture.json"
+)
+
+
+def _canonical_scene_document() -> dict[str, Any]:
+    return cast(
+        "dict[str, Any]",
+        json.loads(_CANONICAL_FIXTURE.read_text(encoding="utf-8")),
+    )
+
+
+def test_public_scene_serves_the_canonical_fixture_verbatim(
+    scene_context: SceneContext,
+) -> None:
+    _seed_listing(scene_context)
+    document = _canonical_scene_document()
+    _store_scene(scene_context, document=document)
+
+    response = scene_context.client.get("/api/v1/listings/scene-listing/scene")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == document, (
+        "the public scene is the stored document, nothing else"
+    )
