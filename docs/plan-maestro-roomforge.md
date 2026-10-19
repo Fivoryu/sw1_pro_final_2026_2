@@ -267,7 +267,7 @@ Las superficies son las rutas que existen hoy (corte 2026-09-30). Una fase que n
 - Dos desarrolladores y un mes de plazo reportado; no se conocen horas efectivas diarias ni compromisos individuales.
 - Minimizar gasto real. USD 100 de crédito AWS informado, pendiente de comprobar cobertura y vencimiento.
 - Presentación final en AWS; Floci es emulación local, no reemplaza ese requisito.
-- Teléfono de referencia: Samsung Galaxy S23 FE. No exigir detalles de variante para definir el plan.
+- Dispositivo de referencia: cualquier Android compatible con ARCore que soporte Depth API (decisión 2026-10-19, registro en `odd/tasks/f07-arcore-spike.md` — «no importa el dispositivo»); el S23 FE pasa a ser ejemplo histórico y el modelo real se declara por corrida en la bitácora. No exigir detalles de variante para definir el plan.
 - PC observada: Intel Core 5 120U, aproximadamente 16 GB RAM y gráficos Intel. Es información de hardware, no un benchmark del producto.
 - Sin APIs pagadas de IA generativa. Usar modelos que ejecutemos nosotros, con licencia revisada.
 - Documentación académica en español; código, identificadores y rutas HTTP públicas en inglés.
@@ -312,7 +312,7 @@ Todas las versiones concretas deben fijarse después de inspeccionar compatibili
 | Persistencia | PostgreSQL, SQLAlchemy y Alembic | Relaciones, transacciones y restricciones para negocio. JSONB puede alojar geometría flexible sin sustituir tablas comerciales. MongoDB no simplifica las reservas relacionales. |
 | Panel | React, TypeScript y Vite | Formularios y editor web con tipos estáticos. No introducir Next.js solo por popularidad si no necesitamos sus capacidades de servidor. |
 | Apps | Flutter y Dart | Separar captura y cliente, reutilizando convenciones. La parte AR necesita integración nativa Android; Flutter no garantiza portabilidad automática de esa función. |
-| Captura | ARCore mediante plugin mantenido o módulo Kotlin | Aprovecha cámara y sensores del S23 FE. Evaluar API real y mantenimiento antes de elegir plugin. No enviar cada fotograma a Dart si basta devolver puntos y resultados. |
+| Captura | ARCore mediante plugin mantenido o módulo Kotlin | Aprovecha cámara y sensores de cualquier dispositivo Android compatible con ARCore. Evaluar API real y mantenimiento antes de elegir plugin. No enviar cada fotograma a Dart si basta devolver puntos y resultados. |
 | Editor/visor | Three.js y TypeScript, WebView móvil como candidato | Compartir representación web/móvil; probar rendimiento y controles. Unity/native son alternativas si falla, pero añaden integración y herramientas. |
 | IA | Detector pequeño preentrenado; PyTorch/Torchvision inicialmente; ONNX si conviene | Evita entrenamiento masivo. Exportar solo si funciona y mejora consumo; un runtime no sustituye pesos ni garantiza licencia. |
 | Archivos | S3 real y Floci local | Separar fotos/binarios de datos transaccionales; acceso autorizado, no buckets públicos generales. |
@@ -646,13 +646,13 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 
 #### Ficha ejecutable — piloto móvil (trabajo futuro)
 
-**Objetivo y límite.** Validar una escena sintética pequeña en un WebView candidato dentro de la app cliente, con navegación táctil, carga, recuperación y mediciones observables en un Samsung Galaxy S23 FE. Esta prueba técnica no completa F06 ni decide automáticamente el motor definitivo. No usa capturas, inmuebles reales, datos comerciales, cámara, AR, API ni contrato de escena de F06.2/F07.
+**Objetivo y límite.** Validar una escena sintética pequeña en un WebView candidato dentro de la app cliente, con navegación táctil, carga, recuperación y mediciones observables en un dispositivo Android compatible (decisión 2026-10-19: el S23 FE histórico pasa a ser ejemplo, no requisito; el modelo real se declara por corrida). Esta prueba técnica no completa F06 ni decide automáticamente el motor definitivo. No usa capturas, inmuebles reales, datos comerciales, cámara, AR, API ni contrato de escena de F06.2/F07.
 
 **Entradas y preparación (antes de implementar):**
 
 1. Releer F06.1, el estado vigente de la app y las decisiones/requisitos canónicos que definan límites de rendimiento. Anotar la revisión de `docs/plan-maestro-roomforge.md` y las fuentes verificadas; no convertir propuestas de otras notas en requisitos sin confirmar su vigencia.
 2. Revisar `apps/cliente_mobile/pubspec.yaml`, `apps/cliente_mobile/README.md` y el job `customer-flutter` de `.github/workflows/ci.yml`. En la revisión de este plan, `pubspec.yaml` no declara una dependencia WebView. Verificar de nuevo al ejecutar: si no existe un candidato aprobado, presentar nombre y versión exacta de la dependencia y su efecto antes de agregarla o cambiar la arquitectura. No elegir ni actualizar una versión en silencio.
-3. Confirmar disponibilidad del S23 FE y registrar modelo/SKU, versión y parche de Android, WebView del sistema, resolución/orientación, estado inicial de batería/temperatura, brillo y modo de energía. Si el teléfono no está disponible, se puede completar la preparación, pero no afirmar mediciones ni recomendación basada en dispositivo.
+3. Confirmar disponibilidad del dispositivo compatible y registrar modelo/SKU, versión y parche de Android, WebView del sistema, resolución/orientación, estado inicial de batería/temperatura, brillo y modo de energía. Si el teléfono no está disponible, se puede completar la preparación, pero no afirmar mediciones ni recomendación basada en dispositivo.
 4. Antes de tocar código, congelar en la bitácora una fixture de prueba —no un esquema de producto—: una habitación sintética rectangular de 4 × 3 m y 2,4 m de alto, suelo, paredes con una abertura simple, cámara inicial a 1,6 m, tres cubos de color como referencias y sin texturas, sombras ni efectos. Registrar unidades, ejes, geometría/triángulos, tamaño de archivos, viewport, iluminación y hash de los recursos efectivamente usados. Estos valores son una propuesta reproducible para el spike, no requisitos del inmueble ni el modelo de F06.2.
 5. Congelar un puente desechable con solo las señales necesarias para observar `ready`, `load_error` y el resultado del reintento. Registrar los mensajes exactos y el límite Flutter/WebView elegido; no promoverlos a contrato de producto ni ampliar el esquema de escena. Si el candidato no necesita un puente explícito, registrar esa observación en lugar de añadir uno.
 
@@ -672,7 +672,7 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 
 **Comprobaciones de la app documentadas actualmente** (ejecutar desde `apps/cliente_mobile/` cuando exista una implementación autorizada): `flutter test` debe terminar sin pruebas fallidas; `flutter analyze` debe informar cero problemas; `flutter build apk --debug` debe generar el APK de depuración. Registrar comandos y salidas reales, sin copiar el conteo histórico de pruebas. La verificación en teléfono es separada y no se sustituye por estas comprobaciones. No ejecutar suites, builds ni pruebas de dispositivo durante la preparación documental.
 
-**Entrega futura.** Bitácora propuesta: `docs/spikes/spk-06-1-mobile-viewer-pilot.md` (ruta propuesta, no creada ni enlazada aquí). Debe separar: preparación completa, experimento completo/parcial, resultados funcionales, mediciones/no medidos, limitaciones, recomendación fundamentada y decisión humana pendiente. Sin S23 FE, solo puede cerrarse preparación; sin umbrales acordados, no declarar ganador por rendimiento. Mantener F06 en pendiente hasta que exista el alcance posterior aprobado e integrado. La ubicación del editor, colisión de muebles ocultos y precisión AR no bloquean este piloto: pertenecen a F06.3, F06.4 y F07.
+**Entrega futura.** Bitácora propuesta: `docs/spikes/spk-06-1-mobile-viewer-pilot.md` (ruta propuesta, no creada ni enlazada aquí). Debe separar: preparación completa, experimento completo/parcial, resultados funcionales, mediciones/no medidos, limitaciones, recomendación fundamentada y decisión humana pendiente. Sin dispositivo compatible disponible, solo puede cerrarse preparación; sin umbrales acordados, no declarar ganador por rendimiento. Mantener F06 en pendiente hasta que exista el alcance posterior aprobado e integrado. La ubicación del editor, colisión de muebles ocultos y precisión AR no bloquean este piloto: pertenecen a F06.3, F06.4 y F07.
 
 **Superficie futura.** La única ruta de producto identificada al preparar esta ficha es `apps/cliente_mobile/pubspec.yaml`; su presencia no autoriza editarla ni elegir dependencias. No se asignan todavía rutas fuente nuevas: quien reciba la implementación debe inspeccionar el árbol vigente, proponer paths exactos y nuevas carpetas necesarias, y obtener autorización para esa superficie antes de escribir. No usar un comodín como `apps/*`.
 
@@ -705,7 +705,7 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 **Estado (corte 2026-09-30):** ⬜ Pendiente — la app de captura sólo tiene el acceso de personal; no hay sesión ARCore, contornos, alturas ni borradores de escena.
 **Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
 
-**Alcance técnico por validar:** ARCore en S23 FE es compatible según fuente oficial, no significa medición exacta ni plano automático terminado.
+**Alcance técnico por validar:** ARCore es compatible según fuente oficial en dispositivos Android compatibles —decisión 2026-10-19: el requisito es «compatible con ARCore y Depth API», no un modelo concreto; el S23 FE histórico pasa a ser ejemplo y el dispositivo real se declara por corrida—. La compatibilidad declarada no significa medición exacta ni plano automático terminado; el soporte de Depth API del dispositivo se valida en el spike de F07.6.
 
 ### F07.1 — Integración AR y seguimiento
 
@@ -968,7 +968,7 @@ No se presenta esta lista como certificación ISO. Los umbrales de FPS, respuest
 
 ### F13.2 — Preparar demostración
 
-- **Acciones:** preparar usuarios de dos agencias y cliente, tokens de prueba, dataset autorizado y un inmueble completo. Ensayar captura del aula con S23 FE y límites reales; disponer de escena previa etiquetada como respaldo, no como captura en vivo.
+- **Acciones:** preparar usuarios de dos agencias y cliente, tokens de prueba, dataset autorizado y un inmueble completo. Ensayar captura del aula con el dispositivo compatible disponible y límites reales; disponer de escena previa etiquetada como respaldo, no como captura en vivo.
 - **Salida:** guion con pasos, dependencias de red y alternativas honestas.
 - **Aceptación:** demostrar búsqueda, recorrido libre, selección/precio, aprobación/publicación y reserva/refund; distinguir qué se hizo en aula y qué estaba preparado.
 
