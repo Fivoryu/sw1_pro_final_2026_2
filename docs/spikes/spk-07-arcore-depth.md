@@ -54,3 +54,24 @@ sceneview.github.io). La vigencia de cada dato se re-verifica en T3 antes de con
 
 Ninguna vía queda elegida por este documento. La recomendación técnica nace en T3 con la
 corrida; F07.6 solo se declara viable (o inviable) con la evidencia del spike de Depth API.
+
+## 6. Preparación extendida: integración y build verificados (2026-10-19, T3–T4)
+
+- **Vía elegida:** `augen` 1.5.0 (MIT, ARCore nativo en Kotlin, `ARSessionConfig.depthData`,
+  oclusión respaldada por Depth API con `occlusionStatusStream`). Elección parcial: la corrida en
+  dispositivo (T5) la confirma o la descarta.
+- **Integración:** pantalla `apps/captura_mobile/lib/ui/ar/arcore_basic_screen.dart` reachable
+  desde la vista de sesión iniciada; manifest con `com.google.ar.core=optional` y
+  `uses-feature camera.ar required=false` para que un teléfono sin ARCore instale y use el resto
+  de la app (aceptación de F07.1); `minSdk = maxOf(24, flutter.minSdkVersion)`.
+- **Hallazgo de build:** el manifest del plugin declara `com.google.ar.core` como `required`, y la
+  fusión de manifests rechaza la contradicción con el `optional` del app. Resuelto con
+  `tools:replace="android:value"` — el `optional` del app gana y el teléfono no-AR sigue
+  instalando. Corregido con RED: primer build falló en `processDebugMainManifest`.
+- **Verificación local:** `flutter analyze` limpio; `flutter test` 118/118 (2 nuevas: aviso
+  honesto de prototipo y entrada AR); `flutter build apk --debug` en verde con Flutter 3.47.6
+  (los warnings de cast unchecked son del paquete, no del app). La corrida en dispositivo con
+  mediciones sigue siendo T5: nada acá es medición de ARCore.
+- **Límite confirmado en código:** el plugin no expone el estado de seguimiento por frame de la
+  sesión (grep limpio en `lib/src`); el panel muestra errores y contadores de planos, nunca una
+  medida de calidad de tracking inventada.
