@@ -1,28 +1,41 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kDebugMode;
+
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../../../../data/services/scene_api.dart';
 import '../../../../domain/viewer_controller.dart';
+import '../logic/viewer_assets.dart';
 import '../logic/viewer_bridge.dart';
 
-/// How long the viewer page has to signal `ready` before we stop trusting a
-/// silent WebView and show an honest error instead.
-const _viewerReadyTimeout = Duration(seconds: 10);
+/// How long the page has to prove itself before the walkthrough stops waiting
+/// silently: first to signal `ready`, then to report `scene_loaded`.
+const _viewerPageTimeout = Duration(seconds: 10);
+
+/// Builds the page that hosts the viewer, reporting its bridge traffic.
+typedef ViewerPageBuilder =
+    Widget Function(BuildContext context, void Function(String payload) report);
 
 /// First-person walkthrough of one published listing (F06.4/F06.5).
 ///
-/// The page is a local asset (no network content), and the scene document is
-/// fetched here with [SceneApi] and injected into the page: no credentials
-/// and no remote page ever share the WebView.
+/// The page and its scripts are local bundle assets served over a virtual
+/// origin (see `viewer_assets.dart`), and the scene document is fetched here
+/// with [SceneApi] and injected into the page: no credentials and no remote
+/// page ever share the WebView.
 class ListingViewerScreen extends StatefulWidget {
   const ListingViewerScreen({
     super.key,
     required this.sceneApi,
     required this.listingId,
     this.onObjectSelected,
+    this.pageTimeout = _viewerPageTimeout,
+    this.viewerBuilder,
+    this.scriptRunner,
   });
 
   final SceneApi sceneApi;
@@ -31,20 +44,29 @@ class ListingViewerScreen extends StatefulWidget {
   /// Hotspot callback: the customer tapped an object (null clears it).
   final ValueChanged<String?>? onObjectSelected;
 
+  /// Deadline for each page signal (`ready`, then `scene_loaded`).
+  final Duration pageTimeout;
+
+  /// Test seam: replaces the WebView with a widget that drives [report].
+  final ViewerPageBuilder? viewerBuilder;
+
+  /// Test seam: receives the JavaScript that delivers the scene to the page.
+  final ValueChanged<String>? scriptRunner;
+
   @override
   State<ListingViewerScreen> createState() => _ListingViewerScreenState();
 }
 
 class _ListingViewerScreenState extends State<ListingViewerScreen> {
   late final ViewerController _controller;
-  WebViewController? _webController;
-  bool _webViewBuilt = false;
-  bool _viewerReady = false;
+  InAppWebViewController? _webController;
+  bool _pageBuilt = false;
+  bool _pageBooted = false;
   bool _sceneDelivered = false;
   bool _sceneRendered = false;
   bool _viewerFailed = false;
-  bool _pageFinished = false;
-  Timer? _readyWatchdog;
+  Timer? _pageWatchdog;
+  Timer? _renderWatchdog;
 
   @override
   void initState() {
@@ -56,7 +78,8 @@ class _ListingViewerScreenState extends State<ListingViewerScreen> {
 
   @override
   void dispose() {
-    _readyWatchdog?.cancel();
+    _pageWatchdog?.cancel();
+    _renderWatchdog?.cancel();
     _controller.removeListener(_onControllerChanged);
     _controller.dispose();
     super.dispose();
@@ -65,67 +88,86 @@ class _ListingViewerScreenState extends State<ListingViewerScreen> {
   void _onControllerChanged() {
     if (!mounted) return;
     setState(() {});
-    if (_controller.state == ViewerLoadState.ready) {
-      _deliverScene();
-    }
+    if (_controller.state == ViewerLoadState.ready) _deliverScene();
   }
 
-  /// Sends the scene document once both sides are prepared: the page booted
-  /// (`ready`) and the document arrived (`ready` state on the controller).
+  /// Sends the scene document once the page booted and the document arrived.
   void _deliverScene() {
     final document = _controller.document;
-    final webController = _webController;
-    if (document == null || webController == null) return;
-    if (!_viewerReady || !_pageFinished || _sceneDelivered) return;
+    if (document == null || !_pageBooted || !_pageBuilt || _sceneDelivered) {
+      return;
+    }
+    // Exactly one delivery per attempt: re-sending `loadScene` on every rebuild
+    // would reset the camera to its spawn point on each frame.
     _sceneDelivered = true;
-    _readyWatchdog?.cancel();
-    webController.runJavaScript(
-      'window.viewerHost.loadScene(${jsonEncode(document)})',
-    );
+    // The page owes us a rendered scene now, whether or not the controller is
+    // already attached: silence is still a failure the customer must see.
+    _armRenderWatchdog();
+    final source = 'window.viewerHost.loadScene(${jsonEncode(document)})';
+    final runner = widget.scriptRunner;
+    if (runner != null) {
+      runner(source);
+      return;
+    }
+    _webController?.evaluateJavascript(source: source);
   }
 
-  void _onBridgeMessage(JavaScriptMessage message) {
-    final parsed = ViewerBridgeMessage.tryParse(message.message);
+  /// After delivery the page must report  within the deadline.
+  void _armRenderWatchdog() {
+    _renderWatchdog?.cancel();
+    _renderWatchdog = Timer(widget.pageTimeout, () {
+      if (!mounted || _sceneRendered) return;
+      setState(() => _viewerFailed = true);
+    });
+  }
+
+  void _onBridgePayload(String payload) {
+    final parsed = ViewerBridgeMessage.tryParse(payload);
     if (parsed == null) return; // Unknown traffic is dropped, never trusted.
-    if (!mounted) return;
     switch (parsed) {
       case ViewerReady():
-        _viewerReady = true;
-        _armReadyWatchdog();
+        _pageWatchdog?.cancel();
+        _pageBooted = true;
         _deliverScene();
       case SceneLoaded():
-        _readyWatchdog?.cancel();
+        _renderWatchdog?.cancel();
+        if (!mounted) return;
         setState(() {
           _sceneRendered = true;
           _viewerFailed = false;
         });
       case ViewerLoadError():
-        _readyWatchdog?.cancel();
+        _pageWatchdog?.cancel();
+        _renderWatchdog?.cancel();
+        if (!mounted) return;
         setState(() => _viewerFailed = true);
       case ViewerSelection(:final objectId):
         widget.onObjectSelected?.call(objectId);
     }
   }
 
-  void _armReadyWatchdog() {
-    // The watchdog only matters while the document has not been delivered:
-    // once the page booted, delivery either happens or fails explicitly.
-    if (_sceneDelivered) return;
-    _readyWatchdog?.cancel();
-    _readyWatchdog = Timer(_viewerReadyTimeout, () {
-      if (!mounted || _sceneDelivered) return;
+  /// The page must answer within [widget.pageTimeout]; silence is a failure we
+  /// show, never a blank canvas that looks like a building without walls.
+  void _armPageWatchdog() {
+    _pageWatchdog?.cancel();
+    _pageWatchdog = Timer(widget.pageTimeout, () {
+      if (!mounted || _pageBooted) return;
       setState(() => _viewerFailed = true);
     });
   }
 
-  /// Resends the scene document to the viewer after a render failure.
   Future<void> _retryViewer() async {
     setState(() {
       _viewerFailed = false;
       _sceneDelivered = false;
       _sceneRendered = false;
     });
-    _deliverScene();
+    if (_pageBooted) {
+      _deliverScene();
+      return;
+    }
+    _armPageWatchdog();
+    await _webController?.reload();
   }
 
   @override
@@ -165,30 +207,20 @@ class _ListingViewerScreenState extends State<ListingViewerScreen> {
   );
 
   Widget _viewerBody() {
-    if (!_webViewBuilt) {
-      _webViewBuilt = true;
-      _webController = WebViewController()
-        ..setJavaScriptMode(JavaScriptMode.unrestricted)
-        ..addJavaScriptChannel(
-          'RoomForgeBridge',
-          onMessageReceived: _onBridgeMessage,
-        )
-        ..setNavigationDelegate(
-          NavigationDelegate(
-            onPageFinished: (_) {
-              _pageFinished = true;
-              _deliverScene();
-            },
-          ),
-        )
-        ..loadFlutterAsset('assets/viewer/index.html');
+    if (!_pageBuilt) {
+      _pageBuilt = true;
+      _armPageWatchdog();
     }
-    final webController = _webController!;
+    final page = widget.viewerBuilder?.call(context, _onBridgePayload) ??
+        _ViewerPage(
+          onReady: (controller) => _webController = controller,
+          report: _onBridgePayload,
+        );
     // Deliver if the page booted before the document arrived.
     _deliverScene();
     return Stack(
       children: [
-        WebViewWidget(controller: webController),
+        page,
         if (!_sceneRendered)
           ColoredBox(
             color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.85),
@@ -211,4 +243,67 @@ class _ListingViewerScreenState extends State<ListingViewerScreen> {
       ],
     );
   }
+}
+
+/// The real page: bundle assets over the virtual origin, bridge shim ahead of
+/// the viewer scripts, and no navigation away from the serving origin.
+class _ViewerPage extends StatelessWidget {
+  const _ViewerPage({required this.onReady, required this.report});
+
+  final ValueChanged<InAppWebViewController> onReady;
+  final void Function(String payload) report;
+
+  @override
+  Widget build(BuildContext context) => InAppWebView(
+    initialUrlRequest: URLRequest(url: WebUri('$viewerOrigin/index.html')),
+    initialSettings: InAppWebViewSettings(
+      javaScriptEnabled: true,
+      useShouldInterceptRequest: true,
+      // The viewer is a local, self-contained page: no popups, no file access.
+      supportMultipleWindows: false,
+      allowFileAccess: false,
+      allowContentAccess: false,
+      transparentBackground: false,
+    ),
+    initialUserScripts: UnmodifiableListView([
+      UserScript(
+        source: viewerBridgeShim,
+        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+      ),
+    ]),
+    shouldInterceptRequest: (controller, request) async {
+      final key = viewerAssetKeyFor(request.url);
+      if (key == null) return null;
+      final contentType = contentTypeForViewerAsset(key);
+      if (contentType == null) return null;
+      final data = await rootBundle.load(key);
+      return WebResourceResponse(
+        contentType: contentType,
+        data: data.buffer.asUint8List(),
+      );
+    },
+    shouldOverrideUrlLoading: (controller, action) async {
+      final url = action.request.url;
+      if (url == null || viewerAssetKeyFor(url) != null) {
+        return NavigationActionPolicy.ALLOW;
+      }
+      return NavigationActionPolicy.CANCEL;
+    },
+    onWebViewCreated: (controller) {
+      if (kDebugMode) {
+        // Debug builds expose the page to `chrome://inspect` / CDP so the run
+        // can be measured; release builds never do.
+        InAppWebViewController.setWebContentsDebuggingEnabled(true);
+      }
+      onReady(controller);
+      controller.addJavaScriptHandler(
+        handlerName: 'RoomForgeBridge',
+        callback: (args) {
+          if (args.isEmpty) return null;
+          report(args.first.toString());
+          return null;
+        },
+      );
+    },
+  );
 }

@@ -25,8 +25,10 @@ http.Response _sceneNotDefined() => _json({
 }, 404);
 
 Map<String, Object?> _sceneDocument() => {
-  'version': '1.0',
+  'version': '2.0',
   'unit': 'meters',
+  'walls': <Object?>[],
+  'openings': <Object?>[],
   'rooms': <Object?>[],
   'objects': <Object?>[],
 };
@@ -96,6 +98,137 @@ void main() {
       response.complete(_sceneNotDefined());
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('viewer-not-defined')), findsOneWidget);
+    });
+  });
+
+  group('ListingViewerScreen page timeouts', () {
+    ListingViewerScreen buildViewer({
+      required Duration pageTimeout,
+      required ViewerPageBuilder viewerBuilder,
+    }) => ListingViewerScreen(
+      sceneApi: SceneApi(
+        baseUrl: 'https://api.example.test',
+        client: MockClient((_) async => _json(_sceneDocument(), 200)),
+      ),
+      listingId: 'listing-1',
+      pageTimeout: pageTimeout,
+      viewerBuilder: viewerBuilder,
+    );
+
+    testWidgets('a page that never boots ends in the honest error, never a blank wait', (
+      tester,
+    ) async {
+      final viewer = buildViewer(
+        pageTimeout: const Duration(milliseconds: 50),
+        viewerBuilder: (context, report) =>
+            const SizedBox(key: ValueKey('fake-viewer-page')),
+      );
+
+      await tester.pumpWidget(MaterialApp(home: viewer));
+      // The scene arrives and the page mounts; the spinner keeps animating, so
+      // this test pumps explicit frames instead of settling.
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byKey(const ValueKey('fake-viewer-page')), findsOneWidget);
+      expect(find.byKey(const ValueKey('viewer-runtime-error')), findsNothing);
+
+      await tester.pump(const Duration(milliseconds: 60));
+
+      expect(find.byKey(const ValueKey('viewer-runtime-error')), findsOneWidget);
+      expect(find.text('El visor 3D no respondió.'), findsOneWidget);
+    });
+
+    testWidgets('a page that boots but never renders the scene ends in the honest error', (
+      tester,
+    ) async {
+      var reported = false;
+      final viewer = buildViewer(
+        pageTimeout: const Duration(milliseconds: 50),
+        viewerBuilder: (context, report) {
+          if (!reported) {
+            reported = true;
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => report('{"type":"ready"}'),
+            );
+          }
+          return const SizedBox(key: ValueKey('fake-viewer-page'));
+        },
+      );
+
+      await tester.pumpWidget(MaterialApp(home: viewer));
+      await tester.pump(); // the scene arrives and the page mounts
+      await tester.pump(); // the page reports it booted
+
+      expect(find.byKey(const ValueKey('viewer-runtime-error')), findsNothing);
+
+      await tester.pump(const Duration(milliseconds: 60));
+
+      expect(find.byKey(const ValueKey('viewer-runtime-error')), findsOneWidget);
+    });
+
+    testWidgets('the scene is delivered exactly once, never on every rebuild', (
+      tester,
+    ) async {
+      final delivered = <String>[];
+      var reported = false;
+      final viewer = ListingViewerScreen(
+        sceneApi: SceneApi(
+          baseUrl: 'https://api.example.test',
+          client: MockClient((_) async => _json(_sceneDocument(), 200)),
+        ),
+        listingId: 'listing-1',
+        pageTimeout: const Duration(milliseconds: 50),
+        scriptRunner: delivered.add,
+        viewerBuilder: (context, report) {
+          if (!reported) {
+            reported = true;
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => report('{"type":"ready"}'),
+            );
+          }
+          return const SizedBox(key: ValueKey('fake-viewer-page'));
+        },
+      );
+
+      await tester.pumpWidget(MaterialApp(home: viewer));
+      await tester.pump();
+      await tester.pump();
+      // Several rebuilds later the camera must not be reset again.
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        delivered,
+        hasLength(1),
+        reason: 're-sending loadScene resets the walkthrough camera to its spawn',
+      );
+      expect(delivered.single, contains('window.viewerHost.loadScene('));
+    });
+
+    testWidgets('retrying after a silent page clears the error and re-arms the timeout', (
+      tester,
+    ) async {
+      final viewer = buildViewer(
+        pageTimeout: const Duration(milliseconds: 50),
+        viewerBuilder: (context, report) =>
+            const SizedBox(key: ValueKey('fake-viewer-page')),
+      );
+
+      await tester.pumpWidget(MaterialApp(home: viewer));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 60));
+      expect(find.byKey(const ValueKey('viewer-runtime-error')), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('viewer-runtime-retry')));
+      await tester.pump();
+
+      expect(find.byKey(const ValueKey('viewer-runtime-error')), findsNothing);
+
+      // The new attempt still has to prove itself: silence fails again.
+      await tester.pump(const Duration(milliseconds: 60));
+      expect(find.byKey(const ValueKey('viewer-runtime-error')), findsOneWidget);
     });
   });
 
