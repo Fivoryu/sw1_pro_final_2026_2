@@ -30,6 +30,12 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- F07.1 spike: ARCore session marker. Declared optional so the app
+             installs and runs without ARCore; the AR screen shows an honest
+             state when the device or the user's permission is unavailable. -->
+        <meta-data
+            android:name="com.google.ar.core"
+            android:value="optional" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
@@ -42,4 +48,10 @@
             <data android:mimeType="text/plain"/>
         </intent>
     </queries>
+    <!-- F07.1 spike: camera access for the AR session. The AR feature is
+         optional so a device without AR support keeps every non-AR flow
+         working (F07.1 acceptance: a missing permission never blocks the app). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.ar" android:required="false" />
+    <uses-feature android:glEsVersion="0x00030000" android:required="true" />
 </manifest>

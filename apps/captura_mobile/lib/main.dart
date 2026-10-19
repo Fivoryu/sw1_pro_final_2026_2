@@ -7,6 +7,7 @@ import 'data/services/staff_listing_photos_api.dart';
 import 'data/services/staff_listings_api.dart';
 import 'domain/listing_drafts_controller.dart';
 import 'domain/staff_session_controller.dart';
+import 'ui/ar/arcore_basic_screen.dart';
 import 'ui/listings/listings_screen.dart';
 
 /// Backend used by the running app. Override it per environment with
@@ -17,11 +18,11 @@ const _apiBaseUrl = String.fromEnvironment(
 );
 
 /// What the agent can rely on: listings and their photos, from the camera or the gallery,
-/// are saved in RoomForge, while spatial capture belongs to a later phase and stays
-/// unavailable.
+/// are saved in RoomForge, while spatial capture remains a prototype that does not save data.
 const _accessNotice =
-    'La captura espacial todavía no está disponible. Los inmuebles y sus fotos, '
-    'desde la cámara o la galería, se guardan en RoomForge.';
+    'La captura espacial está en fase de prototipo: la sesión ARCore es una '
+    'prueba técnica y no guarda datos. Los inmuebles y sus fotos, desde la '
+    'cámara o la galería, se guardan en RoomForge.';
 
 const _credentialsNotice =
     'El acceso valida tus credenciales y el código de tu segundo factor.';
@@ -302,6 +303,18 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
         ),
         icon: const Icon(Icons.arrow_forward),
         label: const Text('Continuar a mis inmuebles'),
+      ),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        key: const ValueKey('access-ar-spike'),
+        style: OutlinedButton.styleFrom(minimumSize: _actionMinSize),
+        onPressed: () => Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => const ArcoreBasicScreen(),
+          ),
+        ),
+        icon: const Icon(Icons.view_in_ar),
+        label: const Text('Captura espacial (prototipo ARCore)'),
       ),
       const SizedBox(height: 8),
       OutlinedButton(

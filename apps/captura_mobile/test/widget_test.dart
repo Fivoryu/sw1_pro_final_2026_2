@@ -69,7 +69,7 @@ void main() {
     expect(find.text('Acceso del agente'), findsOneWidget);
     expect(find.byKey(const ValueKey('access-email-field')), findsOneWidget);
     expect(
-      find.textContaining('La captura espacial todavía no está disponible'),
+      find.textContaining('La captura espacial está en fase de prototipo'),
       findsOneWidget,
     );
     expect(find.byKey(const ValueKey('access-continue-button')), findsNothing);
@@ -95,6 +95,13 @@ void main() {
     expect(find.text('Mis inmuebles'), findsOneWidget);
     expect(find.byKey(const ValueKey('new-listing-button')), findsOneWidget);
     expect(find.byKey(const ValueKey('listings-empty')), findsOneWidget);
+  });
+
+  testWidgets('signed-in view offers the ARCore spike entry', (tester) async {
+    await pumpCaptureApp(tester, signedIn: true);
+
+    expect(find.byKey(const ValueKey('access-ar-spike')), findsOneWidget);
+    expect(find.text('Captura espacial (prototipo ARCore)'), findsOneWidget);
   });
 
   /// Opens the first future-phase prototype step directly; it is no longer part
