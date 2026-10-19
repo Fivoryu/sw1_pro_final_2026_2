@@ -24,7 +24,7 @@ La [infraestructura del Sprint 0](scrum/sprint-0-requerimientos/09-infraestructu
 | Tema | Continuidad o ajuste planteado | Estado |
 |---|---|---|
 | Captura de interiores con Android | Se conserva como origen de geometría y contenido del inmueble. | **ACORDADO**, con método por validar. |
-| Asistencia y reconstrucción fotogramétrica con Meshroom | La asistencia de captura sigue siendo una posibilidad; sustituir la reconstrucción obligatoria por geometría paramétrica simple es una recomendación para reducir riesgo. | **PENDIENTE** de reconciliar con la propuesta anterior. |
+| Asistencia y reconstrucción fotogramétrica con Meshroom | La asistencia de captura sigue siendo una posibilidad; sustituir la reconstrucción obligatoria por geometría paramétrica simple es una recomendación para reducir riesgo. | **DECIDIDO (2026-10-19):** la geometría paramétrica con cajas de ocupación de muebles sin etiqueta (plan maestro, F07.6) reemplaza a Meshroom en el alcance; el fotorrealismo sigue fuera y se confirma el ACORDADO de §2. Registro: `odd/tasks/f00-scope-decisions-2026-10-19.md`. |
 | Modelo externo/open-source y ajuste local | Se acepta evaluar y reutilizar pesos preentrenados; no se aprobó un modelo ni se autorizó afirmar entrenamiento propio. | **ACORDADO** como enfoque; selección pendiente. |
 | Inferencia IA offline en el teléfono | La propuesta original la plantea; ubicar la inferencia en PC/servidor/AWS cambiaría ese requisito. | **PENDIENTE**. |
 | SaaS inmobiliario | El nuevo alcance agrega catálogo, agencias, publicación, reservas y token de prueba. | **ACORDADO** como dirección del producto. |
