@@ -57,7 +57,7 @@ _CUSTOMER_WALLET_KEY = "0x" + "22" * 32
 
 
 def _walkthrough_scene(extra_id: str) -> dict[str, object]:
-    """The canonical fixture, with its first object standing for the priced extra.
+    """The canonical v2 fixture, with its first object standing for the priced extra.
 
     Scene object ids are offer ids: a tap in the walkthrough (F06.5) opens the
     quote for that extra, so this journey links the two explicitly instead of

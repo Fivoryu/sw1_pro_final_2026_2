@@ -8,26 +8,25 @@
 
 export const CAMERA_RADIUS = 0.25; // collision margin around the camera
 
-/** The door/window spans a wall must leave open, in metres from its start. */
-export function openingSpansForWall(room, start, end, wallLength) {
-  const dx = end.x - start.x;
-  const dz = end.z - start.z;
+/** Return an opening's vertical and parametric span along its owning wall. */
+export function wallOpeningsForWall(wall, openings) {
+  if (!wall || !wall.start || !wall.end) return [];
+  const dx = wall.end.x - wall.start.x;
+  const dz = wall.end.z - wall.start.z;
+  const length = Math.hypot(dx, dz);
+  if (length === 0) return [];
+
   const spans = [];
-  (room.openings || []).forEach((opening) => {
-    const offsetX = opening.position.x - start.x;
-    const offsetZ = opening.position.z - start.z;
-    const center = (offsetX * dx + offsetZ * dz) / wallLength;
-    const distance = Math.abs(offsetX * dz - offsetZ * dx) / wallLength;
-    if (distance > 0.05 || center < -opening.width / 2 || center > wallLength + opening.width / 2) {
-      return;
-    }
-    const span = {
-      start: Math.max(0, center - opening.width / 2),
-      end: Math.min(wallLength, center + opening.width / 2),
-      bottom: Math.max(0, opening.position.y),
-      top: Math.min(room.height, opening.position.y + opening.height),
-    };
-    if (span.start < span.end && span.bottom < span.top) spans.push(span);
+  (openings || []).forEach((opening) => {
+    if (opening.wallId !== wall.id) return;
+    const center = opening.position * length;
+    const start = Math.max(0, center - opening.width / 2);
+    const end = Math.min(length, center + opening.width / 2);
+    const bottom = opening.type === "window"
+      ? Math.max(0, opening.sillHeight === undefined ? 0.9 : opening.sillHeight)
+      : 0;
+    const top = Math.min(wall.height, bottom + opening.height);
+    if (start < end && bottom < top) spans.push({ start, end, bottom, top });
   });
   return spans;
 }
@@ -37,46 +36,46 @@ export function sortedUnique(values) {
 }
 
 /**
- * Colliders of one scene: wall segments (with their doorway gaps already
+ * Colliders of one scene: wall segments (with floor-level doorway gaps
  * removed) and the boxes of the objects. Furniture keeps its collision even
  * when it is hidden from the commercial selection (F06.4 acceptance).
  */
 export function buildColliders(document_) {
   const segments = [];
   const boxes = [];
-  document_.rooms.forEach((room) => {
-    const contours = room.contours;
-    for (let index = 0; index < contours.length; index += 1) {
-      const start = contours[index];
-      const end = contours[(index + 1) % contours.length];
-      const dx = end.x - start.x;
-      const dz = end.z - start.z;
-      const length = Math.hypot(dx, dz);
-      if (length === 0) continue;
-      const spans = openingSpansForWall(room, start, end, length);
-      // Doorways (floor-level openings) are passable; everything else blocks.
-      const passable = spans
-        .filter((span) => span.bottom <= 0.01)
-        .sort((a, b) => a.start - b.start);
-      let cursor = 0;
-      const blockers = [];
-      passable.forEach((span) => {
-        if (span.start > cursor) blockers.push([cursor, span.start]);
-        cursor = Math.max(cursor, span.end);
+  const openings = document_.openings || [];
+  (document_.walls || []).forEach((wall) => {
+    const start = wall.start;
+    const end = wall.end;
+    const dx = end.x - start.x;
+    const dz = end.z - start.z;
+    const length = Math.hypot(dx, dz);
+    if (length === 0) return;
+
+    const spans = wallOpeningsForWall(wall, openings);
+    // Only floor-level openings (doors) are passable; windows remain blockers.
+    const passable = spans
+      .filter((span) => span.bottom <= 0.01)
+      .sort((a, b) => a.start - b.start);
+    let cursor = 0;
+    const blockers = [];
+    passable.forEach((span) => {
+      if (span.start > cursor) blockers.push([cursor, span.start]);
+      cursor = Math.max(cursor, span.end);
+    });
+    if (cursor < length) blockers.push([cursor, length]);
+    blockers.forEach(([from, to]) => {
+      if (to - from < 0.05) return;
+      segments.push({
+        ax: start.x + (dx / length) * from,
+        az: start.z + (dz / length) * from,
+        bx: start.x + (dx / length) * to,
+        bz: start.z + (dz / length) * to,
+        thickness: wall.thickness,
       });
-      if (cursor < length) blockers.push([cursor, length]);
-      blockers.forEach(([from, to]) => {
-        if (to - from < 0.05) return;
-        segments.push({
-          ax: start.x + (dx / length) * from,
-          az: start.z + (dz / length) * from,
-          bx: start.x + (dx / length) * to,
-          bz: start.z + (dz / length) * to,
-        });
-      });
-    }
+    });
   });
-  document_.objects.forEach((object) => {
+  (document_.objects || []).forEach((object) => {
     boxes.push({
       minX: object.position.x - object.dimensions.width / 2 - CAMERA_RADIUS,
       maxX: object.position.x + object.dimensions.width / 2 + CAMERA_RADIUS,
@@ -103,7 +102,9 @@ export function distanceToSegment(px, pz, segment) {
 export function isBlocked(x, z, colliders) {
   const segments = colliders.segments;
   for (let index = 0; index < segments.length; index += 1) {
-    if (distanceToSegment(x, z, segments[index]) < CAMERA_RADIUS) return true;
+    const segment = segments[index];
+    const margin = CAMERA_RADIUS + (segment.thickness || 0) / 2;
+    if (distanceToSegment(x, z, segment) <= margin) return true;
   }
   const boxes = colliders.boxes;
   for (let index = 0; index < boxes.length; index += 1) {
@@ -127,31 +128,124 @@ export function resolveMove(fromX, fromZ, deltaX, deltaZ, colliders) {
   return { x: fromX, z: fromZ };
 }
 
-/** Why this document cannot be rendered, or null when it can. */
+function isFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function hasPointCoordinates(point, dimensions) {
+  return Boolean(point) && dimensions.every((dimension) => isFiniteNumber(point[dimension]));
+}
+
+function samePoint(left, right) {
+  return Math.abs(left.x - right.x) <= 1e-9 && Math.abs(left.z - right.z) <= 1e-9;
+}
+
+/** Why this v2 document cannot be rendered, or null when it can. */
 export function validateScene(document_) {
   if (!document_ || typeof document_ !== "object") return "Scene document is not an object.";
-  if (document_.version !== "1.0") return "Unsupported scene version.";
+  if (document_.version !== "2.0") return "Unsupported scene version.";
   if (document_.unit !== "meters") return "Unsupported scene unit.";
-  if (!Array.isArray(document_.rooms) || document_.rooms.length === 0) return "Scene has no rooms.";
-  for (let index = 0; index < document_.rooms.length; index += 1) {
-    const room = document_.rooms[index];
-    if (!Array.isArray(room.contours) || room.contours.length < 3) {
-      return `Room ${index} has fewer than three contours.`;
+  if (!Array.isArray(document_.walls) || document_.walls.length === 0) return "Scene has no walls.";
+
+  const wallIds = new Set();
+  for (let index = 0; index < document_.walls.length; index += 1) {
+    const wall = document_.walls[index];
+    if (!wall || typeof wall !== "object") return `walls[${index}] must be an object.`;
+    if (typeof wall.id !== "string" || wall.id.length === 0) return `walls[${index}].id is required.`;
+    if (wallIds.has(wall.id)) return "Duplicate id in walls.";
+    wallIds.add(wall.id);
+    if (!hasPointCoordinates(wall.start, ["x", "z"])) return `walls[${index}].start must have numeric x and z.`;
+    if (!hasPointCoordinates(wall.end, ["x", "z"])) return `walls[${index}].end must have numeric x and z.`;
+    if (samePoint(wall.start, wall.end)) return `walls[${index}].start must differ from end.`;
+    if (!(isFiniteNumber(wall.height) && wall.height > 0)) {
+      return `walls[${index}].height must be greater than 0.`;
     }
-    if (!(room.height > 0)) return `Room ${index} has no height.`;
+    if (!(isFiniteNumber(wall.thickness) && wall.thickness > 0)) {
+      return `walls[${index}].thickness must be greater than 0.`;
+    }
   }
+
+  if (!Array.isArray(document_.openings)) return "Scene openings are missing.";
+  const openingIds = new Set();
+  for (let index = 0; index < document_.openings.length; index += 1) {
+    const opening = document_.openings[index];
+    if (!opening || typeof opening !== "object") return `openings[${index}] must be an object.`;
+    if (typeof opening.id !== "string" || opening.id.length === 0) {
+      return `openings[${index}].id is required.`;
+    }
+    if (openingIds.has(opening.id)) return "Duplicate id in openings.";
+    openingIds.add(opening.id);
+    if (!wallIds.has(opening.wallId)) {
+      return `openings[${index}].wallId must refer to an existing wall.`;
+    }
+    if (!(isFiniteNumber(opening.position) && opening.position >= 0 && opening.position <= 1)) {
+      return `openings[${index}].position must be between 0 and 1.`;
+    }
+    if (!(isFiniteNumber(opening.width) && opening.width > 0)) {
+      return `openings[${index}].width must be greater than 0.`;
+    }
+    if (!(isFiniteNumber(opening.height) && opening.height > 0)) {
+      return `openings[${index}].height must be greater than 0.`;
+    }
+    if (opening.type !== "door" && opening.type !== "window") {
+      return `openings[${index}].type must be door or window.`;
+    }
+    if (opening.sillHeight !== undefined &&
+      !(isFiniteNumber(opening.sillHeight) && opening.sillHeight >= 0)) {
+      return `openings[${index}].sillHeight must be at least 0.`;
+    }
+  }
+
   if (!Array.isArray(document_.objects)) return "Scene objects are missing.";
+  const objectIds = new Set();
+  for (let index = 0; index < document_.objects.length; index += 1) {
+    const object = document_.objects[index];
+    if (!object || typeof object !== "object") return `objects[${index}] must be an object.`;
+    if (typeof object.id !== "string" || object.id.length === 0) return `objects[${index}].id is required.`;
+    if (objectIds.has(object.id)) return "Duplicate id in objects.";
+    objectIds.add(object.id);
+    if (!object.position || !["x", "y", "z"].every((axis) => isFiniteNumber(object.position[axis]))) {
+      return `objects[${index}].position must have numeric x, y, and z.`;
+    }
+    if (!object.dimensions || !["width", "height", "depth"].every((dimension) =>
+      isFiniteNumber(object.dimensions[dimension]) && object.dimensions[dimension] > 0)) {
+      return `objects[${index}].dimensions must be greater than 0.`;
+    }
+  }
   return null;
+}
+
+/** Build a room floor polygon by following its ordered wall cycle. */
+export function roomPolygon(document_, roomId) {
+  if (!document_ || !Array.isArray(document_.rooms) || !Array.isArray(document_.walls)) return null;
+  const room = document_.rooms.find((candidate) => candidate && candidate.id === roomId);
+  if (!room || !Array.isArray(room.wallIds) || room.wallIds.length < 3) return null;
+  if (new Set(room.wallIds).size !== room.wallIds.length) return null;
+
+  const wallsById = new Map(document_.walls.map((wall) => [wall.id, wall]));
+  const walls = room.wallIds.map((wallId) => wallsById.get(wallId));
+  if (walls.some((wall) => !wall ||
+    !hasPointCoordinates(wall.start, ["x", "z"]) ||
+    !hasPointCoordinates(wall.end, ["x", "z"]))) return null;
+
+  const points = [];
+  for (let index = 0; index < walls.length; index += 1) {
+    const wall = walls[index];
+    if (index > 0 && !samePoint(walls[index - 1].end, wall.start)) return null;
+    points.push({ x: wall.start.x, z: wall.start.z });
+  }
+  if (!samePoint(walls[walls.length - 1].end, walls[0].start)) return null;
+  return points;
 }
 
 /**
  * Where the walkthrough starts and which way it looks: the bounding-box centre
- * of the first room when it is free, otherwise the first free midpoint between
- * that centre and a contour vertex.
+ * of all wall endpoints when free, otherwise the first free midpoint between
+ * that centre and a wall endpoint.
  */
 export function spawnPoint(document_, colliders) {
-  const room = document_.rooms[0];
-  const points = room.contours;
+  const points = (document_.walls || []).flatMap((wall) => [wall.start, wall.end]);
+  if (points.length === 0) return { x: 0, z: 0, yaw: 0, pitch: 0 };
   const xs = points.map((point) => point.x);
   const zs = points.map((point) => point.z);
   const centerX = (Math.min(...xs) + Math.max(...xs)) / 2;

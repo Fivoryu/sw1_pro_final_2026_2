@@ -4,11 +4,10 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type {
   SceneDocument,
   SceneObject,
-  SceneOpening,
   ScenePoint2D,
-  SceneRoom,
+  SceneWall,
 } from "../../application/sceneContract";
-import { DEFAULT_SCENE_DOCUMENT } from "../../application/sceneContract";
+import { DEFAULT_SCENE_DOCUMENT, roomPolygon } from "../../application/sceneContract";
 
 interface SceneViewerProps {
   sceneDocument?: SceneDocument;
@@ -28,59 +27,47 @@ interface WallOpeningSpan {
   top: number;
 }
 
-function openingSpansForWall(
-  room: SceneRoom,
-  start: ScenePoint2D,
-  end: ScenePoint2D,
-  wallLength: number,
-): WallOpeningSpan[] {
-  const dx = end.x - start.x;
-  const dz = end.z - start.z;
+function openingSpansForWall(document: SceneDocument, wall: SceneWall, length: number): WallOpeningSpan[] {
+  return document.openings.flatMap((opening) => {
+    if (opening.wallId !== wall.id) return [];
 
-  return room.openings.flatMap((opening: SceneOpening) => {
-    const offsetX = opening.position.x - start.x;
-    const offsetZ = opening.position.z - start.z;
-    const center = (offsetX * dx + offsetZ * dz) / wallLength;
-    const distance = Math.abs(offsetX * dz - offsetZ * dx) / wallLength;
-    if (distance > 0.05 || center < -opening.width / 2 || center > wallLength + opening.width / 2) {
-      return [];
-    }
-
+    const center = opening.position * length;
+    const bottom = opening.type === "window" ? opening.sillHeight ?? 0.9 : 0;
     const span = {
       start: Math.max(0, center - opening.width / 2),
-      end: Math.min(wallLength, center + opening.width / 2),
-      bottom: Math.max(0, opening.position.y),
-      top: Math.min(room.height, opening.position.y + opening.height),
+      end: Math.min(length, center + opening.width / 2),
+      bottom: Math.max(0, bottom),
+      top: Math.min(wall.height, bottom + opening.height),
     };
     return span.start < span.end && span.bottom < span.top ? [span] : [];
   });
 }
 
-function addWall(
-  group: THREE.Group,
-  room: SceneRoom,
-  start: ScenePoint2D,
-  end: ScenePoint2D,
-  material: THREE.MeshBasicMaterial,
-  lineMaterial: THREE.LineBasicMaterial,
-) {
-  const dx = end.x - start.x;
-  const dz = end.z - start.z;
+function uniqueSorted(values: number[]): number[] {
+  return [...new Set(values.map((value) => Number(value.toFixed(6))))].sort((a, b) => a - b);
+}
+
+function addWall(group: THREE.Group, document: SceneDocument, wall: SceneWall) {
+  const dx = wall.end.x - wall.start.x;
+  const dz = wall.end.z - wall.start.z;
   const length = Math.hypot(dx, dz);
   if (length === 0) return;
 
-  const openings = openingSpansForWall(room, start, end, length);
+  const openings = openingSpansForWall(document, wall, length);
   const horizontalCuts = [0, length];
-  const verticalCuts = [0, room.height];
+  const verticalCuts = [0, wall.height];
   openings.forEach((opening) => {
     horizontalCuts.push(opening.start, opening.end);
     verticalCuts.push(opening.bottom, opening.top);
   });
-  const sortedUnique = (values: number[]) =>
-    [...new Set(values.map((value) => Number(value.toFixed(6))))].sort((a, b) => a - b);
-  const xs = sortedUnique(horizontalCuts);
-  const ys = sortedUnique(verticalCuts);
+  const xs = uniqueSorted(horizontalCuts);
+  const ys = uniqueSorted(verticalCuts);
   const rotation = Math.atan2(-dz, dx);
+  const material = new THREE.MeshBasicMaterial({
+    color: wall.color ?? "#e67e22",
+    side: THREE.DoubleSide,
+  });
+  const lineMaterial = new THREE.LineBasicMaterial({ color: 0x000000 });
 
   for (let xIndex = 0; xIndex < xs.length - 1; xIndex += 1) {
     const left = xs[xIndex];
@@ -102,34 +89,36 @@ function addWall(
       );
       if (insideOpening) continue;
 
-      const geometry = new THREE.PlaneGeometry(right - left, top - bottom);
-      const wall = new THREE.Mesh(geometry, material);
+      const geometry = new THREE.BoxGeometry(right - left, top - bottom, wall.thickness);
+      const mesh = new THREE.Mesh(geometry, material);
       const distanceFromStart = (left + right) / 2;
-      wall.position.set(
-        start.x + (dx / length) * distanceFromStart,
+      mesh.position.set(
+        wall.start.x + (dx / length) * distanceFromStart,
         centerY,
-        start.z + (dz / length) * distanceFromStart,
+        wall.start.z + (dz / length) * distanceFromStart,
       );
-      wall.rotation.y = rotation;
-      const edges = new THREE.EdgesGeometry(geometry);
-      wall.add(new THREE.LineSegments(edges, lineMaterial));
-      group.add(wall);
+      mesh.rotation.y = rotation;
+      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry), lineMaterial));
+      group.add(mesh);
     }
   }
 }
 
-function addRoom(group: THREE.Group, room: SceneRoom) {
-  if (room.contours.length < 3) return;
+function addRoom(group: THREE.Group, document: SceneDocument, roomId: string) {
+  const room = document.rooms.find((candidate) => candidate.id === roomId);
+  if (!room) return;
+  const polygon = roomPolygon(document, room.id);
+  if (!polygon || polygon.length < 3) return;
 
   const shape = new THREE.Shape();
-  shape.moveTo(room.contours[0].x, room.contours[0].z);
-  room.contours.slice(1).forEach((point) => shape.lineTo(point.x, point.z));
+  shape.moveTo(polygon[0].x, polygon[0].z);
+  polygon.slice(1).forEach((point) => shape.lineTo(point.x, point.z));
   shape.closePath();
 
   const floor = new THREE.Mesh(
     new THREE.ShapeGeometry(shape),
     new THREE.MeshBasicMaterial({
-      color: "#3a7bd5",
+      color: room.color ?? "#3a7bd5",
       transparent: true,
       opacity: 0.5,
       side: THREE.DoubleSide,
@@ -137,24 +126,6 @@ function addRoom(group: THREE.Group, room: SceneRoom) {
   );
   floor.rotation.x = Math.PI / 2;
   group.add(floor);
-
-  const wallMaterial = new THREE.MeshBasicMaterial({
-    color: "#e67e22",
-    transparent: true,
-    opacity: 0.8,
-    side: THREE.DoubleSide,
-  });
-  const lineMaterial = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 });
-  room.contours.forEach((point, index) => {
-    addWall(
-      group,
-      room,
-      point,
-      room.contours[(index + 1) % room.contours.length],
-      wallMaterial,
-      lineMaterial,
-    );
-  });
 }
 
 function addObject(group: THREE.Group, object: SceneObject, isSelected: boolean): THREE.Mesh {
@@ -197,8 +168,9 @@ function disposeGroup(group: THREE.Group) {
 }
 
 function focusPoint(document: SceneDocument) {
-  const points = document.rooms.flatMap((room) => room.contours);
+  const points: ScenePoint2D[] = document.walls.flatMap((wall) => [wall.start, wall.end]);
   if (points.length === 0) return { x: 2, z: 1.5, height: 2.4 };
+
   const minX = Math.min(...points.map((point) => point.x));
   const maxX = Math.max(...points.map((point) => point.x));
   const minZ = Math.min(...points.map((point) => point.z));
@@ -206,7 +178,7 @@ function focusPoint(document: SceneDocument) {
   return {
     x: (minX + maxX) / 2,
     z: (minZ + maxZ) / 2,
-    height: Math.max(...document.rooms.map((room) => room.height)),
+    height: Math.max(2.4, ...document.walls.map((wall) => wall.height)),
   };
 }
 
@@ -352,7 +324,8 @@ export const SceneViewer: React.FC<SceneViewerProps> = ({
       disposeGroup(groupRef.current);
     }
     const group = new THREE.Group();
-    sceneDocument.rooms.forEach((room) => addRoom(group, room));
+    sceneDocument.walls.forEach((wall) => addWall(group, sceneDocument, wall));
+    sceneDocument.rooms.forEach((room) => addRoom(group, sceneDocument, room.id));
     objectMeshesRef.current = sceneDocument.objects.map((object) =>
       addObject(group, object, object.id === selectedObjectId),
     );

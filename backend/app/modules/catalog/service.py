@@ -40,7 +40,11 @@ from app.modules.catalog.models import (
     QuoteRateLimitEvent,
     QuoteSnapshot,
 )
-from app.modules.catalog.schemas import ExtraPayload, ListingAuthoringRequest
+from app.modules.catalog.schemas import (
+    ExtraPayload,
+    ListingAuthoringRequest,
+    ListingSceneDocument,
+)
 from app.modules.exchange_rates.service import convert, current_conversion_rates
 
 
@@ -52,6 +56,14 @@ class InvalidCursorError(ValueError):
     """Raised when a listing cursor is malformed or unsafe to use."""
 
 
+class InvalidSceneIntegrityError(ValueError):
+    """Raised when scene collection references or identifiers are inconsistent."""
+
+    def __init__(self, detail: str) -> None:
+        self.detail = detail
+        super().__init__(detail)
+
+
 @dataclass(frozen=True)
 class ListingCursor:
     created_at: datetime
@@ -60,6 +72,44 @@ class ListingCursor:
 
 def normalize_geo_key(value: str) -> str:
     return value.strip().casefold()
+
+
+def validate_scene_integrity(scene: ListingSceneDocument) -> None:
+    """Check scene-wide identifier uniqueness and wall references."""
+    collections = {
+        "walls": [wall.id for wall in scene.walls],
+        "openings": [opening.id for opening in scene.openings],
+        "rooms": [room.id for room in scene.rooms],
+        "objects": [item.id for item in scene.objects],
+    }
+    for collection, identifiers in collections.items():
+        seen: set[str] = set()
+        for index, identifier in enumerate(identifiers):
+            if identifier in seen:
+                raise InvalidSceneIntegrityError(
+                    f"{collection}[{index}].id must be unique"
+                )
+            seen.add(identifier)
+
+    wall_ids = set(collections["walls"])
+    for index, opening in enumerate(scene.openings):
+        if opening.wall_id not in wall_ids:
+            raise InvalidSceneIntegrityError(
+                f"openings[{index}].wallId must refer to an existing wall"
+            )
+
+    for room_index, room in enumerate(scene.rooms):
+        referenced: set[str] = set()
+        for wall_index, wall_id in enumerate(room.wall_ids):
+            if wall_id in referenced:
+                raise InvalidSceneIntegrityError(
+                    f"rooms[{room_index}].wallIds[{wall_index}] must be distinct"
+                )
+            if wall_id not in wall_ids:
+                raise InvalidSceneIntegrityError(
+                    f"rooms[{room_index}].wallIds[{wall_index}] must refer to an existing wall"
+                )
+            referenced.add(wall_id)
 
 
 def get_listing_scene(session: Session, listing_id: str) -> ListingScene | None:

@@ -16,8 +16,11 @@ import {
 } from "../../application/staffListingsApi";
 import {
   DEFAULT_SCENE_DOCUMENT,
+  roomPolygon,
   type SceneDocument,
+  type SceneOpeningV2,
   type ScenePoint2D,
+  type SceneWall,
 } from "../../application/sceneContract";
 import { SceneViewer } from "./SceneViewer";
 
@@ -32,12 +35,10 @@ type ListState<T> =
   | { kind: "error"; message: string };
 
 type SceneLoadState = "idle" | "loading" | "ready" | "error";
-type SceneSelection =
-  | { kind: "room"; roomId: string }
-  | { kind: "vertex"; roomId: string; index: number }
-  | { kind: "object"; objectId: string }
-  | null;
-type DragTarget = Exclude<SceneSelection, { kind: "room" } | null>;
+type DragTarget =
+  | { kind: "wall-endpoint"; wallId: string; endpoint: "start" | "end" }
+  | { kind: "opening"; openingId: string }
+  | { kind: "object"; objectId: string };
 
 interface CanvasTransform {
   minX: number;
@@ -50,6 +51,7 @@ interface ActiveDrag {
   transform: CanvasTransform;
   startPoint: ScenePoint2D;
   originalPosition?: ScenePoint2D;
+  wall?: SceneWall;
 }
 
 const LISTING_STATUSES: ListingApprovalStatus[] = [
@@ -61,6 +63,8 @@ const LISTING_STATUSES: ListingApprovalStatus[] = [
 const CANVAS_WIDTH = 640;
 const CANVAS_HEIGHT = 420;
 const CANVAS_PADDING = 48;
+const SNAP_GRID_METERS = 0.1;
+const ENDPOINT_SNAP_TOLERANCE = 0.15;
 const SESSION_EXPIRED = "Tu sesión expiró. Cierra sesión y vuelve a ingresar.";
 const FORBIDDEN = "Tu cuenta no tiene permisos sobre los inmuebles de esta inmobiliaria.";
 
@@ -84,7 +88,7 @@ function listingLabel(listing: StaffListing): string {
 }
 
 function canvasTransform(document: SceneDocument): CanvasTransform {
-  const points: ScenePoint2D[] = document.rooms.flatMap((room) => room.contours);
+  const points: ScenePoint2D[] = document.walls.flatMap((wall) => [wall.start, wall.end]);
   document.objects.forEach((object) => {
     points.push(
       { x: object.position.x - object.dimensions.width / 2, z: object.position.z - object.dimensions.depth / 2 },
@@ -132,23 +136,54 @@ function toWorld(
   };
 }
 
-function updateVertex(
+function snapEndpoint(
   document: SceneDocument,
-  roomId: string,
-  index: number,
+  wallId: string,
+  point: ScenePoint2D,
+): ScenePoint2D {
+  const snapped = {
+    x: Number((Math.round(point.x / SNAP_GRID_METERS) * SNAP_GRID_METERS).toFixed(1)),
+    z: Number((Math.round(point.z / SNAP_GRID_METERS) * SNAP_GRID_METERS).toFixed(1)),
+  };
+
+  let nearest: ScenePoint2D | null = null;
+  let nearestDistance = ENDPOINT_SNAP_TOLERANCE;
+  for (const wall of document.walls) {
+    if (wall.id === wallId) continue;
+    for (const endpoint of [wall.start, wall.end]) {
+      const distance = Math.hypot(endpoint.x - snapped.x, endpoint.z - snapped.z);
+      if (distance <= nearestDistance) {
+        nearest = endpoint;
+        nearestDistance = distance;
+      }
+    }
+  }
+  return nearest ? { ...nearest } : snapped;
+}
+
+function updateWallEndpoint(
+  document: SceneDocument,
+  wallId: string,
+  endpoint: "start" | "end",
   point: ScenePoint2D,
 ): SceneDocument {
   return {
     ...document,
-    rooms: document.rooms.map((room) =>
-      room.id !== roomId
-        ? room
-        : {
-            ...room,
-            contours: room.contours.map((vertex, vertexIndex) =>
-              vertexIndex === index ? { ...vertex, ...point } : vertex,
-            ),
-          },
+    walls: document.walls.map((wall) =>
+      wall.id !== wallId ? wall : { ...wall, [endpoint]: { ...point } },
+    ),
+  };
+}
+
+function updateOpeningPosition(
+  document: SceneDocument,
+  openingId: string,
+  position: number,
+): SceneDocument {
+  return {
+    ...document,
+    openings: document.openings.map((opening) =>
+      opening.id !== openingId ? opening : { ...opening, position },
     ),
   };
 }
@@ -168,6 +203,23 @@ function updateObjectPosition(
   };
 }
 
+function openingPositionOnWall(
+  opening: SceneOpeningV2,
+  wall: SceneWall,
+  point: ScenePoint2D,
+): number {
+  const dx = wall.end.x - wall.start.x;
+  const dz = wall.end.z - wall.start.z;
+  const length = Math.hypot(dx, dz);
+  if (length === 0) return opening.position;
+
+  const projected = ((point.x - wall.start.x) * dx + (point.z - wall.start.z) * dz) / (length * length);
+  const halfWidthRatio = opening.width / (2 * length);
+  const minimum = Math.min(0.5, halfWidthRatio);
+  const maximum = Math.max(0.5, 1 - halfWidthRatio);
+  return Math.max(minimum, Math.min(maximum, projected));
+}
+
 interface SceneCanvasProps {
   sceneDocument: SceneDocument;
   selectedObjectId: string | null;
@@ -185,31 +237,37 @@ function SceneCanvas({
 }: SceneCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<ActiveDrag | null>(null);
-  const [selection, setSelection] = useState<SceneSelection>(null);
+  const [selection, setSelection] = useState<DragTarget | null>(null);
   const transform = useMemo(() => canvasTransform(sceneDocument), [sceneDocument]);
 
-  function beginDrag(
-    event: PointerEvent<SVGElement>,
-    target: DragTarget,
-    originalPosition?: ScenePoint2D,
-  ) {
+  function beginDrag(event: PointerEvent<SVGElement>, target: DragTarget) {
     event.stopPropagation();
     event.preventDefault();
     if (disabled || !svgRef.current) return;
 
     const frozenTransform = canvasTransform(sceneDocument);
+    const startPoint = toWorld(
+      event as PointerEvent<SVGSVGElement>,
+      svgRef.current,
+      frozenTransform,
+    );
+    const targetWall = target.kind === "opening"
+      ? sceneDocument.walls.find((wall) =>
+          wall.id === sceneDocument.openings.find((opening) => opening.id === target.openingId)?.wallId,
+        )
+      : undefined;
     dragRef.current = {
       target,
       transform: frozenTransform,
-      startPoint: toWorld(event as PointerEvent<SVGSVGElement>, svgRef.current, frozenTransform),
-      originalPosition,
+      startPoint,
+      originalPosition:
+        target.kind === "object"
+          ? sceneDocument.objects.find((object) => object.id === target.objectId)?.position
+          : undefined,
+      wall: targetWall,
     };
-    if (target.kind === "object") {
-      setSelection({ kind: "object", objectId: target.objectId });
-      onObjectSelect(target.objectId);
-    } else {
-      setSelection({ kind: "vertex", roomId: target.roomId, index: target.index });
-    }
+    setSelection(target);
+    if (target.kind === "object") onObjectSelect(target.objectId);
 
     try {
       if (typeof event.pointerId === "number") {
@@ -225,15 +283,26 @@ function SceneCanvas({
     const svg = svgRef.current;
     if (!drag || !svg || disabled) return;
     const point = toWorld(event, svg, drag.transform);
-    if (drag.target.kind === "vertex") {
-      const { roomId, index } = drag.target;
-      onEdit((document) => updateVertex(document, roomId, index, point));
+
+    if (drag.target.kind === "wall-endpoint") {
+      const { wallId, endpoint } = drag.target;
+      const snapped = snapEndpoint(sceneDocument, wallId, point);
+      onEdit((document) => updateWallEndpoint(document, wallId, endpoint, snapped));
       return;
     }
 
+    if (drag.target.kind === "opening") {
+      const openingId = drag.target.openingId;
+      const opening = sceneDocument.openings.find((candidate) => candidate.id === openingId);
+      if (!opening || !drag.wall) return;
+      const position = openingPositionOnWall(opening, drag.wall, point);
+      onEdit((document) => updateOpeningPosition(document, openingId, position));
+      return;
+    }
+
+    const objectId = drag.target.objectId;
     const originalPosition = drag.originalPosition;
     if (!originalPosition) return;
-    const { objectId } = drag.target;
     onEdit((document) =>
       updateObjectPosition(document, objectId, {
         x: originalPosition.x + (point.x - drag.startPoint.x),
@@ -267,37 +336,73 @@ function SceneCanvas({
     >
       <rect fill="#f4f2eb" height={CANVAS_HEIGHT} width={CANVAS_WIDTH} x="0" y="0" />
       {sceneDocument.rooms.map((room) => {
-        const points = room.contours.map((point) => toCanvas(point, transform));
-        const selected = selection?.kind === "room" && selection.roomId === room.id;
+        const polygon = roomPolygon(sceneDocument, room.id);
+        if (!polygon) return null;
+        const points = polygon.map((point) => toCanvas(point, transform));
+        const labelPoint = points.reduce(
+          (center, point) => ({ x: center.x + point.x / points.length, y: center.y + point.y / points.length }),
+          { x: 0, y: 0 },
+        );
         return (
           <g key={room.id}>
             <polygon
-              aria-label={`Seleccionar habitación ${room.id}`}
-              className={`scene-editor__room${selected ? " is-selected" : ""}`}
+              className="scene-editor__room"
               data-testid={`room-outline-${room.id}`}
-              onClick={() => setSelection({ kind: "room", roomId: room.id })}
+              fill={room.color ?? "#3a7bd5"}
+              fillOpacity="0.2"
               points={points.map((point) => `${point.x},${point.y}`).join(" ")}
-              role="button"
-              tabIndex={0}
             />
-            {room.contours.map((point, index) => {
-              const canvasPoint = toCanvas(point, transform);
-              const vertexSelected =
-                selection?.kind === "vertex" &&
-                selection.roomId === room.id &&
-                selection.index === index;
+            <text
+              className="scene-editor__room-label"
+              data-testid={`room-label-${room.id}`}
+              pointerEvents="none"
+              textAnchor="middle"
+              x={labelPoint.x}
+              y={labelPoint.y}
+            >
+              {room.name ?? room.id}
+            </text>
+          </g>
+        );
+      })}
+      {sceneDocument.walls.map((wall) => {
+        const start = toCanvas(wall.start, transform);
+        const end = toCanvas(wall.end, transform);
+        const strokeWidth = Math.max(4, wall.thickness * transform.scale);
+        return (
+          <g key={wall.id}>
+            <line
+              aria-label={`Pared ${wall.id}`}
+              className="scene-editor__wall"
+              data-testid={`scene-wall-${wall.id}`}
+              stroke={wall.color ?? "#555a60"}
+              strokeLinecap="square"
+              strokeWidth={strokeWidth}
+              x1={start.x}
+              x2={end.x}
+              y1={start.y}
+              y2={end.y}
+            />
+            {(["start", "end"] as const).map((endpoint) => {
+              const point = endpoint === "start" ? start : end;
+              const position = wall[endpoint];
+              const selected =
+                selection?.kind === "wall-endpoint" &&
+                selection.wallId === wall.id &&
+                selection.endpoint === endpoint;
               return (
                 <circle
-                  aria-label={`Mover esquina ${index + 1} de ${room.id}`}
-                  aria-pressed={vertexSelected}
-                  className={`scene-editor__vertex${vertexSelected ? " is-selected" : ""}`}
-                  cx={canvasPoint.x}
-                  cy={canvasPoint.y}
-                  data-testid={`room-vertex-${room.id}-${index}`}
-                  key={`${room.id}-vertex-${index}`}
-                  onClick={() => setSelection({ kind: "vertex", roomId: room.id, index })}
+                  aria-label={`Mover extremo ${endpoint === "start" ? "inicial" : "final"} de ${wall.id}`}
+                  aria-pressed={selected}
+                  className={`scene-editor__wall-endpoint${selected ? " is-selected" : ""}`}
+                  cx={point.x}
+                  cy={point.y}
+                  data-position-x={position.x}
+                  data-position-z={position.z}
+                  data-testid={`wall-endpoint-${wall.id}-${endpoint}`}
+                  key={`${wall.id}-${endpoint}`}
                   onPointerDown={(event) =>
-                    beginDrag(event, { kind: "vertex", roomId: room.id, index })
+                    beginDrag(event, { kind: "wall-endpoint", wallId: wall.id, endpoint })
                   }
                   r="7"
                   role="button"
@@ -305,6 +410,65 @@ function SceneCanvas({
                 />
               );
             })}
+          </g>
+        );
+      })}
+      {sceneDocument.openings.map((opening) => {
+        const wall = sceneDocument.walls.find((candidate) => candidate.id === opening.wallId);
+        if (!wall) return null;
+        const dx = wall.end.x - wall.start.x;
+        const dz = wall.end.z - wall.start.z;
+        const length = Math.hypot(dx, dz);
+        if (length === 0) return null;
+        const halfWidthRatio = opening.width / (2 * length);
+        const from = Math.max(0, opening.position - halfWidthRatio);
+        const to = Math.min(1, opening.position + halfWidthRatio);
+        const start = toCanvas(
+          { x: wall.start.x + dx * from, z: wall.start.z + dz * from },
+          transform,
+        );
+        const end = toCanvas(
+          { x: wall.start.x + dx * to, z: wall.start.z + dz * to },
+          transform,
+        );
+        const wallStrokeWidth = Math.max(4, wall.thickness * transform.scale);
+        return (
+          <g key={opening.id}>
+            <line
+              pointerEvents="none"
+              stroke="#f4f2eb"
+              strokeWidth={wallStrokeWidth + 2}
+              x1={start.x}
+              x2={end.x}
+              y1={start.y}
+              y2={end.y}
+            />
+            <line
+              pointerEvents="none"
+              stroke={opening.type === "window" ? "#248c8c" : "#bd6b42"}
+              strokeWidth="2"
+              x1={start.x}
+              x2={end.x}
+              y1={start.y}
+              y2={end.y}
+            />
+            <line
+              aria-label={`Mover abertura ${opening.id}`}
+              aria-pressed={selection?.kind === "opening" && selection.openingId === opening.id}
+              className="scene-editor__opening-hit-area"
+              data-position={opening.position}
+              data-testid={`scene-opening-${opening.id}`}
+              onPointerDown={(event) => beginDrag(event, { kind: "opening", openingId: opening.id })}
+              role="button"
+              pointerEvents="stroke"
+              stroke="transparent"
+              strokeWidth={Math.max(12, wallStrokeWidth + 8)}
+              tabIndex={0}
+              x1={start.x}
+              x2={end.x}
+              y1={start.y}
+              y2={end.y}
+            />
           </g>
         );
       })}
@@ -329,7 +493,7 @@ function SceneCanvas({
                 onObjectSelect(object.id);
               }}
               onPointerDown={(event) =>
-                beginDrag(event, { kind: "object", objectId: object.id }, object.position)
+                beginDrag(event, { kind: "object", objectId: object.id })
               }
               role="button"
               tabIndex={0}
@@ -592,7 +756,7 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
             <section aria-label="Edición del plano 2D" className="scene-editor__panel">
               <div className="scene-editor__panel-heading">
                 <h3>Plano 2D</h3>
-                <p>Arrastra los puntos de las paredes o los objetos para modificar su posición.</p>
+                <p>Arrastra los extremos de las paredes, las aberturas sobre su pared o los objetos.</p>
               </div>
               <SceneCanvas
                 disabled={isSaving}

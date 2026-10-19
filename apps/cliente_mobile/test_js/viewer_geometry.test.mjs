@@ -10,18 +10,19 @@ import {
   buildColliders,
   distanceToSegment,
   isBlocked,
-  openingSpansForWall,
   resolveMove,
+  roomPolygon,
   spawnPoint,
   validateScene,
+  wallOpeningsForWall,
 } from "../assets/viewer/geometry.mjs";
 
 const FIXTURE = JSON.parse(
   readFileSync(new URL("../../../docs/api/f06-scene-fixture.json", import.meta.url), "utf8"),
 );
 
-function collidersFor(document = FIXTURE) {
-  return buildColliders(document);
+function collidersFor(document_ = FIXTURE) {
+  return buildColliders(document_);
 }
 
 /** Floats coming from the contract are never compared bit-exactly. */
@@ -32,54 +33,107 @@ function closeTo(actual, expected, message) {
   );
 }
 
-test("the canonical fixture is a valid scene", () => {
+test("the canonical v2 fixture is a valid scene", () => {
   assert.equal(validateScene(FIXTURE), null);
 });
 
-test("validateScene rejects what the viewer cannot render", () => {
+test("v2 validation checks wall geometry, opening references, and duplicate ids", () => {
   assert.match(validateScene(null), /not an object/);
-  assert.match(validateScene({ ...FIXTURE, version: "2.0" }), /Unsupported scene version/);
+  assert.match(validateScene({ ...FIXTURE, version: "1.0" }), /Unsupported scene version/);
   assert.match(validateScene({ ...FIXTURE, unit: "feet" }), /Unsupported scene unit/);
-  assert.match(validateScene({ ...FIXTURE, rooms: [] }), /no rooms/);
+  assert.match(validateScene({ ...FIXTURE, walls: [] }), /walls/);
+
+  const degenerateWall = structuredClone(FIXTURE);
+  degenerateWall.walls[2].end = { ...degenerateWall.walls[2].start };
+  assert.equal(validateScene(degenerateWall), "walls[2].start must differ from end.");
+
+  const zeroHeight = structuredClone(FIXTURE);
+  zeroHeight.walls[0].height = 0;
+  assert.match(validateScene(zeroHeight), /walls\[0\]\.height/);
+  const zeroThickness = structuredClone(FIXTURE);
+  zeroThickness.walls[0].thickness = 0;
+  assert.match(validateScene(zeroThickness), /walls\[0\]\.thickness/);
+
+  const unknownWall = structuredClone(FIXTURE);
+  unknownWall.openings[0].wallId = "wall-unknown";
+  assert.equal(
+    validateScene(unknownWall),
+    "openings[0].wallId must refer to an existing wall.",
+  );
+
+  const outOfRange = structuredClone(FIXTURE);
+  outOfRange.openings[0].position = 1.1;
+  assert.match(validateScene(outOfRange), /openings\[0\]\.position/);
+
+  const duplicateWall = structuredClone(FIXTURE);
+  duplicateWall.walls[1].id = duplicateWall.walls[0].id;
+  assert.match(validateScene(duplicateWall), /duplicate.*wall/i);
+});
+
+test("rooms are optional complement metadata and objects remain required", () => {
+  assert.equal(validateScene({ ...FIXTURE, rooms: undefined }), null);
+  assert.equal(validateScene({ ...FIXTURE, rooms: [{ id: "incomplete" }] }), null);
   assert.match(validateScene({ ...FIXTURE, objects: undefined }), /objects are missing/);
-  const flat = { ...FIXTURE, rooms: [{ ...FIXTURE.rooms[0], height: 0 }] };
-  assert.match(validateScene(flat), /has no height/);
-  const triangle = {
-    ...FIXTURE,
-    rooms: [
-      {
-        ...FIXTURE.rooms[0],
-        contours: [
-          { x: 0, z: 0 },
-          { x: 1, z: 0 },
-        ],
-      },
-    ],
-  };
-  assert.match(validateScene(triangle), /fewer than three contours/);
 });
 
 test("the middle of the room is walkable", () => {
   assert.equal(isBlocked(2, 1.5, collidersFor()), false);
 });
 
-test("walls block the camera before it walks through them", () => {
+test("wall collision margin includes half the painted wall thickness", () => {
   const colliders = collidersFor();
-  // The z=0 wall away from the doorway, and the x=4 wall.
-  assert.equal(isBlocked(0.5, 0, colliders), true);
-  assert.equal(isBlocked(4, 1.5, colliders), true);
-  // The camera radius is the margin, not a point.
-  assert.equal(isBlocked(0.5, CAMERA_RADIUS / 2, colliders), true);
-  assert.equal(isBlocked(0.5, CAMERA_RADIUS + 0.05, colliders), false);
+  const northWall = colliders.segments.find((segment) => segment.az === 0);
+  assert.ok(northWall, "the north wall has a blocking segment away from its door");
+  closeTo(northWall.thickness, 0.15);
+  assert.equal(isBlocked(0.5, CAMERA_RADIUS + northWall.thickness / 2 - 0.001, colliders), true);
+  assert.equal(isBlocked(0.5, CAMERA_RADIUS + northWall.thickness / 2 + 0.01, colliders), false);
+  assert.equal(isBlocked(4 - CAMERA_RADIUS - 0.001, 1.5, colliders), true);
 });
 
-test("the door opening is passable and the rest of its wall is not", () => {
+test("the wall-north door is passable and the rest of that wall is not", () => {
   const colliders = collidersFor();
-  // door_1 sits at x=2 on the z=0 wall, 0.9 m wide: x in [1.55, 2.45].
+  const north = FIXTURE.walls.find((wall) => wall.id === "wall-north");
+  const spans = wallOpeningsForWall(north, FIXTURE.openings);
+  assert.equal(spans.length, 1);
+  closeTo(spans[0].start, 1.55);
+  closeTo(spans[0].end, 2.45);
+  closeTo(spans[0].bottom, 0);
+  closeTo(spans[0].top, 2.1);
+
   assert.equal(isBlocked(2, 0, colliders), false);
   assert.equal(isBlocked(2, -0.5, colliders), false, "the customer can step through the door");
   assert.equal(isBlocked(1.4, 0, colliders), true);
   assert.equal(isBlocked(2.6, 0, colliders), true);
+});
+
+test("a window above a one-metre sill does not create a floor-level gap", () => {
+  const withWindow = structuredClone(FIXTURE);
+  withWindow.openings = [{
+    id: "window_1",
+    wallId: "wall-north",
+    position: 0.5,
+    width: 0.9,
+    height: 1,
+    type: "window",
+    sillHeight: 1,
+  }];
+  assert.equal(validateScene(withWindow), null);
+  const colliders = collidersFor(withWindow);
+  const windowSpan = wallOpeningsForWall(withWindow.walls[0], withWindow.openings)[0];
+  closeTo(windowSpan.bottom, 1);
+  closeTo(windowSpan.top, 2);
+  assert.equal(isBlocked(2, 0, colliders), true);
+});
+
+test("openings are owned by wallId and their spans are clamped to the wall", () => {
+  const north = FIXTURE.walls[0];
+  const opening = { ...FIXTURE.openings[0], wallId: "wall-east" };
+  assert.deepEqual(wallOpeningsForWall(north, [opening]), []);
+
+  const nearEnd = { ...opening, wallId: north.id, position: 0.05, width: 1 };
+  const [span] = wallOpeningsForWall(north, [nearEnd]);
+  closeTo(span.start, 0);
+  closeTo(span.end, 0.7);
 });
 
 test("furniture blocks the camera even though it is selectable", () => {
@@ -95,23 +149,19 @@ test("furniture blocks the camera even though it is selectable", () => {
 
 test("a blocked move slides along the wall instead of stopping dead", () => {
   const colliders = collidersFor();
-  // Walking diagonally into the x=4 wall keeps the z component.
-  const slid = resolveMove(3.7, 1.5, 0.5, 0.2, colliders);
-  closeTo(slid.x, 3.7, "the blocked axis must not move");
+  const slid = resolveMove(3.6, 1.5, 0.5, 0.2, colliders);
+  closeTo(slid.x, 3.6, "the blocked axis must not move");
   closeTo(slid.z, 1.7, "the free axis must keep its step");
 });
 
 test("a free move is applied as requested", () => {
-  const colliders = collidersFor();
-  const moved = resolveMove(2, 0.7, 0.1, 0.1, colliders);
+  const moved = resolveMove(2, 0.7, 0.1, 0.1, collidersFor());
   closeTo(moved.x, 2.1);
   closeTo(moved.z, 0.8);
 });
 
 test("a move into a corner keeps the camera where it was", () => {
-  const colliders = collidersFor();
-  // A real frame never steps further than WALK_SPEED * 0.1 = 0.18 m.
-  const stuck = resolveMove(0.3, 0.3, -0.1, -0.1, colliders);
+  const stuck = resolveMove(0.3, 0.3, -0.1, -0.1, collidersFor());
   closeTo(stuck.x, 0.3);
   closeTo(stuck.z, 0.3);
 });
@@ -124,13 +174,13 @@ test("walking into a wall never leaves the room", () => {
   }
   assert.equal(isBlocked(position.x, position.z, colliders), false);
   assert.ok(
-    position.x >= CAMERA_RADIUS - 1e-9,
-    `the camera must stop at the radius, got x=${position.x}`,
+    position.x >= CAMERA_RADIUS + FIXTURE.walls[3].thickness / 2 - 1e-9,
+    `the camera must stop at the painted edge margin, got x=${position.x}`,
   );
   assert.ok(position.x < 1, "the camera must have walked toward the wall");
 });
 
-test("the spawn point is inside the room and looks at its centre", () => {
+test("the spawn point uses the wall bounds and looks toward their centre", () => {
   const colliders = collidersFor();
   const spawn = spawnPoint(FIXTURE, colliders);
   assert.equal(isBlocked(spawn.x, spawn.z, colliders), false);
@@ -157,22 +207,22 @@ test("a spawn candidate blocked by furniture is skipped", () => {
   );
 });
 
-test("opening spans are computed only for the wall that owns the opening", () => {
-  const room = FIXTURE.rooms[0];
-  const doorWall = openingSpansForWall(room, { x: 0, z: 0 }, { x: 4, z: 0 }, 4);
-  assert.equal(doorWall.length, 1);
-  closeTo(doorWall[0].start, 1.55);
-  closeTo(doorWall[0].end, 2.45);
-  closeTo(doorWall[0].bottom, 0);
-  closeTo(doorWall[0].top, 2.1);
-
-  const oppositeWall = openingSpansForWall(room, { x: 4, z: 3 }, { x: 0, z: 3 }, 4);
-  assert.deepEqual(oppositeWall, []);
-});
-
 test("distanceToSegment clamps to the endpoints", () => {
   const segment = { ax: 0, az: 0, bx: 2, bz: 0 };
   closeTo(distanceToSegment(1, 1, segment), 1);
   closeTo(distanceToSegment(-1, 0, segment), 1);
   closeTo(distanceToSegment(3, 0, segment), 1);
+});
+
+test("roomPolygon chains room_main from the fixture and rejects a broken chain", () => {
+  assert.deepEqual(roomPolygon(FIXTURE, "room_main"), [
+    { x: 0, z: 0 },
+    { x: 4, z: 0 },
+    { x: 4, z: 3 },
+    { x: 0, z: 3 },
+  ]);
+
+  const brokenChain = structuredClone(FIXTURE);
+  brokenChain.walls[1].start = { x: 5, z: 0 };
+  assert.equal(roomPolygon(brokenChain, "room_main"), null);
 });

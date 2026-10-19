@@ -103,26 +103,53 @@ def _store_scene(
 
 def _scene_document() -> dict[str, Any]:
     return {
-        "version": "1.0",
+        "version": "2.0",
         "unit": "meters",
+        "walls": [
+            {
+                "id": "wall-north",
+                "start": {"x": 0, "z": 0},
+                "end": {"x": 4, "z": 0},
+                "height": 2.4,
+                "thickness": 0.15,
+            },
+            {
+                "id": "wall-east",
+                "start": {"x": 4, "z": 0},
+                "end": {"x": 4, "z": 3},
+                "height": 2.4,
+                "thickness": 0.15,
+            },
+            {
+                "id": "wall-south",
+                "start": {"x": 4, "z": 3},
+                "end": {"x": 0, "z": 3},
+                "height": 2.4,
+                "thickness": 0.15,
+            },
+            {
+                "id": "wall-west",
+                "start": {"x": 0, "z": 3},
+                "end": {"x": 0, "z": 0},
+                "height": 2.4,
+                "thickness": 0.15,
+            },
+        ],
+        "openings": [
+            {
+                "id": "door_1",
+                "wallId": "wall-north",
+                "position": 0.5,
+                "width": 0.9,
+                "height": 2.1,
+                "type": "door",
+            }
+        ],
         "rooms": [
             {
                 "id": "room_main",
-                "height": 2.4,
-                "contours": [
-                    {"x": 0, "z": 0},
-                    {"x": 4, "z": 0},
-                    {"x": 4, "z": 3},
-                    {"x": 0, "z": 3},
-                ],
-                "openings": [
-                    {
-                        "id": "door_1",
-                        "type": "door",
-                        "position": {"x": 2, "y": 0, "z": 0},
-                        "width": 0.9,
-                        "height": 2.1,
-                    }
+                "wallIds": [
+                    "wall-north", "wall-east", "wall-south", "wall-west"
                 ],
             }
         ],
@@ -146,6 +173,26 @@ def test_public_scene_returns_document_for_published_listing(
     response = scene_context.client.get("/api/v1/listings/scene-listing/scene")
     assert response.status_code == 200
     assert response.json() == _scene_document()
+
+
+def test_public_scene_treats_stored_v1_scene_as_not_defined(
+    scene_context: SceneContext,
+) -> None:
+    _seed_listing(scene_context)
+    _store_scene(
+        scene_context,
+        document={
+            "version": "1.0",
+            "unit": "meters",
+            "rooms": [],
+            "objects": [],
+        },
+    )
+
+    response = scene_context.client.get("/api/v1/listings/scene-listing/scene")
+
+    assert response.status_code == 404, response.text
+    assert response.json()["code"] == "scene_not_defined"
 
 
 def test_public_scene_without_scene_returns_scene_not_defined(
@@ -177,7 +224,7 @@ def test_public_scene_for_unknown_listing_returns_listing_not_found(
     assert response.json()["detail"] == "listing_not_found"
 
 
-# The canonical document every surface must accept verbatim (S13).
+# The canonical document every surface must accept verbatim (S7).
 _CANONICAL_FIXTURE = (
     Path(__file__).resolve().parents[2] / "docs" / "api" / "f06-scene-fixture.json"
 )

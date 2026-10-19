@@ -1,5 +1,5 @@
 // RoomForge customer walkthrough viewer (F06.4/F06.5).
-// Loads a scene contract v1 document and renders a first-person walkthrough:
+// Loads a scene contract v2 document and renders a first-person walkthrough:
 // left-half joystick moves, right-half drag looks, taps select objects.
 // All content is local (vendored Three.js); the only outbound channel is the
 // RoomForgeBridge JavaScript channel posting JSON messages to Flutter.
@@ -7,7 +7,8 @@
 // a dependency-free module covered by node --test (test_js/).
 import {
   buildColliders,
-  openingSpansForWall,
+  roomPolygon,
+  wallOpeningsForWall,
   resolveMove,
   sortedUnique,
   spawnPoint,
@@ -44,16 +45,17 @@ function reportLoadError(detail) {
   postMessage({ type: "load_error", detail: String(detail) });
 }
 
-function addWall(group, room, start, end, material, lineMaterial) {
+function addWall(group, wallData, openings, material, lineMaterial) {
+  const { start, end } = wallData;
   const dx = end.x - start.x;
   const dz = end.z - start.z;
   const length = Math.hypot(dx, dz);
   if (length === 0) return;
 
-  const openings = openingSpansForWall(room, start, end, length);
+  const wallOpenings = wallOpeningsForWall(wallData, openings);
   const horizontalCuts = [0, length];
-  const verticalCuts = [0, room.height];
-  openings.forEach((opening) => {
+  const verticalCuts = [0, wallData.height];
+  wallOpenings.forEach((opening) => {
     horizontalCuts.push(opening.start, opening.end);
     verticalCuts.push(opening.bottom, opening.top);
   });
@@ -71,14 +73,16 @@ function addWall(group, room, start, end, material, lineMaterial) {
       if (top <= bottom) continue;
       const centerX = (left + right) / 2;
       const centerY = (bottom + top) / 2;
-      const insideOpening = openings.some(
+      const insideOpening = wallOpenings.some(
         (opening) =>
           centerX > opening.start && centerX < opening.end &&
           centerY > opening.bottom && centerY < opening.top,
       );
       if (insideOpening) continue;
 
-      const geometry = new THREE.PlaneGeometry(right - left, top - bottom);
+      // The box is centered on the wall axis, so its faces sit thickness/2 on
+      // either side of that axis, matching the painted-edge collision margin.
+      const geometry = new THREE.BoxGeometry(right - left, top - bottom, wallData.thickness);
       const wall = new THREE.Mesh(geometry, material);
       const distanceFromStart = (left + right) / 2;
       wall.position.set(
@@ -93,35 +97,18 @@ function addWall(group, room, start, end, material, lineMaterial) {
   }
 }
 
-function addRoom(group, room) {
-  if (room.contours.length < 3) return;
+function addRoomFloor(group, document_, room, material) {
+  if (!room || typeof room.id !== "string") return;
+  const polygon = roomPolygon(document_, room.id);
+  if (!polygon) return;
   const shape = new THREE.Shape();
-  shape.moveTo(room.contours[0].x, room.contours[0].z);
-  room.contours.slice(1).forEach((point) => shape.lineTo(point.x, point.z));
+  shape.moveTo(polygon[0].x, polygon[0].z);
+  polygon.slice(1).forEach((point) => shape.lineTo(point.x, point.z));
   shape.closePath();
 
-  const floor = new THREE.Mesh(
-    new THREE.ShapeGeometry(shape),
-    new THREE.MeshBasicMaterial({
-      color: "#3a7bd5",
-      transparent: true,
-      opacity: 0.5,
-      side: THREE.DoubleSide,
-    }),
-  );
+  const floor = new THREE.Mesh(new THREE.ShapeGeometry(shape), material);
   floor.rotation.x = Math.PI / 2;
   group.add(floor);
-
-  const wallMaterial = new THREE.MeshBasicMaterial({
-    color: "#e67e22",
-    transparent: true,
-    opacity: 0.8,
-    side: THREE.DoubleSide,
-  });
-  const lineMaterial = new THREE.LineBasicMaterial({ color: 0x000000 });
-  room.contours.forEach((point, index) => {
-    addWall(group, room, point, room.contours[(index + 1) % room.contours.length], wallMaterial, lineMaterial);
-  });
 }
 
 function addObject(group, object) {
@@ -165,6 +152,7 @@ function spawnCamera(document_) {
 }
 
 let loadedDocument = null;
+let sceneLoadCount = 0;
 
 function loadScene(document_) {
   const problem = validateScene(document_);
@@ -173,10 +161,27 @@ function loadScene(document_) {
     return;
   }
   try {
+    sceneLoadCount += 1;
     loadedDocument = document_;
     disposeWorld();
     worldGroup = new THREE.Group();
-    document_.rooms.forEach((room) => addRoom(worldGroup, room));
+    const floorMaterial = new THREE.MeshBasicMaterial({
+      color: "#3a7bd5",
+      transparent: true,
+      opacity: 0.5,
+      side: THREE.DoubleSide,
+    });
+    const wallMaterial = new THREE.MeshBasicMaterial({
+      color: "#e67e22",
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide,
+    });
+    const lineMaterial = new THREE.LineBasicMaterial({ color: 0x000000 });
+    const rooms = Array.isArray(document_.rooms) ? document_.rooms : [];
+    rooms.forEach((room) => addRoomFloor(worldGroup, document_, room, floorMaterial));
+    document_.walls.forEach((wall) =>
+      addWall(worldGroup, wall, document_.openings, wallMaterial, lineMaterial));
     document_.objects.forEach((object) => addObject(worldGroup, object));
     scene.add(worldGroup);
     colliders = buildColliders(document_);
@@ -195,6 +200,15 @@ function resetView() {
 
 function setupInput(canvas) {
   const pointers = new Map();
+  const resetMoveInput = () => {
+    moveVector = { x: 0, y: 0 };
+  };
+  const resetAllInput = () => {
+    pointers.clear();
+    resetMoveInput();
+  };
+  window.addEventListener("blur", resetAllInput);
+  document.addEventListener("visibilitychange", resetAllInput);
 
   canvas.addEventListener("pointerdown", (event) => {
     const rect = canvas.getBoundingClientRect();
@@ -237,7 +251,7 @@ function setupInput(canvas) {
     const pointer = pointers.get(event.pointerId);
     if (!pointer) return;
     pointers.delete(event.pointerId);
-    if (pointer.mode === "move") moveVector = { x: 0, y: 0 };
+    if (pointer.mode === "move") resetMoveInput();
     const elapsed = performance.now() - pointer.startedAt;
     const travel = Math.hypot(event.clientX - pointer.startX, event.clientY - pointer.startY);
     if (elapsed <= TAP_MAX_MS && travel <= TAP_MAX_PIXELS) {
@@ -248,9 +262,12 @@ function setupInput(canvas) {
   canvas.addEventListener("pointerup", (event) => releasePointer(event, canvas));
   canvas.addEventListener("pointercancel", (event) => {
     const pointer = pointers.get(event.pointerId);
-    if (!pointer) return;
+    if (!pointer) {
+      resetMoveInput();
+      return;
+    }
     pointers.delete(event.pointerId);
-    if (pointer.mode === "move") moveVector = { x: 0, y: 0 };
+    if (pointer.mode === "move") resetMoveInput();
   });
 }
 
@@ -331,6 +348,16 @@ window.viewerHost = {
   resetView: () => {
     if (loadedDocument) spawnCamera(loadedDocument);
   },
+  // Read-only probe used by the device run (never by product code): it is what
+  // makes "the gestos mueven la cámara" a measured fact instead of a guess.
+  debugState: () => ({
+    yaw: yaw,
+    pitch: pitch,
+    x: camera ? camera.position.x : null,
+    z: camera ? camera.position.z : null,
+    loads: sceneLoadCount,
+    objects: objectMeshes.length,
+  }),
 };
 
 bootstrap();

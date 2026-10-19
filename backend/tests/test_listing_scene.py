@@ -4,6 +4,7 @@ import base64
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
@@ -19,6 +20,7 @@ from app.core.config import Settings
 from app.db.base import Base
 from app.main import create_app
 from app.modules.catalog.models import Listing
+from app.modules.catalog.service import upsert_listing_scene
 from app.modules.identity.models import Agency
 from app.modules.identity.session import get_active_staff
 
@@ -107,26 +109,53 @@ def _scene_url(
 
 def _scene_document() -> dict[str, Any]:
     return {
-        "version": "1.0",
+        "version": "2.0",
         "unit": "meters",
+        "walls": [
+            {
+                "id": "wall-north",
+                "start": {"x": 0, "z": 0},
+                "end": {"x": 4, "z": 0},
+                "height": 2.4,
+                "thickness": 0.15,
+            },
+            {
+                "id": "wall-east",
+                "start": {"x": 4, "z": 0},
+                "end": {"x": 4, "z": 3},
+                "height": 2.4,
+                "thickness": 0.15,
+            },
+            {
+                "id": "wall-south",
+                "start": {"x": 4, "z": 3},
+                "end": {"x": 0, "z": 3},
+                "height": 2.4,
+                "thickness": 0.15,
+            },
+            {
+                "id": "wall-west",
+                "start": {"x": 0, "z": 3},
+                "end": {"x": 0, "z": 0},
+                "height": 2.4,
+                "thickness": 0.15,
+            },
+        ],
+        "openings": [
+            {
+                "id": "door_1",
+                "wallId": "wall-north",
+                "position": 0.5,
+                "width": 0.9,
+                "height": 2.1,
+                "type": "door",
+            }
+        ],
         "rooms": [
             {
                 "id": "room_main",
-                "height": 2.4,
-                "contours": [
-                    {"x": 0, "z": 0},
-                    {"x": 4, "z": 0},
-                    {"x": 4, "z": 3},
-                    {"x": 0, "z": 3},
-                ],
-                "openings": [
-                    {
-                        "id": "door_1",
-                        "type": "door",
-                        "position": {"x": 2, "y": 0, "z": 0},
-                        "width": 0.9,
-                        "height": 2.1,
-                    }
+                "wallIds": [
+                    "wall-north", "wall-east", "wall-south", "wall-west"
                 ],
             }
         ],
@@ -186,10 +215,10 @@ def test_put_scene_round_trips_full_document_and_records_actor(
 @pytest.mark.parametrize(
     "change",
     [
-        lambda scene: scene.update(version="2.0"),
+        lambda scene: scene.update(version="1.0"),
         lambda scene: scene.update(extra="not allowed"),
         lambda scene: scene.update(unit="feet"),
-        lambda scene: scene["rooms"][0].update(height="2.4"),
+        lambda scene: scene["walls"][0].update(height="2.4"),
     ],
     ids=["unknown-version", "extra-key", "unknown-unit", "non-numeric-height"],
 )
@@ -208,6 +237,143 @@ def test_put_rejects_scene_outside_contract(
     assert response.status_code == 422, response.text
     assert response.json()["code"] == "scene_invalid"
     assert response.json()["detail"]
+
+
+def _assert_scene_invalid(response: Any, path: str) -> None:
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["code"] == "scene_invalid"
+    assert path in body["detail"]
+
+
+def test_put_rejects_unknown_opening_wall_id(scene_context: SceneContext) -> None:
+    context = scene_context
+    _seed_listing(context)
+    _staff(context)
+    body = _scene_document()
+    body["openings"][0]["wallId"] = "wall-missing"
+
+    response = context.client.put(_scene_url(), json=body)
+
+    _assert_scene_invalid(response, "openings[0].wallId")
+
+
+def test_put_rejects_room_wall_ids_referencing_unknown_walls(
+    scene_context: SceneContext,
+) -> None:
+    context = scene_context
+    _seed_listing(context)
+    _staff(context)
+    body = _scene_document()
+    body["rooms"][0]["wallIds"][2] = "wall-missing"
+
+    response = context.client.put(_scene_url(), json=body)
+
+    _assert_scene_invalid(response, "rooms[0].wallIds[2]")
+
+
+def test_put_rejects_duplicate_wall_ids(scene_context: SceneContext) -> None:
+    context = scene_context
+    _seed_listing(context)
+    _staff(context)
+    body = _scene_document()
+    body["walls"][1]["id"] = body["walls"][0]["id"]
+
+    response = context.client.put(_scene_url(), json=body)
+
+    _assert_scene_invalid(response, "walls[1].id")
+
+
+def test_put_rejects_duplicate_opening_ids(scene_context: SceneContext) -> None:
+    context = scene_context
+    _seed_listing(context)
+    _staff(context)
+    body = _scene_document()
+    body["openings"].append(dict(body["openings"][0]))
+
+    response = context.client.put(_scene_url(), json=body)
+
+    _assert_scene_invalid(response, "openings[1].id")
+
+
+def test_put_rejects_duplicate_room_ids(scene_context: SceneContext) -> None:
+    context = scene_context
+    _seed_listing(context)
+    _staff(context)
+    body = _scene_document()
+    body["rooms"].append(dict(body["rooms"][0]))
+
+    response = context.client.put(_scene_url(), json=body)
+
+    _assert_scene_invalid(response, "rooms[1].id")
+
+
+def test_put_rejects_duplicate_object_ids(scene_context: SceneContext) -> None:
+    context = scene_context
+    _seed_listing(context)
+    _staff(context)
+    body = _scene_document()
+    body["objects"].append(dict(body["objects"][0]))
+
+    response = context.client.put(_scene_url(), json=body)
+
+    _assert_scene_invalid(response, "objects[1].id")
+
+
+@pytest.mark.parametrize("position", [-0.01, 1.01])
+def test_put_rejects_opening_position_outside_unit_interval(
+    scene_context: SceneContext,
+    position: float,
+) -> None:
+    context = scene_context
+    _seed_listing(context)
+    _staff(context)
+    body = _scene_document()
+    body["openings"][0]["position"] = position
+
+    response = context.client.put(_scene_url(), json=body)
+
+    _assert_scene_invalid(response, "openings[0].position")
+
+
+def test_put_rejects_wall_with_identical_start_and_end(
+    scene_context: SceneContext,
+) -> None:
+    context = scene_context
+    _seed_listing(context)
+    _staff(context)
+    body = _scene_document()
+    body["walls"][0]["end"] = dict(body["walls"][0]["start"])
+
+    response = context.client.put(_scene_url(), json=body)
+
+    _assert_scene_invalid(response, "walls[0]")
+
+
+def test_put_accepts_empty_rooms(scene_context: SceneContext) -> None:
+    context = scene_context
+    _seed_listing(context)
+    _staff(context)
+    body = _scene_document()
+    body["rooms"] = []
+
+    response = context.client.put(_scene_url(), json=body)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["rooms"] == []
+
+
+def test_put_applies_default_window_sill_height(scene_context: SceneContext) -> None:
+    context = scene_context
+    _seed_listing(context)
+    _staff(context)
+    body = _scene_document()
+    body["openings"][0].update(type="window", height=1.2)
+
+    response = context.client.put(_scene_url(), json=body)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["openings"][0]["sillHeight"] == 0.9
 
 
 def test_put_scene_for_another_agency_is_forbidden(scene_context: SceneContext) -> None:
@@ -244,7 +410,35 @@ def test_scene_routes_return_404_for_unknown_listing(
         assert response.json()["code"] == "listing_not_found"
 
 
-# The canonical document every surface must accept verbatim (S13). The backend
+def test_get_treats_stored_v1_scene_as_not_defined(
+    scene_context: SceneContext,
+) -> None:
+    context = scene_context
+    _seed_listing(context)
+    _staff(context)
+    legacy_document = {
+        "version": "1.0",
+        "unit": "meters",
+        "rooms": [],
+        "objects": [],
+    }
+    with context.session_factory.begin() as session:
+        upsert_listing_scene(
+            session,
+            agency_id="agency-one",
+            listing_id="scene-listing",
+            scene=legacy_document,
+            updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            updated_by="scene-actor",
+        )
+
+    response = context.client.get(_scene_url())
+
+    assert response.status_code == 404, response.text
+    assert response.json()["code"] == "scene_not_defined"
+
+
+# The canonical document every surface must accept verbatim (S7). The backend
 # validates and stores it without adding, dropping or retyping a single field.
 _CANONICAL_FIXTURE = (
     Path(__file__).resolve().parents[2] / "docs" / "api" / "f06-scene-fixture.json"

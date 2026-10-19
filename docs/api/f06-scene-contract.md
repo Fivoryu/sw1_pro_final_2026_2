@@ -2,7 +2,67 @@
 
 Define la estructura JSON estandarizada para representar inmuebles paramétricos antes de su renderizado.
 
-## Estructura Base (Fixture Sintético)
+## Estructura v2 — muros como fuente de verdad (vigente)
+
+Desde el 2026-10-19 el contrato es **v2**: los muros son la fuente de verdad y las habitaciones
+son complemento derivado (decisión del operador, `odd/tasks/f06-scene-contract-v2.md`). Las
+aberturas son paramétricas: viven en una colección propia y se ubican con `wallId` más `position`
+(0..1 a lo largo del muro), no con coordenadas absolutas. Mover un muro mueve sus aberturas; las
+habitaciones nunca discrepan de los muros porque no guardan contornos.
+
+```json
+{
+  "version": "2.0",
+  "unit": "meters",
+  "walls": [
+    { "id": "wall-north", "start": { "x": 0, "z": 0 }, "end": { "x": 4, "z": 0 },
+      "height": 2.4, "thickness": 0.15 }
+  ],
+  "openings": [
+    { "id": "door_1", "wallId": "wall-north", "position": 0.5,
+      "width": 0.9, "height": 2.1, "type": "door" }
+  ],
+  "rooms": [
+    { "id": "room_main", "name": "Estar",
+      "wallIds": ["wall-north", "wall-east", "wall-south", "wall-west"] }
+  ],
+  "objects": [
+    { "id": "ref_cube_1", "type": "placeholder",
+      "position": { "x": 1, "y": 0, "z": 1 },
+      "dimensions": { "width": 0.5, "height": 0.5, "depth": 0.5 }, "color": "red" }
+  ]
+}
+```
+
+Reglas del documento v1:
+
+- `walls[]`: `start`/`end` distintos entre sí (metros), `height` > 0, `thickness` > 0. `color`
+  opcional por muro.
+- `openings[]`: `type` es `door` o `window`; `position` ∈ [0,1] medido desde `start` del muro y
+  centrado en ese punto; `width`/`height` > 0; `sillHeight` ≥ 0 (ventanas, default 0.9).
+  `wallId` debe referenciar un muro del mismo documento.
+- `rooms[]` (complemento): `wallIds` con al menos 3 ids distintos que forman un ciclo; el polígono
+  se deriva encadenando los extremos de esos muros en orden. `name` y `color` opcionales.
+  Los muros pueden compartirse entre habitaciones (tabique).
+- `objects[]`: igual que en v1; `objects[].id` es el `extra_id` publicado (ver «Objetos y oferta»).
+
+Validación (estilo `readProject` de openPlan3D): rechazo con `422 scene_invalid` y detalle con
+ruta (`openings[0].wallId must refer to an existing wall`), integridad referencial completa,
+ids duplicados por colección y rangos numéricos. Un documento almacenado que ya no valida contra
+el contrato vigente se lee como `404 scene_not_defined` en staff y público: el cliente muestra su
+estado honesto y el staff debe re-guardar. No se promete retrocompatibilidad de lectura de
+documentos v1.
+
+El recorrido colisiona contra los muros (segmentos con los tramos de abertura restados) y el
+margen de cámara respeta el espesor: radio de cámara + `thickness/2` (distancia al borde pintado,
+no a la línea central). `rooms` es metadato complementario: el visor la tolera ausente o
+incompleta y nunca la usa para colisionar.
+
+## Historia: v1 (superada, solo referencia)
+
+Hasta el 2026-10-19 el contrato era `version: "1.0"`: habitaciones con `contours` absolutos y
+aberturas con `position {x,y,z}` absoluta dentro de cada habitación. Se reemplaza por v2; no se
+ofrece lectura retrocompatible (ver regla de `scene_not_defined` arriba).
 
 ```json
 {
@@ -29,25 +89,18 @@ Define la estructura JSON estandarizada para representar inmuebles paramétricos
       ]
     }
   ],
-  "objects": [
-    {
-      "id": "ref_cube_1",
-      "type": "placeholder",
-      "position": { "x": 1, "y": 0, "z": 1 },
-      "dimensions": { "width": 0.5, "height": 0.5, "depth": 0.5 },
-      "color": "red"
-    }
-  ]
+  "objects": []
 }
 ```
 
 ## Fixture canónica
 
 El documento de referencia de la escena para todas las superficies es
-`docs/api/f06-scene-fixture.json`. Define una habitación `room_main` de 4 m × 3 m
-con 2.4 m de altura; una abertura `door_1` en (x=2, y=0, z=0), de 0.9 m × 2.1 m;
-y tres cubos placeholder de 0.5 m por lado: `ref_cube_1` rojo en (1,0,1),
-`ref_cube_2` verde en (3,0,1) y `ref_cube_3` azul en (2,0,2).
+`docs/api/f06-scene-fixture.json`, en v2: cuatro muros de espesor 0.15 m que cierran la
+habitación `room_main` de 4 m × 3 m con 2.4 m de altura (los `wallIds` de la habitación forman el
+ciclo); una abertura `door_1` tipo puerta centrada en `wall-north` (`position: 0.5`, 0.9 m × 2.1 m);
+y tres cubos placeholder de 0.5 m por lado: `ref_cube_1` rojo en (1,0,1), `ref_cube_2` verde en
+(3,0,1) y `ref_cube_3` azul en (2,0,2).
 
 La fixture se consume sin alteraciones en:
 

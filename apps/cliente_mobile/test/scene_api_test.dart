@@ -21,21 +21,28 @@ SceneApi _build(Future<http.Response> Function(http.Request request) handler) =>
   );
 
 Map<String, Object?> _sceneDocument() => {
-  'version': '1.0',
+  'version': '2.0',
   'unit': 'meters',
-  'rooms': [
+  'walls': <Object?>[
     {
-      'id': 'room_main',
+      'id': 'wall-north',
+      'start': {'x': 0.0, 'z': 0.0},
+      'end': {'x': 4.0, 'z': 0.0},
       'height': 2.4,
-      'contours': [
-        {'x': 0.0, 'z': 0.0},
-        {'x': 4.0, 'z': 0.0},
-        {'x': 4.0, 'z': 3.0},
-        {'x': 0.0, 'z': 3.0},
-      ],
-      'openings': <Object?>[],
+      'thickness': 0.15,
     },
   ],
+  'openings': <Object?>[
+    {
+      'id': 'door_1',
+      'wallId': 'wall-north',
+      'position': 0.5,
+      'width': 0.9,
+      'height': 2.1,
+      'type': 'door',
+    },
+  ],
+  'rooms': <Object?>[],
   'objects': <Object?>[],
 };
 
@@ -55,7 +62,7 @@ void main() {
 
       expect(result, isA<SceneReady>());
       final ready = result as SceneReady;
-      expect(ready.document['version'], '1.0');
+      expect(ready.document['version'], '2.0');
       final request = requests.single;
       expect(request.url.path, '/api/v1/listings/listing-1/scene');
       expect(request.headers['Accept'], 'application/json');
@@ -67,9 +74,12 @@ void main() {
 
       final result = await api.getScene('listing-1') as SceneReady;
 
-      final rooms = result.document['rooms']! as List<Object?>;
-      final room = rooms.single! as Map<String, Object?>;
-      expect(room['height'], 2.4);
+      final walls = result.document['walls']! as List<Object?>;
+      final wall = walls.single! as Map<String, Object?>;
+      expect(wall['height'], 2.4);
+      final openings = result.document['openings']! as List<Object?>;
+      final door = openings.single! as Map<String, Object?>;
+      expect(door['position'], 0.5);
     });
   });
 

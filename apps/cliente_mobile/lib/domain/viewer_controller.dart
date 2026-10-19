@@ -20,7 +20,7 @@ class ViewerController extends ChangeNotifier {
 
   ViewerLoadState get state => _state;
 
-  /// Scene document matching the v1 contract; only when [state] is ready.
+  /// Scene document matching the v2 contract; only when [state] is ready.
   Map<String, Object?>? get document => _document;
 
   /// User-facing notice when the load failed.

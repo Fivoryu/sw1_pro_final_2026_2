@@ -14,8 +14,10 @@ http.Response _json(Object body, int status) => http.Response.bytes(
 );
 
 Map<String, Object?> _sceneDocument() => {
-  'version': '1.0',
+  'version': '2.0',
   'unit': 'meters',
+  'walls': <Object?>[],
+  'openings': <Object?>[],
   'rooms': <Object?>[],
   'objects': <Object?>[],
 };
