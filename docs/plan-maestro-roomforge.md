@@ -249,6 +249,7 @@ Las superficies son las rutas que existen hoy (corte 2026-09-30). Una fase que n
 3. **Al cerrar una issue** se registra en esta tabla su cierre; la issue no se reabre para nuevo alcance: eso es una issue nueva (y, si cambia requisitos, primero el plan).
 4. **Labels:** cada issue lleva el label de su fase (`f06`…`f14`) y `type:feature` o `mejora` según corresponda.
 5. **Las issues no reemplazan `odd/tasks/`:** el registro de ejecución por unidad sigue en el repositorio, conforme a §1.4.4 y la sección F correspondiente.
+6. **Etiquetas de dependencia:** cada issue abierta lleva labels `depends:fXX` con las fases que esta tabla y §1.4.1 declaran como dependencia (creadas el 2026-10-19). Para fases transversales o con dependencias por subfase se etiqueta cada una: F12 lleva `depends:f06`–`depends:f11` y F14 las de su subfase (tour y captura guiada → `f04`; favoritos y dashboard → `f10`). Una dependencia ya integrada no se retira del label: la vigencia se lee de la fila de estado de §1.4.1, no del label.
 
 | Fase | Issues abiertas | Issues cerradas |
 |---|---|---|
