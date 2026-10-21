@@ -4,6 +4,7 @@ import 'package:captura_mobile/data/models/staff_listing.dart';
 import 'package:captura_mobile/data/services/staff_auth_api.dart';
 import 'package:captura_mobile/data/services/staff_listing_photos_api.dart';
 import 'package:captura_mobile/data/services/staff_listings_api.dart';
+import 'package:captura_mobile/data/services/staff_scene_api.dart';
 import 'package:captura_mobile/domain/listing_drafts_controller.dart';
 import 'package:captura_mobile/domain/staff_session_controller.dart';
 import 'package:captura_mobile/ui/listings/listing_format.dart';
@@ -11,14 +12,18 @@ import 'package:captura_mobile/ui/listings/listings_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/fake_ar_capture.dart';
 import 'support/fake_listings_backend.dart';
 import 'support/fake_photo_source.dart';
+import 'support/fake_scene_backend.dart';
 import 'support/fake_staff_backend.dart';
+import 'support/in_memory_capture_draft_store.dart';
 
 Future<FakeListingsBackend> _pumpListings(
   WidgetTester tester, {
   void Function(FakeListingsBackend backend)? seed,
   FakePhotoSource? source,
+  bool spatial = false,
 }) async {
   final session = StaffSessionController(
     api: StaffAuthApi(
@@ -43,6 +48,14 @@ Future<FakeListingsBackend> _pumpListings(
       client: backend.client,
     ),
     photoSource: source ?? FakePhotoSource(),
+    sceneApi: spatial
+        ? StaffSceneApi(
+            baseUrl: 'https://api.example.test',
+            client: FakeSceneBackend().client,
+          )
+        : null,
+    captureStore: spatial ? InMemoryCaptureDraftStore() : null,
+    arCapture: spatial ? FakeArCapture() : null,
   );
   await tester.pumpWidget(
     MaterialApp(home: ListingsScreen(controller: controller)),
@@ -615,6 +628,62 @@ void main() {
         find.byKey(const ValueKey('listing-status-warning')),
         findsNothing,
       );
+    });
+  });
+
+  group('spatial capture', () {
+    testWidgets('a saved draft opens its spatial capture', (tester) async {
+      await _pumpListings(
+        tester,
+        spatial: true,
+        seed: (backend) => backend.seed(id: 'd-1'),
+      );
+      await _tapVisible(tester, 'listing-item-d-1');
+      await _tapVisible(tester, 'open-spatial-capture');
+
+      expect(
+        find.byKey(const ValueKey('spatial-capture-screen')),
+        findsOneWidget,
+      );
+      expect(find.text('Todavía no capturaste ambientes.'), findsOneWidget);
+    });
+
+    testWidgets('a listing under review can be measured but not sent', (
+      tester,
+    ) async {
+      await _pumpListings(
+        tester,
+        spatial: true,
+        seed: (backend) => backend.seed(id: 'p-1', status: 'pending'),
+      );
+      await _tapVisible(tester, 'listings-tab-pending');
+      await _tapVisible(tester, 'listing-item-p-1');
+      await _tapVisible(tester, 'open-spatial-capture');
+
+      expect(
+        find.textContaining('Para enviar una escena nueva'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a new listing must be saved before measuring', (tester) async {
+      await _pumpListings(tester, spatial: true);
+      await _tapVisible(tester, 'new-listing-button');
+
+      expect(
+        find.byKey(const ValueKey('spatial-capture-unsaved')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('open-spatial-capture')), findsNothing);
+    });
+
+    testWidgets('builds without capture services show no spatial section', (
+      tester,
+    ) async {
+      await _pumpListings(tester, seed: (backend) => backend.seed(id: 'd-1'));
+      await _tapVisible(tester, 'listing-item-d-1');
+
+      expect(find.byKey(const ValueKey('open-spatial-capture')), findsNothing);
     });
   });
 }
