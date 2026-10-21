@@ -6,7 +6,15 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, StrictStr
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    model_validator,
+)
 
 from app.core.money import SupportedCurrency
 
@@ -24,7 +32,7 @@ class SceneContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class SceneContourPoint(SceneContractModel):
+class ScenePoint(SceneContractModel):
     x: SceneNumber
     z: SceneNumber
 
@@ -41,19 +49,49 @@ class SceneDimensions(SceneContractModel):
     depth: SceneNumber
 
 
+class SceneWall(SceneContractModel):
+    id: StrictStr
+    start: ScenePoint
+    end: ScenePoint
+    height: Annotated[SceneNumber, Field(gt=0)]
+    thickness: Annotated[SceneNumber, Field(gt=0)]
+    color: StrictStr | None = None
+
+    @model_validator(mode="after")
+    def endpoints_must_differ(self) -> SceneWall:
+        if self.start == self.end:
+            raise ValueError("start and end must be different")
+        return self
+
+
 class SceneOpening(SceneContractModel):
     id: StrictStr
-    type: StrictStr
-    position: ScenePosition
-    width: SceneNumber
-    height: SceneNumber
+    wall_id: StrictStr = Field(alias="wallId")
+    position: Annotated[SceneNumber, Field(ge=0, le=1)]
+    width: Annotated[SceneNumber, Field(gt=0)]
+    height: Annotated[SceneNumber, Field(gt=0)]
+    type: Literal["door", "window"]
+    sill_height: Annotated[SceneNumber, Field(ge=0)] = Field(default=0, alias="sillHeight")
+
+    @model_validator(mode="before")
+    @classmethod
+    def apply_window_sill_height(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        if (
+            value.get("type") == "window"
+            and "sillHeight" not in value
+            and "sill_height" not in value
+        ):
+            return {**value, "sillHeight": 0.9}
+        return value
 
 
 class SceneRoom(SceneContractModel):
     id: StrictStr
-    height: SceneNumber
-    contours: list[SceneContourPoint]
-    openings: list[SceneOpening]
+    name: StrictStr | None = None
+    wall_ids: list[StrictStr] = Field(alias="wallIds", min_length=3)
+    color: StrictStr | None = None
 
 
 class SceneObject(SceneContractModel):
@@ -65,8 +103,10 @@ class SceneObject(SceneContractModel):
 
 
 class ListingSceneDocument(SceneContractModel):
-    version: Literal["1.0"]
+    version: Literal["2.0"]
     unit: Literal["meters"]
+    walls: list[SceneWall]
+    openings: list[SceneOpening]
     rooms: list[SceneRoom]
     objects: list[SceneObject]
 

@@ -65,11 +65,13 @@ from app.modules.catalog.service import (
     encode_cursor,
     get_public_listing,
     get_listing_scene,
+    InvalidSceneIntegrityError,
     list_listing_extras,
     normalize_geo_key,
     search_public_listings,
     transition_staff_listing,
     upsert_listing_scene,
+    validate_scene_integrity,
 )
 from app.modules.identity.session import ActiveStaff, get_active_staff
 
@@ -209,6 +211,36 @@ def get_public_listing_detail(
             extras=[_public_extra_item(extra, listing.currency) for extra in extras],
             photos=photos,
         )
+
+
+@listings_router.get(
+    "/{listing_id}/scene",
+    response_model=ListingSceneDocument,
+    response_model_exclude_unset=True,
+    responses={404: {"description": "Listing or scene not found"}},
+)
+def get_public_listing_scene(
+    listing_id: Annotated[str, Path(min_length=1, max_length=36)], request: Request
+) -> ListingSceneDocument | JSONResponse:
+    """Scene document of a published listing; customers cannot see draft scenes."""
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    with session_factory() as session:
+        listing = get_public_listing(session, listing_id)
+        if listing is None:
+            raise HTTPException(status_code=404, detail="listing_not_found")
+        stored = get_listing_scene(session, listing.id)
+        if stored is None:
+            return _scene_error_response(
+                404, "Scene is not defined for this listing", "scene_not_defined"
+            )
+        try:
+            scene = ListingSceneDocument.model_validate(stored.scene)
+            validate_scene_integrity(scene)
+        except (ValidationError, InvalidSceneIntegrityError):
+            return _scene_error_response(
+                404, "Scene is not defined for this listing", "scene_not_defined"
+            )
+        return scene
 
 
 def _quote_response(quote: QuoteSnapshot) -> QuoteSnapshotResponse:
@@ -713,9 +745,22 @@ def _scene_error_response(status_code: int, detail: str, code: str) -> JSONRespo
     )
 
 
+def _scene_validation_detail(error: ValidationError) -> str:
+    first_error = error.errors()[0]
+    path = ""
+    for part in first_error["loc"]:
+        if isinstance(part, int):
+            path += f"[{part}]"
+        else:
+            path += f".{part}" if path else str(part)
+    message = first_error["msg"]
+    return f"{path} {message}" if path else message
+
+
 @router.get(
     "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/scene",
     response_model=ListingSceneDocument,
+    response_model_exclude_unset=True,
 )
 def get_agency_listing_scene(
     agency_id: str,
@@ -734,12 +779,20 @@ def get_agency_listing_scene(
             return _scene_error_response(
                 404, "Scene is not defined for this listing", "scene_not_defined"
             )
-        return ListingSceneDocument.model_validate(stored.scene)
+        try:
+            scene = ListingSceneDocument.model_validate(stored.scene)
+            validate_scene_integrity(scene)
+        except (ValidationError, InvalidSceneIntegrityError):
+            return _scene_error_response(
+                404, "Scene is not defined for this listing", "scene_not_defined"
+            )
+        return scene
 
 
 @router.put(
     "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/scene",
     response_model=ListingSceneDocument,
+    response_model_exclude_unset=True,
 )
 def replace_agency_listing_scene(
     agency_id: str,
@@ -751,10 +804,13 @@ def replace_agency_listing_scene(
     _require_listing_editor(staff, agency_id)
     try:
         scene = ListingSceneDocument.model_validate(body)
-    except ValidationError:
+        validate_scene_integrity(scene)
+    except ValidationError as error:
         return _scene_error_response(
-            422, "Scene document does not match the v1 contract", "scene_invalid"
+            422, _scene_validation_detail(error), "scene_invalid"
         )
+    except InvalidSceneIntegrityError as error:
+        return _scene_error_response(422, error.detail, "scene_invalid")
 
     session_factory: sessionmaker[Session] = request.app.state.session_factory
     with session_factory.begin() as session:
@@ -762,7 +818,7 @@ def replace_agency_listing_scene(
             session,
             agency_id=agency_id,
             listing_id=listing_id,
-            scene=scene.model_dump(mode="json"),
+            scene=scene.model_dump(mode="json", by_alias=True, exclude_unset=True),
             updated_at=request.app.state.clock(),
             updated_by=staff["id"],
         )

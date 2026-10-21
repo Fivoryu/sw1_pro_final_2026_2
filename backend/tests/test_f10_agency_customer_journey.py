@@ -20,11 +20,13 @@ from __future__ import annotations
 
 import base64
 import ipaddress
+import json
 import os
 from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from itertools import count
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -45,11 +47,25 @@ from app.modules.identity.models import Agency
 from app.modules.identity.session import get_active_staff
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
+# The canonical walkthrough document shared by the panel, the backend and the app.
+_SCENE_FIXTURE = _BACKEND_ROOT.parent / "docs" / "api" / "f06-scene-fixture.json"
 _DATABASE_PREFIX = "roomforge_f10_"
 _AGENCY_ONE = "f10-agency-one"
 _AGENCY_TWO = "f10-agency-two"
 _AGENCY_WALLET_KEY = "0x" + "11" * 32
 _CUSTOMER_WALLET_KEY = "0x" + "22" * 32
+
+
+def _walkthrough_scene(extra_id: str) -> dict[str, object]:
+    """The canonical v2 fixture, with its first object standing for the priced extra.
+
+    Scene object ids are offer ids: a tap in the walkthrough (F06.5) opens the
+    quote for that extra, so this journey links the two explicitly instead of
+    relying on a coincidence between two independent ids.
+    """
+    document = json.loads(_SCENE_FIXTURE.read_text(encoding="utf-8"))
+    document["objects"][0]["id"] = extra_id
+    return cast("dict[str, object]", document)
 
 
 def _validated_journey_url() -> URL:
@@ -237,6 +253,15 @@ def test_agency_to_customer_journey_e2e(journey_postgres_engine: Engine) -> None
         foreign_publish = client.post(f"{listing_url}/publish")
         assert foreign_publish.status_code == 403, foreign_publish.text
 
+        # --- Staff authors the walkthrough scene (F06.3 → F06.4) ----------------
+        act_as("agency_admin", _AGENCY_ONE, "f10-admin-one")
+        scene_document = _walkthrough_scene(extra_id)
+        saved_scene = client.put(f"{listing_url}/scene", json=scene_document)
+        assert saved_scene.status_code == 200, saved_scene.text
+        assert saved_scene.json() == scene_document, (
+            "the panel must save the canonical scene verbatim"
+        )
+
         # --- Customer surface: catalog and detail (F04.4) -----------------------
         registered = client.post(
             "/api/v1/customer/auth/register",
@@ -265,14 +290,27 @@ def test_agency_to_customer_journey_e2e(journey_postgres_engine: Engine) -> None
         detail_extras = detail.json()["extras"]
         assert [extra["extra_id"] for extra in detail_extras] == [extra_id]
 
-        # --- Quote (F05): base plus the selected extra, snapshot returned ------
+        # --- The customer walks the published scene (F06.4) --------------------
+        # No credentials: the scene is public exactly like the catalog.
+        public_scene = client.get(f"/api/v1/listings/{listing_id}/scene")
+        assert public_scene.status_code == 200, public_scene.text
+        served_scene = public_scene.json()
+        assert served_scene == scene_document, (
+            "the customer app must receive exactly what the panel saved"
+        )
+        scene_object_ids = [item["id"] for item in served_scene["objects"]]
+        assert extra_id in scene_object_ids, (
+            "a tap in the walkthrough only prices objects that are published extras"
+        )
+
+        # --- Quote (F05): base plus the object tapped in the scene (F06.5) ----
         quoted_version = listing["offer_version"]
         quote = client.post(
             "/api/v1/quotes",
             json={
                 "listing_id": listing_id,
                 "offer_version": quoted_version,
-                "selected_extra_ids": [extra_id],
+                "selected_extra_ids": [scene_object_ids[0]],
             },
         )
         assert quote.status_code == 201, quote.text

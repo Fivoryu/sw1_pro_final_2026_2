@@ -116,7 +116,13 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.41.8"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - run: flutter pub get
+      # The walkthrough geometry (collisions, doorways, limits) is plain JS
+      # covered by node --test, not by flutter test.
+      - run: node --test
       - run: flutter test
       - run: flutter analyze
       - run: flutter build apk --release --dart-define=API_BASE_URL=https://api.example.com/api/v1

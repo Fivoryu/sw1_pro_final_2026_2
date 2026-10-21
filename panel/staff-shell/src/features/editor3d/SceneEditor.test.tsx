@@ -8,7 +8,7 @@ import {
   StaffListingsApiError,
   type StaffListing,
 } from "../../application/staffListingsApi";
-import { DEFAULT_SCENE_DOCUMENT, type SceneDocument } from "../../application/sceneContract";
+import { DEFAULT_SCENE_DOCUMENT, type SceneDocument, type ScenePoint2D } from "../../application/sceneContract";
 import { SceneEditor } from "./SceneEditor";
 
 vi.mock("../../application/staffListingsApi", async (importOriginal) => {
@@ -55,6 +55,11 @@ function documentInViewer(): SceneDocument {
   return JSON.parse(screen.getByTestId("scene-viewer-document").textContent ?? "{}") as SceneDocument;
 }
 
+function canvasPoint(point: ScenePoint2D) {
+  // The fixture fits the 640×420 canvas at 90 px/m, with a 75×345 px origin.
+  return { x: 75 + point.x * 90, y: 345 - point.z * 90 };
+}
+
 async function chooseListing(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByRole("option", { name: /Venta · La Paz, Sopocachi/ });
   await user.selectOptions(screen.getByLabelText("Inmueble"), listing.listing_id);
@@ -64,21 +69,22 @@ async function chooseListing(user: ReturnType<typeof userEvent.setup>) {
 function dispatchPointer(
   target: Element,
   type: "pointerdown" | "pointermove" | "pointerup",
-  clientX: number,
-  clientY: number,
+  point: ScenePoint2D,
   pointerId: number,
 ) {
-  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY });
+  const { x, y } = canvasPoint(point);
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y });
   Object.defineProperty(event, "pointerId", { value: pointerId });
   fireEvent(target, event);
 }
 
-async function dragVertex(user: ReturnType<typeof userEvent.setup>) {
+async function dragWallEndpoint(user: ReturnType<typeof userEvent.setup>) {
   await chooseListing(user);
+  const endpoint = screen.getByTestId("wall-endpoint-wall-north-start");
   const canvas = screen.getByTestId("scene-editor-canvas");
-  dispatchPointer(screen.getByTestId("room-vertex-room_main-0"), "pointerdown", 60, 80, 1);
-  dispatchPointer(canvas, "pointermove", 140, 120, 1);
-  dispatchPointer(canvas, "pointerup", 140, 120, 1);
+  dispatchPointer(endpoint, "pointerdown", { x: 0, z: 0 }, 1);
+  dispatchPointer(canvas, "pointermove", { x: 0.23, z: 0.18 }, 1);
+  dispatchPointer(canvas, "pointerup", { x: 0.23, z: 0.18 }, 1);
 }
 
 beforeEach(() => {
@@ -88,21 +94,62 @@ beforeEach(() => {
 });
 
 describe("SceneEditor", () => {
-  it("sends an edited 2D wall vertex to the 3D viewer through the shared scene state", async () => {
+  it("sends a snapped 2D wall endpoint edit to the 3D viewer through shared scene state", async () => {
     const user = userEvent.setup();
     render(<SceneEditor accessToken="volatile-access" agencyId="agency-1" />);
-    await dragVertex(user);
+    await dragWallEndpoint(user);
 
     await waitFor(() => {
-      expect(documentInViewer().rooms[0].contours[0]).not.toEqual(
-        DEFAULT_SCENE_DOCUMENT.rooms[0].contours[0],
-      );
+      expect(documentInViewer().walls[0].start).toEqual({ x: 0.2, z: 0.2 });
     });
-    expect(getListingScene).toHaveBeenCalledWith(
-      "volatile-access",
-      "agency-1",
-      "listing-1",
-    );
+    // Openings stay parametric on the wall as its endpoints move.
+    expect(documentInViewer().openings[0]).toMatchObject({ wallId: "wall-north", position: 0.5 });
+    expect(getListingScene).toHaveBeenCalledWith("volatile-access", "agency-1", "listing-1");
+  });
+
+  it("snaps a wall endpoint to another endpoint within tolerance", async () => {
+    const user = userEvent.setup();
+    render(<SceneEditor accessToken="volatile-access" agencyId="agency-1" />);
+    await chooseListing(user);
+
+    const endpoint = screen.getByTestId("wall-endpoint-wall-north-start");
+    const canvas = screen.getByTestId("scene-editor-canvas");
+    dispatchPointer(endpoint, "pointerdown", { x: 0, z: 0 }, 4);
+    dispatchPointer(canvas, "pointermove", { x: 3.92, z: 2.92 }, 4);
+    dispatchPointer(canvas, "pointerup", { x: 3.92, z: 2.92 }, 4);
+
+    await waitFor(() => {
+      expect(documentInViewer().walls[0].start).toEqual({ x: 4, z: 3 });
+    });
+  });
+
+  it("renders room outlines as derived wall polygons without editable room vertices", async () => {
+    const user = userEvent.setup();
+    render(<SceneEditor accessToken="volatile-access" agencyId="agency-1" />);
+    await chooseListing(user);
+
+    expect(screen.getByTestId("room-outline-room_main")).toBeInTheDocument();
+    expect(screen.getByText("Estar")).toBeInTheDocument();
+    expect(screen.queryByTestId(/room-vertex-/)).not.toBeInTheDocument();
+    expect(Number(screen.getByTestId("scene-wall-wall-north").getAttribute("stroke-width")))
+      .toBeCloseTo(13.5);
+  });
+
+  it("drags an opening along its wall and clamps its center so its width stays inside", async () => {
+    const user = userEvent.setup();
+    render(<SceneEditor accessToken="volatile-access" agencyId="agency-1" />);
+    await chooseListing(user);
+
+    const opening = screen.getByTestId("scene-opening-door_1");
+    const canvas = screen.getByTestId("scene-editor-canvas");
+    dispatchPointer(opening, "pointerdown", { x: 2, z: 0 }, 2);
+    dispatchPointer(canvas, "pointermove", { x: 4, z: 0 }, 2);
+    dispatchPointer(canvas, "pointerup", { x: 4, z: 0 }, 2);
+
+    await waitFor(() => {
+      expect(documentInViewer().openings[0].position).toBeCloseTo(0.8875);
+    });
+    expect(documentInViewer().openings[0].width).toBe(0.9);
   });
 
   it("updates an object's x/z position while it is dragged on the canvas", async () => {
@@ -113,9 +160,9 @@ describe("SceneEditor", () => {
     const object = screen.getByTestId("scene-object-ref_cube_1");
     const startingX = Number(object.getAttribute("data-position-x"));
     const canvas = screen.getByTestId("scene-editor-canvas");
-    dispatchPointer(object, "pointerdown", 100, 100, 2);
-    dispatchPointer(canvas, "pointermove", 180, 130, 2);
-    dispatchPointer(canvas, "pointerup", 180, 130, 2);
+    dispatchPointer(object, "pointerdown", { x: 1, z: 1 }, 3);
+    dispatchPointer(canvas, "pointermove", { x: 1.9, z: 0.7 }, 3);
+    dispatchPointer(canvas, "pointerup", { x: 1.9, z: 0.7 }, 3);
 
     await waitFor(() => {
       expect(Number(screen.getByTestId("scene-object-ref_cube_1").getAttribute("data-position-x")))
@@ -124,7 +171,7 @@ describe("SceneEditor", () => {
     expect(documentInViewer().objects[0].position.x).toBeGreaterThan(startingX);
   });
 
-  it("saves the edited document and reloads the persisted scene", async () => {
+  it("saves the edited v2 document in a full PUT and reloads the persisted scene", async () => {
     const user = userEvent.setup();
     let storedDocument: SceneDocument = structuredClone(DEFAULT_SCENE_DOCUMENT);
     vi.mocked(getListingScene).mockImplementation(async () => structuredClone(storedDocument));
@@ -136,7 +183,7 @@ describe("SceneEditor", () => {
     const firstRender = render(
       <SceneEditor accessToken="volatile-access" agencyId="agency-1" />,
     );
-    await dragVertex(user);
+    await dragWallEndpoint(user);
     const editedDocument = documentInViewer();
     await user.click(screen.getByRole("button", { name: "Guardar escena" }));
 
@@ -171,7 +218,7 @@ describe("SceneEditor", () => {
     expect(screen.queryByText(/Escena sin guardar/)).not.toBeInTheDocument();
   });
 
-  it("uses the synthetic scene only for scene_not_defined and labels it as unsaved", async () => {
+  it("uses the synthetic v2 scene only for scene_not_defined and labels it as unsaved", async () => {
     const user = userEvent.setup();
     vi.mocked(getListingScene).mockRejectedValue(
       new StaffListingsApiError(404, "Scene is not defined", "scene_not_defined"),
