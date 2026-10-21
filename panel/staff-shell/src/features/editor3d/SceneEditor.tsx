@@ -23,6 +23,7 @@ import {
   type SceneWall,
 } from "../../application/sceneContract";
 import { SceneViewer } from "./SceneViewer";
+import { FurnitureReviewPanel } from "./FurnitureReviewPanel";
 
 interface SceneEditorProps {
   accessToken: string;
@@ -523,6 +524,8 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
 
   const listingSelectId = useId();
   const [listReload, setListReload] = useState(0);
+  const [showFurniture, setShowFurniture] = useState(false);
+  const [furnitureBusy, setFurnitureBusy] = useState(false);
   const [listings, setListings] = useState<ListState<StaffListing[]>>({ kind: "loading" });
   const [selectedListingId, setSelectedListingId] = useState("");
   const [sceneReload, setSceneReload] = useState(0);
@@ -617,7 +620,7 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
   }, [agencyId, selectedListingId, sceneReload]);
 
   function handleEdit(edit: (document: SceneDocument) => SceneDocument) {
-    if (isSaving) return;
+    if (isSaving || furnitureBusy) return;
     setScene(edit);
     setIsDirty(true);
     setNotice(null);
@@ -625,7 +628,7 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
   }
 
   async function handleSave() {
-    if (!selectedListingId || sceneLoad !== "ready" || isSaving) return;
+    if (!selectedListingId || sceneLoad !== "ready" || isSaving || furnitureBusy) return;
     setIsSaving(true);
     setNotice(null);
     setError(null);
@@ -666,7 +669,7 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
         <div className="scene-editor__listing-field">
           <label htmlFor={listingSelectId}>Inmueble</label>
           <select
-            disabled={listings.kind !== "ready" || listings.value.length === 0}
+            disabled={furnitureBusy || isSaving || listings.kind !== "ready" || listings.value.length === 0}
             id={listingSelectId}
             onChange={(event) => setSelectedListingId(event.target.value)}
             value={selectedListingId}
@@ -683,7 +686,7 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
         </div>
         <button
           className="review-button"
-          disabled={!sceneReady || isSaving || (hasSavedScene && !isDirty)}
+          disabled={!sceneReady || furnitureBusy || isSaving || (hasSavedScene && !isDirty)}
           onClick={() => void handleSave()}
           type="button"
         >
@@ -759,7 +762,7 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
                 <p>Arrastra los extremos de las paredes, las aberturas sobre su pared o los objetos.</p>
               </div>
               <SceneCanvas
-                disabled={isSaving}
+                disabled={isSaving || furnitureBusy}
                 onEdit={handleEdit}
                 onObjectSelect={setSelectedObjectId}
                 sceneDocument={scene}
@@ -779,6 +782,15 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
           </div>
         </>
       ) : null}
+      {selectedListingId ? <>
+        <button className="review-button review-button--secondary" type="button"
+          onClick={() => setShowFurniture((value) => !value)} disabled={furnitureBusy}
+          aria-expanded={showFurniture}>Mobiliario y sugerencias IA</button>
+        {showFurniture ? <FurnitureReviewPanel key={`${agencyId}:${selectedListingId}`}
+          accessToken={accessToken} agencyId={agencyId} listingId={selectedListingId}
+          disabled={!sceneReady || !hasSavedScene || isDirty || isSaving}
+          onBusyChange={setFurnitureBusy} onChanged={() => setSceneReload((value) => value + 1)} /> : null}
+      </> : null}
     </section>
   );
 }

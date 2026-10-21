@@ -34,6 +34,7 @@ from app.modules.catalog.photos import (
 from app.modules.catalog.router import router as catalog_router
 from app.modules.customer_identity.router import router as customer_identity_router
 from app.modules.customer_identity.router import wallet_router as customer_wallet_router
+from app.modules.detection.furniture_review import router as furniture_review_router
 from app.modules.detection.job_queue import JobQueue, create_job_queue
 from app.modules.detection.router import router as detection_router
 from app.modules.detection.router import worker_router as detection_worker_router
@@ -375,6 +376,7 @@ def create_app(
     app.include_router(catalog_router)
     app.include_router(catalog_photo_router)
     app.include_router(detection_router)
+    app.include_router(furniture_review_router)
     app.include_router(detection_worker_router)
     app.include_router(reservations_router)
     app.include_router(staff_reservations_router)

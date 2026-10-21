@@ -26,8 +26,8 @@ jobs:
         with:
           python-version: "3.11"
       # The PostgreSQL-backed (F04, R6) and Floci lifecycle tests skip when their
-      # services are missing. Run them for real: one Postgres with two virgin
-      # databases and one Floci container, exactly like the local Compose setup.
+      # services are missing. Run them for real: one Postgres with separate fresh
+      # F04/R6/F10/F08 databases and Floci, like the local Compose setup.
       - name: Start integration services
         working-directory: .
         run: |
@@ -36,7 +36,8 @@ jobs:
             -U roomforge -d roomforge \
             -c "CREATE DATABASE roomforge_f04_runner" \
             -c "CREATE DATABASE roomforge_r6_runner" \
-            -c "CREATE DATABASE roomforge_f10_runner"
+            -c "CREATE DATABASE roomforge_f10_runner" \
+            -c "CREATE DATABASE roomforge_f08_runner"
           docker compose -f infra/docker/compose.local.yml up -d floci --wait
           # The lifecycle tests require the bucket and queues that the local
           # provisioning script creates, so provision them exactly like local dev.
@@ -55,6 +56,7 @@ jobs:
           ROOMFORGE_POSTGRES_DATABASE_URL: postgresql+psycopg://roomforge:valor-dev-local@127.0.0.1:5434/roomforge_f04_runner
           ROOMFORGE_R6_DATABASE_URL: postgresql+psycopg://roomforge:valor-dev-local@127.0.0.1:5434/roomforge_r6_runner
           ROOMFORGE_F10_DATABASE_URL: postgresql+psycopg://roomforge:valor-dev-local@127.0.0.1:5434/roomforge_f10_runner
+          ROOMFORGE_F08_DATABASE_URL: postgresql+psycopg://roomforge:valor-dev-local@127.0.0.1:5434/roomforge_f08_runner
         run: |
           python -m pip install py-spy
           python -m pytest tests -q -rs --timeout=120 --timeout-method=thread &
