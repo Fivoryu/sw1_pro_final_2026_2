@@ -363,7 +363,15 @@ def create_app(
         allow_origins=[resolved_settings.web_origin.rstrip("/")],
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "Idempotency-Key"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "X-CSRF-Token",
+            "Idempotency-Key",
+            "If-Match",
+            "If-None-Match",
+        ],
+        expose_headers=["ETag"],
     )
     app.include_router(health_router)
     app.include_router(identity_router)

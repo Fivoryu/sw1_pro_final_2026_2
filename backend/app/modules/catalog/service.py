@@ -64,6 +64,37 @@ class InvalidSceneIntegrityError(ValueError):
         super().__init__(detail)
 
 
+class SceneConflictError(Exception):
+    """Raised when a scene write precondition (If-Match/If-None-Match) fails."""
+
+    def __init__(self, current_revision: int | None) -> None:
+        self.current_revision = current_revision
+        super().__init__("scene precondition failed")
+
+
+def scene_etag(revision: int) -> str:
+    """Strong entity tag that identifies one scene revision."""
+    return f'"{revision}"'
+
+
+def _scene_etag_matches(header: str, revision: int | None, *, weak: bool) -> bool:
+    """Evaluate an If-Match/If-None-Match list against the current scene revision.
+
+    ``*`` matches any existing scene. If-Match uses strong comparison, so weak
+    tags never match; If-None-Match uses weak comparison (RFC 9110 §13.1).
+    """
+    if revision is None:
+        return False
+    current = scene_etag(revision)
+    for raw_candidate in header.split(","):
+        candidate = raw_candidate.strip()
+        if weak and candidate.startswith("W/"):
+            candidate = candidate[2:]
+        if candidate in ("*", current):
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class ListingCursor:
     created_at: datetime
@@ -124,8 +155,14 @@ def upsert_listing_scene(
     scene: dict[str, object],
     updated_at: datetime,
     updated_by: str,
+    if_match: str | None = None,
+    if_none_match: str | None = None,
 ) -> ListingScene | None:
-    """Replace a listing's full scene after locking its parent listing row."""
+    """Replace a listing's full scene after locking its parent listing row.
+
+    Preconditions are evaluated under that lock, so two writers holding the same
+    revision cannot both succeed. Raises ``SceneConflictError`` when one fails.
+    """
     listing = (
         session.query(Listing)
         .filter(Listing.id == listing_id, Listing.agency_id == agency_id)
@@ -136,18 +173,30 @@ def upsert_listing_scene(
         return None
 
     stored = session.get(ListingScene, listing_id)
+    current_revision = stored.revision if stored is not None else None
+    if if_match is not None and not _scene_etag_matches(
+        if_match, current_revision, weak=False
+    ):
+        raise SceneConflictError(current_revision)
+    if if_none_match is not None and _scene_etag_matches(
+        if_none_match, current_revision, weak=True
+    ):
+        raise SceneConflictError(current_revision)
+
     if stored is None:
         stored = ListingScene(
             listing_id=listing_id,
             scene=scene,
             updated_at=updated_at,
             updated_by=updated_by,
+            revision=1,
         )
         session.add(stored)
     else:
         stored.scene = scene
         stored.updated_at = updated_at
         stored.updated_by = updated_by
+        stored.revision = stored.revision + 1
 
     session.flush()
     return stored

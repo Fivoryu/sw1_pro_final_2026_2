@@ -250,3 +250,20 @@ def test_public_scene_serves_the_canonical_fixture_verbatim(
     assert response.json() == document, (
         "the public scene is the stored document, nothing else"
     )
+
+
+def test_public_scene_has_no_etag_and_serves_provenance_verbatim(
+    scene_context: SceneContext,
+) -> None:
+    _seed_listing(scene_context)
+    document = _scene_document()
+    document["walls"][0]["heightSource"] = "assumed"
+    document["objects"][0]["source"] = "depth"
+    document["objects"][0]["confidence"] = 0.5
+    _store_scene(scene_context, document=document)
+
+    response = scene_context.client.get("/api/v1/listings/scene-listing/scene")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == document
+    assert "etag" not in response.headers

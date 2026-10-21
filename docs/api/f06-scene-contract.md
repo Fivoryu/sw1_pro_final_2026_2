@@ -46,6 +46,25 @@ Reglas del documento v1:
   Los muros pueden compartirse entre habitaciones (tabique).
 - `objects[]`: igual que en v1; `objects[].id` es el `extra_id` publicado (ver «Objetos y oferta»).
 
+### Procedencia de la captura (F07, campos opcionales)
+
+La app de captura (F07) declara de dónde sale cada medida. Son campos **aditivos y opcionales**:
+un documento sin ellos sigue siendo válido, y cuando no se envían tampoco aparecen en la respuesta
+(no se agregan valores por defecto). Si se envían, se validan:
+
+- `walls[].heightSource`: procedencia de `height`. Valores admitidos:
+  - `ceiling_plane`: altura medida contra un plano de techo detectado.
+  - `wall_point`: altura medida con un punto marcado sobre el muro.
+  - `manual`: altura ingresada a mano por el agente.
+  - `assumed`: altura supuesta; **no fue medida** y no debe presentarse como medición.
+- `objects[].source`: procedencia del volumen; `depth` (extraído de datos de profundidad durante el
+  recorrido) o `manual` (ubicado a mano).
+- `objects[].confidence`: número en [0, 1] con la confianza declarada por la captura.
+
+Un valor fuera de dominio (por ejemplo `heightSource: "laser"` o `confidence: 1.5`) se rechaza con
+`422 scene_invalid` y la ruta del campo en el detalle. Estos campos no asignan clase ni precio a un
+objeto: la oferta sigue dependiendo de `objects[].id` (ver «Objetos y oferta»).
+
 Validación (estilo `readProject` de openPlan3D): rechazo con `422 scene_invalid` y detalle con
 ruta (`openings[0].wallId must refer to an existing wall`), integridad referencial completa,
 ids duplicados por colección y rangos numéricos. Un documento almacenado que ya no valida contra
@@ -131,7 +150,7 @@ Las rutas de staff requieren un miembro de la agencia del inmueble (`agency_admi
   `{ "detail": "Scene is not defined for this listing", "code": "scene_not_defined" }`.
   Si no existe el inmueble, conserva el `404` del detalle de staff de F04 (`code: "not_found"`).
 - `PUT /api/v1/staff/agencies/{agency_id}/listings/{listing_id}/scene` recibe y reemplaza el
-  documento completo del contrato v1; no aplica parches ni combina campos con una escena anterior.
+  documento completo del contrato v2; no aplica parches ni combina campos con una escena anterior.
   Un documento válido responde `200` con la escena almacenada. La validación estricta rechaza
   versiones o unidades no admitidas y campos extra con `422` (`code: "scene_invalid"`). Un
   inmueble inexistente responde `404` (`code: "listing_not_found"`), y el acceso desde otra
@@ -141,12 +160,40 @@ Los errores conservan el sobre común `{ "detail": "...", "code": "..." }`. La e
 al primer `PUT`; cada guardado posterior sustituye el documento y actualiza `updated_at` y
 `updated_by`.
 
+## Versionado (F07.5)
+
+La fila de `listing_scene` lleva una columna `revision` (entero, migración
+`0024_listing_scene_revision`): la escena se crea con `revision = 1` y cada `PUT` exitoso la
+incrementa en uno. Las escenas existentes antes de la migración quedan en `1`.
+
+- `GET` y `PUT` de staff con respuesta `200` incluyen la cabecera `ETag: "<revision>"` (etiqueta
+  fuerte, entre comillas). El cuerpo no cambia: sigue siendo el documento de escena.
+- `PUT` acepta precondiciones opcionales:
+  - `If-Match: "<n>"`: el guardado se aplica solo si existe una escena y su revisión es `n`.
+    `If-Match: *` se cumple con cualquier escena existente. Una etiqueta débil (`W/"n"`) nunca se
+    cumple, porque la comparación es fuerte.
+  - `If-None-Match: *`: el guardado se aplica solo si el inmueble todavía no tiene escena (alta
+    sin duplicar).
+  - Si la precondición no se cumple, responde `412` con
+    `{ "detail": "Scene was modified by another writer; reload it and retry", "code": "scene_conflict" }`
+    y, si existe una escena, con la cabecera `ETag` de la revisión vigente. La escena almacenada
+    no cambia.
+- Sin precondiciones, el `PUT` conserva el comportamiento incondicional anterior (el panel sigue
+  guardando así).
+- Orden de evaluación: `422 scene_invalid` (documento), luego `404 listing_not_found`, luego
+  `412 scene_conflict`. La precondición se evalúa dentro de la misma transacción, después de
+  bloquear la fila del inmueble (`SELECT ... FOR UPDATE`), de modo que dos escritores con la misma
+  revisión no pueden ganar ambos.
+- CORS: la API expone `ETag` (`Access-Control-Expose-Headers`) y admite `If-Match` e
+  `If-None-Match` en las solicitudes del origen del panel.
+- La lectura pública (`GET /api/v1/listings/{listing_id}/scene`) no expone `ETag` ni la revisión.
+
 ## Lectura pública (F06.4)
 
 La app cliente lee la escena de un inmueble publicado sin sesión ni credenciales:
 
 - `GET /api/v1/listings/{listing_id}/scene` devuelve `200` con el documento completo del
-  contrato v1. Es de solo lectura: no expone `updated_by` ni rutas de escritura.
+  contrato v2. Es de solo lectura: no expone `updated_by`, la revisión ni rutas de escritura.
 - Si el inmueble no existe o no está publicado y aprobado, responde `404` con el error común
   `{ "detail": "Listing not found", "code": "listing_not_found" }`: un borrador o rechazado es
   indistinguible de un inmueble inexistente.
