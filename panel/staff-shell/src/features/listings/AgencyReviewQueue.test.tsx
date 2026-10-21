@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getAgencyListing,
+  getListingScene,
   listAgencyListings,
   listListingPhotos,
   listListingTransitions,
@@ -11,7 +12,14 @@ import {
   type ListingTransition,
   type StaffListing,
 } from "../../application/staffListingsApi";
+import { DEFAULT_SCENE_DOCUMENT, type SceneDocument } from "../../application/sceneContract";
 import { AgencyReviewQueue, formatCop } from "./AgencyReviewQueue";
+
+vi.mock("../editor3d/SceneViewer", () => ({
+  SceneViewer: ({ sceneDocument }: { sceneDocument: SceneDocument }) => (
+    <div data-testid="review-scene-viewer">{sceneDocument.walls.length} muros</div>
+  ),
+}));
 
 vi.mock("../../application/staffListingsApi", async (importOriginal) => {
   const actual =
@@ -19,6 +27,7 @@ vi.mock("../../application/staffListingsApi", async (importOriginal) => {
   return {
     ...actual,
     getAgencyListing: vi.fn(),
+    getListingScene: vi.fn(),
     listAgencyListings: vi.fn(),
     listListingPhotos: vi.fn(),
     listListingTransitions: vi.fn(),
@@ -85,6 +94,11 @@ beforeEach(() => {
   vi.mocked(listListingTransitions).mockReset().mockResolvedValue([transition()]);
   vi.mocked(listListingPhotos).mockReset().mockResolvedValue([]);
   vi.mocked(transitionListing).mockReset();
+  vi.mocked(getListingScene)
+    .mockReset()
+    .mockRejectedValue(
+      new StaffListingsApiError(404, "Scene is not defined for this listing", "scene_not_defined"),
+    );
 });
 
 describe("formatCop", () => {
@@ -437,6 +451,74 @@ describe("AgencyReviewQueue", () => {
 
       expect(
         await screen.findByText("No se pudieron cargar las fotos del inmueble."),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Aprobar" })).toBeEnabled();
+    });
+  });
+  describe("scene", () => {
+    function capturedScene(): SceneDocument {
+      const document = structuredClone(DEFAULT_SCENE_DOCUMENT);
+      document.walls = document.walls.map((wall, index) => ({
+        ...wall,
+        heightSource: index < 2 ? "assumed" : "ceiling_plane",
+      }));
+      document.objects = [
+        {
+          id: "box-1",
+          type: "occupancy",
+          position: { x: 1, y: 0, z: 1 },
+          dimensions: { width: 1, height: 0.8, depth: 0.6 },
+          color: "#9e9e9e",
+          source: "depth",
+          confidence: 0.7,
+        },
+      ];
+      return document;
+    }
+
+    it("shows the captured scene with its provenance next to photos and record", async () => {
+      const user = userEvent.setup();
+      const scene = capturedScene();
+      vi.mocked(listAgencyListings).mockResolvedValue(page([listing()]));
+      vi.mocked(getListingScene).mockResolvedValue(scene);
+      renderQueue();
+
+      await openDetail(user, listing());
+
+      const viewer = await screen.findByTestId("review-scene-viewer");
+      expect(viewer).toHaveTextContent(`${scene.walls.length} muros`);
+      expect(
+        screen.getByText(`Altura supuesta (no medida) en 2 de ${scene.walls.length} muros.`),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("1 volumen de ocupación capturado, sin etiqueta ni precio publicado."),
+      ).toBeInTheDocument();
+      expect(getListingScene).toHaveBeenCalledWith("volatile-access", "agency-1", "listing-1");
+    });
+
+    it("says when the listing has no scene yet", async () => {
+      const user = userEvent.setup();
+      vi.mocked(listAgencyListings).mockResolvedValue(page([listing()]));
+      renderQueue();
+
+      await openDetail(user, listing());
+
+      expect(
+        await screen.findByText("Este inmueble todavía no tiene escena capturada."),
+      ).toBeInTheDocument();
+      expect(screen.queryByTestId("review-scene-viewer")).not.toBeInTheDocument();
+    });
+
+    it("keeps the review usable when the scene cannot be loaded", async () => {
+      const user = userEvent.setup();
+      vi.mocked(listAgencyListings).mockResolvedValue(page([listing()]));
+      vi.mocked(getListingScene).mockRejectedValue(new StaffListingsApiError(500, "boom"));
+      renderQueue();
+
+      await openDetail(user, listing());
+
+      expect(
+        await screen.findByText("No se pudo cargar la escena del inmueble."),
       ).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Aprobar" })).toBeEnabled();
     });
