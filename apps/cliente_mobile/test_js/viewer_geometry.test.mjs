@@ -254,3 +254,35 @@ test("roomPolygon chains room_main from the fixture and rejects a broken chain",
   brokenChain.walls[1].start = { x: 5, z: 0 };
   assert.equal(roomPolygon(brokenChain, "room_main"), null);
 });
+
+// F07: the scene the capture app builds (two rooms joined by one door) walks end to end.
+const CAPTURED = JSON.parse(
+  readFileSync(new URL("../../../docs/api/f07-captured-scene-fixture.json", import.meta.url), "utf8"),
+);
+
+function walkEast(fromX, z, untilX, colliders) {
+  let position = { x: fromX, z };
+  for (let step = 0; step < 200 && position.x < untilX; step += 1) {
+    const next = resolveMove(position.x, position.z, 0.1, 0, colliders);
+    if (next.x === position.x && next.z === position.z) break;
+    position = next;
+  }
+  return position;
+}
+
+test("captured two-room scene is renderable and every room closes", () => {
+  assert.equal(validateScene(CAPTURED), null);
+  for (const room of CAPTURED.rooms) {
+    assert.ok(roomPolygon(CAPTURED, room.id), `${room.id} must derive a closed polygon`);
+  }
+});
+
+test("captured scene lets the visitor cross the shared door into the next room", () => {
+  const colliders = buildColliders(CAPTURED);
+
+  const throughDoor = walkEast(2, 1.5, 5.5, colliders);
+  assert.ok(throughDoor.x >= 5.5, `door must be passable, stopped at x=${throughDoor.x}`);
+
+  const besideDoor = walkEast(2, 0.5, 5.5, colliders);
+  assert.ok(besideDoor.x < 4.075, `the shared wall must block away from the door, reached x=${besideDoor.x}`);
+});
