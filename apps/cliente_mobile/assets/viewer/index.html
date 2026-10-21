@@ -19,10 +19,50 @@
     display: block;
     touch-action: none;
   }
+  #joystick-control {
+    position: fixed;
+    left: max(16px, env(safe-area-inset-left));
+    bottom: max(16px, env(safe-area-inset-bottom));
+    z-index: 2;
+    box-sizing: border-box;
+    width: 144px;
+    height: 144px;
+    padding: 0;
+    border: 2px solid rgba(240, 253, 250, 0.9);
+    border-radius: 50%;
+    background: rgba(15, 118, 110, 0.36);
+    box-shadow: inset 0 0 0 2px rgba(20, 184, 166, 0.3), 0 4px 16px rgba(0, 0, 0, 0.38);
+    appearance: none;
+    -webkit-appearance: none;
+    touch-action: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #joystick-control:focus-visible {
+    outline: 3px solid #14b8a6;
+    outline-offset: 4px;
+  }
+  #joystick-knob {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    box-sizing: border-box;
+    width: 44px;
+    height: 44px;
+    border: 2px solid #f0fdfa;
+    border-radius: 50%;
+    background: #14b8a6;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    transform: translate(calc(-50% + var(--joystick-x, 0px)), calc(-50% + var(--joystick-y, 0px)));
+    pointer-events: none;
+  }
 </style>
 </head>
 <body>
 <canvas id="scene-canvas"></canvas>
+<button id="joystick-control" type="button" aria-label="Joystick de movimiento">
+  <span id="joystick-knob" aria-hidden="true"></span>
+</button>
 <script type="module" src="viewer.js"></script>
 </body>
 </html>

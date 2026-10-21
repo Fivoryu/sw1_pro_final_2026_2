@@ -16,10 +16,12 @@ import {
   validateScene,
   wallOpeningsForWall,
 } from "../assets/viewer/geometry.mjs";
+import * as viewerGeometry from "../assets/viewer/geometry.mjs";
 
 const FIXTURE = JSON.parse(
   readFileSync(new URL("../../../docs/api/f06-scene-fixture.json", import.meta.url), "utf8"),
 );
+const VIEWER_HTML = readFileSync(new URL("../assets/viewer/index.html", import.meta.url), "utf8");
 
 function collidersFor(document_ = FIXTURE) {
   return buildColliders(document_);
@@ -32,6 +34,32 @@ function closeTo(actual, expected, message) {
     message ? `${message}: expected ${expected}, got ${actual}` : `expected ${expected}, got ${actual}`,
   );
 }
+
+test("joystick input normalizes diagonals and clamps at full deflection", () => {
+  assert.deepEqual(viewerGeometry.joystickVector?.(30, 40, 50), { x: 0.6, y: 0.8 });
+  assert.deepEqual(viewerGeometry.joystickVector?.(0, 0, 50), { x: 0, y: 0 });
+  assert.deepEqual(viewerGeometry.joystickVector?.(100, 0, 50), { x: 1, y: 0 });
+  assert.deepEqual(viewerGeometry.joystickVector?.(0, -25, 50), { x: 0, y: -0.5 });
+});
+
+test("the viewer provides a labeled, touch-sized joystick overlay", () => {
+  const buttonStart = VIEWER_HTML.indexOf('<button id="joystick-control"');
+  assert.notEqual(buttonStart, -1, "the scene includes a visible joystick button");
+  const buttonEnd = VIEWER_HTML.indexOf("</button>", buttonStart);
+  assert.notEqual(buttonEnd, -1, "the joystick button is closed");
+  const joystickButton = VIEWER_HTML.slice(buttonStart, buttonEnd);
+  assert.ok(joystickButton.includes('aria-label="Joystick de movimiento"'));
+  assert.ok(joystickButton.includes('id="joystick-knob"'));
+
+  const styleStart = VIEWER_HTML.indexOf("#joystick-control");
+  assert.notEqual(styleStart, -1, "the joystick has a dedicated CSS rule");
+  const ruleStart = VIEWER_HTML.indexOf("{", styleStart);
+  const ruleEnd = VIEWER_HTML.indexOf("}", ruleStart);
+  const styles = VIEWER_HTML.slice(ruleStart + 1, ruleEnd);
+  assert.ok(styles.includes("width: 144px"));
+  assert.ok(styles.includes("height: 144px"));
+  assert.ok(styles.includes("touch-action: none"));
+});
 
 test("the canonical v2 fixture is a valid scene", () => {
   assert.equal(validateScene(FIXTURE), null);

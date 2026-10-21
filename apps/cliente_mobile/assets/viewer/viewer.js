@@ -7,6 +7,7 @@
 // a dependency-free module covered by node --test (test_js/).
 import {
   buildColliders,
+  joystickVector,
   roomPolygon,
   wallOpeningsForWall,
   resolveMove,
@@ -17,7 +18,7 @@ import {
 
 const EYE_HEIGHT = 1.6;
 const WALK_SPEED = 1.8; // meters per second
-const JOYSTICK_RANGE = 60; // pixels of full deflection
+const JOYSTICK_RANGE = 50; // pixels of full deflection
 const LOOK_RADIANS_PER_PIXEL = 0.005;
 const MAX_PITCH = Math.PI / 2 - 0.05;
 const TAP_MAX_MS = 300;
@@ -200,12 +201,34 @@ function resetView() {
 
 function setupInput(canvas) {
   const pointers = new Map();
-  const resetMoveInput = () => {
+  const joystick = document.getElementById("joystick-control");
+  const joystickKnob = document.getElementById("joystick-knob");
+  let movePointerId = null;
+
+  const resetJoystickVisual = () => {
+    if (!joystickKnob) return;
+    joystickKnob.style.setProperty("--joystick-x", "0px");
+    joystickKnob.style.setProperty("--joystick-y", "0px");
+  };
+  const resetMoveInput = (pointerId = null) => {
+    if (pointerId !== null && movePointerId !== pointerId) return;
+    movePointerId = null;
     moveVector = { x: 0, y: 0 };
+    resetJoystickVisual();
   };
   const resetAllInput = () => {
     pointers.clear();
     resetMoveInput();
+  };
+  const updateMoveInput = (pointer, event) => {
+    moveVector = joystickVector(
+      event.clientX - pointer.startX,
+      event.clientY - pointer.startY,
+      JOYSTICK_RANGE,
+    );
+    if (!joystickKnob) return;
+    joystickKnob.style.setProperty("--joystick-x", `${moveVector.x * JOYSTICK_RANGE}px`);
+    joystickKnob.style.setProperty("--joystick-y", `${moveVector.y * JOYSTICK_RANGE}px`);
   };
   window.addEventListener("blur", resetAllInput);
   document.addEventListener("visibilitychange", resetAllInput);
@@ -213,62 +236,88 @@ function setupInput(canvas) {
   canvas.addEventListener("pointerdown", (event) => {
     const rect = canvas.getBoundingClientRect();
     const mode = event.clientX - rect.left < rect.width / 2 ? "move" : "look";
-    pointers.set(event.pointerId, {
+    if (mode === "move" && movePointerId !== null) return;
+    const pointer = {
       mode,
       startX: event.clientX,
       startY: event.clientY,
       lastX: event.clientX,
       lastY: event.clientY,
       startedAt: performance.now(),
-    });
+      selectable: true,
+    };
+    pointers.set(event.pointerId, pointer);
     if (mode === "move") {
+      movePointerId = event.pointerId;
       moveVector = { x: 0, y: 0 };
+      resetJoystickVisual();
     }
     canvas.setPointerCapture(event.pointerId);
   });
 
-  canvas.addEventListener("pointermove", (event) => {
+  const handlePointerMove = (event) => {
     const pointer = pointers.get(event.pointerId);
     if (!pointer) return;
     if (pointer.mode === "look") {
       yaw -= (event.clientX - pointer.lastX) * LOOK_RADIANS_PER_PIXEL;
       pitch -= (event.clientY - pointer.lastY) * LOOK_RADIANS_PER_PIXEL;
       pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, pitch));
+    } else if (pointer.mode === "move") {
+      updateMoveInput(pointer, event);
     }
     pointer.lastX = event.clientX;
     pointer.lastY = event.clientY;
-    if (pointer.mode === "move") {
-      const deltaX = pointer.lastX - pointer.startX;
-      const deltaY = pointer.lastY - pointer.startY;
-      const length = Math.hypot(deltaX, deltaY);
-      const clamped = Math.min(length, JOYSTICK_RANGE);
-      const scale = length === 0 ? 0 : clamped / length / JOYSTICK_RANGE;
-      moveVector = { x: deltaX * scale, y: deltaY * scale };
-    }
-  });
+  };
 
   const releasePointer = (event, canvasEl) => {
     const pointer = pointers.get(event.pointerId);
     if (!pointer) return;
     pointers.delete(event.pointerId);
-    if (pointer.mode === "move") resetMoveInput();
+    if (pointer.mode === "move") resetMoveInput(event.pointerId);
     const elapsed = performance.now() - pointer.startedAt;
     const travel = Math.hypot(event.clientX - pointer.startX, event.clientY - pointer.startY);
-    if (elapsed <= TAP_MAX_MS && travel <= TAP_MAX_PIXELS) {
+    if (pointer.selectable && elapsed <= TAP_MAX_MS && travel <= TAP_MAX_PIXELS) {
       selectAt(canvasEl, event.clientX, event.clientY);
     }
   };
 
-  canvas.addEventListener("pointerup", (event) => releasePointer(event, canvas));
-  canvas.addEventListener("pointercancel", (event) => {
+  const cancelPointer = (event) => {
     const pointer = pointers.get(event.pointerId);
-    if (!pointer) {
-      resetMoveInput();
-      return;
-    }
+    if (!pointer) return;
     pointers.delete(event.pointerId);
-    if (pointer.mode === "move") resetMoveInput();
-  });
+    if (pointer.mode === "move") resetMoveInput(event.pointerId);
+  };
+
+  canvas.addEventListener("pointermove", handlePointerMove);
+  canvas.addEventListener("pointerup", (event) => releasePointer(event, canvas));
+  canvas.addEventListener("pointercancel", cancelPointer);
+
+  if (joystick) {
+    joystick.addEventListener("pointerdown", (event) => {
+      if (movePointerId !== null) {
+        event.preventDefault();
+        return;
+      }
+      const rect = joystick.getBoundingClientRect();
+      const pointer = {
+        mode: "move",
+        startX: rect.left + rect.width / 2,
+        startY: rect.top + rect.height / 2,
+        lastX: event.clientX,
+        lastY: event.clientY,
+        startedAt: performance.now(),
+        selectable: false,
+      };
+      pointers.set(event.pointerId, pointer);
+      movePointerId = event.pointerId;
+      joystick.setPointerCapture(event.pointerId);
+      updateMoveInput(pointer, event);
+      event.preventDefault();
+    });
+    joystick.addEventListener("pointermove", handlePointerMove);
+    joystick.addEventListener("pointerup", (event) => releasePointer(event, canvas));
+    joystick.addEventListener("pointercancel", cancelPointer);
+  }
 }
 
 function selectAt(canvas, clientX, clientY) {

@@ -8,6 +8,16 @@
 
 export const CAMERA_RADIUS = 0.25; // collision margin around the camera
 
+/** Convert a touch offset into a unit joystick vector with a circular clamp. */
+export function joystickVector(deltaX, deltaY, range) {
+  const distance = Math.hypot(deltaX, deltaY);
+  if (!Number.isFinite(distance) || !Number.isFinite(range) || distance === 0 || range <= 0) {
+    return { x: 0, y: 0 };
+  }
+  const scale = Math.min(distance, range) / (distance * range);
+  return { x: deltaX * scale, y: deltaY * scale };
+}
+
 /** Return an opening's vertical and parametric span along its owning wall. */
 export function wallOpeningsForWall(wall, openings) {
   if (!wall || !wall.start || !wall.end) return [];

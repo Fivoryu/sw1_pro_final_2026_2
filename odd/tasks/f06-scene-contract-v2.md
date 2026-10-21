@@ -46,16 +46,16 @@ tolerancia. La corrida en S23 FE continúa después, con el build v2.
 
 ## Tasks
 
-- **T1** (S1, S7): contrato v2 + fixture canónica. Commit: `(pendiente)`
+- **T1** (S1, S7): contrato v2 + fixture canónica. Commit: `2709136`
 - **T2** (S2, S3, S8): backend — esquemas v2, validación referencial, rutas, seed v2, E2E F10 v2,
-  tests RED→GREEN. Commit: `(pendiente)`
+  tests RED→GREEN. Commit: `2709136`
 - **T3** (S4, S5): visor — `geometry.mjs` desde muros, `viewer.js` render v2 + reset en blur,
-  `node --test` v2. Commit: `(pendiente)`
-- **T4** (S6): panel — `DEFAULT_SCENE_DOCUMENT` v2 y editor de muros con tests vitest. Commit: `(pendiente)`
-- **T5** (S9): app cliente — gate `2.0`, fixture y parser tests. Commit: `(pendiente)`
+  `node --test` v2. Commit: `2709136`
+- **T4** (S6): panel — `DEFAULT_SCENE_DOCUMENT` v2 y editor de muros con tests vitest. Commit: `2709136`
+- **T5** (S9): app cliente — gate `2.0`, fixture y parser tests. Commit: `2709136`
 - **T6**: gates completos (pytest, ruff, pyright, vitest+build, flutter test/analyze/build,
-  node --test, E2E PostgreSQL). Commit: `(pendiente)`
-- **T7**: corrida en S23 FE con el build v2 y registro de mediciones (S6/S7/S8 del issue #22).
+  node --test, E2E PostgreSQL). Commit: `2709136`
+- **T7**: corrida en S23 FE con el build v2 y registro de mediciones (S6/S7/S8 del issue #22). **Parcial**: S7 está verificado (hotspot `extra-piscina` → ficha → snapshot BOB 350.800); S8 también (estado honesto de listing sin escena, retorno desde HOME y cota de carga warm ≤2,55 s, con evidencia de captura después eliminada por instrucción del operador). El joystick visible está confirmado manualmente por el operador en el build LAN (L15); no se obtuvo captura automatizada, y touch-look/fluidez no se verificaron por separado. Ver `odd/tasks/f06-customer-walkthrough.md` L8/L15/L25.
 
 ## Log
 
@@ -83,6 +83,9 @@ tolerancia. La corrida en S23 FE continúa después, con el build v2.
   (1878 inserciones / 605 eliminaciones). Límites declarados: el editor no agrega ni borra muros
   (no había estructura de herramientas; edición de extremos/aberturas/objetos sí); sin detección
   automática de habitaciones (F07); sin muros curvos ni CSG; la lectura de documentos v1 guardados
-  degrada a `scene_not_defined` (S3). Pendiente: commits (decisión del operador, S12) y corrida en
-  S23 FE con build v2 (T7).
+  degrada a `scene_not_defined` (S3). Los cambios quedaron en `5db8912` (origen virtual del WebView)
+  y `2709136` (contrato v2). La corrida en S23 FE (T7) está parcial; ver
+  `odd/tasks/f06-customer-walkthrough.md` L7.
+- **L4** (corrida física parcial con APK v2): S23 FE mostró la escena; arrastrar por la mitad derecha cambió la cámara, pero el desplazamiento por la izquierda no se midió. **S7 verificado**: hotspot `extra-piscina` abrió «Acceso a piscina» por BOB 800 y el flujo mostró la cotización con total BOB 350.800. S8, latencia precisa y retorno con el visor en segundo plano siguen pendientes. ADB respondió a una llamada de shell básica; las capturas fueron intermitentes (una expiró, una posterior funcionó tras autorización explícita y la secuencia final de retroceso + captura expiró). Ver `odd/tasks/f06-customer-walkthrough.md` L7.
+- **L5** (aceptación física reanudada con APK v2): `listing-f06-alquiler` muestra «Recorrido 3D no disponible.»; el retorno desde HOME conservó el visor y la escena. En navegación warm, la captura de escena terminó ≤2,55 s tras el toque; no es latencia fría ni FPS. El lote de cinco capturas expiró, pero una captura cronometrada única terminó correctamente. S8 verificado; queda medir el joystick visible/fluidez en el build final. Detalle en `odd/tasks/f06-customer-walkthrough.md` L8.
 
