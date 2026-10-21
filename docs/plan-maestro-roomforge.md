@@ -711,6 +711,8 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 
 **Alcance técnico por validar:** ARCore en S23 FE es compatible según fuente oficial, no significa medición exacta ni plano automático terminado.
 
+**Decisión 2026-10-21 (operador; registro en `odd/tasks/f07-spatial-capture.md`, L12–L13): captura híbrida al estilo CubiCasa.** El modo principal de F07.2 pasa a ser un **recorrido continuo**: el agente camina por el ambiente sin marcar puntos, ARCore registra los planos de piso y pared detectados y la trayectoria, y la app **propone el contorno automáticamente** (paredes = planos verticales proyectados al piso, agrupados y ordenados; esquinas = intersección de paredes vecinas). La propuesta se revisa y corrige: en el teléfono y, como revisión humana, en el editor del panel (F06.3). La **escala exacta la da una medida de referencia** (cinta, láser u objeto de medida conocida) que reescala el ambiente completo. El **marcado manual por paredes** (dos puntos al pie de cada pared) queda como respaldo cuando la propuesta automática no alcanza. Límites declarados: no hay modelo entrenado ni dibujo humano externo como en CubiCasa, por lo que no se promete su precisión (95–97 % publicada por el proveedor); ARCore no detecta paredes lisas sin textura, así que la propuesta puede tener huecos que se completan a mano. No se graba video ni se sube imagen: solo geometría observada. La fotogrametría sigue excluida (decisión 2026-10-19).
+
 ### F07.1 — Integración AR y seguimiento
 
 - **Entrada:** teléfono real, contrato de escena y permiso de cámara.
