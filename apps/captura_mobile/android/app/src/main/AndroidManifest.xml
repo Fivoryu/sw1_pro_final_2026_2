@@ -1,4 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- F07: live camera preview for ARCore capture only; no video is recorded and no frame is saved. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- ARCore is optional: the app installs and works on devices without AR support. -->
+    <uses-feature android:name="android.hardware.camera.ar" android:required="false" />
     <application
         android:label="captura_mobile"
         android:name="${applicationName}"
@@ -25,6 +29,15 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <activity
+            android:name=".ar.ArCaptureActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode" />
+        <meta-data
+            android:name="com.google.ar.core"
+            android:value="optional" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
