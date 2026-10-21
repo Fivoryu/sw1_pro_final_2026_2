@@ -97,11 +97,11 @@ docker compose -f infra/docker/compose.postgres.yml up -d
 
 | Superficie | Estado |
 | --- | --- |
-| `backend/` | Identidad de personal y de cliente, agencias, catálogo con publicaciones, fotos (F04) y mobiliario, cotizaciones multi-moneda (BOB, USD y USDT) y reservas con escrow local. Módulo de detección de mobiliario con trabajos asíncronos (F08) en revisión (PR #20). |
+| `backend/` | Identidad de personal y de cliente, agencias, catálogo con publicaciones, fotos (F04) y mobiliario, cotizaciones multi-moneda (BOB, USD y USDT) y reservas con escrow local. Módulo de detección de mobiliario con trabajos asíncronos (F08.4) integrado con PR #20; revisión humana de sugerencias e inventario (F08.5) en PR #54. |
 | `panel/` | Panel de personal (React + TypeScript + Vite): acceso con TOTP, administración de agencias, bandeja de revisión de inmuebles con fotos, administración de tipos de cambio y visor 3D paramétrico del recorrido (F06.2, PR #18). |
 | `apps/captura_mobile/` | App de captura (Flutter): acceso de personal y borradores de inmuebles con moneda y fotos; las pantallas de captura espacial (F07) siguen siendo prototipos. |
 | `apps/cliente_mobile/` | App cliente (Flutter): cuenta y sesión de cliente, catálogo público con filtros, detalle, fotos y moneda de visualización; cotización, wallet y reservas sin interfaz en `main` (el flujo de reserva del cliente avanza en la rama `F09`/`develop`). |
-| `worker3d/` | Piloto de detección de mobiliario con trabajos asíncronos (F08, PR #20): CLI de detección, conjunto CC0 con guardia de licencia, cola con claim atómico y hoja de revisión humana. |
+| `worker3d/` | Piloto de detección de mobiliario con trabajos asíncronos (F08, integrado con PR #20): CLI de detección, conjunto CC0 con guardia de licencia, cola con claim atómico y hoja de revisión humana. |
 | `contracts/` | Escrow de reserva con Hardhat (F09): `ReservationEscrow.sol`, tokens de prueba y pruebas locales. |
 
 ## 7. Documentación y trazabilidad (convenciones)
