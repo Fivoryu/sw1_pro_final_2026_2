@@ -6,6 +6,9 @@ import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.view.View
+import kotlin.math.cos
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /** A labelled segment in view pixels. */
 data class OverlaySegment(
@@ -13,6 +16,16 @@ data class OverlaySegment(
     val end: ScreenPoint,
     val label: String?,
     val dashed: Boolean,
+)
+
+/** Walkthrough minimap data in floor coordinates (metres); the view fits it into its corner box. */
+data class MinimapModel(
+    val walls: List<WallSegment>,
+    val trajectory: List<Corner2>,
+    val position: Corner2,
+    /** Camera forward bearing on the floor plane, `atan2(z, x)` in radians. */
+    val headingRad: Double,
+    val coverage: Coverage,
 )
 
 /** Immutable snapshot of what the overlay draws; produced on the GL thread, drawn on the UI thread. */
@@ -24,6 +37,7 @@ data class OverlayModel(
     val reticleOnFloor: Boolean,
     /** Shown instead of the room polygon when it cannot be computed (Spanish). */
     val notice: String? = null,
+    val minimap: MinimapModel? = null,
 ) {
     companion object {
         val EMPTY = OverlayModel(emptyList(), emptyList(), emptyList(), emptyList(), false)
@@ -61,6 +75,24 @@ class CaptureOverlayView(context: Context) : View(context) {
     }
     private val labelBackground = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(170, 0, 0, 0) }
 
+    private val minimapBackground = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(170, 0, 0, 0) }
+    private val minimapWallPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(255, 193, 7)
+        style = Paint.Style.STROKE
+        strokeWidth = 3f * density
+    }
+    private val minimapPathPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(160, 255, 255, 255)
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f * density
+    }
+    private val minimapHeadingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(3, 169, 244)
+        style = Paint.Style.STROKE
+        strokeWidth = 2.5f * density
+    }
+    private val minimapMePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(3, 169, 244) }
+
     private var model: OverlayModel = OverlayModel.EMPTY
 
     fun update(next: OverlayModel) {
@@ -77,6 +109,41 @@ class CaptureOverlayView(context: Context) : View(context) {
         for (point in current.boxPoints) canvas.drawCircle(point.x, point.y, 6f * density, boxPointPaint)
         drawReticle(canvas, current.reticleOnFloor)
         current.notice?.let { drawNotice(canvas, it) }
+        current.minimap?.let { drawMinimap(canvas, it) }
+    }
+
+    /** Top-right floor plan: observed walls, the walked path, the user and the coverage percentage. */
+    private fun drawMinimap(canvas: Canvas, map: MinimapModel) {
+        val size = MINIMAP_SIZE_DP * density
+        val padding = 10f * density
+        val left = width - size - 12f * density
+        val top = height * 0.22f
+        canvas.drawRoundRect(left, top, left + size, top + size, 8f * density, 8f * density, minimapBackground)
+        val points = map.walls.flatMap { listOf(it.start, it.end) } + map.trajectory + map.position
+        val projection = MinimapProjection.fit(points, size, padding) ?: return
+        fun at(point: Corner2): ScreenPoint = projection.map(point).let { ScreenPoint(it.x + left, it.y + top) }
+        for (i in 1 until map.trajectory.size) {
+            val a = at(map.trajectory[i - 1])
+            val b = at(map.trajectory[i])
+            canvas.drawLine(a.x, a.y, b.x, b.y, minimapPathPaint)
+        }
+        for (wall in map.walls) {
+            val a = at(wall.start)
+            val b = at(wall.end)
+            canvas.drawLine(a.x, a.y, b.x, b.y, minimapWallPaint)
+        }
+        val me = at(map.position)
+        val arrow = 14f * density
+        canvas.drawLine(
+            me.x,
+            me.y,
+            me.x + (arrow * cos(map.headingRad)).toFloat(),
+            me.y + (arrow * sin(map.headingRad)).toFloat(),
+            minimapHeadingPaint,
+        )
+        canvas.drawCircle(me.x, me.y, 4f * density, minimapMePaint)
+        val percent = (map.coverage.fraction * 100).roundToInt()
+        canvas.drawText("Cobertura $percent %", left + size / 2f, top + size + 16f * density, labelPaint)
     }
 
     /** Wraps the notice above the reticle on a dark background. */
@@ -135,5 +202,9 @@ class CaptureOverlayView(context: Context) : View(context) {
         canvas.drawLine(cx + radius * 0.5f, cy, cx + radius * 1.6f, cy, reticlePaint)
         canvas.drawLine(cx, cy - radius * 1.6f, cx, cy - radius * 0.5f, reticlePaint)
         canvas.drawLine(cx, cy + radius * 0.5f, cx, cy + radius * 1.6f, reticlePaint)
+    }
+
+    private companion object {
+        const val MINIMAP_SIZE_DP = 120f
     }
 }

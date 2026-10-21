@@ -1,6 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- F07: live camera preview for ARCore capture only; no video is recorded and no frame is saved. -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- ARCore is optional: the app installs and works on devices without AR support. -->
     <uses-feature android:name="android.hardware.camera.ar" android:required="false" />
     <application

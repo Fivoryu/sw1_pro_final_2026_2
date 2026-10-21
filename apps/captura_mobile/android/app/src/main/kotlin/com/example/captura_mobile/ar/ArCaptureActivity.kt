@@ -31,6 +31,7 @@ import com.google.ar.core.Coordinates2d
 import com.google.ar.core.DepthPoint
 import com.google.ar.core.Frame
 import com.google.ar.core.HitResult
+import com.google.ar.core.LightEstimate
 import com.google.ar.core.Plane
 import com.google.ar.core.Point
 import com.google.ar.core.Session
@@ -46,6 +47,7 @@ import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationExceptio
 import java.util.concurrent.ConcurrentLinkedQueue
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.atan2
 
 /**
  * Native ARCore capture of one room: wall lines on the floor (corners are derived by intersecting
@@ -152,6 +154,18 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
     private var liveFloorArea = 0.0
     private var lastWalkSampleAtMs = 0L
 
+    // GL-thread state, walkthrough guidance (S12).
+    private val motionMeter = MotionMeter()
+    private var lastMotion: MotionSample? = null
+    private var lightIntensity: Double? = null
+    private var headingRad = 0.0
+    private var coverage = Coverage.EMPTY
+    private val announcer = GuidanceAnnouncer()
+    private var maxWallCount = 0
+
+    /** Voice and vibration; walkthrough mode only. */
+    private var feedback: GuidanceFeedback? = null
+
     /** Main-thread mirror of [recording] for the button state. */
     private var recordingShown = false
 
@@ -171,6 +185,7 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
         roomName = intent.getStringExtra(EXTRA_ROOM_NAME).orEmpty()
         mode = CaptureMode.fromArgument(intent.getStringExtra(EXTRA_MODE))
         startedAtMs = SystemClock.elapsedRealtime()
+        if (mode == CaptureMode.WALKTHROUGH) feedback = GuidanceFeedback(this)
         setContentView(buildLayout())
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) {
@@ -214,6 +229,8 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
     }
 
     override fun onDestroy() {
+        feedback?.shutdown()
+        feedback = null
         session?.close()
         session = null
         super.onDestroy()
@@ -251,6 +268,7 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
             val config = Config(created).apply {
                 planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
                 focusMode = Config.FocusMode.AUTO
+                lightEstimationMode = Config.LightEstimationMode.AMBIENT_INTENSITY
                 updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
                 depthMode = if (created.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) {
                     Config.DepthMode.AUTOMATIC
@@ -347,6 +365,7 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
         val centreHits = if (tracking) centreHitTest(frame) else emptyList()
         if (mode == CaptureMode.WALKTHROUGH) {
             // Tracking loss pauses the walkthrough: nothing is sampled until tracking returns.
+            updateGuidanceSignals(frame, camera, tracking)
             if (tracking) sampleWalkthrough(current, camera)
             publishWalkthroughOverlay(camera, tracking, centreHits)
             publishWalkthroughStatus(camera)
@@ -585,6 +604,8 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
         }
         recording = true
         trajectory = TrajectorySampler()
+        maxWallCount = liveWalls.size
+        motionMeter.reset()
         val pose = camera.pose
         trajectory.offer(pose.tx().toDouble(), pose.tz().toDouble())
         runOnUiThread {
@@ -593,6 +614,7 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
             recordButton.isEnabled = true
         }
         postMessage(WALKTHROUGH_GUIDANCE)
+        feedback?.speak(WALKTHROUGH_GUIDANCE)
     }
 
     /**
@@ -652,6 +674,43 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
             val pose = camera.pose
             trajectory.offer(pose.tx().toDouble(), pose.tz().toDouble())
         }
+        coverage = WalkthroughCoverage.compute(liveWalls, coverageCentre(camera))
+    }
+
+    /** Centre of the walked path, which approximates the room centre when walking along the walls. */
+    private fun coverageCentre(camera: Camera): Corner2 {
+        val points = trajectory.points
+        if (points.isEmpty()) return Corner2(camera.pose.tx().toDouble(), camera.pose.tz().toDouble())
+        return Corner2(points.sumOf { it.x } / points.size, points.sumOf { it.z } / points.size)
+    }
+
+    /** Heading, speed and light for the live guidance; motion restarts after every tracking loss. */
+    private fun updateGuidanceSignals(frame: Frame, camera: Camera, tracking: Boolean) {
+        if (!tracking) {
+            motionMeter.reset()
+            lastMotion = null
+            return
+        }
+        val pose = camera.pose
+        // The camera looks down its local -z axis.
+        val zAxis = pose.zAxis
+        headingRad = atan2(-zAxis[2].toDouble(), -zAxis[0].toDouble())
+        motionMeter.offer(SystemClock.elapsedRealtime(), pose.tx().toDouble(), pose.tz().toDouble(), headingRad)
+            ?.let { lastMotion = it }
+        val estimate = frame.lightEstimate
+        lightIntensity = if (estimate.state == LightEstimate.State.VALID) estimate.pixelIntensity.toDouble() else null
+    }
+
+    /** Speaks a stable cue, warns with vibration when too fast and ticks when a new wall is registered. */
+    private fun announce(guidance: Guidance, nowMs: Long) {
+        val target = feedback ?: return
+        if (recording && liveWalls.size > maxWallCount) {
+            maxWallCount = liveWalls.size
+            target.tick()
+        }
+        val cue = announcer.offer(guidance.cue, nowMs) ?: return
+        if (cue == GuidanceCue.TOO_FAST) target.warn()
+        target.speak(guidance.message)
     }
 
     private fun trackedPlanes(session: Session): List<Plane> =
@@ -719,7 +778,13 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
             null
         }
         val onFloor = tracking && centreHits.any { isTrackedPlaneHit(it, Plane.Type.HORIZONTAL_UPWARD_FACING) }
-        val model = OverlayModel(emptyList(), segments, emptyList(), emptyList(), onFloor, notice)
+        val minimap = if (recording || walls.isNotEmpty()) {
+            val pose = camera.pose
+            MinimapModel(walls, trajectory.points, Corner2(pose.tx().toDouble(), pose.tz().toDouble()), headingRad, coverage)
+        } else {
+            null
+        }
+        val model = OverlayModel(emptyList(), segments, emptyList(), emptyList(), onFloor, notice, minimap)
         overlay.post { overlay.update(model) }
     }
 
@@ -727,13 +792,27 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
         val now = SystemClock.elapsedRealtime()
         if (now - lastStatusAtMs < STATUS_INTERVAL_MS) return
         lastStatusAtMs = now
-        val guidance = CaptureRules.trackingGuidance(camera.trackingState.name, camera.trackingFailureReason.name)
+        val guidance = WalkthroughGuidance.evaluate(
+            GuidanceInput(
+                trackingStateName = camera.trackingState.name,
+                failureReasonName = camera.trackingFailureReason.name,
+                recording = recording,
+                floorFound = walkFloorY != null,
+                speed = lastMotion?.speed,
+                yawRateDeg = lastMotion?.yawRateDeg,
+                lightIntensity = lightIntensity,
+                coverage = coverage,
+                headingRad = headingRad,
+            ),
+        )
+        announce(guidance, now)
         val depthText = if (depthSupported) "profundidad disponible" else "sin profundidad"
         val stateText = if (recording) "recorrido en curso" else "recorrido sin iniciar"
         val heightText = roomHeight?.let { " · altura ${CaptureGeometry.formatMeters(it.value)}" } ?: ""
-        val text = "$guidance\nParedes detectadas: ${liveWalls.size} · " +
+        val text = "${guidance.message}\nParedes detectadas: ${liveWalls.size} · " +
             "piso: ${WalkthroughGeometry.formatSquareMeters(liveFloorArea)} · " +
-            "trayectoria: ${WalkthroughGeometry.formatTrajectory(trajectory.length())}\n" +
+            "trayectoria: ${WalkthroughGeometry.formatTrajectory(trajectory.length())} · " +
+            "cobertura ${(coverage.fraction * 100).toInt()} %\n" +
             "$depthText · $stateText$heightText"
         runOnUiThread { statusText.text = text }
     }
