@@ -1,8 +1,8 @@
 """Payload shapes for detection jobs (F08.4).
 
 The `result` column holds ``DetectionResultPayload``. It carries suggestions,
-never commercial inventory: the confirmed inventory belongs to F08.5 and its
-contract with F05 is not frozen yet.
+never commercial inventory: the confirmed inventory belongs to the separate
+human-review transaction documented in docs/api/f08-furniture-review.md.
 """
 
 from __future__ import annotations

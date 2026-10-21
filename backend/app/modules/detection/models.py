@@ -41,6 +41,29 @@ def dedupe_key_for(photo_id: str, model_id: str) -> str:
     return f"{photo_id}:{model_id}"
 
 
+class FurnitureReview(Base):
+    """Append-only human decision, independent of photo/result retention."""
+
+    __tablename__ = "furniture_review"
+    __table_args__ = (
+        UniqueConstraint("job_id", "detection_index", name="uq_furniture_review_detection"),
+        CheckConstraint("action IN ('manual', 'confirmed', 'rejected')", name="ck_furniture_review_action"),
+        Index("ix_furniture_review_listing", "listing_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    agency_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    listing_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    detection_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    extra_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class DetectionJob(Base):
     """One asynchronous detection run over one listing photo."""
 

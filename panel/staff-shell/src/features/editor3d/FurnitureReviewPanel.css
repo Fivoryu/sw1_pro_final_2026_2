@@ -1,0 +1,14 @@
+.furniture-review { margin-top: 1.5rem; padding: 1.25rem; border: 1px solid #d8e1e8; border-radius: 0.75rem; background: #fff; color: #263544; }
+.furniture-review h4 { margin: 1.5rem 0 0.75rem; }
+.furniture-review__photos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 1rem; }
+.furniture-review__photo { position: relative; max-width: 420px; }
+.furniture-review__photo img { display: block; width: 100%; height: auto; border-radius: 0.5rem; }
+.furniture-review__photo svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.furniture-review__suggestions { list-style: none; padding: 0; }
+.furniture-review__suggestions > li { padding: 1rem 0; border-bottom: 1px solid #d8e1e8; overflow-wrap: anywhere; }
+.furniture-review__actions { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.furniture-review fieldset { border: 0; padding: 0; min-width: 0; }
+.furniture-review__fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 0.75rem; }
+.furniture-review label { display: grid; gap: 0.35rem; font-size: 0.9rem; }
+.furniture-review input, .furniture-review select { width: 100%; min-width: 0; box-sizing: border-box; padding: 0.6rem; border: 1px solid #8a9dad; border-radius: 0.35rem; font: inherit; color: inherit; background: white; }
+.furniture-review [role="alert"] { color: #a11c28; }
