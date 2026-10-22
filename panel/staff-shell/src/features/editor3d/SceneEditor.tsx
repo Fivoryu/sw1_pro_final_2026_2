@@ -6,6 +6,7 @@ import {
   useState,
   type PointerEvent,
 } from "react";
+import { acceptCapture } from "../../application/captureReviewApi";
 import {
   getListingScene,
   listAgencyListings,
@@ -24,6 +25,7 @@ import {
 } from "../../application/sceneContract";
 import { SceneViewer } from "./SceneViewer";
 import { FurnitureReviewPanel } from "./FurnitureReviewPanel";
+import { CaptureDraftPanel } from "./CaptureDraftPanel";
 
 interface SceneEditorProps {
   accessToken: string;
@@ -526,6 +528,9 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
   const [listReload, setListReload] = useState(0);
   const [showFurniture, setShowFurniture] = useState(false);
   const [furnitureBusy, setFurnitureBusy] = useState(false);
+  const [showCaptures, setShowCaptures] = useState(false);
+  const [loadedCaptureId, setLoadedCaptureId] = useState<string | null>(null);
+  const [captureRefresh, setCaptureRefresh] = useState(0);
   const [listings, setListings] = useState<ListState<StaffListing[]>>({ kind: "loading" });
   const [selectedListingId, setSelectedListingId] = useState("");
   const [sceneReload, setSceneReload] = useState(0);
@@ -580,6 +585,7 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
     setSelectedObjectId(null);
     setIsDirty(false);
     setHasSavedScene(false);
+    setLoadedCaptureId(null);
 
     if (!selectedListingId) {
       setSceneLoad("idle");
@@ -627,6 +633,22 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
     setError(null);
   }
 
+  function handleLoadDraft(captureId: string, draft: SceneDocument) {
+    if (isSaving || furnitureBusy) return;
+    if (
+      isDirty &&
+      !window.confirm("Hay cambios sin guardar en la escena. ¿Reemplazarlos con el borrador de la captura?")
+    ) {
+      return;
+    }
+    setScene(draft);
+    setIsDirty(true);
+    setSelectedObjectId(null);
+    setLoadedCaptureId(captureId);
+    setNotice(null);
+    setError(null);
+  }
+
   async function handleSave() {
     if (!selectedListingId || sceneLoad !== "ready" || isSaving || furnitureBusy) return;
     setIsSaving(true);
@@ -643,6 +665,18 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
       setHasSavedScene(true);
       setIsDirty(false);
       setNotice("Cambios guardados correctamente.");
+      if (loadedCaptureId) {
+        const captureId = loadedCaptureId;
+        setLoadedCaptureId(null);
+        try {
+          await acceptCapture(tokenRef.current, agencyId, selectedListingId, captureId);
+          setCaptureRefresh((value) => value + 1);
+        } catch {
+          setError(
+            "La escena se guardó, pero no se pudo aceptar la captura. Vuelve a cargar el borrador y guarda de nuevo para aceptarla.",
+          );
+        }
+      }
     } catch (failure) {
       setError(errorMessage(failure, "No se pudo guardar la escena. Inténtalo nuevamente."));
     } finally {
@@ -786,6 +820,13 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
         <button className="review-button review-button--secondary" type="button"
           onClick={() => setShowFurniture((value) => !value)} disabled={furnitureBusy}
           aria-expanded={showFurniture}>Mobiliario y sugerencias IA</button>
+        <button className="review-button review-button--secondary" type="button"
+          onClick={() => setShowCaptures((value) => !value)} disabled={furnitureBusy}
+          aria-expanded={showCaptures}>Capturas reconstruidas</button>
+        {showCaptures ? <CaptureDraftPanel key={`${agencyId}:${selectedListingId}`}
+          accessToken={accessToken} agencyId={agencyId} listingId={selectedListingId}
+          disabled={!sceneReady || isSaving || furnitureBusy} refreshKey={captureRefresh}
+          loadedCaptureId={loadedCaptureId} onLoadDraft={handleLoadDraft} /> : null}
         {showFurniture ? <FurnitureReviewPanel key={`${agencyId}:${selectedListingId}`}
           accessToken={accessToken} agencyId={agencyId} listingId={selectedListingId}
           disabled={!sceneReady || !hasSavedScene || isDirty || isSaving}
