@@ -18,6 +18,8 @@ Prefijo: `/api/v1/staff/agencies/{agency_id}/listings/{listing_id}`.
 ### GET /furniture-review
 Devuelve `listing` (respuesta staff existente con extras, moneda y `offer_version`), `suggestions[]` y `history[]`.
 Cada sugerencia incluye `job_id`, `detection_index`, `photo_id`, `model_id`, `label`, `score`, `box`, `status` (`pending|confirmed|rejected|expired`) y `extra_id`.
+Además devuelve `volume_suggestions[]` (sugerencias de clase para volúmenes reconstruidos por F07.7): `{ capture_id, object_id, model_id, label, score, position, dimensions, status, extra_id }`. `position` y `dimensions` salen del objeto del `scene_draft` de la captura (`null` si el objeto ya no existe). `status` es la decisión registrada (`confirmed|rejected`), o `pending` si la captura está `completed`/`accepted` y el objeto sigue en su borrador, o `expired` en otro caso. Solo se listan capturas de la misma agencia e inmueble.
+Cada entrada del historial agrega `capture_id` y `object_id` (`null` en las decisiones por foto).
 El historial conserva actor, fecha, decisión, resultado original y extra confirmado. GET no inserta ni modifica filas.
 Solo aparecen resultados de trabajos completados. Los estados de ejecución siguen en `GET /detections`; la solicitud de inferencia sigue en `POST /photos/{photo_id}/detections`.
 
@@ -25,10 +27,12 @@ Solo aparecen resultados de trabajos completados. Los estados de ejecución sigu
 Campos comunes: `request_id` (UUID de idempotencia), `expected_offer_version` (entero positivo).
 Modo manual: `action: "manual"`, `item`.
 Modo sugerencia: `action: "confirmed"|"rejected"`, `job_id`, `detection_index`.
+Referencia alternativa por volumen: `capture_id` + `object_id` en lugar de `job_id` + `detection_index`. Confirmar o rechazar exige exactamente una referencia completa (ambas a la vez o una incompleta: `422`); el modo manual no admite ninguna.
 Confirmar requiere exactamente uno de `item` (nuevo extra) o `existing_extra_id` (repetido ya inventariado).
 Rechazar no admite item ni vínculo.
 `item`: `name`, `price` (decimal exacto, máximo dos decimales), `width_cm`, `height_cm`, `depth_cm`, `position: {x,y,z}`; opcionales `category`, `room`, `quantity` (por defecto 1).
 El servidor asigna procedencia y vínculo visual; no acepta que el cliente los fabrique. Nueva caja de tipo `box`, color neutro.
+Confirmar por volumen crea el extra con `origin: "human-confirmed-ai"` y `visual_reference: "capture:{capture_id}:{object_id}"`; el `item` define nombre, precio y medidas como en el modo por foto. En la escena guardada reemplaza el objeto con id `object_id` si existe (conservando su posición y dimensiones) o agrega una caja con la geometría del volumen del borrador. Rechazar solo registra la decisión. Si la captura no está `completed`/`accepted` o el objeto ya no está en su borrador: `409` «The source capture is no longer available»; una captura o volumen inexistente o de otra agencia: `404`. La tabla impide dos decisiones para el mismo par `capture_id`/`object_id` (migración `0026_capture_volume_suggestions`, columnas nullables).
 Respuesta: la misma vista actualizada de GET.
 
 ## Cambios, caducidad e idempotencia

@@ -74,6 +74,8 @@ class ListingCapture(Base):
     claim_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
     scene_draft: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     warnings: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    # Class suggestions per depth volume (F08 x F07.7); only ever read by the human review.
+    volume_suggestions: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_by: Mapped[str] = mapped_column(String(36), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

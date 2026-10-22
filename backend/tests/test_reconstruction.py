@@ -576,3 +576,63 @@ def test_retention_keeps_the_record_for_retry_when_storage_deletion_fails(ctx: C
     second = run_capture_retention_sweep(ctx.session_factory, ctx.storage, now=due)
 
     assert second == 1 and key not in ctx.storage.objects
+
+
+def _occupancy_scene() -> dict[str, Any]:
+    scene = _scene()
+    scene["objects"][0]["type"] = "occupancy"
+    return scene
+
+
+def _suggestions(*object_ids: str) -> dict[str, Any]:
+    return {
+        "modelId": "test-model",
+        "items": [
+            {"objectId": oid, "label": "sofa", "score": 0.8, "keyframe": 2, "box": [1, 2, 3, 4]}
+            for oid in object_ids
+        ],
+    }
+
+
+def test_complete_stores_valid_volume_suggestions(ctx: Ctx) -> None:
+    job_id, token = ctx.running()
+    payload = {
+        "sceneDraft": _occupancy_scene(), "warnings": [], "volumeSuggestions": _suggestions("vol-1"),
+    }
+
+    done = ctx.worker(job_id, "complete", token, payload)
+
+    assert done.status_code == 200, done.text
+    assert ctx.row().volume_suggestions == _suggestions("vol-1")
+
+
+@pytest.mark.parametrize("object_ids", [("ghost",), ("vol-1", "vol-1")])
+def test_complete_rejects_unknown_or_duplicate_volume_suggestions(
+    ctx: Ctx, object_ids: tuple[str, ...]
+) -> None:
+    job_id, token = ctx.running()
+    payload = {
+        "sceneDraft": _occupancy_scene(), "warnings": [], "volumeSuggestions": _suggestions(*object_ids),
+    }
+
+    bad = ctx.worker(job_id, "complete", token, payload)
+
+    assert bad.status_code == 422, bad.text
+    assert bad.json()["code"] == "volume_suggestions_invalid"
+    assert ctx.row().status == "processing" and ctx.row().volume_suggestions is None
+
+
+def test_complete_rejects_suggestion_for_a_non_occupancy_object(ctx: Ctx) -> None:
+    job_id, token = ctx.running()
+    payload = {"sceneDraft": _scene(), "warnings": [], "volumeSuggestions": _suggestions("vol-1")}
+
+    assert ctx.worker(job_id, "complete", token, payload).status_code == 422
+
+
+def test_complete_without_volume_suggestions_stores_null(ctx: Ctx) -> None:
+    job_id, token = ctx.running()
+
+    done = ctx.worker(job_id, "complete", token, {"sceneDraft": _scene(), "warnings": []})
+
+    assert done.status_code == 200, done.text
+    assert ctx.row().status == "completed" and ctx.row().volume_suggestions is None

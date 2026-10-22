@@ -47,6 +47,7 @@ class FurnitureReview(Base):
     __tablename__ = "furniture_review"
     __table_args__ = (
         UniqueConstraint("job_id", "detection_index", name="uq_furniture_review_detection"),
+        UniqueConstraint("capture_id", "object_id", name="uq_furniture_review_volume"),
         CheckConstraint("action IN ('manual', 'confirmed', 'rejected')", name="ck_furniture_review_action"),
         Index("ix_furniture_review_listing", "listing_id"),
     )
@@ -56,6 +57,9 @@ class FurnitureReview(Base):
     listing_id: Mapped[str] = mapped_column(String(36), nullable=False)
     job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     detection_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Alternative reference (F08 x F07.7): a class suggestion for a reconstructed volume.
+    capture_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    object_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     action: Mapped[str] = mapped_column(String(16), nullable=False)
     extra_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
