@@ -36,7 +36,10 @@ void main() {
         '/api/v1/staff/agencies/agency%201/listings/listing-1/captures',
       );
       expect(request.headers['Authorization'], 'Bearer tok');
-      expect(jsonDecode(request.body), {'captureId': 'cap-1', 'sizeBytes': 1234});
+      expect(jsonDecode(request.body), {
+        'captureId': 'cap-1',
+        'sizeBytes': 1234,
+      });
       expect(registration.captureId, 'cap-1');
       expect(registration.status, RemoteCaptureStatus.awaitingUpload);
       expect(
@@ -94,7 +97,13 @@ void main() {
           captureId: 'cap-1',
           sizeBytes: 10,
         ),
-        throwsA(isA<StaffAuthFailure>().having((f) => f.isNetworkFailure, 'net', true)),
+        throwsA(
+          isA<StaffAuthFailure>().having(
+            (f) => f.isNetworkFailure,
+            'net',
+            true,
+          ),
+        ),
       );
     });
 
@@ -102,12 +111,21 @@ void main() {
       final api = StaffCaptureApi(
         baseUrl: 'https://api.example.test',
         client: MockClient(
-          (_) async => http.Response(jsonEncode({'captureId': 'cap-1', 'status': 'awaiting_upload'}), 201),
+          (_) async => http.Response(
+            jsonEncode({'captureId': 'cap-1', 'status': 'awaiting_upload'}),
+            201,
+          ),
         ),
       );
 
       expect(
-        api.register(accessToken: 't', agencyId: 'a', listingId: 'l', captureId: 'cap-1', sizeBytes: 1),
+        api.register(
+          accessToken: 't',
+          agencyId: 'a',
+          listingId: 'l',
+          captureId: 'cap-1',
+          sizeBytes: 1,
+        ),
         throwsA(isA<StaffAuthFailure>()),
       );
     });
@@ -117,42 +135,56 @@ void main() {
         baseUrl: 'https://api.example.test',
         client: MockClient(
           (_) async => http.Response(
-            jsonEncode({'captureId': 'cap-1', 'status': 'weird', 'uploadUrl': 'https://x.test/u', 'expiresAt': '2026-10-21T13:00:00Z'}),
+            jsonEncode({
+              'captureId': 'cap-1',
+              'status': 'weird',
+              'uploadUrl': 'https://x.test/u',
+              'expiresAt': '2026-10-21T13:00:00Z',
+            }),
             201,
           ),
         ),
       );
 
       expect(
-        api.register(accessToken: 't', agencyId: 'a', listingId: 'l', captureId: 'cap-1', sizeBytes: 1),
+        api.register(
+          accessToken: 't',
+          agencyId: 'a',
+          listingId: 'l',
+          captureId: 'cap-1',
+          sizeBytes: 1,
+        ),
         throwsA(isA<StaffAuthFailure>()),
       );
     });
   });
 
   group('upload', () {
-    test('PUTs the ZIP bytes to the signed URL without the staff token', () async {
-      final backend = FakeCaptureBackend();
-      backend.captures['cap-1'] = FakeCapture('cap-1', 4);
-      final progress = <int>[];
+    test(
+      'PUTs the ZIP bytes to the signed URL without the staff token',
+      () async {
+        final backend = FakeCaptureBackend();
+        backend.captures['cap-1'] = FakeCapture('cap-1', 4);
+        final progress = <int>[];
 
-      await _api(backend).upload(
-        uploadUrl: 'https://storage.example.test/upload/cap-1?sig=1',
-        body: Stream.fromIterable([
-          [1, 2],
-          [3, 4],
-        ]),
-        length: 4,
-        onProgress: progress.add,
-      );
+        await _api(backend).upload(
+          uploadUrl: 'https://storage.example.test/upload/cap-1?sig=1',
+          body: Stream.fromIterable([
+            [1, 2],
+            [3, 4],
+          ]),
+          length: 4,
+          onProgress: progress.add,
+        );
 
-      final request = backend.requests.single;
-      expect(request.method, 'PUT');
-      expect(request.headers.containsKey('Authorization'), isFalse);
-      expect(request.headers['Content-Type'], 'application/zip');
-      expect(backend.captures['cap-1']!.uploaded, [1, 2, 3, 4]);
-      expect(progress, [2, 4]);
-    });
+        final request = backend.requests.single;
+        expect(request.method, 'PUT');
+        expect(request.headers.containsKey('Authorization'), isFalse);
+        expect(request.headers['Content-Type'], 'application/zip');
+        expect(backend.captures['cap-1']!.uploaded, [1, 2, 3, 4]);
+        expect(progress, [2, 4]);
+      },
+    );
 
     test('resolves a relative upload URL against the API', () async {
       final backend = FakeCaptureBackend();
@@ -165,9 +197,16 @@ void main() {
         }),
       );
 
-      await api.upload(uploadUrl: '/api/v1/uploads/cap-1?sig=9', body: _bytes([1]), length: 1);
+      await api.upload(
+        uploadUrl: '/api/v1/uploads/cap-1?sig=9',
+        body: _bytes([1]),
+        length: 1,
+      );
 
-      expect(requests.single.url.toString(), 'https://api.example.test/api/v1/uploads/cap-1?sig=9');
+      expect(
+        requests.single.url.toString(),
+        'https://api.example.test/api/v1/uploads/cap-1?sig=9',
+      );
       expect(backend.requests, isEmpty);
     });
 
@@ -175,7 +214,11 @@ void main() {
       final backend = FakeCaptureBackend()..expirePuts = 1;
 
       expect(
-        _api(backend).upload(uploadUrl: 'https://storage.example.test/upload/cap-1', body: _bytes([1]), length: 1),
+        _api(backend).upload(
+          uploadUrl: 'https://storage.example.test/upload/cap-1',
+          body: _bytes([1]),
+          length: 1,
+        ),
         throwsA(isA<UploadUrlExpired>()),
       );
     });
@@ -184,8 +227,18 @@ void main() {
       final backend = FakeCaptureBackend()..failPuts = 1;
 
       expect(
-        _api(backend).upload(uploadUrl: 'https://storage.example.test/upload/cap-1', body: _bytes([1]), length: 1),
-        throwsA(isA<StaffAuthFailure>().having((f) => f.isNetworkFailure, 'net', true)),
+        _api(backend).upload(
+          uploadUrl: 'https://storage.example.test/upload/cap-1',
+          body: _bytes([1]),
+          length: 1,
+        ),
+        throwsA(
+          isA<StaffAuthFailure>().having(
+            (f) => f.isNetworkFailure,
+            'net',
+            true,
+          ),
+        ),
       );
     });
 
@@ -196,8 +249,14 @@ void main() {
       );
 
       expect(
-        api.upload(uploadUrl: 'https://storage.example.test/u', body: _bytes([1]), length: 1),
-        throwsA(isA<StaffAuthFailure>().having((f) => f.code, 'code', kInternalError)),
+        api.upload(
+          uploadUrl: 'https://storage.example.test/u',
+          body: _bytes([1]),
+          length: 1,
+        ),
+        throwsA(
+          isA<StaffAuthFailure>().having((f) => f.code, 'code', kInternalError),
+        ),
       );
     });
   });
@@ -206,10 +265,26 @@ void main() {
     test('complete is idempotent and reports the queue state', () async {
       final backend = FakeCaptureBackend();
       final api = _api(backend);
-      await api.register(accessToken: 't', agencyId: 'a', listingId: 'l', captureId: 'cap-1', sizeBytes: 1);
+      await api.register(
+        accessToken: 't',
+        agencyId: 'a',
+        listingId: 'l',
+        captureId: 'cap-1',
+        sizeBytes: 1,
+      );
 
-      final first = await api.complete(accessToken: 't', agencyId: 'a', listingId: 'l', captureId: 'cap-1');
-      final second = await api.complete(accessToken: 't', agencyId: 'a', listingId: 'l', captureId: 'cap-1');
+      final first = await api.complete(
+        accessToken: 't',
+        agencyId: 'a',
+        listingId: 'l',
+        captureId: 'cap-1',
+      );
+      final second = await api.complete(
+        accessToken: 't',
+        agencyId: 'a',
+        listingId: 'l',
+        captureId: 'cap-1',
+      );
 
       expect(first, RemoteCaptureStatus.queued);
       expect(second, RemoteCaptureStatus.queued);
@@ -222,10 +297,21 @@ void main() {
     test('status returns the failure reason and warnings', () async {
       final backend = FakeCaptureBackend();
       final api = _api(backend);
-      await api.register(accessToken: 't', agencyId: 'a', listingId: 'l', captureId: 'cap-1', sizeBytes: 1);
+      await api.register(
+        accessToken: 't',
+        agencyId: 'a',
+        listingId: 'l',
+        captureId: 'cap-1',
+        sizeBytes: 1,
+      );
       backend.statusScript.add(('failed', 'Sin piso detectado'));
 
-      final report = await api.status(accessToken: 't', agencyId: 'a', listingId: 'l', captureId: 'cap-1');
+      final report = await api.status(
+        accessToken: 't',
+        agencyId: 'a',
+        listingId: 'l',
+        captureId: 'cap-1',
+      );
 
       expect(report.status, RemoteCaptureStatus.failed);
       expect(report.failureReason, 'Sin piso detectado');
@@ -234,8 +320,15 @@ void main() {
 
     test('status of an unknown capture is a not-found failure', () async {
       expect(
-        _api(FakeCaptureBackend()).status(accessToken: 't', agencyId: 'a', listingId: 'l', captureId: 'nope'),
-        throwsA(isA<StaffAuthFailure>().having((f) => f.code, 'code', kNotFound)),
+        _api(FakeCaptureBackend()).status(
+          accessToken: 't',
+          agencyId: 'a',
+          listingId: 'l',
+          captureId: 'nope',
+        ),
+        throwsA(
+          isA<StaffAuthFailure>().having((f) => f.code, 'code', kNotFound),
+        ),
       );
     });
 
@@ -246,7 +339,12 @@ void main() {
       );
 
       expect(
-        api.status(accessToken: 't', agencyId: 'a', listingId: 'l', captureId: 'c'),
+        api.status(
+          accessToken: 't',
+          agencyId: 'a',
+          listingId: 'l',
+          captureId: 'c',
+        ),
         throwsA(isA<StaffAuthFailure>()),
       );
     });

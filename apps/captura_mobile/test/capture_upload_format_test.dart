@@ -39,13 +39,19 @@ void main() {
 
   group('while the phone is sending', () {
     test('registering', () {
-      final text = captureUploadText(_item(_upload(), phase: UploadPhase.registering));
+      final text = captureUploadText(
+        _item(_upload(), phase: UploadPhase.registering),
+      );
       expect(text.title, 'Preparando la subida…');
     });
 
     test('uploading shows the percentage and the size', () {
       final text = captureUploadText(
-        _item(_upload(stage: UploadStage.registered), phase: UploadPhase.uploading, progress: 0.425),
+        _item(
+          _upload(stage: UploadStage.registered),
+          phase: UploadPhase.uploading,
+          progress: 0.425,
+        ),
       );
       expect(text.title, 'Subiendo el recorrido…');
       expect(text.detail, '42 % de 3,0 MB');
@@ -54,11 +60,24 @@ void main() {
 
     test('finishing and checking', () {
       expect(
-        captureUploadText(_item(_upload(stage: UploadStage.uploaded), phase: UploadPhase.finishing)).title,
+        captureUploadText(
+          _item(
+            _upload(stage: UploadStage.uploaded),
+            phase: UploadPhase.finishing,
+          ),
+        ).title,
         'Confirmando la subida…',
       );
       expect(
-        captureUploadText(_item(_upload(stage: UploadStage.completed, remote: RemoteCaptureStatus.queued), phase: UploadPhase.checking)).title,
+        captureUploadText(
+          _item(
+            _upload(
+              stage: UploadStage.completed,
+              remote: RemoteCaptureStatus.queued,
+            ),
+            phase: UploadPhase.checking,
+          ),
+        ).title,
         'Consultando el estado…',
       );
     });
@@ -73,13 +92,19 @@ void main() {
     });
 
     test('shows the last problem', () {
-      final text = captureUploadText(_item(_upload(stage: UploadStage.registered, error: 'Sin conexión.')));
+      final text = captureUploadText(
+        _item(_upload(stage: UploadStage.registered, error: 'Sin conexión.')),
+      );
       expect(text.detail, contains('Sin conexión.'));
       expect(text.canRetry, isTrue);
     });
 
     test('a permanent rejection cannot be retried, only removed', () {
-      final text = captureUploadText(_item(_upload(permanent: true, error: 'El paquete es demasiado grande.')));
+      final text = captureUploadText(
+        _item(
+          _upload(permanent: true, error: 'El paquete es demasiado grande.'),
+        ),
+      );
       expect(text.title, 'No se pudo subir el recorrido');
       expect(text.detail, contains('demasiado grande'));
       expect(text.canRetry, isFalse);
@@ -88,8 +113,16 @@ void main() {
   });
 
   group('reconstruction status', () {
-    PendingCaptureUpload sent(RemoteCaptureStatus? status, {String? reason, String? error}) =>
-        _upload(stage: UploadStage.completed, remote: status, reason: reason, error: error);
+    PendingCaptureUpload sent(
+      RemoteCaptureStatus? status, {
+      String? reason,
+      String? error,
+    }) => _upload(
+      stage: UploadStage.completed,
+      remote: status,
+      reason: reason,
+      error: error,
+    );
 
     test('queued', () {
       final text = captureUploadText(_item(sent(RemoteCaptureStatus.queued)));
@@ -99,13 +132,17 @@ void main() {
     });
 
     test('processing', () {
-      final text = captureUploadText(_item(sent(RemoteCaptureStatus.processing)));
+      final text = captureUploadText(
+        _item(sent(RemoteCaptureStatus.processing)),
+      );
       expect(text.title, 'Reconstruyendo el ambiente');
       expect(text.canRefresh, isTrue);
     });
 
     test('completed points to the panel and promises no 3D on the phone', () {
-      final text = captureUploadText(_item(sent(RemoteCaptureStatus.completed)));
+      final text = captureUploadText(
+        _item(sent(RemoteCaptureStatus.completed)),
+      );
       expect(text.title, 'Borrador listo');
       expect(text.detail, contains('panel'));
       expect(text.canRefresh, isFalse);
@@ -113,7 +150,9 @@ void main() {
     });
 
     test('failed shows the server reason', () {
-      final text = captureUploadText(_item(sent(RemoteCaptureStatus.failed, reason: 'Sin piso detectado')));
+      final text = captureUploadText(
+        _item(sent(RemoteCaptureStatus.failed, reason: 'Sin piso detectado')),
+      );
       expect(text.title, 'La reconstrucción falló');
       expect(text.detail, contains('Sin piso detectado'));
       expect(text.detail, contains('Volvé a capturar'));
@@ -126,7 +165,10 @@ void main() {
     });
 
     test('accepted', () {
-      expect(captureUploadText(_item(sent(RemoteCaptureStatus.accepted))).title, 'Borrador aceptado');
+      expect(
+        captureUploadText(_item(sent(RemoteCaptureStatus.accepted))).title,
+        'Borrador aceptado',
+      );
     });
 
     test('sent but not yet checked', () {
@@ -136,7 +178,9 @@ void main() {
     });
 
     test('a failed status check adds its problem to the last known state', () {
-      final text = captureUploadText(_item(sent(RemoteCaptureStatus.processing, error: 'Sin conexión.')));
+      final text = captureUploadText(
+        _item(sent(RemoteCaptureStatus.processing, error: 'Sin conexión.')),
+      );
       expect(text.title, 'Reconstruyendo el ambiente');
       expect(text.detail, contains('Sin conexión.'));
     });

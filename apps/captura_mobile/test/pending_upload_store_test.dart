@@ -48,15 +48,21 @@ void main() {
     expect(records.single.createdAt, DateTime.utc(2026, 10, 21, 12));
   });
 
-  test('saving the same capture again replaces it instead of duplicating', () async {
-    await store.save('agent-1', upload('cap-1'));
-    await store.save('agent-1', upload('cap-1').copyWith(stage: UploadStage.uploaded));
+  test(
+    'saving the same capture again replaces it instead of duplicating',
+    () async {
+      await store.save('agent-1', upload('cap-1'));
+      await store.save(
+        'agent-1',
+        upload('cap-1').copyWith(stage: UploadStage.uploaded),
+      );
 
-    final records = await store.list('agent-1');
+      final records = await store.list('agent-1');
 
-    expect(records, hasLength(1));
-    expect(records.single.stage, UploadStage.uploaded);
-  });
+      expect(records, hasLength(1));
+      expect(records.single.stage, UploadStage.uploaded);
+    },
+  );
 
   test('lists oldest first and only the owner records', () async {
     await store.save('agent-1', upload('cap-2', minute: 5));
@@ -67,7 +73,10 @@ void main() {
       [for (final r in await store.list('agent-1')) r.captureId],
       ['cap-1', 'cap-2'],
     );
-    expect([for (final r in await store.list('agent-2')) r.captureId], ['cap-3']);
+    expect(
+      [for (final r in await store.list('agent-2')) r.captureId],
+      ['cap-3'],
+    );
   });
 
   test('delete removes only that record', () async {
@@ -76,14 +85,19 @@ void main() {
 
     await store.delete('agent-1', 'cap-1');
 
-    expect([for (final r in await store.list('agent-1')) r.captureId], ['cap-2']);
+    expect(
+      [for (final r in await store.list('agent-1')) r.captureId],
+      ['cap-2'],
+    );
   });
 
   test('sets aside an unreadable record instead of discarding it', () async {
     final dir = Directory('${root.path}/capture_uploads/agent-1');
     await dir.create(recursive: true);
     await File('${dir.path}/cap-1.json').writeAsString('{not json');
-    await File('${dir.path}/cap-2.json').writeAsString(jsonEncode({'captureId': 'cap-2'}));
+    await File(
+      '${dir.path}/cap-2.json',
+    ).writeAsString(jsonEncode({'captureId': 'cap-2'}));
 
     expect(await store.list('agent-1'), isEmpty);
     expect(await File('${dir.path}/cap-1.json.corrupt').exists(), isTrue);
@@ -115,7 +129,13 @@ void main() {
       expect(restored.isFinished, isTrue);
     });
 
-    for (final key in ['captureId', 'listingId', 'sizeBytes', 'createdAt', 'stage']) {
+    for (final key in [
+      'captureId',
+      'listingId',
+      'sizeBytes',
+      'createdAt',
+      'stage',
+    ]) {
       test('rejects a record without $key', () {
         expect(
           () => PendingCaptureUpload.fromJson({...valid()}..remove(key)),
@@ -125,9 +145,22 @@ void main() {
     }
 
     test('rejects a wrong type, an unknown stage and a bad date', () {
-      expect(() => PendingCaptureUpload.fromJson({...valid(), 'sizeBytes': 'big'}), throwsFormatException);
-      expect(() => PendingCaptureUpload.fromJson({...valid(), 'stage': 'teleported'}), throwsFormatException);
-      expect(() => PendingCaptureUpload.fromJson({...valid(), 'createdAt': 'yesterday'}), throwsFormatException);
+      expect(
+        () => PendingCaptureUpload.fromJson({...valid(), 'sizeBytes': 'big'}),
+        throwsFormatException,
+      );
+      expect(
+        () =>
+            PendingCaptureUpload.fromJson({...valid(), 'stage': 'teleported'}),
+        throwsFormatException,
+      );
+      expect(
+        () => PendingCaptureUpload.fromJson({
+          ...valid(),
+          'createdAt': 'yesterday',
+        }),
+        throwsFormatException,
+      );
     });
   });
 

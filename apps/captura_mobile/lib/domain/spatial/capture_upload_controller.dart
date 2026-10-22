@@ -239,7 +239,10 @@ class CaptureUploadController extends ChangeNotifier {
             }
             current = await _save(
               owner,
-              current.copyWith(stage: UploadStage.uploaded, clearLastError: true),
+              current.copyWith(
+                stage: UploadStage.uploaded,
+                clearLastError: true,
+              ),
             );
           case UploadStage.uploaded:
             _setPhase(current, UploadPhase.finishing);
@@ -267,16 +270,16 @@ class CaptureUploadController extends ChangeNotifier {
         }
       }
     } on StaffAuthFailure catch (failure) {
-      await _save(owner, current.copyWith(
-        permanent: _isPermanent(failure),
-        lastError: _describe(failure),
-      ));
-    } on Object {
-      // A local problem (for example, reading the ZIP): retryable, not fatal.
       await _save(
         owner,
-        current.copyWith(lastError: _localProblemMessage),
+        current.copyWith(
+          permanent: _isPermanent(failure),
+          lastError: _describe(failure),
+        ),
       );
+    } on Object {
+      // A local problem (for example, reading the ZIP): retryable, not fatal.
+      await _save(owner, current.copyWith(lastError: _localProblemMessage));
     }
   }
 
@@ -286,7 +289,8 @@ class CaptureUploadController extends ChangeNotifier {
     if (url == null || path == null) {
       throw const StaffAuthFailure(
         code: kInternalError,
-        detail: 'Falta la dirección de subida. La retomamos desde el principio.',
+        detail:
+            'Falta la dirección de subida. La retomamos desde el principio.',
       );
     }
     var lastPercent = -1;
@@ -364,7 +368,11 @@ class CaptureUploadController extends ChangeNotifier {
     return upload;
   }
 
-  void _setPhase(PendingCaptureUpload upload, UploadPhase phase, {double? progress}) {
+  void _setPhase(
+    PendingCaptureUpload upload,
+    UploadPhase phase, {
+    double? progress,
+  }) {
     _activeId = upload.captureId;
     _phase = phase;
     _progress = progress;

@@ -27,7 +27,10 @@ ListingDraftsController _controller({required bool uploads}) {
     ),
     photosApi: StaffListingPhotosApi(baseUrl: _baseUrl, client: backend.client),
     photoSource: FakePhotoSource(),
-    sceneApi: StaffSceneApi(baseUrl: _baseUrl, client: FakeSceneBackend().client),
+    sceneApi: StaffSceneApi(
+      baseUrl: _baseUrl,
+      client: FakeSceneBackend().client,
+    ),
     captureStore: InMemoryCaptureDraftStore(),
     arCapture: FakeArCapture(),
     captureApi: uploads ? StaffCaptureApi(baseUrl: _baseUrl) : null,

@@ -79,7 +79,9 @@ Future<_Built> _build(
           client: captures.client,
         ),
         store: pending,
-        files: FakePackageFiles({_zipPath: [1, 2, 3, 4]}),
+        files: FakePackageFiles({
+          _zipPath: [1, 2, 3, 4],
+        }),
       ),
     );
     await controller.load();
@@ -87,7 +89,10 @@ Future<_Built> _build(
   return (controller: controller, backend: captures, pending: pending);
 }
 
-Future<void> _pump(WidgetTester tester, SpatialCaptureController controller) async {
+Future<void> _pump(
+  WidgetTester tester,
+  SpatialCaptureController controller,
+) async {
   tester.view.physicalSize = const Size(1080, 6000);
   tester.view.devicePixelRatio = 2;
   addTearDown(tester.view.reset);
@@ -104,14 +109,19 @@ Future<void> _tap(WidgetTester tester, Finder finder) async {
 }
 
 void main() {
-  testWidgets('shows no upload section when nothing was captured for reconstruction', (tester) async {
-    final built = await _build(tester);
-    await _pump(tester, built.controller);
+  testWidgets(
+    'shows no upload section when nothing was captured for reconstruction',
+    (tester) async {
+      final built = await _build(tester);
+      await _pump(tester, built.controller);
 
-    expect(find.byKey(const ValueKey('uploads-card')), findsNothing);
-  });
+      expect(find.byKey(const ValueKey('uploads-card')), findsNothing);
+    },
+  );
 
-  testWidgets('shows the queued state and refreshes it from the server', (tester) async {
+  testWidgets('shows the queued state and refreshes it from the server', (
+    tester,
+  ) async {
     final backend = FakeCaptureBackend()
       ..captures['cap-1'] = (FakeCapture('cap-1', 4)..status = 'queued');
     final built = await _build(tester, stored: _upload(), backend: backend);
@@ -126,33 +136,42 @@ void main() {
     expect(find.text('Reconstruyendo el ambiente'), findsOneWidget);
   });
 
-  testWidgets('shows the reconstruction result as a draft for the panel, not as 3D', (tester) async {
-    final built = await _build(
-      tester,
-      stored: _upload(remote: RemoteCaptureStatus.completed),
-    );
-    await _pump(tester, built.controller);
+  testWidgets(
+    'shows the reconstruction result as a draft for the panel, not as 3D',
+    (tester) async {
+      final built = await _build(
+        tester,
+        stored: _upload(remote: RemoteCaptureStatus.completed),
+      );
+      await _pump(tester, built.controller);
 
-    expect(find.text('Borrador listo'), findsOneWidget);
-    expect(find.textContaining('panel'), findsOneWidget);
-    expect(find.byKey(const ValueKey('upload-refresh-button')), findsNothing);
-  });
+      expect(find.text('Borrador listo'), findsOneWidget);
+      expect(find.textContaining('panel'), findsOneWidget);
+      expect(find.byKey(const ValueKey('upload-refresh-button')), findsNothing);
+    },
+  );
 
-  testWidgets('shows why a reconstruction failed and lets the agent remove it', (tester) async {
-    final built = await _build(
-      tester,
-      stored: _upload(remote: RemoteCaptureStatus.failed, reason: 'Sin piso detectado'),
-    );
-    await _pump(tester, built.controller);
+  testWidgets(
+    'shows why a reconstruction failed and lets the agent remove it',
+    (tester) async {
+      final built = await _build(
+        tester,
+        stored: _upload(
+          remote: RemoteCaptureStatus.failed,
+          reason: 'Sin piso detectado',
+        ),
+      );
+      await _pump(tester, built.controller);
 
-    expect(find.text('La reconstrucción falló'), findsOneWidget);
-    expect(find.textContaining('Sin piso detectado'), findsOneWidget);
+      expect(find.text('La reconstrucción falló'), findsOneWidget);
+      expect(find.textContaining('Sin piso detectado'), findsOneWidget);
 
-    await _tap(tester, find.byKey(const ValueKey('upload-dismiss-button')));
+      await _tap(tester, find.byKey(const ValueKey('upload-dismiss-button')));
 
-    expect(find.byKey(const ValueKey('uploads-card')), findsNothing);
-    expect(await built.pending.list('staff-1'), isEmpty);
-  });
+      expect(find.byKey(const ValueKey('uploads-card')), findsNothing);
+      expect(await built.pending.list('staff-1'), isEmpty);
+    },
+  );
 
   testWidgets('a package waiting on the phone can be retried', (tester) async {
     final backend = FakeCaptureBackend()..offline = true;

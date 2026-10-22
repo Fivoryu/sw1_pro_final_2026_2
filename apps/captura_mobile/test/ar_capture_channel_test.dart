@@ -112,25 +112,28 @@ void main() {
       expect(seen.arguments, {'roomName': 'Estar', 'mode': 'walkthrough'});
     });
 
-    test('passes the listing id so the package manifest can carry it', () async {
-      late MethodCall seen;
-      answer((call) {
-        seen = call;
-        return {'outcome': 'cancelled'};
-      });
+    test(
+      'passes the listing id so the package manifest can carry it',
+      () async {
+        late MethodCall seen;
+        answer((call) {
+          seen = call;
+          return {'outcome': 'cancelled'};
+        });
 
-      await MethodChannelArCapture().captureRoom(
-        'Estar',
-        mode: CaptureMode.walkthrough,
-        listingId: 'listing-1',
-      );
+        await MethodChannelArCapture().captureRoom(
+          'Estar',
+          mode: CaptureMode.walkthrough,
+          listingId: 'listing-1',
+        );
 
-      expect(seen.arguments, {
-        'roomName': 'Estar',
-        'mode': 'walkthrough',
-        'listingId': 'listing-1',
-      });
-    });
+        expect(seen.arguments, {
+          'roomName': 'Estar',
+          'mode': 'walkthrough',
+          'listingId': 'listing-1',
+        });
+      },
+    );
   });
 
   group('capture package', () {
@@ -143,19 +146,20 @@ void main() {
       ...extra,
     };
 
-    Map<String, Object?> package({Map<String, Object?> override = const {}}) => {
-      'zipPath': '/data/user/0/app/files/capture_packages/cap-1.zip',
-      'captureId': 'cap-1',
-      'sizeBytes': 2097152,
-      'keyframeCount': 40,
-      'droppedKeyframes': 2,
-      'failedKeyframes': 0,
-      'rooms': [
-        {'id': 'room-1', 'name': 'Estar'},
-        {'id': 'room-2', 'name': 'Ambiente 2'},
-      ],
-      ...override,
-    };
+    Map<String, Object?> package({Map<String, Object?> override = const {}}) =>
+        {
+          'zipPath': '/data/user/0/app/files/capture_packages/cap-1.zip',
+          'captureId': 'cap-1',
+          'sizeBytes': 2097152,
+          'keyframeCount': 40,
+          'droppedKeyframes': 2,
+          'failedKeyframes': 0,
+          'rooms': [
+            {'id': 'room-1', 'name': 'Estar'},
+            {'id': 'room-2', 'name': 'Ambiente 2'},
+          ],
+          ...override,
+        };
 
     test('parses the additive capturePackage result', () async {
       answer((_) => captured({'capturePackage': package()}));
@@ -172,7 +176,10 @@ void main() {
       expect(info.rooms.map((r) => r.name), ['Estar', 'Ambiente 2']);
       expect(result.packageProblem, isNull);
       // The existing fields are untouched.
-      expect(result.payload['metrics'], {'durationMs': 1000, 'method': 'walkthrough'});
+      expect(result.payload['metrics'], {
+        'durationMs': 1000,
+        'method': 'walkthrough',
+      });
     });
 
     test('a result without a package behaves as before', () async {
@@ -201,9 +208,21 @@ void main() {
       ('with an empty captureId', package(override: {'captureId': ''})),
       ('with a non-numeric size', package(override: {'sizeBytes': 'big'})),
       ('with a zero size', package(override: {'sizeBytes': 0})),
-      ('with a negative keyframe count', package(override: {'keyframeCount': -1})),
+      (
+        'with a negative keyframe count',
+        package(override: {'keyframeCount': -1}),
+      ),
       ('with rooms that are not a list', package(override: {'rooms': 'x'})),
-      ('with a room without a name', package(override: {'rooms': [{'id': 'room-1'}]})),
+      (
+        'with a room without a name',
+        package(
+          override: {
+            'rooms': [
+              {'id': 'room-1'},
+            ],
+          },
+        ),
+      ),
     ]) {
       test('keeps the room but flags a malformed package ($label)', () async {
         answer((_) => captured({'capturePackage': bad}));
@@ -217,9 +236,21 @@ void main() {
       });
     }
 
-    test('CapturePackageInfo.fromJson throws FormatException when malformed', () {
-      expect(() => CapturePackageInfo.fromJson({...package()}..remove('captureId')), throwsFormatException);
-      expect(() => CapturePackageInfo.fromJson(package(override: {'rooms': <Object?>[]})), throwsFormatException);
-    });
+    test(
+      'CapturePackageInfo.fromJson throws FormatException when malformed',
+      () {
+        expect(
+          () =>
+              CapturePackageInfo.fromJson({...package()}..remove('captureId')),
+          throwsFormatException,
+        );
+        expect(
+          () => CapturePackageInfo.fromJson(
+            package(override: {'rooms': <Object?>[]}),
+          ),
+          throwsFormatException,
+        );
+      },
+    );
   });
 }

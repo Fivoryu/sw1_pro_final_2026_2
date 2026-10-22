@@ -60,13 +60,17 @@ class CapturePackageInfo {
     String string(String key) {
       final value = json[key];
       if (value is String && value.isNotEmpty) return value;
-      throw FormatException('Capture package "$key" must be a non-empty string');
+      throw FormatException(
+        'Capture package "$key" must be a non-empty string',
+      );
     }
 
     int integer(String key, {required int min}) {
       final value = json[key];
       if (value is int && value >= min) return value;
-      throw FormatException('Capture package "$key" must be an integer >= $min');
+      throw FormatException(
+        'Capture package "$key" must be an integer >= $min',
+      );
     }
 
     final rooms = json['rooms'];

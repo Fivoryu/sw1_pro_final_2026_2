@@ -79,31 +79,34 @@ Future<_Harness> _build({
 }
 
 void main() {
-  test('registers, uploads and completes, deleting the ZIP only at the end', () async {
-    final h = await _build();
+  test(
+    'registers, uploads and completes, deleting the ZIP only at the end',
+    () async {
+      final h = await _build();
 
-    await h.controller.enqueue(_package());
-    await h.controller.idle;
+      await h.controller.enqueue(_package());
+      await h.controller.idle;
 
-    final item = h.controller.items.single;
-    expect(item.upload.stage, UploadStage.completed);
-    expect(item.upload.remoteStatus, RemoteCaptureStatus.queued);
-    expect(item.upload.zipPath, isNull);
-    expect(h.backend.captures['cap-1']!.uploaded, _zipBytes);
-    expect(h.backend.captures['cap-1']!.status, 'queued');
-    expect(h.files.deleted, [_zipPath]);
-    // The order on the wire is register, PUT, complete.
-    expect(
-      [for (final r in h.backend.requests) '${r.method} ${r.url.path}'],
-      [
-        'POST /api/v1/staff/agencies/agency-1/listings/listing-1/captures',
-        'PUT /upload/cap-1',
-        'POST /api/v1/staff/agencies/agency-1/listings/listing-1/captures/cap-1/complete',
-      ],
-    );
-    final stored = await h.store.list('staff-1');
-    expect(stored.single.stage, UploadStage.completed);
-  });
+      final item = h.controller.items.single;
+      expect(item.upload.stage, UploadStage.completed);
+      expect(item.upload.remoteStatus, RemoteCaptureStatus.queued);
+      expect(item.upload.zipPath, isNull);
+      expect(h.backend.captures['cap-1']!.uploaded, _zipBytes);
+      expect(h.backend.captures['cap-1']!.status, 'queued');
+      expect(h.files.deleted, [_zipPath]);
+      // The order on the wire is register, PUT, complete.
+      expect(
+        [for (final r in h.backend.requests) '${r.method} ${r.url.path}'],
+        [
+          'POST /api/v1/staff/agencies/agency-1/listings/listing-1/captures',
+          'PUT /upload/cap-1',
+          'POST /api/v1/staff/agencies/agency-1/listings/listing-1/captures/cap-1/complete',
+        ],
+      );
+      final stored = await h.store.list('staff-1');
+      expect(stored.single.stage, UploadStage.completed);
+    },
+  );
 
   test('reports progress while uploading', () async {
     final h = await _build();
@@ -123,47 +126,53 @@ void main() {
     expect(seen.last, 1.0);
   });
 
-  test('a lost connection during the upload keeps the ZIP and resumes without registering again', () async {
-    final h = await _build();
-    h.backend.failPuts = 1;
+  test(
+    'a lost connection during the upload keeps the ZIP and resumes without registering again',
+    () async {
+      final h = await _build();
+      h.backend.failPuts = 1;
 
-    await h.controller.enqueue(_package());
-    await h.controller.idle;
+      await h.controller.enqueue(_package());
+      await h.controller.idle;
 
-    var item = h.controller.items.single;
-    expect(item.upload.stage, UploadStage.registered);
-    expect(item.upload.zipPath, _zipPath);
-    expect(item.upload.lastError, contains('Sin conexión'));
-    expect(item.upload.permanent, isFalse);
-    expect(h.files.deleted, isEmpty);
+      var item = h.controller.items.single;
+      expect(item.upload.stage, UploadStage.registered);
+      expect(item.upload.zipPath, _zipPath);
+      expect(item.upload.lastError, contains('Sin conexión'));
+      expect(item.upload.permanent, isFalse);
+      expect(h.files.deleted, isEmpty);
 
-    await h.controller.retry();
+      await h.controller.retry();
 
-    item = h.controller.items.single;
-    expect(item.upload.stage, UploadStage.completed);
-    expect(item.upload.lastError, isNull);
-    expect(h.backend.registerCalls, 1);
-    expect(h.backend.putCalls, 2);
-    expect(h.backend.captures, hasLength(1));
-    expect(h.files.deleted, [_zipPath]);
-  });
+      item = h.controller.items.single;
+      expect(item.upload.stage, UploadStage.completed);
+      expect(item.upload.lastError, isNull);
+      expect(h.backend.registerCalls, 1);
+      expect(h.backend.putCalls, 2);
+      expect(h.backend.captures, hasLength(1));
+      expect(h.files.deleted, [_zipPath]);
+    },
+  );
 
-  test('offline at the start registers once when the connection returns', () async {
-    final h = await _build();
-    h.backend.offline = true;
+  test(
+    'offline at the start registers once when the connection returns',
+    () async {
+      final h = await _build();
+      h.backend.offline = true;
 
-    await h.controller.enqueue(_package());
-    await h.controller.idle;
-    expect(h.controller.items.single.upload.stage, UploadStage.local);
-    expect(h.backend.captures, isEmpty);
+      await h.controller.enqueue(_package());
+      await h.controller.idle;
+      expect(h.controller.items.single.upload.stage, UploadStage.local);
+      expect(h.backend.captures, isEmpty);
 
-    h.backend.offline = false;
-    await h.controller.retry();
+      h.backend.offline = false;
+      await h.controller.retry();
 
-    expect(h.controller.items.single.upload.stage, UploadStage.completed);
-    expect(h.backend.captures, hasLength(1));
-    expect(h.backend.registerCalls, 1);
-  });
+      expect(h.controller.items.single.upload.stage, UploadStage.completed);
+      expect(h.backend.captures, hasLength(1));
+      expect(h.backend.registerCalls, 1);
+    },
+  );
 
   test('a failed complete keeps the ZIP and does not upload twice', () async {
     final h = await _build();
@@ -247,26 +256,29 @@ void main() {
     expect(h.backend.completeCalls, 1);
   });
 
-  test('a rejection retrying cannot fix is permanent and is not retried', () async {
-    final h = await _build();
-    h.backend.rejectRegistration = true;
+  test(
+    'a rejection retrying cannot fix is permanent and is not retried',
+    () async {
+      final h = await _build();
+      h.backend.rejectRegistration = true;
 
-    await h.controller.enqueue(_package());
-    await h.controller.idle;
-    await h.controller.retry();
+      await h.controller.enqueue(_package());
+      await h.controller.idle;
+      await h.controller.retry();
 
-    final item = h.controller.items.single;
-    expect(item.upload.permanent, isTrue);
-    expect(item.upload.lastError, isNotNull);
-    expect(h.backend.registerCalls, 1);
-    expect(h.files.deleted, isEmpty);
+      final item = h.controller.items.single;
+      expect(item.upload.permanent, isTrue);
+      expect(item.upload.lastError, isNotNull);
+      expect(h.backend.registerCalls, 1);
+      expect(h.files.deleted, isEmpty);
 
-    await h.controller.dismiss('cap-1');
+      await h.controller.dismiss('cap-1');
 
-    expect(h.controller.items, isEmpty);
-    expect(await h.store.list('staff-1'), isEmpty);
-    expect(h.files.deleted, [_zipPath]);
-  });
+      expect(h.controller.items, isEmpty);
+      expect(await h.store.list('staff-1'), isEmpty);
+      expect(h.files.deleted, [_zipPath]);
+    },
+  );
 
   test('a ZIP that is gone from the phone is a permanent failure', () async {
     final h = await _build(files: FakePackageFiles({}));
@@ -280,22 +292,25 @@ void main() {
     expect(h.backend.requests, isEmpty);
   });
 
-  test('without a session nothing is sent and the agent is told to sign in', () async {
-    final session = StaffSessionController(
-      api: StaffAuthApi(
-        baseUrl: 'https://api.example.test',
-        client: FakeStaffBackend().client,
-      ),
-      credentialStore: InMemoryStaffCredentialStore(),
-    );
-    final h = await _build(session: session);
+  test(
+    'without a session nothing is sent and the agent is told to sign in',
+    () async {
+      final session = StaffSessionController(
+        api: StaffAuthApi(
+          baseUrl: 'https://api.example.test',
+          client: FakeStaffBackend().client,
+        ),
+        credentialStore: InMemoryStaffCredentialStore(),
+      );
+      final h = await _build(session: session);
 
-    await h.controller.enqueue(_package());
-    await h.controller.idle;
+      await h.controller.enqueue(_package());
+      await h.controller.idle;
 
-    expect(h.backend.requests, isEmpty);
-    expect(h.controller.message, contains('sesión'));
-  });
+      expect(h.backend.requests, isEmpty);
+      expect(h.controller.message, contains('sesión'));
+    },
+  );
 
   group('status', () {
     test('follows the reconstruction until it completes', () async {
@@ -307,11 +322,17 @@ void main() {
         ..add(('completed', null));
 
       await h.controller.retry();
-      expect(h.controller.items.single.upload.remoteStatus, RemoteCaptureStatus.processing);
+      expect(
+        h.controller.items.single.upload.remoteStatus,
+        RemoteCaptureStatus.processing,
+      );
       expect(h.controller.items.single.upload.isFinished, isFalse);
 
       await h.controller.retry();
-      expect(h.controller.items.single.upload.remoteStatus, RemoteCaptureStatus.completed);
+      expect(
+        h.controller.items.single.upload.remoteStatus,
+        RemoteCaptureStatus.completed,
+      );
       expect(h.controller.items.single.upload.isFinished, isTrue);
     });
 

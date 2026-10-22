@@ -17,17 +17,22 @@ import 'support/in_memory_upload_support.dart';
 
 const _zipPath = '/files/capture_packages/cap-1.zip';
 
-CapturePackageInfo _info({List<CapturePackageRoom>? rooms}) => CapturePackageInfo(
-  zipPath: _zipPath,
-  captureId: 'cap-1',
-  sizeBytes: 4,
-  keyframeCount: 8,
-  droppedKeyframes: 0,
-  failedKeyframes: 0,
-  rooms: rooms ?? const [CapturePackageRoom(id: 'room-1', name: 'Estar')],
-);
+CapturePackageInfo _info({List<CapturePackageRoom>? rooms}) =>
+    CapturePackageInfo(
+      zipPath: _zipPath,
+      captureId: 'cap-1',
+      sizeBytes: 4,
+      keyframeCount: 8,
+      droppedKeyframes: 0,
+      failedKeyframes: 0,
+      rooms: rooms ?? const [CapturePackageRoom(id: 'room-1', name: 'Estar')],
+    );
 
-ArCaptured _withPackage(ArCaptured base, {CapturePackageInfo? package, String? problem}) =>
+ArCaptured _withPackage(
+  ArCaptured base, {
+  CapturePackageInfo? package,
+  String? problem,
+}) =>
     ArCaptured(base.payload, capturePackage: package, packageProblem: problem);
 
 typedef _Built = ({
@@ -63,7 +68,9 @@ Future<_Built> _build({bool withUploads = true}) async {
             client: captures.client,
           ),
           store: pending,
-          files: FakePackageFiles({_zipPath: [1, 2, 3, 4]}),
+          files: FakePackageFiles({
+            _zipPath: [1, 2, 3, 4],
+          }),
         )
       : null;
   final controller = SpatialCaptureController(
@@ -89,28 +96,40 @@ Future<_Built> _build({bool withUploads = true}) async {
 }
 
 void main() {
-  test('a walkthrough with a package adds the room and uploads the package', () async {
-    final b = await _build();
-    b.ar.results.add(_withPackage(walkthrough(), package: _info()));
+  test(
+    'a walkthrough with a package adds the room and uploads the package',
+    () async {
+      final b = await _build();
+      b.ar.results.add(_withPackage(walkthrough(), package: _info()));
 
-    final notice = await b.controller.captureRoom('Estar', mode: CaptureMode.walkthrough);
-    await b.uploads!.idle;
+      final notice = await b.controller.captureRoom(
+        'Estar',
+        mode: CaptureMode.walkthrough,
+      );
+      await b.uploads!.idle;
 
-    expect(b.controller.rooms, hasLength(1));
-    expect(notice, contains('Contorno propuesto'));
-    expect(notice, contains('se sube'));
-    expect(b.ar.listingIds, ['listing-1']);
-    expect(b.captures.captures['cap-1']!.status, 'queued');
-    expect(b.uploads!.items.single.upload.stage, UploadStage.completed);
-  });
+      expect(b.controller.rooms, hasLength(1));
+      expect(notice, contains('Contorno propuesto'));
+      expect(notice, contains('se sube'));
+      expect(b.ar.listingIds, ['listing-1']);
+      expect(b.captures.captures['cap-1']!.status, 'queued');
+      expect(b.uploads!.items.single.upload.stage, UploadStage.completed);
+    },
+  );
 
   test('a package problem keeps the room and tells the agent', () async {
     final b = await _build();
     b.ar.results.add(
-      _withPackage(walkthrough(), problem: 'No se guardaron cuadros del recorrido.'),
+      _withPackage(
+        walkthrough(),
+        problem: 'No se guardaron cuadros del recorrido.',
+      ),
     );
 
-    final notice = await b.controller.captureRoom('Estar', mode: CaptureMode.walkthrough);
+    final notice = await b.controller.captureRoom(
+      'Estar',
+      mode: CaptureMode.walkthrough,
+    );
 
     expect(b.controller.rooms, hasLength(1));
     expect(notice, contains('No se guardaron cuadros del recorrido.'));
@@ -119,25 +138,31 @@ void main() {
     expect(b.uploads!.items, isEmpty);
   });
 
-  test('several rooms in one session are flagged: the local contour is only a preview', () async {
-    final b = await _build();
-    b.ar.results.add(
-      _withPackage(
-        walkthrough(),
-        package: _info(
-          rooms: const [
-            CapturePackageRoom(id: 'room-1', name: 'Estar'),
-            CapturePackageRoom(id: 'room-2', name: 'Ambiente 2'),
-          ],
+  test(
+    'several rooms in one session are flagged: the local contour is only a preview',
+    () async {
+      final b = await _build();
+      b.ar.results.add(
+        _withPackage(
+          walkthrough(),
+          package: _info(
+            rooms: const [
+              CapturePackageRoom(id: 'room-1', name: 'Estar'),
+              CapturePackageRoom(id: 'room-2', name: 'Ambiente 2'),
+            ],
+          ),
         ),
-      ),
-    );
+      );
 
-    final notice = await b.controller.captureRoom('Estar', mode: CaptureMode.walkthrough);
+      final notice = await b.controller.captureRoom(
+        'Estar',
+        mode: CaptureMode.walkthrough,
+      );
 
-    expect(notice, contains('2 ambientes'));
-    expect(notice, contains('vista previa'));
-  });
+      expect(notice, contains('2 ambientes'));
+      expect(notice, contains('vista previa'));
+    },
+  );
 
   test('walls mode never creates an upload', () async {
     final b = await _build();
@@ -155,7 +180,10 @@ void main() {
     final b = await _build(withUploads: false);
     b.ar.results.add(_withPackage(walkthrough(), package: _info()));
 
-    final notice = await b.controller.captureRoom('Estar', mode: CaptureMode.walkthrough);
+    final notice = await b.controller.captureRoom(
+      'Estar',
+      mode: CaptureMode.walkthrough,
+    );
 
     expect(b.controller.rooms, hasLength(1));
     expect(notice, isNot(contains('se sube')));

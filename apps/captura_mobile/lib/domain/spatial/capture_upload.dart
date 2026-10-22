@@ -171,7 +171,9 @@ class PendingCaptureUpload {
       createdAt: created,
       stage: stage.first,
       uploadUrl: optional('uploadUrl'),
-      remoteStatus: remote == null ? null : RemoteCaptureStatus.fromWire(remote),
+      remoteStatus: remote == null
+          ? null
+          : RemoteCaptureStatus.fromWire(remote),
       failureReason: optional('failureReason'),
       lastError: optional('lastError'),
       permanent: json['permanent'] == true,

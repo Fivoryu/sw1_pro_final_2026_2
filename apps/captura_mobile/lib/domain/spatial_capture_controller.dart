@@ -162,7 +162,11 @@ class SpatialCaptureController extends ChangeNotifier {
         return null;
       case ArCaptureFailed(:final message):
         return message;
-      case ArCaptured(:final payload, :final capturePackage, :final packageProblem):
+      case ArCaptured(
+        :final payload,
+        :final capturePackage,
+        :final packageProblem,
+      ):
         var capture = payload;
         String? notice;
         final metrics = payload['metrics'];
