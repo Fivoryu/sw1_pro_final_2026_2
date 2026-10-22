@@ -155,6 +155,11 @@ void main() {
         final room = h.controller.rooms.single;
         expect(room.corners, hasLength(4));
         expect(polygonArea(room.corners), closeTo(12, 0.05));
+        expect(
+          room.acquisition.method,
+          RoomAcquisitionMethod.arcoreWalkthrough,
+        );
+        expect(room.acquisition.arMetrics, isNotNull);
       },
     );
 

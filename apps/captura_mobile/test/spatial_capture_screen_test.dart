@@ -151,6 +151,11 @@ void main() {
     expect(find.text('Superficie estimada: 15,54 m²'), findsOneWidget);
     expect(find.text('Medidas ingresadas manualmente'), findsOneWidget);
     expect(find.bySemanticsLabel('Plano de la captura'), findsOneWidget);
+
+    await _tapAndSettle(tester, find.byKey(const ValueKey('edit-room-room-1')));
+    expect(find.text('Lados'), findsOneWidget);
+    expect(find.byKey(const ValueKey('add-opening-button')), findsOneWidget);
+    expect(find.byKey(const ValueKey('reference-field-0')), findsNothing);
   });
 
   testWidgets('shows automatic capture unavailable on unsupported devices', (

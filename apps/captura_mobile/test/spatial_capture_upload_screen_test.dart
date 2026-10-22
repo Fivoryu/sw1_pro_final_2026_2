@@ -109,6 +109,24 @@ Future<void> _tap(WidgetTester tester, Finder finder) async {
 }
 
 void main() {
+  testWidgets('manual rooms never enter the reconstruction upload queue', (
+    tester,
+  ) async {
+    final built = await _build(tester);
+
+    await tester.runAsync(
+      () => built.controller.createManualRectangularRoom(
+        name: 'Dormitorio',
+        length: 4.2,
+        width: 3.7,
+        height: 2.6,
+      ),
+    );
+
+    expect(await built.pending.list('staff-1'), isEmpty);
+    expect(built.controller.uploads!.items, isEmpty);
+  });
+
   testWidgets(
     'shows no upload section when nothing was captured for reconstruction',
     (tester) async {

@@ -45,6 +45,7 @@ void main() {
       expect(room.placement, RoomPlacement.identity);
       expect(room.metrics!.trackingLossCount, 0);
       expect(room.metrics!.cornerHitDistances, [1.0, 1.5, 2.0, 2.5]);
+      expect(room.acquisition.method, RoomAcquisitionMethod.arcoreWalls);
     });
 
     test('reorders a clockwise capture counter-clockwise keeping corner 0', () {

@@ -75,7 +75,7 @@ void main() {
 
       final restored = CapturedRoom.fromJson(legacy);
 
-      expect(restored.acquisition.method, RoomAcquisitionMethod.arcoreWalls);
+      expect(restored.acquisition.method, RoomAcquisitionMethod.legacyArcore);
       expect(restored.acquisition.arMetrics, isNotNull);
     });
 

@@ -290,6 +290,7 @@ class CaptureMetrics {
 /// Only the two ARCore methods are operational camera captures today. The
 /// remaining values make provenance explicit without exposing unfinished UI.
 enum RoomAcquisitionMethod {
+  legacyArcore('legacy_arcore'),
   arcoreWalkthrough('arcore_walkthrough'),
   arcoreWalls('arcore_walls'),
   manual('manual'),
@@ -300,7 +301,8 @@ enum RoomAcquisitionMethod {
 
   final String wire;
 
-  bool get usesArCore => this == arcoreWalkthrough || this == arcoreWalls;
+  bool get usesArCore =>
+      this == legacyArcore || this == arcoreWalkthrough || this == arcoreWalls;
 
   static RoomAcquisitionMethod fromWire(Object? wire) => values.firstWhere(
     (method) => method.wire == wire,
@@ -313,13 +315,15 @@ enum RoomAcquisitionMethod {
 class RoomAcquisition {
   const RoomAcquisition({required this.method, this.arMetrics})
     : assert(
-        (method != RoomAcquisitionMethod.arcoreWalkthrough &&
+        (method != RoomAcquisitionMethod.legacyArcore &&
+                method != RoomAcquisitionMethod.arcoreWalkthrough &&
                 method != RoomAcquisitionMethod.arcoreWalls) ||
             arMetrics != null,
         'ARCore acquisitions require capture metrics',
       ),
       assert(
-        method == RoomAcquisitionMethod.arcoreWalkthrough ||
+        method == RoomAcquisitionMethod.legacyArcore ||
+            method == RoomAcquisitionMethod.arcoreWalkthrough ||
             method == RoomAcquisitionMethod.arcoreWalls ||
             arMetrics == null,
         'Non-AR acquisitions cannot contain ARCore metrics',
@@ -537,10 +541,10 @@ class CapturedRoom {
     ],
     acquisition: json['acquisition'] == null
         // Drafts written before adaptive capture were exclusively ARCore
-        // rooms. Their exact native mode was not persisted, so the safe
-        // interpretation is the legacy wall-marking AR flow, never manual.
+        // rooms. Their exact native mode was not persisted, so provenance
+        // remains explicitly unknown within ARCore and is never manual.
         ? RoomAcquisition(
-            method: RoomAcquisitionMethod.arcoreWalls,
+            method: RoomAcquisitionMethod.legacyArcore,
             arMetrics: CaptureMetrics.fromJson(
               asJsonMap(json['metrics'], 'metrics'),
             ),
