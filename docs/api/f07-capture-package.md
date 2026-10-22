@@ -102,7 +102,7 @@ La API es la única que escribe el estado; los leases vencidos se recuperan por 
 
 ## Resultado
 
-- `sceneDraft`: escena v2 completa (contrato `docs/api/f06-scene-contract.md`) con `source: "reconstruction"` en paredes y objetos; volúmenes sin clase ni precio (F07.6).
+- `sceneDraft`: escena v2 completa (contrato `docs/api/f06-scene-contract.md`) que usa solo los campos de procedencia que ese contrato admite (`walls[].heightSource`; `objects[].source: "depth"` con `confidence`); volúmenes sin clase ni precio (F07.6). La procedencia «reconstrucción» de todo el borrador la registra la captura en la API, no cada elemento de la escena.
 - `warnings`: lista de textos para la agencia (por ejemplo, «Pared sin observar entre…», «Sin profundidad: no se generaron volúmenes»).
 - Los muebles con clase sugerida por el detector entran como sugerencias de F08.5, nunca como inventario.
 - La agencia carga el borrador en el editor (F06.3) y lo guarda con el `PUT` de escena existente; nada se publica solo.
