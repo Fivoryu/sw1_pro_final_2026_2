@@ -86,6 +86,7 @@ confidence/000001.png    # confianza de profundidad 0–255, PNG de 8 bits (opci
 | `POST /api/v1/staff/agencies/{agency_id}/listings/{listing_id}/captures` | Registra la captura. Cuerpo: `{ "captureId", "sizeBytes" }`. Idempotente por `captureId`: repetir devuelve la misma captura. Responde `201` (o `200` al repetir) con `{ "captureId", "status", "uploadUrl", "expiresAt" }`. |
 | `PUT {uploadUrl}` | Subida directa del ZIP al almacenamiento de objetos (URL firmada, corta duración). |
 | `POST …/captures/{capture_id}/complete` | Confirma la subida y encola la reconstrucción. Idempotente. `202` con `{ "captureId", "status": "queued" }`. |
+| `GET …/captures` | Lista las capturas del inmueble, de la más nueva a la más vieja: `{ "captures": [ …mismo cuerpo que el `GET` individual… ] }`. Agregada el 2026-10-22 para que el panel descubra las capturas sin conocer sus ids (cambio aditivo). |
 | `GET …/captures/{capture_id}` | Estado: `awaiting_upload`, `queued`, `processing`, `completed`, `failed`, `accepted`; si hay resultado, incluye `sceneDraft` (escena v2) y `warnings`; si falló, `failureReason`. |
 | `POST …/captures/{capture_id}/accept` | La agencia aceptó el borrador (lo guardó en el editor): pasa a `accepted` y programa el borrado de los cuadros. Solo desde `completed`; idempotente. |
 

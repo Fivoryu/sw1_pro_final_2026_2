@@ -349,6 +349,28 @@ def test_staff_routes_enforce_agency_isolation(ctx: Ctx) -> None:
     assert ctx.row().status == "queued"
 
 
+def test_list_returns_the_listing_captures_newest_first(ctx: Ctx) -> None:
+    assert ctx.client.get(ctx.base()).json() == {"captures": []}
+    assert ctx.register("capture-old").status_code == 201
+    ctx.now = ctx.now + timedelta(minutes=5)
+    assert ctx.register("capture-new").status_code == 201
+    assert ctx.register("capture-elsewhere", listing="listing-two", agency="agency-two").status_code == 403
+
+    listed = ctx.client.get(ctx.base())
+
+    assert listed.status_code == 200
+    assert [c["captureId"] for c in listed.json()["captures"]] == ["capture-new", "capture-old"]
+    assert listed.json()["captures"][0] == ctx.client.get(f"{ctx.base()}/capture-new").json()
+
+
+def test_list_enforces_agency_isolation(ctx: Ctx) -> None:
+    ctx.queued()
+    ctx.set_staff(tenant="agency-two")
+
+    assert ctx.client.get(ctx.base()).status_code == 403
+    assert ctx.client.get(ctx.base("agency-two", "listing-one")).status_code == 404
+
+
 # --- worker ------------------------------------------------------------------------
 
 

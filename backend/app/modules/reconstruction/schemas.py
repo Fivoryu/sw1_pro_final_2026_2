@@ -44,6 +44,10 @@ class CaptureResponse(BaseModel):
     failure_reason: str | None = Field(default=None, alias="failureReason")
 
 
+class CaptureList(BaseModel):
+    captures: list[CaptureResponse]
+
+
 class ReconstructionResult(BaseModel):
     """What the worker reports for its active claim; the route validates ``sceneDraft``."""
 

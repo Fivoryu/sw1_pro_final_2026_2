@@ -39,6 +39,7 @@ from app.modules.reconstruction.models import (
     ListingCapture,
 )
 from app.modules.reconstruction.schemas import (
+    CaptureList,
     CaptureRegistered,
     CaptureRegistration,
     CaptureResponse,
@@ -232,6 +233,27 @@ def complete_capture_upload(
     ):
         raise HTTPException(status_code=503, detail=_QUEUE_UNAVAILABLE)
     return payload
+
+
+@router.get("", response_model=CaptureList, response_model_by_alias=True)
+def list_captures(
+    agency_id: str,
+    listing_id: str,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> CaptureList:
+    """The listing's captures, newest first, so the panel can offer their drafts."""
+    _require_listing_editor(staff, agency_id)
+    with _session_factory(request).begin() as session:
+        if lock_staff_listing(session, agency_id=agency_id, listing_id=listing_id) is None:
+            raise HTTPException(status_code=404, detail=_LISTING_NOT_FOUND)
+        captures = (
+            session.query(ListingCapture)
+            .filter(ListingCapture.agency_id == agency_id, ListingCapture.listing_id == listing_id)
+            .order_by(ListingCapture.created_at.desc(), ListingCapture.id)
+            .all()
+        )
+        return CaptureList(captures=[_capture_response(capture) for capture in captures])
 
 
 @router.get("/{capture_id}", response_model=CaptureResponse, response_model_by_alias=True)
