@@ -1,6 +1,9 @@
 import { useEffect, useId, useRef, useState } from "react";
+import type { SceneDocument } from "../../application/sceneContract";
+import { SceneViewer } from "../editor3d/SceneViewer";
 import {
   getAgencyListing,
+  getListingScene,
   listAgencyListings,
   listListingPhotos,
   listListingTransitions,
@@ -130,6 +133,22 @@ function errorMessage(error: unknown, fallback: string): string {
     return "Tu cuenta no tiene permisos sobre los inmuebles de esta inmobiliaria.";
   }
   return fallback;
+}
+
+/** Reviewer notes on what the capture measured and what it only assumed. */
+export function sceneProvenanceNotes(scene: SceneDocument): string[] {
+  const notes: string[] = [];
+  const assumed = scene.walls.filter((wall) => wall.heightSource === "assumed").length;
+  if (assumed > 0) {
+    notes.push(`Altura supuesta (no medida) en ${assumed} de ${scene.walls.length} muros.`);
+  }
+  const volumes = scene.objects.filter((item) => item.type === "occupancy").length;
+  if (volumes === 1) {
+    notes.push("1 volumen de ocupación capturado, sin etiqueta ni precio publicado.");
+  } else if (volumes > 1) {
+    notes.push(`${volumes} volúmenes de ocupación capturados, sin etiqueta ni precio publicado.`);
+  }
+  return notes;
 }
 
 function availableActions(listing: StaffListing): ListingReviewAction[] {
@@ -310,6 +329,7 @@ function ListingReviewDetail({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [photos, setPhotos] = useState<LoadState<ListingPhoto[]>>({ kind: "loading" });
+  const [scene, setScene] = useState<LoadState<SceneDocument | null>>({ kind: "loading" });
   const confirmationId = useId();
   const reasonId = useId();
 
@@ -324,6 +344,28 @@ function ListingReviewDetail({
       () => {
         if (isCurrent) {
           setPhotos({ kind: "error", message: "No se pudieron cargar las fotos del inmueble." });
+        }
+      },
+    );
+    return () => {
+      isCurrent = false;
+    };
+  }, [agencyId, listingId, detailReload, tokenRef]);
+
+  // The captured scene loads on its own too; a listing without one is still reviewable.
+  useEffect(() => {
+    let isCurrent = true;
+    setScene({ kind: "loading" });
+    getListingScene(tokenRef.current, agencyId, listingId).then(
+      (value) => {
+        if (isCurrent) setScene({ kind: "ready", value });
+      },
+      (error: unknown) => {
+        if (!isCurrent) return;
+        if (error instanceof StaffListingsApiError && error.code === "scene_not_defined") {
+          setScene({ kind: "ready", value: null });
+        } else {
+          setScene({ kind: "error", message: "No se pudo cargar la escena del inmueble." });
         }
       },
     );
@@ -486,6 +528,25 @@ function ListingReviewDetail({
                   ))}
                 </ul>
                 <p className="review-photos__note">La primera foto es la portada del catálogo.</p>
+              </>
+            ) : null}
+          </section>
+
+          <section aria-labelledby={`${confirmationId}-scene`} className="review-scene">
+            <h4 id={`${confirmationId}-scene`}>Escena</h4>
+            {scene.kind === "loading" ? <p>Cargando escena…</p> : null}
+            {scene.kind === "error" ? <p role="status">{scene.message}</p> : null}
+            {scene.kind === "ready" && scene.value === null ? (
+              <p>Este inmueble todavía no tiene escena capturada.</p>
+            ) : null}
+            {scene.kind === "ready" && scene.value !== null ? (
+              <>
+                <SceneViewer sceneDocument={scene.value} />
+                <ul aria-label="Procedencia de la escena" className="review-scene__notes">
+                  {sceneProvenanceNotes(scene.value).map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
               </>
             ) : null}
           </section>

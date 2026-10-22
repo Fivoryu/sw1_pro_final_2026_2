@@ -4,6 +4,21 @@ import os
 from dataclasses import dataclass
 
 
+DETECTION_LEASE_SECONDS_DEFAULT = 300
+
+
+def _boolean_from_env(environment_name: str, default: bool) -> bool:
+    value = os.environ.get(environment_name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes"}:
+        return True
+    if normalized in {"0", "false", "no"}:
+        return False
+    raise RuntimeError(f"{environment_name} must be a boolean")
+
+
 def _positive_timeout_from_env(environment_name: str, default: int) -> int:
     value = os.environ.get(environment_name)
     if value is None:
@@ -38,7 +53,25 @@ class Settings:
     s3_endpoint_url: str | None = None
     s3_bucket_name: str | None = None
     s3_public_endpoint_url: str | None = None
+    s3_access_key_id: str | None = None
+    s3_secret_access_key: str | None = None
+    s3_allow_remote_endpoint: bool = False
     s3_region: str = "us-east-1"
+    sqs_endpoint_url: str | None = None
+    detection_queue_name: str = "roomforge-local-detection"
+    detection_model_id: str = "ssdlite320-mobilenetv3-coco-v1"
+    detection_worker_token: str | None = None
+    detection_max_attempts: int = 3
+    detection_visibility_timeout_seconds: int = 60
+    detection_lease_seconds: int = DETECTION_LEASE_SECONDS_DEFAULT
+    detection_sweep_seconds: int = 60
+    reconstruction_queue_name: str = "roomforge-local-reconstruction"
+    # Falls back to the detection worker token when unset: no new required env var.
+    reconstruction_worker_token: str | None = None
+    reconstruction_max_attempts: int = 3
+    reconstruction_lease_seconds: int = DETECTION_LEASE_SECONDS_DEFAULT
+    reconstruction_sweep_seconds: int = 60
+    capture_retention_days: int = 30
     escrow_rpc_url: str | None = None
     escrow_address: str | None = None
     escrow_bob_address: str | None = None
@@ -87,7 +120,39 @@ class Settings:
             s3_endpoint_url=os.environ.get("S3_ENDPOINT_URL"),
             s3_bucket_name=os.environ.get("S3_BUCKET_NAME") or None,
             s3_public_endpoint_url=os.environ.get("S3_PUBLIC_ENDPOINT_URL") or None,
+            s3_access_key_id=os.environ.get("S3_ACCESS_KEY_ID") or None,
+            s3_secret_access_key=os.environ.get("S3_SECRET_ACCESS_KEY") or None,
+            s3_allow_remote_endpoint=_boolean_from_env("S3_ALLOW_REMOTE_ENDPOINT", False),
             s3_region=os.environ.get("AWS_DEFAULT_REGION") or "us-east-1",
+            sqs_endpoint_url=os.environ.get("SQS_ENDPOINT_URL") or None,
+            detection_queue_name=os.environ.get("DETECTION_QUEUE_NAME")
+            or "roomforge-local-detection",
+            detection_model_id=os.environ.get("DETECTION_MODEL_ID")
+            or "ssdlite320-mobilenetv3-coco-v1",
+            detection_worker_token=os.environ.get("DETECTION_WORKER_TOKEN") or None,
+            detection_max_attempts=_positive_timeout_from_env("DETECTION_MAX_ATTEMPTS", 3),
+            detection_visibility_timeout_seconds=_positive_timeout_from_env(
+                "DETECTION_VISIBILITY_TIMEOUT_SECONDS", 60
+            ),
+            detection_lease_seconds=_positive_timeout_from_env(
+                "DETECTION_LEASE_SECONDS", DETECTION_LEASE_SECONDS_DEFAULT
+            ),
+            detection_sweep_seconds=_positive_timeout_from_env(
+                "ROOMFORGE_DETECTION_SWEEP_SECONDS", 60
+            ),
+            reconstruction_queue_name=os.environ.get("RECONSTRUCTION_QUEUE_NAME")
+            or "roomforge-local-reconstruction",
+            reconstruction_worker_token=os.environ.get("RECONSTRUCTION_WORKER_TOKEN") or None,
+            reconstruction_max_attempts=_positive_timeout_from_env(
+                "RECONSTRUCTION_MAX_ATTEMPTS", 3
+            ),
+            reconstruction_lease_seconds=_positive_timeout_from_env(
+                "RECONSTRUCTION_LEASE_SECONDS", DETECTION_LEASE_SECONDS_DEFAULT
+            ),
+            reconstruction_sweep_seconds=_positive_timeout_from_env(
+                "ROOMFORGE_RECONSTRUCTION_SWEEP_SECONDS", 60
+            ),
+            capture_retention_days=_positive_timeout_from_env("CAPTURE_RETENTION_DAYS", 30),
             escrow_rpc_url=os.environ.get("ROOMFORGE_ESCROW_RPC_URL"),
             escrow_address=os.environ.get("ROOMFORGE_ESCROW_ADDRESS"),
             escrow_bob_address=os.environ.get("ROOMFORGE_ESCROW_BOB_ADDRESS"),
@@ -126,5 +191,17 @@ class Settings:
             self.database_pool_timeout_seconds,
             self.database_statement_timeout_seconds,
             self.email_send_timeout_seconds,
+            self.detection_max_attempts,
+            self.detection_visibility_timeout_seconds,
+            self.detection_lease_seconds,
+            self.detection_sweep_seconds,
+            self.reconstruction_max_attempts,
+            self.reconstruction_lease_seconds,
+            self.reconstruction_sweep_seconds,
+            self.capture_retention_days,
         ) < 1:
             raise ValueError("Timeouts and recovery-code count must be positive")
+        if self.detection_lease_seconds < self.detection_visibility_timeout_seconds:
+            raise ValueError(
+                "The detection lease must not be shorter than the queue visibility timeout"
+            )

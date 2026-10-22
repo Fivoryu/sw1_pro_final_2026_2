@@ -258,7 +258,7 @@ class FakeListingsBackend {
     }
     if (rest.isEmpty && request.method == 'POST') {
       final body = jsonDecode(request.body) as Map<String, Object?>;
-      if (listingPhotos.length >= 10) {
+      if (listingPhotos.length >= 20) {
         return _failure(409, 'conflict', 'Listing photo limit reached');
       }
       final id = 'photo-${_sequence++}';

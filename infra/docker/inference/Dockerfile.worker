@@ -1,0 +1,17 @@
+# Dedicated F08.4 consumer image; Dockerfile/requirements.txt remain the F08.2 pilot evidence.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    TORCH_HOME=/cache/torch
+
+WORKDIR /app
+COPY requirements.txt /app/requirements-inference.txt
+COPY requirements-worker.txt /app/requirements-worker.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir \
+        -r /app/requirements-inference.txt \
+        -r /app/requirements-worker.txt
+
+WORKDIR /work
+ENTRYPOINT ["python", "/work/job_worker.py"]

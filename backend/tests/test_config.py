@@ -23,6 +23,22 @@ def _settings() -> Settings:
     )
 
 
+def test_remote_s3_endpoint_opt_in_defaults_closed_and_is_environment_configurable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_required_environment(monkeypatch)
+    monkeypatch.delenv("S3_ALLOW_REMOTE_ENDPOINT", raising=False)
+
+    assert Settings.from_env().s3_allow_remote_endpoint is False
+
+    monkeypatch.setenv("S3_ALLOW_REMOTE_ENDPOINT", "true")
+    assert Settings.from_env().s3_allow_remote_endpoint is True
+
+    monkeypatch.setenv("S3_ALLOW_REMOTE_ENDPOINT", "maybe")
+    with pytest.raises(RuntimeError, match="S3_ALLOW_REMOTE_ENDPOINT"):
+        Settings.from_env()
+
+
 def test_timeout_settings_use_approved_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_required_environment(monkeypatch)
 

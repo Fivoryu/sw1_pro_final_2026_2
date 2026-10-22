@@ -14,6 +14,9 @@ jobs:
   backend:
     name: Backend (Python 3.11)
     runs-on: ubuntu-latest
+    # A hung test must never burn the 6-hour GitHub limit again: cap the job and
+    # make pytest fail fast, dumping the stacks of every thread when a test stalls.
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
@@ -22,14 +25,75 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      # The PostgreSQL-backed (F04, R6) and Floci lifecycle tests skip when their
+      # services are missing. Run them for real: one Postgres with separate fresh
+      # F04/R6/F10/F08 databases and Floci, like the local Compose setup.
+      - name: Start integration services
+        working-directory: .
+        run: |
+          docker compose -f infra/docker/compose.postgres.yml up -d --wait
+          docker compose -f infra/docker/compose.postgres.yml exec -T postgres psql \
+            -U roomforge -d roomforge \
+            -c "CREATE DATABASE roomforge_f04_runner" \
+            -c "CREATE DATABASE roomforge_r6_runner" \
+            -c "CREATE DATABASE roomforge_f10_runner" \
+            -c "CREATE DATABASE roomforge_f08_runner"
+          docker compose -f infra/docker/compose.local.yml up -d floci --wait
+          # The lifecycle tests require the bucket and queues that the local
+          # provisioning script creates, so provision them exactly like local dev.
+          pwsh -NoProfile -File infra/docker/init-local-resources.ps1
       - run: python -m pip install ".[dev]"
-      - run: python -m pytest tests -q
+      # pytest-timeout (thread method) cannot break a hang that happens inside
+      # native code holding the GIL: its timer thread is starved too, which is
+      # exactly what the stall at 48% of the suite showed. py-spy reads the
+      # process from outside, so every 30 seconds past the watchdog it dumps the
+      # native stack of every thread into this log before killing the run. The
+      # watchdog (12 x 30s) must exceed the healthy suite duration, which the
+      # real PostgreSQL and Floci integration tests have stretched well past
+      # the 2.5 minutes the pure-unit suite used to take.
+      - name: Pytest with native stack dumps on stall
+        env:
+          ROOMFORGE_POSTGRES_DATABASE_URL: postgresql+psycopg://roomforge:valor-dev-local@127.0.0.1:5434/roomforge_f04_runner
+          ROOMFORGE_R6_DATABASE_URL: postgresql+psycopg://roomforge:valor-dev-local@127.0.0.1:5434/roomforge_r6_runner
+          ROOMFORGE_F10_DATABASE_URL: postgresql+psycopg://roomforge:valor-dev-local@127.0.0.1:5434/roomforge_f10_runner
+          ROOMFORGE_F08_DATABASE_URL: postgresql+psycopg://roomforge:valor-dev-local@127.0.0.1:5434/roomforge_f08_runner
+        run: |
+          python -m pip install py-spy
+          python -m pytest tests -q -rs --timeout=120 --timeout-method=thread &
+          PYTEST_PID=$!
+          for _ in $(seq 1 12); do
+            sleep 30
+            if ! kill -0 "$PYTEST_PID" 2>/dev/null; then
+              wait "$PYTEST_PID"
+              exit $?
+            fi
+          done
+          echo "::error::pytest did not finish in ~150s; dumping native thread stacks (py-spy)"
+          py-spy dump --pid "$PYTEST_PID" --nonblocking || true
+          sleep 10
+          py-spy dump --pid "$PYTEST_PID" --nonblocking || true
+          kill -9 "$PYTEST_PID" 2>/dev/null || true
+          wait "$PYTEST_PID" 2>/dev/null || true
+          exit 1
       - run: ruff check app tests
       - run: pyright app tests
+      # Two feature branches once numbered their migrations from the same parent, which
+      # left the chain with two heads and made `alembic upgrade head` unusable once they
+      # met. Fail here instead, where the pull request can still add a merge revision.
+      - name: Alembic chain has a single head
+        run: |
+          python -m alembic heads > "$RUNNER_TEMP/alembic-heads.txt"
+          cat "$RUNNER_TEMP/alembic-heads.txt"
+          heads="$(grep -c '(head)' "$RUNNER_TEMP/alembic-heads.txt" || true)"
+          if [ "$heads" -ne 1 ]; then
+            echo "::error::Expected exactly one Alembic head, found $heads. Add a merge revision for the diverged chains."
+            exit 1
+          fi
 
   panel:
     name: Staff panel (Node 22)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: panel/staff-shell
@@ -45,6 +109,7 @@ jobs:
   customer-flutter:
     name: Customer app (Flutter 3.41.8)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/cliente_mobile
@@ -53,7 +118,13 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.41.8"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - run: flutter pub get
+      # The walkthrough geometry (collisions, doorways, limits) is plain JS
+      # covered by node --test, not by flutter test.
+      - run: node --test
       - run: flutter test
       - run: flutter analyze
       - run: flutter build apk --release --dart-define=API_BASE_URL=https://api.example.com/api/v1
@@ -61,6 +132,7 @@ jobs:
   capture-flutter:
     name: Capture app (Flutter 3.41.8)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/captura_mobile

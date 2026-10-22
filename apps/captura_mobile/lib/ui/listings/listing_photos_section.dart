@@ -176,6 +176,10 @@ class ListingPhotosSection extends StatelessWidget {
             title: const Text('Galería'),
             onTap: () => Navigator.of(context).pop(PhotoOrigin.gallery),
           ),
+          // useSafeArea keeps the sheet clear of the status bar only, so on a device with a
+          // three-button navigation bar the last option ends up underneath it and cannot be
+          // tapped at the position it is drawn in.
+          SizedBox(height: MediaQuery.viewPaddingOf(context).bottom),
         ],
       ),
     );

@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
+import 'data/services/ar_capture_channel.dart';
+import 'data/services/capture_draft_store.dart';
 import 'data/services/staff_auth_api.dart';
+import 'data/services/staff_capture_api.dart';
 import 'data/services/photo_source.dart';
 import 'data/services/staff_credential_store.dart';
 import 'data/services/staff_listing_photos_api.dart';
 import 'data/services/staff_listings_api.dart';
+import 'data/services/staff_scene_api.dart';
 import 'domain/listing_drafts_controller.dart';
 import 'domain/staff_session_controller.dart';
 import 'ui/listings/listings_screen.dart';
@@ -16,11 +21,11 @@ const _apiBaseUrl = String.fromEnvironment(
   defaultValue: 'http://10.0.2.2:8000',
 );
 
-/// What the agent can rely on: listings are saved in RoomForge (F04), while
-/// camera capture belongs to a later phase and stays unavailable.
+/// What the agent can rely on: listings and their photos are saved in
+/// RoomForge, and the spatial capture is kept on the phone until it is sent.
 const _accessNotice =
-    'La captura con cámara todavía no está disponible. Los inmuebles que '
-    'cargues se guardan en RoomForge.';
+    'Los inmuebles y sus fotos se guardan en RoomForge. La captura espacial '
+    'de los ambientes queda en el teléfono hasta que la envíes.';
 
 const _credentialsNotice =
     'El acceso valida tus credenciales y el código de tu segundo factor.';
@@ -40,6 +45,11 @@ void main() => runApp(
     listingsApi: StaffListingsApi(baseUrl: _apiBaseUrl),
     photosApi: StaffListingPhotosApi(baseUrl: _apiBaseUrl),
     photoSource: ImagePickerPhotoSource(),
+    sceneApi: StaffSceneApi(baseUrl: _apiBaseUrl),
+    captureStore: FileCaptureDraftStore(root: getApplicationSupportDirectory),
+    arCapture: MethodChannelArCapture(),
+    captureApi: StaffCaptureApi(baseUrl: _apiBaseUrl),
+    uploadStore: FilePendingUploadStore(root: getApplicationSupportDirectory),
   ),
 );
 
@@ -50,12 +60,22 @@ class CaptureApp extends StatelessWidget {
     required this.listingsApi,
     required this.photosApi,
     required this.photoSource,
+    this.sceneApi,
+    this.captureStore,
+    this.arCapture,
+    this.captureApi,
+    this.uploadStore,
   });
 
   final StaffSessionController controller;
   final StaffListingsApi listingsApi;
   final StaffListingPhotosApi photosApi;
   final PhotoSource photoSource;
+  final StaffSceneApi? sceneApi;
+  final CaptureDraftStore? captureStore;
+  final ArCapture? arCapture;
+  final StaffCaptureApi? captureApi;
+  final PendingUploadStore? uploadStore;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -69,6 +89,11 @@ class CaptureApp extends StatelessWidget {
       listingsApi: listingsApi,
       photosApi: photosApi,
       photoSource: photoSource,
+      sceneApi: sceneApi,
+      captureStore: captureStore,
+      arCapture: arCapture,
+      captureApi: captureApi,
+      uploadStore: uploadStore,
     ),
   );
 }
@@ -81,12 +106,22 @@ class AgentAccessScreen extends StatefulWidget {
     required this.listingsApi,
     required this.photosApi,
     required this.photoSource,
+    this.sceneApi,
+    this.captureStore,
+    this.arCapture,
+    this.captureApi,
+    this.uploadStore,
   });
 
   final StaffSessionController controller;
   final StaffListingsApi listingsApi;
   final StaffListingPhotosApi photosApi;
   final PhotoSource photoSource;
+  final StaffSceneApi? sceneApi;
+  final CaptureDraftStore? captureStore;
+  final ArCapture? arCapture;
+  final StaffCaptureApi? captureApi;
+  final PendingUploadStore? uploadStore;
 
   @override
   State<AgentAccessScreen> createState() => _AgentAccessScreenState();
@@ -99,6 +134,7 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
   final _password = TextEditingController();
   final _code = TextEditingController();
   bool _submitting = false;
+  bool _passwordVisible = false;
 
   @override
   void initState() {
@@ -196,10 +232,21 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
           TextFormField(
             key: const ValueKey('access-password-field'),
             controller: _password,
-            obscureText: true,
-            decoration: const InputDecoration(
+            obscureText: !_passwordVisible,
+            decoration: InputDecoration(
               labelText: 'Contraseña',
-              border: OutlineInputBorder(),
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                key: const ValueKey('access-password-visibility'),
+                tooltip: _passwordVisible
+                    ? 'Ocultar contraseña'
+                    : 'Mostrar contraseña',
+                icon: Icon(
+                  _passwordVisible ? Icons.visibility_off : Icons.visibility,
+                ),
+                onPressed: () =>
+                    setState(() => _passwordVisible = !_passwordVisible),
+              ),
             ),
             validator: (value) => (value == null || value.isEmpty)
                 ? 'Ingresá tu contraseña'
@@ -295,6 +342,11 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
                 session: widget.controller,
                 photosApi: widget.photosApi,
                 photoSource: widget.photoSource,
+                sceneApi: widget.sceneApi,
+                captureStore: widget.captureStore,
+                arCapture: widget.arCapture,
+                captureApi: widget.captureApi,
+                uploadStore: widget.uploadStore,
               ),
             ),
           ),

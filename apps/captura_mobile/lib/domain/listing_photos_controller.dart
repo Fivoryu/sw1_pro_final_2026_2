@@ -46,8 +46,8 @@ class ListingPhotosController extends ChangeNotifier {
        _now = now ?? DateTime.now;
 
   /// Same limits as the API.
-  static const int maxPhotos = 10;
-  static const int maxBytes = 5 * 1024 * 1024;
+  static const int maxPhotos = 20;
+  static const int maxBytes = 20 * 1024 * 1024;
 
   static const String _noSessionMessage =
       'Tu cuenta no tiene una sesión activa. Volvé a ingresar.';
@@ -130,7 +130,7 @@ class ListingPhotosController extends ChangeNotifier {
     try {
       picked = await _source.pick(origin);
     } on UnsupportedPhotoFormat {
-      _message = 'Elegí una foto JPG, PNG o WebP.';
+      _message = 'Elegí una foto JPG, PNG, WebP, HEIC o HEIF.';
       _notify();
       return;
     } on Exception {
@@ -143,7 +143,7 @@ class ListingPhotosController extends ChangeNotifier {
       return;
     }
     if (picked.bytes.length > maxBytes) {
-      _message = 'La foto pesa más de 5 MB. Elegí otra.';
+      _message = 'La foto pesa más de 20 MiB. Elegí otra.';
       _notify();
       return;
     }
@@ -283,10 +283,11 @@ class ListingPhotosController extends ChangeNotifier {
         'Tu cuenta no tiene permisos sobre los inmuebles de esta '
             'inmobiliaria.',
       404 => 'El inmueble o la foto ya no existe.',
-      409 when stage == _Stage.request => 'Llegaste al máximo de 10 fotos.',
+      409 when stage == _Stage.request => 'Llegaste al máximo de 20 fotos.',
       409 => 'La subida no se completó. Reintentá.',
       422 =>
-        'El archivo no es una foto válida (JPG, PNG o WebP de hasta 5 MB).',
+        'El archivo no es una foto válida (JPG, PNG, WebP, HEIC o HEIF de '
+            'hasta 20 MiB).',
       502 || 503 || 504 =>
         'El almacenamiento de fotos no está disponible. Intentá más tarde.',
       _ => 'Ocurrió un error inesperado. Intentá de nuevo.',

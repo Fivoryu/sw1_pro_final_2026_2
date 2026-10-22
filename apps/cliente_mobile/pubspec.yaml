@@ -15,6 +15,7 @@ dependencies:
   convert: ^3.1.2
   web3dart: ^3.0.3
   wallet: ^0.0.18
+  flutter_inappwebview: ^6.1.5
 
 dev_dependencies:
   flutter_test:
@@ -22,3 +23,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/viewer/index.html
+    - assets/viewer/viewer.js
+    - assets/viewer/geometry.mjs
+    - assets/viewer/three.module.min.js

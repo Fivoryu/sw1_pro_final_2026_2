@@ -5,7 +5,7 @@ from typing import cast
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from httpx import Response
+from httpx2 import Response
 
 from app.modules.identity.models import Agency
 from test_agencies import (

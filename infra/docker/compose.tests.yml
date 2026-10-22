@@ -1,0 +1,36 @@
+name: roomforge-photo-tests
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: roomforge_f04_runner
+      POSTGRES_USER: roomforge_test
+      POSTGRES_PASSWORD: roomforge_test_only
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U roomforge_test -d roomforge_f04_runner"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  backend-tests:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile.test
+    depends_on:
+      postgres:
+        condition: service_healthy
+    network_mode: "service:postgres"
+    environment:
+      ROOMFORGE_POSTGRES_DATABASE_URL: postgresql+psycopg://roomforge_test:roomforge_test_only@127.0.0.1:5432/roomforge_f04_runner
+    command: ["tests", "-q"]
+    volumes:
+      - ../../backend/app:/app/app:ro
+      - ../../backend/tests:/app/tests:ro
+      - ../../backend/alembic:/app/alembic:ro
+      - ../../backend/alembic.ini:/app/alembic.ini:ro
+      - ../../infra:/infra:ro
+      - ../../worker3d:/worker3d:ro

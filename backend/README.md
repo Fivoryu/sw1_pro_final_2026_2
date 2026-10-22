@@ -49,4 +49,47 @@ From this directory:
 ../.venv/Scripts/pyright.exe app tests
 ```
 
-Tests use an in-memory SQLite database and an in-test fake email sender; they do not send email or mutate PostgreSQL data.
+Most unit tests use in-memory SQLite and in-test fakes. The dedicated Docker test runner also executes the F04 PostgreSQL migration test against a fresh temporary database.
+
+## Isolated Docker test runner
+
+The API image remains runtime-only. The separate Compose project builds a test-only image with the dependencies from `.[dev]` and a temporary PostgreSQL service. It installs `libatomic1` for the bundled Node runtime used by Pyright on `python:3.12-slim`. It binds `app/`, `tests/`, `alembic/`, and `alembic.ini` read-only from the working tree into the container, so code/test edits do not require rebuilding. PostgreSQL uses a temporary filesystem and shares its loopback network namespace with pytest so the F04 migration test can use its required fresh `roomforge_f04_*` database. The runner never connects to or modifies the persistent databases in `compose.local.yml` or `compose.postgres.yml`.
+
+Run from Windows PowerShell with Docker Desktop active, or from a WSL shell integrated with Docker Desktop.
+
+Build the test image once, then rebuild only when the Dockerfile or Python dependencies change:
+
+```powershell
+$compose = "infra/docker/compose.tests.yml"
+docker compose -f $compose build backend-tests
+```
+
+Focused photo tests:
+
+```powershell
+$compose = "infra/docker/compose.tests.yml"
+docker compose -f $compose run --rm backend-tests tests/test_listing_photos.py -q
+$testExit = $LASTEXITCODE
+docker compose -f $compose down --remove-orphans
+exit $testExit
+```
+
+Full backend suite:
+
+```powershell
+$compose = "infra/docker/compose.tests.yml"
+docker compose -f $compose run --rm backend-tests
+$testExit = $LASTEXITCODE
+docker compose -f $compose down --remove-orphans
+exit $testExit
+```
+
+Isolated Pyright check:
+
+```powershell
+$compose = "infra/docker/compose.tests.yml"
+docker compose -f $compose run --rm --entrypoint pyright backend-tests app tests
+$checkExit = $LASTEXITCODE
+docker compose -f $compose down --remove-orphans
+exit $checkExit
+```

@@ -11,6 +11,10 @@ import { getCurrentExchangeRates, getExchangeRateHistory } from "../../applicati
 import { listAgencyListings } from "../../application/staffListingsApi";
 import { ProtectedStaffShell } from "./ProtectedStaffShell";
 
+vi.mock("../editor3d/SceneViewer", () => ({
+  SceneViewer: () => <div aria-label="Visor 3D de la escena" />,
+}));
+
 vi.mock("../../application/staffListingsApi", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../application/staffListingsApi")>();
@@ -147,6 +151,28 @@ describe("ProtectedStaffShell", () => {
       status: "pending",
     });
     expect(screen.queryByText(/prototipo/i)).not.toBeInTheDocument();
+  });
+
+  it("opens the scene editor from the agency staff navigation", async () => {
+    const user = userEvent.setup();
+    sessionStorage.setItem("roomforge.staff.csrf", "stored-csrf");
+    vi.mocked(refreshStaffSession).mockResolvedValue({
+      access_token: "volatile-access",
+      csrf_token: "rotated-csrf",
+    });
+    vi.mocked(getStaffMe).mockResolvedValue({ user: staffUser("agency_admin") });
+
+    render(<ProtectedStaffShell />);
+    await screen.findByRole("heading", { level: 2, name: "Cola de revisión" });
+    await user.click(screen.getByRole("button", { name: "Editor de escenas" }));
+
+    expect(await screen.findByRole("heading", { level: 2, name: "Editor de escenas" })).toBeVisible();
+    expect(listAgencyListings).toHaveBeenCalledWith("volatile-access", "agency-1", {
+      status: "draft",
+    });
+    expect(listAgencyListings).toHaveBeenCalledWith("volatile-access", "agency-1", {
+      status: "approved",
+    });
   });
 
   it("returns to login after a successful API logout", async () => {

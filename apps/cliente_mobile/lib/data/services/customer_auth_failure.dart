@@ -12,6 +12,9 @@ const String kInternalError = 'internal_error';
 /// The transport never reached the API, so the caller can offer a retry.
 const String kNetworkError = 'network_error';
 
+/// The server asked the client to slow down (HTTP 429).
+const String kRateLimited = 'rate_limited';
+
 /// User-facing text chosen locally. Server details are used only when the
 /// response carries the documented envelope.
 const Map<String, String> kSafeFailureDetails = {
@@ -20,6 +23,7 @@ const Map<String, String> kSafeFailureDetails = {
   kForbidden: 'No tenés permiso para realizar esta acción.',
   kNotFound: 'El recurso solicitado no existe.',
   kConflict: 'La operación entra en conflicto con datos existentes.',
+  kRateLimited: 'Estás haciendo demasiadas solicitudes. Esperá un momento.',
   kDependencyUnavailable: 'Un servicio requerido no está disponible.',
   kInternalError: 'Ocurrió un error inesperado. Intentá de nuevo.',
   kNetworkError: 'No pudimos contactar el servicio. Revisá tu conexión.',
@@ -53,6 +57,7 @@ String codeForStatus(int statusCode) {
   if (statusCode == 403) return kForbidden;
   if (statusCode == 404) return kNotFound;
   if (statusCode == 409) return kConflict;
+  if (statusCode == 429) return kRateLimited;
   if (statusCode == 502 || statusCode == 503 || statusCode == 504) {
     return kDependencyUnavailable;
   }

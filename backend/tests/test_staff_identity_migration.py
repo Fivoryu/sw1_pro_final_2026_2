@@ -35,6 +35,16 @@ from sqlalchemy.schema import CheckConstraint, UniqueConstraint
 from app.db.base import Base
 from app.modules.identity import models as identity_models  # noqa: F401
 
+# The R6 schema defines a unique index over an expression
+# (lower(trim(normalized_email))) on pending invitations. SQLAlchemy cannot
+# reflect expression-based indexes, so every metadata comparison over a
+# migrated database emits this SAWarning. The index is intentional; silencing
+# the reflection notice here is the documented accommodation, not a schema
+# problem.
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:Skipped unsupported reflection of expression-based index"
+)
+
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 _R6_DATABASE_PREFIX = "roomforge_r6_"
 _R6_ENGINE_INFO_KEY = "roomforge.r6.isolated_engine"
@@ -191,16 +201,24 @@ def _normalize_sql(value: str | None) -> str | None:
     )
     normalized = _DEFAULT_TRIM_ARGUMENTS.sub("trim(", normalized)
     normalized = normalized.replace("(", " ").replace(")", " ")
-    return " ".join(normalized.split())
+    normalized = " ".join(normalized.split())
+    # pg_get_expr renders literal defaults quoted ('manual'); the metadata side of
+    # the comparison is the bare literal value, so drop one wrapping quote pair.
+    if len(normalized) >= 2 and normalized.startswith("'") and normalized.endswith("'"):
+        normalized = normalized[1:-1]
+    return normalized
 
 
 def _expected_default(column: Column[object], engine: Engine) -> str | None:
     server_default = getattr(column, "server_default")
     if server_default is None:
         return None
-    compiled = server_default.arg.compile(
-        dialect=engine.dialect, compile_kwargs={"literal_binds": True}
-    )
+    raw = getattr(server_default, "arg", server_default)
+    if isinstance(raw, str):
+        # A plain-string server default is not a SQL expression object; there is
+        # nothing to compile against the dialect.
+        return _normalize_sql(raw)
+    compiled = raw.compile(dialect=engine.dialect, compile_kwargs={"literal_binds": True})
     return _normalize_sql(str(compiled))
 
 
@@ -706,6 +724,17 @@ def _metadata_differences(engine: Engine) -> list[str]:
                 )
             expected_default = _expected_default(metadata_column, engine)
             actual_default = _normalize_sql(actual_column["default"])
+            if (
+                expected_default is None
+                and metadata_column.primary_key
+                and actual_default is not None
+                and actual_default.startswith("nextval")
+            ):
+                # An autoincrement integer primary key carries no server_default in
+                # SQLAlchemy metadata: the dialect supplies the sequence at DDL time.
+                # PostgreSQL fairly reflects that nextval default, so both sides
+                # describe the same schema.
+                continue
             if expected_default != actual_default:
                 differences.append(
                     f"{table_name}.{column_name} server default: expected {expected_default!r}, "

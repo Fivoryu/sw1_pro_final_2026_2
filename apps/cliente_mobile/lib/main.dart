@@ -5,6 +5,8 @@ import 'data/services/customer_booking_api.dart';
 import 'data/services/local_wallet_connect.dart';
 import 'data/services/customer_auth_api.dart';
 import 'data/services/customer_token_store.dart';
+import 'data/services/quote_api.dart';
+import 'data/services/scene_api.dart';
 import 'domain/catalog_controller.dart';
 import 'domain/customer_reservations_controller.dart';
 import 'domain/customer_session_controller.dart';
@@ -27,6 +29,8 @@ void main() => runApp(
       baseUrl: _apiBaseUrl,
       accessTokenProvider: () => _customerSession.obtainAccessToken(),
     ),
+    sceneApi: SceneApi(baseUrl: _apiBaseUrl),
+    quoteApi: QuoteApi(baseUrl: _apiBaseUrl),
   ),
 );
 
@@ -42,11 +46,15 @@ class RoomForgeApp extends StatelessWidget {
     required this.sessionController,
     required this.catalogApi,
     this.bookingApi,
+    this.sceneApi,
+    this.quoteApi,
   });
 
   final CustomerSessionController sessionController;
   final CatalogApi catalogApi;
   final CustomerBookingApi? bookingApi;
+  final SceneApi? sceneApi;
+  final QuoteApi? quoteApi;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -59,6 +67,8 @@ class RoomForgeApp extends StatelessWidget {
       sessionController: sessionController,
       catalogApi: catalogApi,
       bookingApi: bookingApi,
+      sceneApi: sceneApi,
+      quoteApi: quoteApi,
     ),
   );
 }
@@ -69,11 +79,15 @@ class CustomerShell extends StatefulWidget {
     required this.sessionController,
     required this.catalogApi,
     this.bookingApi,
+    this.sceneApi,
+    this.quoteApi,
   });
 
   final CustomerSessionController sessionController;
   final CatalogApi catalogApi;
   final CustomerBookingApi? bookingApi;
+  final SceneApi? sceneApi;
+  final QuoteApi? quoteApi;
 
   @override
   State<CustomerShell> createState() => _CustomerShellState();
@@ -114,6 +128,8 @@ class _CustomerShellState extends State<CustomerShell> {
           controller: _catalog,
           reservationsController: _reservations,
           sessionController: widget.sessionController,
+          sceneApi: widget.sceneApi,
+          quoteApi: widget.quoteApi,
         ),
         CustomerReservationsScreen(
           controller: _reservations,

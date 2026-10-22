@@ -1,0 +1,50 @@
+{
+  "version": "2.0",
+  "unit": "meters",
+  "walls": [
+    { "id": "wall-north",  "start": { "x": 0, "z": 0 }, "end": { "x": 4, "z": 0 }, "height": 2.4, "thickness": 0.15 },
+    { "id": "wall-east",   "start": { "x": 4, "z": 0 }, "end": { "x": 4, "z": 3 }, "height": 2.4, "thickness": 0.15 },
+    { "id": "wall-south",  "start": { "x": 4, "z": 3 }, "end": { "x": 0, "z": 3 }, "height": 2.4, "thickness": 0.15 },
+    { "id": "wall-west",   "start": { "x": 0, "z": 3 }, "end": { "x": 0, "z": 0 }, "height": 2.4, "thickness": 0.15 }
+  ],
+  "openings": [
+    {
+      "id": "door_1",
+      "wallId": "wall-north",
+      "position": 0.5,
+      "width": 0.9,
+      "height": 2.1,
+      "type": "door"
+    }
+  ],
+  "rooms": [
+    {
+      "id": "room_main",
+      "name": "Estar",
+      "wallIds": ["wall-north", "wall-east", "wall-south", "wall-west"]
+    }
+  ],
+  "objects": [
+    {
+      "id": "ref_cube_1",
+      "type": "placeholder",
+      "position": { "x": 1, "y": 0, "z": 1 },
+      "dimensions": { "width": 0.5, "height": 0.5, "depth": 0.5 },
+      "color": "red"
+    },
+    {
+      "id": "ref_cube_2",
+      "type": "placeholder",
+      "position": { "x": 3, "y": 0, "z": 1 },
+      "dimensions": { "width": 0.5, "height": 0.5, "depth": 0.5 },
+      "color": "green"
+    },
+    {
+      "id": "ref_cube_3",
+      "type": "placeholder",
+      "position": { "x": 2, "y": 0, "z": 2 },
+      "dimensions": { "width": 0.5, "height": 0.5, "depth": 0.5 },
+      "color": "blue"
+    }
+  ]
+}

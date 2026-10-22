@@ -14,6 +14,10 @@ import { listAgencyListings } from "./application/staffListingsApi";
 import { getCurrentExchangeRates, getExchangeRateHistory } from "./application/exchangeRatesApi";
 import * as staffSession from "./application/staffSession";
 
+vi.mock("./features/editor3d/SceneViewer", () => ({
+  SceneViewer: () => <div aria-label="Visor 3D de la escena" />,
+}));
+
 vi.mock("./application/staffListingsApi", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("./application/staffListingsApi")>();
