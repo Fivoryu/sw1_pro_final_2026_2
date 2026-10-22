@@ -12,6 +12,7 @@ import {
 import { SceneEditor } from "../editor3d/SceneEditor";
 import { AgencyReviewQueue } from "../listings/AgencyReviewQueue";
 import { ExchangeRatesAdmin } from "../rates/ExchangeRatesAdmin";
+import { StripeCardPaymentsAdmin } from "../reservations/StripeCardPaymentsAdmin";
 import { StaffLoginShell } from "./StaffLoginShell";
 
 const RENEWAL_SKEW_MS = 30_000;
@@ -278,7 +279,10 @@ export function ProtectedStaffShell() {
           {isAgencyStaff && agencyWorkspace === "scenes" ? (
             <SceneEditor accessToken={session.accessToken} agencyId={agencyId ?? ""} />
           ) : session.user.role === "agency_admin" && agencyId ? (
-            <AgencyReviewQueue accessToken={session.accessToken} agencyId={agencyId} />
+            <>
+              <AgencyReviewQueue accessToken={session.accessToken} agencyId={agencyId} />
+              <StripeCardPaymentsAdmin accessToken={session.accessToken} agencyId={agencyId} />
+            </>
           ) : session.user.role === "platform_admin" ? (
             <ExchangeRatesAdmin accessToken={session.accessToken} />
           ) : session.user.role === "agent" ? (

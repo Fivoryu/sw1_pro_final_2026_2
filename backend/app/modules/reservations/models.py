@@ -31,6 +31,7 @@ class Reservation(Base):
             "status IN ('pending', 'accepted', 'rejected', 'cancelled', 'expired')",
             name="ck_reservation_status",
         ),
+        CheckConstraint("payment_method IN ('wallet', 'card')", name="ck_reservation_payment_method"),
         CheckConstraint("offer_version >= 1", name="ck_reservation_offer_version_positive"),
         CheckConstraint(
             "decision_deadline_at > api_created_at",
@@ -75,23 +76,22 @@ class Reservation(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    listing_id: Mapped[str] = mapped_column(
-        ForeignKey("listing.id", ondelete="RESTRICT"), nullable=False
-    )
+    listing_id: Mapped[str] = mapped_column(ForeignKey("listing.id", ondelete="RESTRICT"), nullable=False)
     quote_id: Mapped[str] = mapped_column(
         ForeignKey("quote_snapshot.id", ondelete="RESTRICT"), nullable=False
     )
     customer_id: Mapped[str] = mapped_column(
         ForeignKey("customer_account.id", ondelete="RESTRICT"), nullable=False
     )
-    customer_wallet_id: Mapped[str] = mapped_column(
-        ForeignKey("customer_wallet.id", ondelete="RESTRICT"), nullable=False
+    customer_wallet_id: Mapped[str | None] = mapped_column(
+        ForeignKey("customer_wallet.id", ondelete="RESTRICT"), nullable=True
     )
-    agency_wallet_id: Mapped[str] = mapped_column(
-        ForeignKey("agency_wallet.id", ondelete="RESTRICT"), nullable=False
+    agency_wallet_id: Mapped[str | None] = mapped_column(
+        ForeignKey("agency_wallet.id", ondelete="RESTRICT"), nullable=True
     )
-    customer_wallet_address: Mapped[str] = mapped_column(String(42), nullable=False)
-    agency_wallet_address: Mapped[str] = mapped_column(String(42), nullable=False)
+    customer_wallet_address: Mapped[str | None] = mapped_column(String(42), nullable=True)
+    agency_wallet_address: Mapped[str | None] = mapped_column(String(42), nullable=True)
+    payment_method: Mapped[str] = mapped_column(String(8), nullable=False, default="wallet")
     offer_version: Mapped[int] = mapped_column(Integer, nullable=False)
     operation: Mapped[str] = mapped_column(String(8), nullable=False)
     quote_lines: Mapped[list[dict[str, str | None]]] = mapped_column(JSON, nullable=False)
@@ -101,9 +101,7 @@ class Reservation(Base):
     api_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     decision_deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
-    deposit_confirmed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deposit_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
 

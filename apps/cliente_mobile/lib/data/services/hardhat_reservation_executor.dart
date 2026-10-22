@@ -91,7 +91,9 @@ class HardhatReservationExecutor {
     final existing = await _pendingFor(reservation.reservationId);
     if (existing != null) {
       if (existing.action != 'deposit') {
-        throw StateError('Hay otra acción on-chain pendiente para esta reserva.');
+        throw StateError(
+          'Hay otra acción on-chain pendiente para esta reserva.',
+        );
       }
       return _reconcilePending(existing);
     }
@@ -156,7 +158,9 @@ class HardhatReservationExecutor {
     final existing = await _pendingFor(reservation.reservationId);
     if (existing != null) {
       if (existing.action != 'cancel') {
-        throw StateError('Hay otra acción on-chain pendiente para esta reserva.');
+        throw StateError(
+          'Hay otra acción on-chain pendiente para esta reserva.',
+        );
       }
       return _reconcilePending(existing);
     }
@@ -221,18 +225,24 @@ class HardhatReservationExecutor {
         reservation.depositAmount == null ||
         reservation.depositConfirmedAt == null ||
         reservation.decisionDeadlineAt.isAfter(DateTime.now().toUtc())) {
-      throw StateError('Solo un depósito pendiente vencido puede expirar en cadena.');
+      throw StateError(
+        'Solo un depósito pendiente vencido puede expirar en cadena.',
+      );
     }
     final existing = await _pendingFor(reservation.reservationId);
     if (existing != null) {
       if (existing.action != 'expire') {
-        throw StateError('Hay otra acción on-chain pendiente para esta reserva.');
+        throw StateError(
+          'Hay otra acción on-chain pendiente para esta reserva.',
+        );
       }
       return _reconcilePending(existing);
     }
     final escrow = _escrowAddressFor(currency);
     if (_wallet.address == null) {
-      throw StateError('Conectá tu wallet EVM para enviar la transacción de expiración.');
+      throw StateError(
+        'Conectá tu wallet EVM para enviar la transacción de expiración.',
+      );
     }
     final reservationHash = keccakUtf8(reservation.reservationId);
     final abi = _escrowAbi();
@@ -255,7 +265,9 @@ class HardhatReservationExecutor {
     return _reconcilePending(pending);
   }
 
-  Future<PendingReservationTransaction?> _pendingFor(String reservationId) async {
+  Future<PendingReservationTransaction?> _pendingFor(
+    String reservationId,
+  ) async {
     for (final pending in await _pendingStore.readAll()) {
       if (pending.reservationId == reservationId) return pending;
     }

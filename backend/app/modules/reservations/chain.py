@@ -131,9 +131,7 @@ def _checksum_address(value: Any) -> str:
     return checksum
 
 
-def _resolve_configuration(
-    settings: Settings, *, currency: str = "BOB"
-) -> tuple[str, str, str, str]:
+def _resolve_configuration(settings: Settings, *, currency: str = "BOB") -> tuple[str, str, str, str]:
     rpc_url, escrow_address = _read_configuration(settings, currency=currency)
     private_key = settings.escrow_signer_private_key
     if not isinstance(private_key, str) or not private_key:
@@ -149,9 +147,7 @@ def _resolve_configuration(
     return rpc_url, escrow_address, normalized_key, signer_address
 
 
-def _read_configuration(
-    settings: Settings, *, currency: str = "BOB"
-) -> tuple[str, str]:
+def _read_configuration(settings: Settings, *, currency: str = "BOB") -> tuple[str, str]:
     """Resolve the loopback escrow reader config without requiring a signing key."""
     rpc_url = settings.escrow_rpc_url
     escrow_address = settings.escrow_address_for(currency)
@@ -295,9 +291,7 @@ def issue_permit(
     ):
         raise PermitUnavailableError
 
-    rpc_url, escrow_address, private_key, signer_address = _resolve_configuration(
-        settings, currency=currency
-    )
+    rpc_url, escrow_address, private_key, signer_address = _resolve_configuration(settings, currency=currency)
     customer = _checksum_address(customer_address)
     agency = _checksum_address(agency_address)
     actor = _checksum_address(actor_address)
@@ -450,9 +444,7 @@ def verify_action_receipt(
         event_name = EVENT_BY_ACTION[action]
     except (KeyError, TypeError):
         raise PermitUnavailableError from None
-    if not isinstance(transaction_hash, str) or not re.fullmatch(
-        r"0x[0-9a-fA-F]{64}", transaction_hash
-    ):
+    if not isinstance(transaction_hash, str) or not re.fullmatch(r"0x[0-9a-fA-F]{64}", transaction_hash):
         raise PermitUnavailableError
     if not isinstance(amount, int) or isinstance(amount, bool) or not 0 <= amount < 2**256:
         raise PermitUnavailableError
@@ -497,10 +489,7 @@ def verify_action_receipt(
         raise PermitUnavailableError
 
     transaction_hash_value = transaction.get("hash")
-    if (
-        not isinstance(transaction_hash_value, str)
-        or transaction_hash_value.lower() != submitted_hash
-    ):
+    if not isinstance(transaction_hash_value, str) or transaction_hash_value.lower() != submitted_hash:
         raise PermitUnavailableError
     receipt_hash_value = receipt.get("transactionHash")
     if not isinstance(receipt_hash_value, str) or receipt_hash_value.lower() != submitted_hash:
@@ -560,9 +549,7 @@ def verify_action_receipt(
     if len(matches) != 1:
         raise PermitUnavailableError
 
-    matched_log, log_reservation_hash, log_listing_hash, log_participant, log_amount, log_nonce = (
-        matches[0]
-    )
+    matched_log, log_reservation_hash, log_listing_hash, log_participant, log_amount, log_nonce = matches[0]
     if (
         log_reservation_hash != reservation_hash
         or log_listing_hash != listing_hash

@@ -32,7 +32,7 @@ services:
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://floci:4566}
       SQS_ENDPOINT_URL: ${SQS_ENDPOINT_URL:-http://floci:4566}
     ports:
-      - "127.0.0.1:${FLOCI_PORT:-4566}:4566"
+      - "${FLOCI_BIND_ADDRESS:-0.0.0.0}:${FLOCI_PORT:-4566}:4566"
     volumes:
       - floci_data:${FLOCI_STORAGE_PERSISTENT_PATH:-/app/data}
     healthcheck:
@@ -83,11 +83,13 @@ services:
       # Public deterministic Hardhat development key only; never use on a public chain.
       ROOMFORGE_ESCROW_SIGNER_PRIVATE_KEY: ${ROOMFORGE_ESCROW_SIGNER_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}
       ROOMFORGE_ALLOW_LOCAL_DEMO_SEED: ${ROOMFORGE_ALLOW_LOCAL_DEMO_SEED:-false}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_CONNECT_ACCOUNT_COUNTRY: ${STRIPE_CONNECT_ACCOUNT_COUNTRY:-US}
     ports:
-      # The bind address is configurable so a phone on the same LAN can reach the API for
-      # device verification; the default stays loopback-only.
-      - "${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
-      - "${HARDHAT_BIND_ADDRESS:-127.0.0.1}:${HARDHAT_PORT:-8545}:8545"
+      - "${API_BIND_ADDRESS:-0.0.0.0}:${API_PORT:-8000}:8000"
+      - "${HARDHAT_BIND_ADDRESS:-0.0.0.0}:${HARDHAT_PORT:-8545}:8545"
     depends_on:
       postgres:
         condition: service_healthy
@@ -134,7 +136,7 @@ services:
     environment:
       VITE_API_TARGET: http://api:8000
     ports:
-      - "127.0.0.1:${PANEL_PORT:-5173}:5173"
+      - "${PANEL_BIND_ADDRESS:-0.0.0.0}:${PANEL_PORT:-5173}:5173"
     depends_on:
       api:
         condition: service_healthy

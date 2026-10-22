@@ -13,6 +13,7 @@ import 'data/services/staff_scene_api.dart';
 import 'domain/listing_drafts_controller.dart';
 import 'domain/staff_session_controller.dart';
 import 'ui/listings/listings_screen.dart';
+import 'ui/theme/andean_theme.dart';
 
 /// Backend used by the running app. Override it per environment with
 /// `--dart-define=ROOMFORGE_API_BASE_URL=https://host`.
@@ -80,10 +81,7 @@ class CaptureApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'RoomForge Captura',
-    theme: ThemeData(
-      colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1D4ED8)),
-      useMaterial3: true,
-    ),
+    theme: andeanTheme(),
     home: AgentAccessScreen(
       controller: controller,
       listingsApi: listingsApi,

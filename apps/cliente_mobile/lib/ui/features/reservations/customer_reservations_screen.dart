@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../../../data/models/reservation_models.dart';
 import '../../../../domain/customer_reservations_controller.dart';
 import '../../../../domain/customer_session_controller.dart';
+import '../../theme/andean_theme.dart';
+import '../../theme/andean_widgets.dart';
 
 class CustomerReservationsScreen extends StatefulWidget {
   const CustomerReservationsScreen({
@@ -103,6 +105,15 @@ class _CustomerReservationsScreenState
           ),
         ],
       ),
+      const SizedBox(height: 12),
+      const AndeanNoticeBanner(
+        title: 'ENTORNO INSTITUCIONAL',
+        badge: 'Hardhat 31337',
+        icon: Icons.terminal,
+        message:
+            'Red de Pruebas Hardhat (Chain 31337) · Fondos y tokens RFT de prueba local. No se custodia moneda fiduciaria ni se realiza compraventa final dentro de la app.',
+      ),
+      const SizedBox(height: 12),
       if (controller.busy && controller.reservations.isEmpty)
         const Padding(
           padding: EdgeInsets.all(24),
@@ -110,11 +121,15 @@ class _CustomerReservationsScreenState
         ),
       if (controller.message != null)
         Card(
+          color: AndeanColors.errorContainer,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Text(
               controller.message!,
               key: const ValueKey('reservations-error'),
+              style: AndeanTypography.bodyMd.copyWith(
+                color: AndeanColors.onErrorContainer,
+              ),
             ),
           ),
         ),
@@ -142,56 +157,176 @@ class _CustomerReservationsScreenState
     final currency = snapshot.lines.isEmpty
         ? snapshot.oneTimeTotal.currency
         : snapshot.lines.first.currency;
+    final isCardPayment = item.paymentMethod == 'card';
     final deposit = item.depositAmount == null
         ? 'Sin depósito configurado'
         : 'Depósito: ${item.depositAmount} $currency';
+
+    final (statusBg, statusFg) = switch (item.status) {
+      'pending' => (AndeanColors.warningBg, AndeanColors.warningText),
+      'accepted' => (AndeanColors.successBg, AndeanColors.successText),
+      'cancelled' => (AndeanColors.criticalBg, AndeanColors.criticalText),
+      'rejected' => (AndeanColors.criticalBg, AndeanColors.criticalText),
+      _ => (AndeanColors.surfaceContainerHigh, AndeanColors.onSurface),
+    };
+
     return Card(
       key: ValueKey('reservation-${item.reservationId}'),
-      margin: const EdgeInsets.only(top: 12),
+      margin: const EdgeInsets.only(top: 14),
+      color: AndeanColors.surfaceContainerLowest,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: AndeanColors.border, width: 1),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
                   child: Text(
                     'Reserva ${item.reservationId}',
-                    style: Theme.of(context).textTheme.titleMedium,
+                    style: AndeanTypography.headlineSm.copyWith(fontSize: 17),
                   ),
                 ),
-                Chip(label: Text(_statusLabel(item.status))),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: statusBg,
+                    borderRadius: BorderRadius.circular(9999),
+                  ),
+                  child: Text(
+                    _statusLabel(item.status),
+                    style: AndeanTypography.labelSm.copyWith(
+                      color: statusFg,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
               ],
             ),
+            const SizedBox(height: 6),
             Text(
               'Inmueble ${item.listingId} · oferta v${snapshot.offerVersion}',
+              style: AndeanTypography.bodySm,
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AndeanColors.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (snapshot.oneTimeTotal.amount != '0.00') ...[
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Pago único:',
+                          style: AndeanTypography.bodySm,
+                        ),
+                        Text(
+                          '${snapshot.oneTimeTotal.amount} ${snapshot.oneTimeTotal.currency}',
+                          style: AndeanTypography.monoData.copyWith(
+                            color: AndeanColors.primaryContainer,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                  ],
+                  if (snapshot.monthlyTotal.amount != '0.00') ...[
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Mensual:', style: AndeanTypography.bodySm),
+                        Text(
+                          '${snapshot.monthlyTotal.amount} ${snapshot.monthlyTotal.currency}',
+                          style: AndeanTypography.monoData.copyWith(
+                            color: AndeanColors.primaryContainer,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                  ],
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        isCardPayment
+                            ? 'Depósito con tarjeta:'
+                            : 'Depósito en Escrow:',
+                        style: AndeanTypography.bodySm,
+                      ),
+                      Text(
+                        deposit,
+                        style: AndeanTypography.monoData.copyWith(
+                          color: AndeanColors.secondary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 8),
-            if (snapshot.oneTimeTotal.amount != '0.00')
-              Text(
-                'Pago único: ${snapshot.oneTimeTotal.amount} ${snapshot.oneTimeTotal.currency}',
-              ),
-            if (snapshot.monthlyTotal.amount != '0.00')
-              Text(
-                'Mensual: ${snapshot.monthlyTotal.amount} ${snapshot.monthlyTotal.currency}',
-              ),
-            Text(deposit),
-            Text('Plazo de respuesta: ${item.decisionDeadlineAt.toLocal()}'),
+            Text(
+              'Plazo de respuesta: ${item.decisionDeadlineAt.toLocal()}',
+              style: AndeanTypography.bodySm,
+            ),
             if (item.status == 'pending')
-              const Padding(
-                padding: EdgeInsets.only(top: 8),
-                child: Text(
-                  'Pendiente no significa depósito confirmado. La confirmación requiere verificar la transacción en la red local.',
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AndeanColors.surfaceContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.info_outline,
+                        size: 16,
+                        color: AndeanColors.secondary,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          isCardPayment
+                              ? item.depositConfirmedAt == null
+                                    ? 'Pago pendiente. Stripe confirmará el depósito cuando el servidor reciba y valide el webhook.'
+                                    : 'Pago con tarjeta confirmado por Stripe; aguardá la decisión de la inmobiliaria.'
+                              : 'Pendiente no significa depósito confirmado. La confirmación requiere verificar la transacción en la red local.',
+                          style: AndeanTypography.bodySm,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             if (item.status == 'pending') ...[
               const SizedBox(height: 12),
               if (item.depositAmount != null &&
-                  item.depositConfirmedAt != null &&
+                  (isCardPayment || item.depositConfirmedAt != null) &&
                   !item.decisionDeadlineAt.isAfter(DateTime.now().toUtc()))
                 SizedBox(
                   width: double.infinity,
+                  height: 48,
                   child: FilledButton.icon(
                     key: ValueKey('expire-${item.reservationId}'),
                     onPressed: controller.busy
@@ -207,26 +342,38 @@ class _CustomerReservationsScreenState
                   ),
                 ),
               if (item.depositAmount != null &&
-                  item.decisionDeadlineAt.isAfter(DateTime.now().toUtc()))
+                  item.decisionDeadlineAt.isAfter(DateTime.now().toUtc()) &&
+                  (!isCardPayment || item.depositConfirmedAt == null))
                 SizedBox(
                   width: double.infinity,
+                  height: 48,
                   child: FilledButton.icon(
                     key: ValueKey('deposit-${item.reservationId}'),
                     onPressed: controller.busy
                         ? null
+                        : isCardPayment
+                        ? () => controller.payCardReservation(item)
                         : () => _confirmDeposit(
                             context,
                             controller,
                             item,
                             currency,
                           ),
-                    icon: const Icon(Icons.lock_outline),
-                    label: Text('Depositar ${item.depositAmount} $currency'),
+                    icon: Icon(
+                      isCardPayment ? Icons.credit_card : Icons.lock_outline,
+                    ),
+                    label: Text(
+                      isCardPayment
+                          ? 'Pagar ${item.depositAmount} $currency con tarjeta'
+                          : 'Depositar ${item.depositAmount} $currency',
+                    ),
                   ),
                 ),
-              if (item.decisionDeadlineAt.isAfter(DateTime.now().toUtc()))
+              if (item.decisionDeadlineAt.isAfter(DateTime.now().toUtc())) ...[
+                const SizedBox(height: 6),
                 SizedBox(
                   width: double.infinity,
+                  height: 48,
                   child: TextButton.icon(
                     key: ValueKey('cancel-${item.reservationId}'),
                     onPressed: controller.busy
@@ -241,12 +388,15 @@ class _CustomerReservationsScreenState
                     label: const Text('Cancelar solicitud'),
                   ),
                 ),
+              ],
             ],
             if (item.status == 'accepted')
-              const Padding(
-                padding: EdgeInsets.only(top: 8),
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
                 child: Text(
-                  'Reserva aceptada. El depósito se transfiere a la wallet verificada de la agencia; el cierre legal ocurre fuera de RoomForge.',
+                  item.paymentMethod == 'card'
+                      ? 'Reserva aceptada. El depósito de tarjeta se transfiere a la cuenta Stripe Connect de la inmobiliaria; el cierre legal ocurre fuera de RoomForge.'
+                      : 'Reserva aceptada. El depósito se transfiere a la wallet verificada de la agencia; el cierre legal ocurre fuera de RoomForge.',
                 ),
               ),
           ],
@@ -294,9 +444,10 @@ class _CustomerReservationsScreenState
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Cancelar solicitud'),
-        content: const Text(
-          'La cancelación requiere una transacción firmada por tu wallet. '
-          'Si ya depositaste, el escrow enviará el reembolso y la API confirmará el evento.',
+        content: Text(
+          reservation.paymentMethod == 'card'
+              ? 'La reserva se cancelará y, si el pago fue confirmado, Stripe procesará el reembolso de prueba.'
+              : 'La cancelación requiere una transacción firmada por tu wallet. Si ya depositaste, el escrow enviará el reembolso y la API confirmará el evento.',
         ),
         actions: [
           TextButton(
@@ -324,7 +475,9 @@ class _CustomerReservationsScreenState
       builder: (context) => AlertDialog(
         title: const Text('Solicitar reembolso'),
         content: Text(
-          'La agencia no respondió antes del plazo. Tu wallet enviará la transacción expire al escrow Hardhat para solicitar el reembolso de ${reservation.depositAmount} $currency.',
+          reservation.paymentMethod == 'card'
+              ? 'Venció el plazo de respuesta. Stripe procesará el reembolso del depósito de prueba si el pago fue confirmado.'
+              : 'La agencia no respondió antes del plazo. Tu wallet enviará la transacción expire al escrow Hardhat para solicitar el reembolso de ${reservation.depositAmount} $currency.',
         ),
         actions: [
           TextButton(

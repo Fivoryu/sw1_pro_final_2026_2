@@ -84,6 +84,27 @@ flutter run `
 
 El nodo muestra las cuentas de prueba al arrancar. Importarlas solo en una wallet conectada a la red local `31337`; no usar esas claves en redes públicas ni con fondos reales. Sin Project ID Reown, catálogo/cuenta siguen ejecutables, pero WalletConnect queda deshabilitado.
 
+### Probar pagos con tarjeta Stripe (solo test mode)
+
+No guardes claves reales en el repositorio. Copiá `infra/docker/local-env.example` a `infra/docker/.env` (`.env` está ignorado por Git) y reemplazá allí los marcadores con las claves **de prueba** `sk_test_...` y `pk_test_...` del Dashboard de Stripe. `STRIPE_CONNECT_ACCOUNT_COUNTRY` debe ser un país admitido por la cuenta Stripe; `US` es solo el valor de muestra para desarrollo. El backend rechaza claves live. No pongas datos de tarjeta ni claves secretas en Flutter.
+
+Para recibir eventos locales, ejecutá Stripe CLI en otra terminal después de iniciar la API:
+
+```powershell
+stripe listen --forward-to http://127.0.0.1:8000/api/v1/stripe/webhook
+```
+
+Copiá el `whsec_...` que Stripe CLI muestra en `STRIPE_WEBHOOK_SECRET` dentro de `infra/docker/.env` y recreá la API para que lea las variables:
+
+```powershell
+docker compose --env-file infra/docker/.env -f infra/docker/compose.local.yml up -d --force-recreate api
+docker compose --env-file infra/docker/.env -f infra/docker/compose.local.yml exec -T api python -m alembic upgrade head
+```
+
+En el panel, iniciá sesión como `agency_admin` y completá **Pagos → Stripe Connect** para la agencia. Luego, en el cliente, elegí **Tarjeta** al solicitar una reserva. El PaymentIntent se calcula en el backend; la app muestra PaymentSheet y el webhook firmado confirma el pago. La cola del panel permite aceptar (transferencia Connect de prueba) o rechazar (reembolso de prueba). El cliente puede cancelar o solicitar reembolso al vencer el plazo. BOB depende de que la cuenta Stripe habilite esa moneda; USDT no se ofrece para tarjeta.
+
+Para la tarjeta de prueba Visa estándar de Stripe, usá `4242 4242 4242 4242`, cualquier fecha futura y cualquier CVC. Solo funciona con claves y entorno de prueba; no uses datos de una tarjeta real. Stripe no acredita estos pagos como fondos reales.
+
 ### Cargar datos demo para F09
 
 Después de registrar la cuenta de cliente en el teléfono, se puede preparar un inmueble local para probar cotización y solicitud de reserva:

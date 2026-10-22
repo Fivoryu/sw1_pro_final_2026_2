@@ -28,6 +28,11 @@ from app.modules.catalog.models import Listing, QuoteSnapshot
 from app.modules.customer_identity.models import CustomerWallet
 from app.modules.identity.models import Agency
 from app.modules.reservations.models import Reservation
+from app.modules.stripe_payments.models import (
+    ReservationCardPayment,
+    StripeConnectAccount,
+    StripeWebhookEvent,
+)
 
 from testclient_app import client_app
 
@@ -51,7 +56,6 @@ class ReservationsContext:
 
 
 @pytest.fixture
-
 def reservations_context() -> Iterator[ReservationsContext]:
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
@@ -159,9 +163,7 @@ def _customer_auth(
         json={"email": email, "password": "password"},
     )
     assert login.status_code == 200
-    return registered.json()["id"], {
-        "Authorization": f"Bearer {login.json()['access_token']}"
-    }
+    return registered.json()["id"], {"Authorization": f"Bearer {login.json()['access_token']}"}
 
 
 def _seed_reservation_inputs(
@@ -211,9 +213,10 @@ def _seed_reservation_inputs(
                 created_at=context.clock(),
             )
         )
-        if wallet_id is not None and session.query(CustomerWallet).filter_by(
-            customer_id=customer_id
-        ).first() is None:
+        if (
+            wallet_id is not None
+            and session.query(CustomerWallet).filter_by(customer_id=customer_id).first() is None
+        ):
             session.add(
                 CustomerWallet(
                     id=wallet_id,
@@ -290,6 +293,396 @@ def _create_test_reservation(
     )
     assert response.status_code == 201, response.text
     return customer_id, auth, response.json()
+
+
+class _FakeStripeGateway:
+    def __init__(self) -> None:
+        self.payment_intent_calls: list[dict[str, Any]] = []
+        self.transfer_calls: list[dict[str, Any]] = []
+        self.refund_calls: list[dict[str, Any]] = []
+
+    def create_payment_intent(self, **kwargs: Any) -> dict[str, object]:
+        self.payment_intent_calls.append(kwargs)
+        return {
+            "id": "pi_test_roomforge",
+            "client_secret": "pi_test_roomforge_secret_client",
+            "status": "requires_payment_method",
+        }
+
+    def create_transfer(self, **kwargs: Any) -> dict[str, object]:
+        self.transfer_calls.append(kwargs)
+        return {"id": "tr_test_roomforge"}
+
+    def create_refund(self, **kwargs: Any) -> dict[str, object]:
+        self.refund_calls.append(kwargs)
+        return {"id": "re_test_roomforge", "status": "succeeded"}
+
+    def cancel_payment_intent(self, **kwargs: Any) -> dict[str, object]:
+        return {"id": "pi_test_roomforge", "status": "canceled"}
+
+    def create_connect_account(self, **kwargs: Any) -> dict[str, object]:
+        return {"id": "acct_test_agency", "details_submitted": False}
+
+    def create_account_link(self, **kwargs: Any) -> dict[str, object]:
+        return {"url": "https://connect.stripe.test/onboarding"}
+
+    def retrieve_account(self, account_id: str) -> dict[str, object]:
+        return {
+            "id": account_id,
+            "details_submitted": True,
+            "charges_enabled": False,
+            "payouts_enabled": True,
+        }
+
+
+def _create_paid_card_reservation(
+    context: ReservationsContext, *, email: str, listing_id: str
+) -> tuple[dict[str, str], str, _FakeStripeGateway]:
+    import hmac
+    import json
+    import time
+
+    customer_id, auth = _customer_auth(context, email=email)
+    quote_id, _ = _seed_reservation_inputs(
+        context,
+        customer_id,
+        listing_id=listing_id,
+        deposit_amount=Decimal("10.00"),
+        with_agency_wallet=False,
+        with_customer_wallet=False,
+    )
+    created_reservation = context.client.post(
+        "/api/v1/reservations",
+        headers={**auth, "Idempotency-Key": f"card-{listing_id}"},
+        json={"listing_id": listing_id, "quote_id": quote_id, "payment_method": "card"},
+    )
+    assert created_reservation.status_code == 201, created_reservation.text
+    reservation_id = created_reservation.json()["reservation_id"]
+    fake_gateway = _FakeStripeGateway()
+    client_app(context.client).state.stripe_gateway = fake_gateway
+    client_app(context.client).state.settings = replace(
+        client_app(context.client).state.settings,
+        stripe_secret_key="sk_test_roomforge",
+        stripe_publishable_key="pk_test_roomforge",
+        stripe_webhook_secret=None,
+    )
+    missing_webhook = context.client.post(
+        f"/api/v1/reservations/{reservation_id}/card-payment-intent", headers=auth
+    )
+    assert missing_webhook.status_code == 503
+    client_app(context.client).state.settings = replace(
+        client_app(context.client).state.settings,
+        stripe_webhook_secret="whsec_roomforge_test",
+    )
+    with context.session_factory.begin() as session:
+        session.add(
+            StripeConnectAccount(
+                id=f"connect-{listing_id}",
+                agency_id="agency-one",
+                stripe_account_id="acct_test_agency",
+                details_submitted=True,
+                charges_enabled=False,
+                payouts_enabled=True,
+                created_at=context.clock(),
+                updated_at=context.clock(),
+            )
+        )
+    intent = context.client.post(f"/api/v1/reservations/{reservation_id}/card-payment-intent", headers=auth)
+    assert intent.status_code == 200, intent.text
+    payload = json.dumps(
+        {
+            "id": f"evt_{listing_id}",
+            "type": "payment_intent.succeeded",
+            "data": {
+                "object": {
+                    "id": "pi_test_roomforge",
+                    "amount_received": 1000,
+                    "currency": "bob",
+                    "latest_charge": "ch_test_roomforge",
+                }
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+    timestamp = int(time.time())
+    signature = hmac.new(
+        b"whsec_roomforge_test",
+        str(timestamp).encode() + b"." + payload,
+        hashlib.sha256,
+    ).hexdigest()
+    webhook = context.client.post(
+        "/api/v1/stripe/webhook",
+        content=payload,
+        headers={"Stripe-Signature": f"t={timestamp},v1={signature}"},
+    )
+    assert webhook.status_code == 200, webhook.text
+    return auth, reservation_id, fake_gateway
+
+
+def test_card_reservation_does_not_require_customer_or_agency_wallet(
+    reservations_context: ReservationsContext,
+) -> None:
+    context = reservations_context
+    customer_id, auth = _customer_auth(context, email="card-customer@example.test")
+    quote_id, _ = _seed_reservation_inputs(
+        context,
+        customer_id,
+        listing_id="card-listing",
+        deposit_amount=Decimal("10.00"),
+        with_agency_wallet=False,
+        with_customer_wallet=False,
+    )
+
+    response = context.client.post(
+        "/api/v1/reservations",
+        headers={**auth, "Idempotency-Key": "card-reservation-one"},
+        json={
+            "listing_id": "card-listing",
+            "quote_id": quote_id,
+            "payment_method": "card",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["payment_method"] == "card"
+    with context.session_factory() as session:
+        reservation = session.get(Reservation, response.json()["reservation_id"])
+        assert reservation is not None
+        assert reservation.customer_wallet_id is None
+        assert reservation.agency_wallet_id is None
+
+
+def test_card_payment_intent_uses_server_deposit_without_wallet(
+    reservations_context: ReservationsContext,
+) -> None:
+    context = reservations_context
+    customer_id, auth = _customer_auth(context, email="stripe-customer@example.test")
+    quote_id, _ = _seed_reservation_inputs(
+        context,
+        customer_id,
+        listing_id="stripe-listing",
+        deposit_amount=Decimal("10.00"),
+        with_agency_wallet=False,
+        with_customer_wallet=False,
+    )
+    reservation_response = context.client.post(
+        "/api/v1/reservations",
+        headers={**auth, "Idempotency-Key": "stripe-reservation-one"},
+        json={"listing_id": "stripe-listing", "quote_id": quote_id, "payment_method": "card"},
+    )
+    assert reservation_response.status_code == 201, reservation_response.text
+    reservation_id = reservation_response.json()["reservation_id"]
+    fake_gateway = _FakeStripeGateway()
+    client_app(context.client).state.stripe_gateway = fake_gateway
+    with context.session_factory.begin() as session:
+        session.add(
+            StripeConnectAccount(
+                id="connect-agency-one",
+                agency_id="agency-one",
+                stripe_account_id="acct_test_agency",
+                details_submitted=True,
+                charges_enabled=False,
+                payouts_enabled=True,
+                created_at=context.clock(),
+                updated_at=context.clock(),
+            )
+        )
+    client_app(context.client).state.settings = replace(
+        client_app(context.client).state.settings,
+        stripe_secret_key="sk_test_roomforge",
+        stripe_publishable_key="pk_test_roomforge",
+        stripe_webhook_secret="whsec_roomforge_test",
+    )
+
+    response = context.client.post(
+        f"/api/v1/reservations/{reservation_id}/card-payment-intent",
+        headers=auth,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["amount_minor"] == 1000
+    assert response.json()["currency"] == "bob"
+    assert response.json()["client_secret"] == "pi_test_roomforge_secret_client"
+    assert fake_gateway.payment_intent_calls[0]["amount"] == 1000
+    assert fake_gateway.payment_intent_calls[0]["idempotency_key"] == (
+        f"roomforge-card-payment-{reservation_id}"
+    )
+
+
+def test_card_webhook_requires_valid_signature_and_confirms_payment(
+    reservations_context: ReservationsContext,
+) -> None:
+    import hmac
+    import json
+    import time
+
+    context = reservations_context
+    customer_id, auth = _customer_auth(context, email="stripe-webhook-customer@example.test")
+    quote_id, _ = _seed_reservation_inputs(
+        context,
+        customer_id,
+        listing_id="stripe-webhook-listing",
+        deposit_amount=Decimal("10.00"),
+        with_agency_wallet=False,
+        with_customer_wallet=False,
+    )
+    reservation_response = context.client.post(
+        "/api/v1/reservations",
+        headers={**auth, "Idempotency-Key": "stripe-webhook-reservation"},
+        json={"listing_id": "stripe-webhook-listing", "quote_id": quote_id, "payment_method": "card"},
+    )
+    reservation_id = reservation_response.json()["reservation_id"]
+    client_app(context.client).state.stripe_gateway = _FakeStripeGateway()
+    with context.session_factory.begin() as session:
+        session.add(
+            StripeConnectAccount(
+                id="connect-agency-one-webhook",
+                agency_id="agency-one",
+                stripe_account_id="acct_test_agency",
+                details_submitted=True,
+                charges_enabled=False,
+                payouts_enabled=True,
+                created_at=context.clock(),
+                updated_at=context.clock(),
+            )
+        )
+    client_app(context.client).state.settings = replace(
+        client_app(context.client).state.settings,
+        stripe_secret_key="sk_test_roomforge",
+        stripe_publishable_key="pk_test_roomforge",
+        stripe_webhook_secret="whsec_roomforge_test",
+    )
+    created = context.client.post(f"/api/v1/reservations/{reservation_id}/card-payment-intent", headers=auth)
+    assert created.status_code == 200
+    payload = json.dumps(
+        {
+            "id": "evt_test_roomforge",
+            "type": "payment_intent.succeeded",
+            "data": {
+                "object": {
+                    "id": "pi_test_roomforge",
+                    "amount_received": 1000,
+                    "currency": "bob",
+                    "latest_charge": "ch_test_roomforge",
+                }
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+    timestamp = int(time.time())
+    signature = hmac.new(
+        b"whsec_roomforge_test",
+        str(timestamp).encode() + b"." + payload,
+        hashlib.sha256,
+    ).hexdigest()
+
+    rejected = context.client.post(
+        "/api/v1/stripe/webhook",
+        content=payload,
+        headers={"Stripe-Signature": f"t={timestamp},v1=invalid"},
+    )
+    assert rejected.status_code == 400
+    accepted = context.client.post(
+        "/api/v1/stripe/webhook",
+        content=payload,
+        headers={"Stripe-Signature": f"t={timestamp},v1={signature}"},
+    )
+
+    assert accepted.status_code == 200, accepted.text
+    duplicate = context.client.post(
+        "/api/v1/stripe/webhook",
+        content=payload,
+        headers={"Stripe-Signature": f"t={timestamp},v1={signature}"},
+    )
+    assert duplicate.status_code == 200
+    with context.session_factory() as session:
+        reservation = session.get(Reservation, reservation_id)
+        payment = session.query(ReservationCardPayment).filter_by(reservation_id=reservation_id).one()
+        assert reservation is not None and reservation.deposit_confirmed_at is not None
+        assert payment.status == "succeeded"
+        assert payment.latest_charge_id == "ch_test_roomforge"
+        assert session.query(StripeWebhookEvent).count() == 1
+
+
+def test_connect_onboarding_creates_and_scopes_agency_account(
+    reservations_context: ReservationsContext,
+) -> None:
+    context = reservations_context
+    _use_staff_principal(context)
+    fake_gateway = _FakeStripeGateway()
+    client_app(context.client).state.stripe_gateway = fake_gateway
+    client_app(context.client).state.settings = replace(
+        client_app(context.client).state.settings,
+        stripe_secret_key="sk_test_roomforge",
+        stripe_connect_account_country="US",
+    )
+
+    response = context.client.post("/api/v1/staff/agencies/agency-one/stripe/connect/onboarding-link")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"url": "https://connect.stripe.test/onboarding"}
+    with context.session_factory() as session:
+        account = session.query(StripeConnectAccount).filter_by(agency_id="agency-one").one()
+        assert account.stripe_account_id == "acct_test_agency"
+
+
+def test_card_acceptance_transfers_to_connected_agency_account(
+    reservations_context: ReservationsContext,
+) -> None:
+    context = reservations_context
+    _, reservation_id, gateway = _create_paid_card_reservation(
+        context, email="card-accept@example.test", listing_id="card-accept-listing"
+    )
+    _use_staff_principal(context)
+
+    response = context.client.post(
+        f"/api/v1/staff/reservations/{reservation_id}/card-decision",
+        json={"action": "accept"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["payment_status"] == "transferred"
+    assert gateway.transfer_calls == [
+        {
+            "amount": 1000,
+            "currency": "bob",
+            "destination": "acct_test_agency",
+            "source_transaction": "ch_test_roomforge",
+            "reservation_id": reservation_id,
+            "idempotency_key": f"roomforge-card-transfer-{reservation_id}",
+        }
+    ]
+    with context.session_factory() as session:
+        reservation = session.get(Reservation, reservation_id)
+        payment = session.query(ReservationCardPayment).filter_by(reservation_id=reservation_id).one()
+        assert reservation is not None and reservation.status == "accepted"
+        assert payment.status == "transferred"
+        assert payment.transfer_id == "tr_test_roomforge"
+
+
+def test_card_rejection_refunds_payment_and_does_not_transfer(
+    reservations_context: ReservationsContext,
+) -> None:
+    context = reservations_context
+    _, reservation_id, gateway = _create_paid_card_reservation(
+        context, email="card-reject@example.test", listing_id="card-reject-listing"
+    )
+    _use_staff_principal(context)
+
+    response = context.client.post(
+        f"/api/v1/staff/reservations/{reservation_id}/card-decision",
+        json={"action": "reject"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["payment_status"] == "refunded"
+    assert gateway.refund_calls == [
+        {
+            "payment_intent_id": "pi_test_roomforge",
+            "idempotency_key": f"roomforge-card-refund-{reservation_id}",
+        }
+    ]
+    assert gateway.transfer_calls == []
 
 
 def test_create_snapshots_quote_deposit_and_both_linked_wallet_addresses(
@@ -455,9 +848,7 @@ def test_rejects_missing_or_foreign_stale_and_expired_quotes_and_unlinked_wallet
     )
     assert (expired.status_code, expired.json().get("code")) == (409, "quote_expired"), expired.text
 
-    unlinked_customer_id, unlinked_auth = _customer_auth(
-        context, email="no-wallet@example.test"
-    )
+    unlinked_customer_id, unlinked_auth = _customer_auth(context, email="no-wallet@example.test")
     _seed_reservation_inputs(
         context,
         unlinked_customer_id,
@@ -478,9 +869,7 @@ def test_rejects_missing_or_foreign_stale_and_expired_quotes_and_unlinked_wallet
         "customer_wallet_not_linked",
     )
 
-    foreign_customer_id, foreign_auth = _customer_auth(
-        context, email="foreign-wallet@example.test"
-    )
+    foreign_customer_id, foreign_auth = _customer_auth(context, email="foreign-wallet@example.test")
     foreign_quote, _ = _seed_reservation_inputs(
         context,
         foreign_customer_id,
@@ -680,11 +1069,14 @@ def test_active_listing_lock_reusable_quote_and_unpaid_deadline_expiry(
         assert reservation is not None
         reservation.deposit_confirmed_at = context.clock()
     context.clock.advance(timedelta(hours=24))
-    assert expire_unpaid_reservations(
-        session_factory=context.session_factory,
-        now=context.clock(),
-        listing_id="deposit-confirmed-listing",
-    ) == 0
+    assert (
+        expire_unpaid_reservations(
+            session_factory=context.session_factory,
+            now=context.clock(),
+            listing_id="deposit-confirmed-listing",
+        )
+        == 0
+    )
     deadline_login = context.client.post(
         "/api/v1/customer/auth/login",
         json={"email": "customer@example.test", "password": "password"},
@@ -709,23 +1101,19 @@ def test_reservation_response_exposes_confirmed_deposit_timestamp(
     reservations_context: ReservationsContext,
 ) -> None:
     context = reservations_context
-    _, auth, reservation = _create_test_reservation(
-        context, listing_id="deposit-response-listing"
-    )
+    _, auth, reservation = _create_test_reservation(context, listing_id="deposit-response-listing")
     confirmed_at = datetime(2026, 9, 1, 13, 45, tzinfo=timezone.utc)
     with context.session_factory.begin() as session:
         stored = session.get(Reservation, reservation["reservation_id"])
         assert stored is not None
         stored.deposit_confirmed_at = confirmed_at
 
-    response = context.client.get(
-        f"/api/v1/reservations/{reservation['reservation_id']}", headers=auth
-    )
+    response = context.client.get(f"/api/v1/reservations/{reservation['reservation_id']}", headers=auth)
 
     assert response.status_code == 200, response.text
-    assert datetime.fromisoformat(
-        response.json()["deposit_confirmed_at"].replace("Z", "+00:00")
-    ) == confirmed_at
+    assert (
+        datetime.fromisoformat(response.json()["deposit_confirmed_at"].replace("Z", "+00:00")) == confirmed_at
+    )
 
 
 def test_customer_can_only_read_and_list_own_reservations(
@@ -773,18 +1161,14 @@ def test_customer_can_only_read_and_list_own_reservations(
     )
     listed = context.client.get("/api/v1/reservations", headers=owner_auth)
     assert listed.status_code == 200
-    assert [item["reservation_id"] for item in listed.json()] == [
-        own.json()["reservation_id"]
-    ]
+    assert [item["reservation_id"] for item in listed.json()] == [own.json()["reservation_id"]]
 
 
 def test_reservation_openapi_and_cors_advertise_idempotency_header(
     reservations_context: ReservationsContext,
 ) -> None:
     context = reservations_context
-    operation = context.client.get("/openapi.json").json()["paths"][
-        "/api/v1/reservations"
-    ]["post"]
+    operation = context.client.get("/openapi.json").json()["paths"]["/api/v1/reservations"]["post"]
     assert any(
         parameter["name"] == "Idempotency-Key" and parameter["in"] == "header"
         for parameter in operation["parameters"]
@@ -1003,9 +1387,7 @@ def test_list_route_expires_overdue_pending_reservation_and_allows_new_creation(
     listed = context.client.get("/api/v1/reservations", headers=refreshed_auth)
     assert listed.status_code == 200, listed.text
     expired = next(
-        item
-        for item in listed.json()
-        if item["reservation_id"] == original.json()["reservation_id"]
+        item for item in listed.json() if item["reservation_id"] == original.json()["reservation_id"]
     )
     assert expired["status"] == "expired"
 
@@ -1047,9 +1429,7 @@ def test_customer_permit_uses_persisted_snapshot_without_mutation_or_transaction
     reservations_context: ReservationsContext,
 ) -> None:
     context = reservations_context
-    customer_id, auth, reservation = _create_test_reservation(
-        context, listing_id="permit-snapshot-listing"
-    )
+    customer_id, auth, reservation = _create_test_reservation(context, listing_id="permit-snapshot-listing")
     rpc = _configure_fake_escrow(context)
     with context.session_factory() as session:
         stored = session.get(Reservation, reservation["reservation_id"])
@@ -1084,6 +1464,7 @@ def test_customer_permit_uses_persisted_snapshot_without_mutation_or_transaction
     }
     assert permit["reservationId"] == "0x" + keccak(text=reservation["reservation_id"]).hex()
     assert permit["listingId"] == "0x" + keccak(text="permit-snapshot-listing").hex()
+    assert before[2] is not None and before[3] is not None
     assert permit["customer"].lower() == before[2].lower()
     assert permit["agency"].lower() == before[3].lower()
     assert permit["actor"].lower() == before[2].lower()
@@ -1156,9 +1537,7 @@ def test_staff_permits_require_agency_admin_tenant_and_actual_wallet_ownership(
     reservations_context: ReservationsContext,
 ) -> None:
     context = reservations_context
-    _, _, reservation = _create_test_reservation(
-        context, listing_id="staff-permit-owner-listing"
-    )
+    _, _, reservation = _create_test_reservation(context, listing_id="staff-permit-owner-listing")
     _configure_fake_escrow(context)
     from app.modules.reservations.models import Reservation as ReservationModel
 
@@ -1196,9 +1575,7 @@ def test_staff_decision_requires_confirmed_positive_deposit_but_cancel_does_not(
     reservations_context: ReservationsContext,
 ) -> None:
     context = reservations_context
-    _, _, reservation = _create_test_reservation(
-        context, listing_id="staff-deposit-listing"
-    )
+    _, _, reservation = _create_test_reservation(context, listing_id="staff-deposit-listing")
     rpc = _configure_fake_escrow(context)
     _use_staff_principal(context)
     path = f"/api/v1/staff/reservations/{reservation['reservation_id']}/permit"
@@ -1260,9 +1637,7 @@ def test_nullable_deposit_allows_agency_decision_and_deadline_is_exclusive(
     assert customer_deposit.status_code == 409
     assert customer_deposit.json()["code"] == "reservation_deposit_not_configured"
 
-    context.clock.now = datetime.fromisoformat(
-        reservation["decision_deadline_at"].replace("Z", "+00:00")
-    )
+    context.clock.now = datetime.fromisoformat(reservation["decision_deadline_at"].replace("Z", "+00:00"))
     expired = context.client.post(path, json={"action": "reject"})
     assert (expired.status_code, expired.json()["code"]) == (
         409,
@@ -1302,9 +1677,7 @@ def test_permit_deadline_ceils_subsecond_policy_deadline_and_policy_stays_exclus
         email="subsecond-permit@example.test",
     )
     rpc = _configure_fake_escrow(context)
-    policy_deadline = datetime.fromisoformat(
-        reservation["decision_deadline_at"].replace("Z", "+00:00")
-    )
+    policy_deadline = datetime.fromisoformat(reservation["decision_deadline_at"].replace("Z", "+00:00"))
     assert policy_deadline == datetime(2026, 9, 2, 12, 0, 0, 250_000, tzinfo=timezone.utc)
 
     permitted = context.client.post(

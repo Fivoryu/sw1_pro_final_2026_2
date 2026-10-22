@@ -59,6 +59,7 @@ from app.modules.reconstruction.service import (
 from app.modules.reservations.errors import ReservationApiError
 from app.modules.reservations.router import router as reservations_router
 from app.modules.reservations.router import staff_router as staff_reservations_router
+from app.modules.stripe_payments.router import router as stripe_payments_router
 
 LOGGER = logging.getLogger("roomforge.detection.recovery")
 
@@ -314,9 +315,7 @@ def _build_lifespan(
             # The first run happens only after the first full interval, so startup
             # never touches the network and the test suite never fetches.
             refresher = asyncio.create_task(
-                _official_rate_refresh_loop(
-                    session_factory, interval_seconds=interval
-                )
+                _official_rate_refresh_loop(session_factory, interval_seconds=interval)
             )
         if application.state.photo_storage is not None:
             # Expired objects are eligible at 15 minutes and are swept at most a
@@ -464,11 +463,10 @@ def create_app(
     app.include_router(reconstruction_worker_router)
     app.include_router(reservations_router)
     app.include_router(staff_reservations_router)
+    app.include_router(stripe_payments_router)
 
     @app.exception_handler(ReservationApiError)
-    async def reservation_api_error(
-        request: Request, exc: ReservationApiError
-    ) -> JSONResponse:
+    async def reservation_api_error(request: Request, exc: ReservationApiError) -> JSONResponse:
         del request
         return JSONResponse(
             status_code=exc.status_code,
@@ -552,9 +550,7 @@ def create_app(
             )
         return JSONResponse(
             status_code=422,
-            content=ErrorResponse(
-                detail="Request validation failed", code="validation_error"
-            ).model_dump(),
+            content=ErrorResponse(detail="Request validation failed", code="validation_error").model_dump(),
         )
 
     @app.exception_handler(Exception)
@@ -562,9 +558,7 @@ def create_app(
         del request, exc
         return JSONResponse(
             status_code=500,
-            content=ErrorResponse(
-                detail="Internal server error", code="internal_error"
-            ).model_dump(),
+            content=ErrorResponse(detail="Internal server error", code="internal_error").model_dump(),
         )
 
     return app

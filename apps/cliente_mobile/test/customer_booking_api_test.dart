@@ -6,6 +6,7 @@ import 'package:http/testing.dart';
 import 'package:cliente_mobile/data/models/reservation_models.dart';
 import 'package:cliente_mobile/data/services/customer_booking_api.dart';
 import 'package:cliente_mobile/data/services/hardhat_reservation_executor.dart';
+import 'package:cliente_mobile/domain/customer_reservations_controller.dart';
 
 Map<String, Object?> quoteJson() => {
   'quote_id': 'quote-1',
@@ -54,74 +55,76 @@ Map<String, Object?> reservationJson() => {
 };
 
 void main() {
+  test(
+    'local escrow mapping follows reservation currency with legacy fallback rules',
+    () {
+      const bob = '0x1111111111111111111111111111111111111111';
+      const usd = '0x2222222222222222222222222222222222222222';
+      const usdt = '0x3333333333333333333333333333333333333333';
+      const legacy = '0x4444444444444444444444444444444444444444';
 
-  test('local escrow mapping follows reservation currency with legacy fallback rules', () {
-    const bob = '0x1111111111111111111111111111111111111111';
-    const usd = '0x2222222222222222222222222222222222222222';
-    const usdt = '0x3333333333333333333333333333333333333333';
-    const legacy = '0x4444444444444444444444444444444444444444';
-
-    expect(
-      localEscrowAddressForCurrency(
-        'BOB',
-        bobAddress: bob,
-        usdAddress: usd,
-        usdtAddress: usdt,
-        legacyRftEscrowAddress: legacy,
-      ),
-      bob,
-    );
-    expect(
-      localEscrowAddressForCurrency(
-        'USD',
-        bobAddress: bob,
-        usdAddress: usd,
-        usdtAddress: usdt,
-        legacyRftEscrowAddress: legacy,
-      ),
-      usd,
-    );
-    expect(
-      localEscrowAddressForCurrency(
-        'USDT',
-        bobAddress: bob,
-        usdAddress: usd,
-        usdtAddress: usdt,
-        legacyRftEscrowAddress: legacy,
-      ),
-      usdt,
-    );
-    expect(
-      localEscrowAddressForCurrency(
-        'BOB',
-        bobAddress: '',
-        usdAddress: '',
-        usdtAddress: usdt,
-        legacyRftEscrowAddress: legacy,
-      ),
-      legacy,
-    );
-    expect(
-      localEscrowAddressForCurrency(
-        'USD',
-        bobAddress: '',
-        usdAddress: '',
-        usdtAddress: usdt,
-        legacyRftEscrowAddress: legacy,
-      ),
-      legacy,
-    );
-    expect(
-      () => localEscrowAddressForCurrency(
-        'USDT',
-        bobAddress: bob,
-        usdAddress: usd,
-        usdtAddress: '',
-        legacyRftEscrowAddress: legacy,
-      ),
-      throwsStateError,
-    );
-  });
+      expect(
+        localEscrowAddressForCurrency(
+          'BOB',
+          bobAddress: bob,
+          usdAddress: usd,
+          usdtAddress: usdt,
+          legacyRftEscrowAddress: legacy,
+        ),
+        bob,
+      );
+      expect(
+        localEscrowAddressForCurrency(
+          'USD',
+          bobAddress: bob,
+          usdAddress: usd,
+          usdtAddress: usdt,
+          legacyRftEscrowAddress: legacy,
+        ),
+        usd,
+      );
+      expect(
+        localEscrowAddressForCurrency(
+          'USDT',
+          bobAddress: bob,
+          usdAddress: usd,
+          usdtAddress: usdt,
+          legacyRftEscrowAddress: legacy,
+        ),
+        usdt,
+      );
+      expect(
+        localEscrowAddressForCurrency(
+          'BOB',
+          bobAddress: '',
+          usdAddress: '',
+          usdtAddress: usdt,
+          legacyRftEscrowAddress: legacy,
+        ),
+        legacy,
+      );
+      expect(
+        localEscrowAddressForCurrency(
+          'USD',
+          bobAddress: '',
+          usdAddress: '',
+          usdtAddress: usdt,
+          legacyRftEscrowAddress: legacy,
+        ),
+        legacy,
+      );
+      expect(
+        () => localEscrowAddressForCurrency(
+          'USDT',
+          bobAddress: bob,
+          usdAddress: usd,
+          usdtAddress: '',
+          legacyRftEscrowAddress: legacy,
+        ),
+        throwsStateError,
+      );
+    },
+  );
 
   test(
     'quote uses the server-selected currency without an auth token',
@@ -189,7 +192,43 @@ void main() {
     },
   );
 
+  test('reservation conflict reloads the already-active reservation', () async {
+    final api = CustomerBookingApi(
+      baseUrl: 'https://api.example.test',
+      accessTokenProvider: () async => 'access-token',
+      client: MockClient((request) async {
+        if (request.method == 'POST' &&
+            request.url.path == '/api/v1/reservations') {
+          return http.Response(
+            jsonEncode({
+              'detail': 'An active reservation already exists.',
+              'code': 'reservation_conflict',
+            }),
+            409,
+          );
+        }
+        if (request.method == 'GET' &&
+            request.url.path == '/api/v1/reservations') {
+          return http.Response(jsonEncode([reservationJson()]), 200);
+        }
+        return http.Response('not found', 404);
+      }),
+    );
+    final controller = CustomerReservationsController(api: api);
 
+    final result = await controller.createReservation(
+      quote: QuoteSnapshot.fromJson(quoteJson()),
+      wallet: const CustomerWallet(
+        id: 'wallet-1',
+        address: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+      ),
+    );
+
+    expect(result, isNull);
+    expect(controller.message, 'An active reservation already exists.');
+    expect(controller.reservations, hasLength(1));
+    expect(controller.reservations.single.reservationId, 'reservation-1');
+  });
 
   test('reservation parses the nullable deposit confirmation timestamp', () {
     final pending = ReservationRecord.fromJson(reservationJson());
@@ -204,6 +243,65 @@ void main() {
       DateTime.utc(2026, 10, 6, 12, 30),
     );
   });
+
+  test(
+    'card flow creates a wallet-independent reservation and payment session',
+    () async {
+      final seenRequests = <http.Request>[];
+      final api = CustomerBookingApi(
+        baseUrl: 'https://api.example.test',
+        accessTokenProvider: () async => 'access-token',
+        client: MockClient((request) async {
+          seenRequests.add(request);
+          if (request.url.path == '/api/v1/reservations' &&
+              request.method == 'POST') {
+            return http.Response(
+              jsonEncode({...reservationJson(), 'payment_method': 'card'}),
+              201,
+            );
+          }
+          if (request.url.path ==
+              '/api/v1/reservations/reservation-1/card-payment-intent') {
+            return http.Response(
+              jsonEncode({
+                'reservation_id': 'reservation-1',
+                'payment_intent_id': 'pi_test_1',
+                'client_secret': 'pi_test_1_secret_client',
+                'publishable_key': 'pk_test_example',
+                'amount_minor': 500,
+                'currency': 'bob',
+                'status': 'requires_payment_method',
+              }),
+              200,
+            );
+          }
+          return http.Response('not found', 404);
+        }),
+      );
+
+      final reservation = await api.createCardReservation(
+        listingId: 'listing-1',
+        quoteId: 'quote-1',
+        idempotencyKey: 'card-request-key',
+      );
+      final payment = await api.createCardPaymentIntent('reservation-1');
+
+      expect(reservation.paymentMethod, 'card');
+      expect(
+        seenRequests.first.headers['authorization'],
+        'Bearer access-token',
+      );
+      expect(seenRequests.first.headers['idempotency-key'], 'card-request-key');
+      expect(jsonDecode(seenRequests.first.body), {
+        'listing_id': 'listing-1',
+        'quote_id': 'quote-1',
+        'payment_method': 'card',
+      });
+      expect(payment.paymentIntentId, 'pi_test_1');
+      expect(payment.amountMinor, 500);
+      expect(payment.currency, 'bob');
+    },
+  );
 
   test('wallet challenge maps the exact message and expiration', () async {
     final api = CustomerBookingApi(

@@ -1456,6 +1456,95 @@ a {
   font-size: 0.875rem;
 }
 
+.stripe-card-admin {
+  display: grid;
+  gap: 1rem;
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+}
+
+.stripe-card-admin__header,
+.stripe-card-admin__connect,
+.stripe-card-admin__queue-heading,
+.stripe-card-admin__reservation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.stripe-card-admin__header h2,
+.stripe-card-admin__connect h3,
+.stripe-card-admin__queue-heading h3 {
+  margin: 0.25rem 0;
+  color: var(--forest-deep);
+}
+
+.stripe-card-admin__intro,
+.stripe-card-admin__connect p,
+.stripe-card-admin__queue-heading p,
+.stripe-card-admin__reservation p {
+  margin: 0.25rem 0;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+.stripe-card-admin__connect,
+.stripe-card-admin__reservation {
+  padding: 1rem;
+  border: 1px solid var(--surface-edge);
+  border-radius: 1rem;
+  background: var(--surface);
+}
+
+.stripe-card-admin__status {
+  font-size: 0.82rem;
+}
+
+.stripe-card-admin__notice {
+  padding: 0.8rem 1rem;
+  border: 1px solid #b5d3bd;
+  border-radius: 0.75rem;
+  background: #edf6ef;
+  color: var(--forest-deep);
+}
+
+.stripe-card-admin__queue-heading > span {
+  display: grid;
+  width: 2.3rem;
+  aspect-ratio: 1;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--forest);
+  color: white;
+  font-weight: 700;
+}
+
+.stripe-card-admin__list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stripe-card-admin__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+@media (max-width: 740px) {
+  .stripe-card-admin__header,
+  .stripe-card-admin__connect,
+  .stripe-card-admin__queue-heading,
+  .stripe-card-admin__reservation {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .protected-staff-navigation__item {
   display: flex;
   width: 100%;

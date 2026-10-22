@@ -108,6 +108,7 @@ class ReservationRecord {
     required this.reservationId,
     required this.listingId,
     required this.status,
+    required this.paymentMethod,
     required this.apiCreatedAt,
     required this.decisionDeadlineAt,
     required this.quoteSnapshot,
@@ -120,6 +121,7 @@ class ReservationRecord {
         json['reservation_id'] is! String ||
         json['listing_id'] is! String ||
         json['status'] is! String ||
+        (json['payment_method'] != null && json['payment_method'] is! String) ||
         json['api_created_at'] is! String ||
         json['decision_deadline_at'] is! String ||
         (json['deposit_amount'] != null && json['deposit_amount'] is! String) ||
@@ -131,6 +133,7 @@ class ReservationRecord {
       reservationId: json['reservation_id']! as String,
       listingId: json['listing_id']! as String,
       status: json['status']! as String,
+      paymentMethod: (json['payment_method'] as String?) ?? 'wallet',
       apiCreatedAt: DateTime.parse(json['api_created_at']! as String),
       decisionDeadlineAt: DateTime.parse(
         json['decision_deadline_at']! as String,
@@ -146,11 +149,54 @@ class ReservationRecord {
   final String reservationId;
   final String listingId;
   final String status;
+  final String paymentMethod;
   final DateTime apiCreatedAt;
   final DateTime decisionDeadlineAt;
   final ReservationQuoteSnapshot quoteSnapshot;
   final String? depositAmount;
   final DateTime? depositConfirmedAt;
+}
+
+class CardPaymentSession {
+  const CardPaymentSession({
+    required this.reservationId,
+    required this.paymentIntentId,
+    required this.clientSecret,
+    required this.publishableKey,
+    required this.amountMinor,
+    required this.currency,
+    required this.status,
+  });
+
+  factory CardPaymentSession.fromJson(Object? json) {
+    if (json is! Map<String, Object?> ||
+        json['reservation_id'] is! String ||
+        json['payment_intent_id'] is! String ||
+        json['client_secret'] is! String ||
+        json['publishable_key'] is! String ||
+        json['amount_minor'] is! int ||
+        json['currency'] is! String ||
+        json['status'] is! String) {
+      throw const FormatException('Card payment session fields are invalid');
+    }
+    return CardPaymentSession(
+      reservationId: json['reservation_id']! as String,
+      paymentIntentId: json['payment_intent_id']! as String,
+      clientSecret: json['client_secret']! as String,
+      publishableKey: json['publishable_key']! as String,
+      amountMinor: json['amount_minor']! as int,
+      currency: json['currency']! as String,
+      status: json['status']! as String,
+    );
+  }
+
+  final String reservationId;
+  final String paymentIntentId;
+  final String clientSecret;
+  final String publishableKey;
+  final int amountMinor;
+  final String currency;
+  final String status;
 }
 
 class ReservationPermit {

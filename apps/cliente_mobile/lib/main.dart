@@ -14,6 +14,8 @@ import 'ui/features/auth/views/customer_account_screen.dart';
 import 'ui/features/catalog/views/catalog_screen.dart';
 import 'ui/features/reservations/customer_reservations_screen.dart';
 
+import 'ui/theme/andean_theme.dart';
+
 /// Backend used by the running app. Override it per environment with
 /// `--dart-define=ROOMFORGE_API_BASE_URL=https://host`.
 const _apiBaseUrl = String.fromEnvironment(
@@ -59,10 +61,7 @@ class RoomForgeApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'RoomForge',
-    theme: ThemeData(
-      colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0F766E)),
-      useMaterial3: true,
-    ),
+    theme: andeanTheme(),
     home: CustomerShell(
       sessionController: sessionController,
       catalogApi: catalogApi,

@@ -6,6 +6,8 @@ import '../../domain/listing_drafts_controller.dart';
 import '../../domain/listing_photos_controller.dart';
 import 'listing_format.dart';
 import 'listing_photos_section.dart';
+import '../theme/andean_theme.dart';
+import '../theme/andean_widgets.dart';
 import '../spatial/spatial_capture_screen.dart';
 
 /// Minimum 48 dp touch target for primary actions.
@@ -395,6 +397,15 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    const AndeanNoticeBanner(
+                      title: 'FICHA TÉCNICA & CAPTURA CATASTRAL',
+                      badge: 'Paso 1 de 3',
+                      icon: Icons.verified_user_outlined,
+                      variant: AndeanBannerVariant.info,
+                      message:
+                          'Genera el borrador certificado para aprobación notarial y registro en contrato inteligente.',
+                    ),
+                    const SizedBox(height: 16),
                     if (listing != null) ...[
                       Text(
                         'Estado: ${statusLabel(listing.status)}',
@@ -405,10 +416,19 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
                     if (_rejectionReason != null) ...[
                       Card(
                         key: const ValueKey('listing-rejection-reason'),
-                        color: theme.colorScheme.errorContainer,
+                        color: AndeanColors.errorContainer,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: const BorderSide(color: AndeanColors.border),
+                        ),
                         child: Padding(
                           padding: const EdgeInsets.all(16),
-                          child: Text('Motivo del rechazo: $_rejectionReason'),
+                          child: Text(
+                            'Motivo del rechazo: $_rejectionReason',
+                            style: AndeanTypography.bodyMd.copyWith(
+                              color: AndeanColors.onErrorContainer,
+                            ),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -416,13 +436,18 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
                     if (reopensReview) ...[
                       Card(
                         key: const ValueKey('listing-status-warning'),
-                        color: theme.colorScheme.tertiaryContainer,
+                        color: AndeanColors.surfaceContainerHigh,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: const BorderSide(color: AndeanColors.border),
+                        ),
                         child: const Padding(
                           padding: EdgeInsets.all(16),
                           child: Text(
                             'Si guardás cambios, el inmueble vuelve a borrador, '
                             'sale del catálogo si estaba publicado y deberá '
                             'aprobarse de nuevo.',
+                            style: AndeanTypography.bodyMd,
                           ),
                         ),
                       ),

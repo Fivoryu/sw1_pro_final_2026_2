@@ -15,7 +15,8 @@ class ReservationCreateRequest(BaseModel):
 
     listing_id: Annotated[str, Field(min_length=1, max_length=36)]
     quote_id: Annotated[str, Field(min_length=1, max_length=36)]
-    customer_wallet_id: Annotated[str, Field(min_length=1, max_length=36)]
+    payment_method: Literal["wallet", "card"] = "wallet"
+    customer_wallet_id: Annotated[str, Field(min_length=1, max_length=36)] | None = None
 
 
 class ReservationQuoteSnapshotResponse(BaseModel):
@@ -102,6 +103,7 @@ class ReservationResponse(BaseModel):
     reservation_id: str
     listing_id: str
     status: Literal["pending", "accepted", "rejected", "cancelled", "expired"]
+    payment_method: Literal["wallet", "card"]
     api_created_at: datetime
     decision_deadline_at: datetime
     quote_snapshot: ReservationQuoteSnapshotResponse
