@@ -39,7 +39,10 @@ def postgres_context() -> Iterator[F04Context]:
         config = Config(str(backend / "alembic.ini"))
         config.set_main_option("script_location", str(backend / "alembic"))
         scripts = ScriptDirectory.from_config(config)
-        assert scripts.get_heads() == ["0023_furniture_review"]
+        heads = scripts.get_heads()
+        assert len(heads) == 1, f"the migration chain must have one head, got {heads}"
+        # Later phases chain onto F08; the furniture review revision must stay in the history.
+        assert "0023_furniture_review" in {rev.revision for rev in scripts.walk_revisions()}
         with patch.dict(os.environ, {"DATABASE_URL": value}):
             alembic_command.upgrade(config, "head")
         assert "furniture_review" in inspect(engine).get_table_names()
