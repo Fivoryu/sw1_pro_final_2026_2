@@ -48,6 +48,25 @@ class CaptureList(BaseModel):
     captures: list[CaptureResponse]
 
 
+class VolumeSuggestion(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    object_id: Annotated[str, Field(alias="objectId", min_length=1, max_length=64)]
+    label: Annotated[str, Field(min_length=1, max_length=64)]
+    score: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+    keyframe: Annotated[int, Field(ge=1)]
+    box: Annotated[
+        list[Annotated[float, Field(allow_inf_nan=False)]], Field(min_length=4, max_length=4)
+    ]
+
+
+class VolumeSuggestions(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    model_id: Annotated[str, Field(alias="modelId", min_length=1, max_length=64)]
+    items: list[VolumeSuggestion] = Field(max_length=100)
+
+
 class ReconstructionResult(BaseModel):
     """What the worker reports for its active claim; the route validates ``sceneDraft``."""
 
@@ -57,6 +76,7 @@ class ReconstructionResult(BaseModel):
     warnings: list[Annotated[str, Field(max_length=500)]] = Field(
         default_factory=list, max_length=MAX_WARNINGS
     )
+    volume_suggestions: VolumeSuggestions | None = Field(default=None, alias="volumeSuggestions")
 
 
 class ReconstructionFailure(BaseModel):

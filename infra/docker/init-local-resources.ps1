@@ -50,10 +50,17 @@ if ([string]::IsNullOrWhiteSpace($bucketName) -or
 function Invoke-FlociAws {
     param(
         [Parameter(Mandatory = $true)][string]$Endpoint,
-        [Parameter(Mandatory = $true)][string[]]$AwsArguments
+        [Parameter(Mandatory = $true)][string[]]$AwsArguments,
+        [string]$StandardInput
     )
 
-    $output = & docker compose --env-file $envFile -f $composeFile exec -T floci aws --endpoint-url $Endpoint @AwsArguments
+    if ($PSBoundParameters.ContainsKey('StandardInput')) {
+        # Windows PowerShell 5.1 strips inner double quotes from native arguments,
+        # so JSON values travel through stdin (file:///dev/stdin) instead.
+        $output = $StandardInput | & docker compose --env-file $envFile -f $composeFile exec -T floci aws --endpoint-url $Endpoint @AwsArguments
+    } else {
+        $output = & docker compose --env-file $envFile -f $composeFile exec -T floci aws --endpoint-url $Endpoint @AwsArguments
+    }
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0) {
         $operation = $AwsArguments -join ' '
@@ -151,6 +158,6 @@ $redrivePolicyJson = [ordered]@{
 $queueAttributesJson = @{ RedrivePolicy = $redrivePolicyJson } | ConvertTo-Json -Compress
 $null = Invoke-FlociAws -Endpoint $sqsEndpoint -AwsArguments @(
     'sqs', 'set-queue-attributes', '--queue-url', $detectionQueueUrl,
-    '--attributes', $queueAttributesJson, '--output', 'json'
-)
+    '--attributes', 'file:///dev/stdin', '--output', 'json'
+) -StandardInput $queueAttributesJson
 Write-Host "Configured SQS redrive for '$detectionQueueName' after $detectionRedriveReceiveCount receives to '$detectionDeadLetterQueueName'."

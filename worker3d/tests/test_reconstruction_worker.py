@@ -271,3 +271,210 @@ def test_worker_requires_a_service_token() -> None:
             queue=FakeQueue(),
             http_client=FakeHttpClient(),
         )
+
+
+# --- class suggestions for depth volumes -------------------------------------------------------
+
+_VIEW = {"objectId": "box-1", "keyframe": 2, "image": "frames/000002.jpg", "box": [100, 100, 200, 200]}
+
+
+def _reconstructor_with_views(views: list[dict[str, Any]]) -> Any:
+    def reconstruct_with_views(package_dir: Path) -> reconstruct.ReconstructionResult:
+        result = reconstruct.reconstruct(package_dir)
+        return reconstruct.ReconstructionResult(result.scene_draft, result.warnings, views)
+
+    return reconstruct_with_views
+
+
+def _complete_body(http: FakeHttpClient) -> dict[str, Any]:
+    body = http.posts[-1][2]
+    assert http.posts[-1][0].endswith("/complete") and body is not None
+    return body
+
+
+def _suggestion_worker(
+    http: FakeHttpClient, queue: FakeQueue, labeler: Any
+) -> reconstruction_worker.ReconstructionJobWorker:
+    return reconstruction_worker.ReconstructionJobWorker(
+        api_base_url="http://api:8000",
+        service_token="service-token",
+        queue=queue,
+        http_client=http,
+        reconstructor=_reconstructor_with_views([_VIEW]),
+        labeler=labeler,
+    )
+
+
+def test_labeler_suggestions_are_posted_with_the_scene_draft() -> None:
+    http = FakeHttpClient()
+    suggestions = {
+        "modelId": "m",
+        "items": [
+            {"objectId": "box-1", "label": "chair", "score": 0.9, "keyframe": 2, "box": [1, 2, 3, 4]}
+        ],
+    }
+    seen: list[Any] = []
+
+    def labeler(_dir: Path, views: list[dict[str, Any]]) -> dict[str, Any]:
+        seen.append(views)
+        return suggestions
+
+    _suggestion_worker(http, FakeQueue(), labeler).run_once()
+
+    body = _complete_body(http)
+    assert set(body) == {"sceneDraft", "warnings", "volumeSuggestions"}
+    assert body["volumeSuggestions"] == suggestions
+    assert seen == [[_VIEW]]
+
+
+def test_no_matches_leaves_the_payload_unchanged() -> None:
+    http = FakeHttpClient()
+
+    _suggestion_worker(http, FakeQueue(), lambda _dir, _views: None).run_once()
+
+    assert set(_complete_body(http)) == {"sceneDraft", "warnings"}
+
+
+def test_detector_unavailable_adds_the_warning_and_sends_no_suggestions() -> None:
+    http = FakeHttpClient()
+
+    def unavailable(_dir: Path, _views: list[dict[str, Any]]) -> None:
+        raise reconstruction_worker.DetectorUnavailable
+
+    _suggestion_worker(http, FakeQueue(), unavailable).run_once()
+
+    body = _complete_body(http)
+    assert "volumeSuggestions" not in body
+    assert "Class suggestions skipped: detector unavailable" in body["warnings"]
+
+
+def test_labeler_failure_does_not_fail_the_job_nor_leak_its_message() -> None:
+    http, queue = FakeHttpClient(), FakeQueue()
+
+    def broken(_dir: Path, _views: list[dict[str, Any]]) -> None:
+        raise RuntimeError("secret /path")
+
+    _suggestion_worker(http, queue, broken).run_once()
+
+    body = _complete_body(http)
+    assert "volumeSuggestions" not in body
+    assert "secret" not in json.dumps(body["warnings"])
+    assert len(queue.deleted) == 1
+
+
+def test_default_labeler_without_views_never_loads_the_detector() -> None:
+    http = FakeHttpClient()
+
+    _worker(http, FakeQueue()).run_once()
+
+    body = _complete_body(http)
+    assert set(body) == {"sceneDraft", "warnings"}
+    assert not any("Class suggestions" in warning for warning in body["warnings"])
+
+
+def _fake_detector(per_image: dict[str, list[dict[str, Any]]], calls: list[str]) -> Any:
+    def detector(images: Any, threshold: float) -> tuple[list[dict[str, Any]], list[str]]:
+        assert threshold == 0.5
+        [path] = list(images)
+        calls.append(path.name)
+        return [{"image": path.name, "detections": per_image.get(path.name, [])}], []
+
+    return detector
+
+
+def test_label_volumes_picks_the_highest_iou_detection_and_drops_weak_overlaps(
+    tmp_path: Path,
+) -> None:
+    views = [
+        {"objectId": "box-1", "keyframe": 2, "image": "frames/b.jpg", "box": [100, 100, 200, 200]},
+        {"objectId": "box-2", "keyframe": 2, "image": "frames/b.jpg", "box": [300, 300, 400, 400]},
+        {"objectId": "box-3", "keyframe": 3, "image": "frames/c.jpg", "box": [0, 0, 100, 100]},
+    ]
+    detections = {
+        "b.jpg": [
+            {"label": "tv", "score": 0.95, "box": [100, 100, 130, 130]},  # IoU 0.09 with box-1
+            {"label": "chair", "score": 0.6, "box": [110, 100, 210, 200]},  # IoU 0.82 with box-1
+            {"label": "bed", "score": 0.9, "box": [300, 300, 340, 400]},  # IoU 0.4 with box-2
+        ],
+        "c.jpg": [{"label": "couch", "score": 0.8, "box": [70, 0, 170, 100]}],  # IoU 0.18
+    }
+    calls: list[str] = []
+
+    result = reconstruction_worker.label_volumes(
+        tmp_path, views, _fake_detector(detections, calls), "model-x", 0.5
+    )
+
+    assert result == {
+        "modelId": "model-x",
+        "items": [
+            {
+                "objectId": "box-1",
+                "label": "chair",
+                "score": 0.6,
+                "keyframe": 2,
+                "box": [110, 100, 210, 200],
+            },
+            {
+                "objectId": "box-2",
+                "label": "bed",
+                "score": 0.9,
+                "keyframe": 2,
+                "box": [300, 300, 340, 400],
+            },
+        ],
+    }
+    assert calls == ["b.jpg", "c.jpg"]  # once per distinct keyframe
+
+
+def test_label_volumes_without_any_match_returns_none(tmp_path: Path) -> None:
+    view = {"objectId": "box-1", "keyframe": 1, "image": "frames/a.jpg", "box": [0, 0, 10, 10]}
+
+    result = reconstruction_worker.label_volumes(tmp_path, [view], _fake_detector({}, []), "m", 0.5)
+
+    assert result is None
+
+
+def test_label_volumes_keeps_the_highest_scores_when_truncating(tmp_path: Path) -> None:
+    views = [
+        {"objectId": f"box-{i}", "keyframe": 1, "image": "a.jpg", "box": [i * 10, 0, i * 10 + 9, 9]}
+        for i in range(1, 106)
+    ]
+    detections = {
+        "a.jpg": [
+            {"label": "chair", "score": round(0.5 + i / 1000, 4), "box": [i * 10, 0, i * 10 + 9, 9]}
+            for i in range(1, 106)
+        ]
+    }
+
+    result = reconstruction_worker.label_volumes(
+        tmp_path, views, _fake_detector(detections, []), "m", 0.5
+    )
+
+    assert result is not None and len(result["items"]) == 100
+    assert result["items"][0]["objectId"] == "box-105"
+    assert "box-1" not in {item["objectId"] for item in result["items"]}
+
+
+def test_warnings_stay_within_the_api_cap_and_keep_the_labeler_warning() -> None:
+    http = FakeHttpClient()
+
+    def crowded(package_dir: Path) -> reconstruct.ReconstructionResult:
+        result = reconstruct.reconstruct(package_dir)
+        many = [f"warning {n}" for n in range(reconstruction_worker.MAX_WARNINGS)]
+        return reconstruct.ReconstructionResult(result.scene_draft, many, [_VIEW])
+
+    def unavailable(_dir: Path, _views: list[dict[str, Any]]) -> None:
+        raise reconstruction_worker.DetectorUnavailable
+
+    reconstruction_worker.ReconstructionJobWorker(
+        api_base_url="http://api:8000",
+        service_token="service-token",
+        queue=FakeQueue(),
+        http_client=http,
+        reconstructor=crowded,
+        labeler=unavailable,
+    ).run_once()
+
+    warnings = _complete_body(http)["warnings"]
+    assert len(warnings) == reconstruction_worker.MAX_WARNINGS
+    assert warnings[-1] == "Class suggestions skipped: detector unavailable"
