@@ -217,7 +217,7 @@ Las superficies son las rutas que existen hoy (corte 2026-09-30). Una fase que n
 | F04 | `backend/app/modules/catalog/{router,schemas,service,models,errors}.py`, `backend/alembic/versions/`, `backend/tests/` | **F05: mismo módulo `catalog`** |
 | F05 | `backend/app/modules/catalog/` (mobiliario y cotizaciones), `backend/alembic/versions/` | **F04: mismo módulo `catalog`** |
 | F06 | módulo nuevo de visor/editor, `panel/staff-shell/src/features/`, `apps/*_mobile/lib/ui/` | F07 (contrato de escena), F10 (`panel`) |
-| F07 | `apps/captura_mobile/lib/`, `apps/captura_mobile/android/` | F06 (contrato de escena), F03 (`captura_mobile`) |
+| F07 | `apps/captura_mobile/lib/`, `apps/captura_mobile/android/`, `worker3d/` (F07.7) | F06 (contrato de escena), F03 (`captura_mobile`), F08 (`worker3d/` y patrón de trabajos) |
 | F08 | `worker3d/`, módulo nuevo de sugerencias y trabajos, `backend/alembic/versions/` | F04/F05/F09 (cadena de migraciones) |
 | F09 | `backend/app/modules/reservations/`, `contracts/`, `apps/cliente_mobile/lib/` | F03 y F06 (app cliente) |
 | F10 | todas las anteriores | **todas: no se paraleliza** |
@@ -717,6 +717,8 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 
 **Decisión 2026-10-21 (operador; registro en `odd/tasks/f07-spatial-capture.md`, L15): guía durante el recorrido continuo.** El agente no graba ni marca por tramos: toca «Empezar» una vez y la app lo guía en vivo con señales que ARCore ya entrega. Indicaciones por estado: sin piso («Apuntá al piso…»), movimiento rápido, poca luz, superficie sin textura y seguimiento perdido —este último conserva lo capturado y no muestrea hasta recuperarse—. Un minimapa de cobertura dibuja las paredes observadas y el porcentaje de sectores cubiertos alrededor del recorrido, e indica hacia dónde falta mirar. Las indicaciones se refuerzan con voz (Text-to-Speech del sistema, sin conexión) y vibración, para no exigir mirar la pantalla. Objetivo declarado: teléfonos de gama media con 4 GB de RAM y soporte de ARCore; **no medido** —solo hay pruebas en el S23 FE— y la guía no agrega inferencia ni carga de red. La detección de muebles durante el recorrido (F08 en el dispositivo) queda fuera de esta decisión y requiere su propio spike.
 
+**Decisión 2026-10-21 (operador; registro en `odd/tasks/f07-spatial-capture.md`, L18): el teléfono captura y `worker3d` reconstruye.** El teléfono deja de generar el modelo: hace bien el recorrido (guía, calidad, seguimiento) y sube un **paquete de captura** con cuadros clave de 640×480, la pose de ARCore de cada cuadro, su profundidad cuando hay Depth API, planos, trayectoria y la medida de referencia (contrato en `docs/api/f07-capture-package.md`). `worker3d` genera con ese paquete el plano 2D, la escena v2 y la ubicación de muebles por pose y profundidad (F07.7). Se eligió frente a subir solo geometría (no permite corregir lo que ARCore no vio) y frente a subir la grabación de ARCore (solo se reproduce en Android y obligaría a recalcular SLAM en el servidor). **Esta decisión reemplaza la frase «No se graba video ni se sube imagen: solo geometría observada» de la decisión anterior:** sigue sin grabarse video continuo, pero sí se suben cuadros clave del interior, privados de la agencia y borrados tras el procesamiento. La propuesta de contorno en el teléfono queda como vista previa y guía, no como resultado. Requiere almacenamiento de objetos (S3 local en desarrollo, F11 en la nube). Sin buena luz no hay poses y el paquete no sirve: la luz sigue siendo condición de la captura.
+
 ### F07.1 — Integración AR y seguimiento
 
 - **Entrada:** teléfono real, contrato de escena y permiso de cámara.
@@ -756,6 +758,13 @@ Después del corte documentado en §1.4, el trabajo F01 se integró en `origin/m
 - **Acciones:** extraer volúmenes de ocupación (posición y dimensiones en metros) desde planos y profundidad durante el recorrido; declarar procedencia (`depth` o `manual`) y confianza; sin clase ni precio. Gate previo obligatorio: spike de Depth API en S23 FE — la Depth API no está medida en este proyecto y ARCore entrega planos horizontales/verticales, no volúmenes libres; los límites se declaran, no se prometen.
 - **Salida:** volúmenes sin etiqueta en la escena, que renderizan y colisionan; promovibles a `ListingExtra` por la agencia (F05.1 + F06.3).
 - **Aceptación:** un volumen sin `extra_id` se muestra con el estado honesto del contrato de escena («Este objeto es parte del recorrido; no tiene precio publicado.»); ningún volumen inventa una clase ni un precio; la pérdida de seguimiento no produce volúmenes ficticios; la corrección de dimensiones permanece manual (F06.3).
+
+### F07.7 — Reconstrucción en worker3d (decisión 2026-10-21)
+
+- **Entrada:** paquete de captura de F07 (`docs/api/f07-capture-package.md`), trabajo asíncrono con el patrón de F08.4.
+- **Acciones:** ajustar planos de piso y paredes con todos los cuadros, proponer el contorno y la altura, ubicar volúmenes de muebles con pose y profundidad (con el detector de F08 como sugerencia de clase) y deduplicar lo visto desde varios ángulos; escribir un borrador de escena v2 con procedencia `reconstruction`.
+- **Salida:** borrador de escena v2 para revisión en el editor (F06.3) y sugerencias de muebles para F08.5.
+- **Aceptación:** el borrador nunca se publica solo; sin profundidad no se inventan volúmenes; lo no observado se declara como tal; los cuadros se borran tras el procesamiento; el error frente a medidas reales se registra, sin prometer precisión no medida.
 
 ## F08 — IA preentrenada para mobiliario
 
@@ -1081,7 +1090,7 @@ Cada casilla se comprobará al ejecutar el proyecto; se mantiene sin marcar en e
 
 ### 7.2 Mejoras posteriores, no dependencias ocultas
 
-Video, mayor variedad de muebles, fine-tuning, unión automática de ambientes, múltiples pisos, exportación CAD/BIM, fotogrametría avanzada, mobiliario realista, pagos reales y suscripciones requieren nuevos requisitos, costos y validación. Se incorporan solo tras terminar el mínimo y obtener aprobación.
+Video continuo (los cuadros clave del paquete de F07.7 no son video), mayor variedad de muebles, fine-tuning, unión automática de ambientes, múltiples pisos, exportación CAD/BIM, fotogrametría avanzada, mobiliario realista, pagos reales y suscripciones requieren nuevos requisitos, costos y validación. Se incorporan solo tras terminar el mínimo y obtener aprobación.
 
 ### 7.3 Cómo iniciar el siguiente trabajo
 
