@@ -8,6 +8,7 @@ import 'catalog_filters_sheet.dart';
 import 'catalog_format.dart';
 import 'listing_detail_screen.dart';
 import 'listing_photo.dart';
+import '../../../theme/andean_theme.dart';
 
 /// The "Explorar" tab: published listings with filters, paging and honest
 /// loading, empty and error states.
@@ -189,45 +190,115 @@ class _CatalogScreenState extends State<CatalogScreen> {
   }
 
   Widget _card(BuildContext context, CatalogListing listing) {
-    final theme = Theme.of(context);
     return Card(
       key: ValueKey('catalog-listing-${listing.listingId}'),
+      margin: const EdgeInsets.only(bottom: 16),
       clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: AndeanColors.border, width: 1),
+      ),
+      color: AndeanColors.surfaceContainerLowest,
       child: InkWell(
         onTap: () => _openListing(listing),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(
-              height: 160,
-              child: listing.coverPhotoUrl == null
-                  ? PhotoPlaceholder(
-                      key: ValueKey(
-                        'catalog-cover-placeholder-${listing.listingId}',
-                      ),
-                    )
-                  : ListingPhoto(
-                      key: ValueKey('catalog-cover-${listing.listingId}'),
-                      url: listing.coverPhotoUrl!,
-                      semanticLabel: 'Portada de ${locationLabel(listing)}',
+            Stack(
+              children: [
+                SizedBox(
+                  height: 170,
+                  width: double.infinity,
+                  child: listing.coverPhotoUrl == null
+                      ? PhotoPlaceholder(
+                          key: ValueKey(
+                            'catalog-cover-placeholder-${listing.listingId}',
+                          ),
+                          message: 'Sin fotos oficiales',
+                        )
+                      : ListingPhoto(
+                          key: ValueKey('catalog-cover-${listing.listingId}'),
+                          url: listing.coverPhotoUrl!,
+                          semanticLabel: 'Portada de ${locationLabel(listing)}',
+                        ),
+                ),
+                Positioned(
+                  top: 10,
+                  left: 10,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
                     ),
+                    decoration: BoxDecoration(
+                      color: AndeanColors.surface.withValues(alpha: 0.92),
+                      borderRadius: BorderRadius.circular(6),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color.fromRGBO(27, 59, 54, 0.08),
+                          blurRadius: 4,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      'ID #${listing.listingId}',
+                      style: AndeanTypography.monoData.copyWith(
+                        color: AndeanColors.secondary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
             Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    locationLabel(listing),
-                    style: theme.textTheme.titleMedium,
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.location_on_outlined,
+                        size: 16,
+                        color: AndeanColors.secondary,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          locationLabel(listing),
+                          style: AndeanTypography.headlineSm.copyWith(
+                            fontSize: 17,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AndeanColors.surfaceContainerHigh,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          operationLabel(listing.operation),
+                          style: AndeanTypography.labelSm.copyWith(
+                            color: AndeanColors.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 4),
-                  Text(operationLabel(listing.operation)),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 8),
                   Text(
                     chargeLabel(listing.basePrice, listing.operation),
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: theme.colorScheme.primary,
+                    style: AndeanTypography.headlineSm.copyWith(
+                      color: AndeanColors.primaryContainer,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
                     ),
                   ),
                 ],

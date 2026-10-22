@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../../data/models/reservation_models.dart';
 import '../../../../data/services/customer_booking_api.dart';
 import '../../../../data/services/local_wallet_connect.dart';
 import '../../../../domain/customer_session_controller.dart';
+import '../../../theme/andean_theme.dart';
 
 /// Account tab: renders the customer session state and drives login,
 /// registration, retry, and logout.
@@ -237,21 +239,53 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
     final identity = widget.controller.identity;
     return [
       _title(context, 'Tu cuenta'),
-      const SizedBox(height: 20),
+      const SizedBox(height: 16),
       Card(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        color: AndeanColors.surfaceContainerLowest,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: AndeanColors.border),
+        ),
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                identity?.email ?? '',
-                key: const ValueKey('account-email'),
-                style: Theme.of(context).textTheme.titleLarge,
+              Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: AndeanColors.primaryContainer,
+                      borderRadius: BorderRadius.circular(9999),
+                    ),
+                    child: const Icon(
+                      Icons.person,
+                      color: AndeanColors.onPrimary,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          identity?.email ?? '',
+                          key: const ValueKey('account-email'),
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Identificador: ${identity?.id ?? ''}',
+                          style: AndeanTypography.bodySm,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
-              Text('Identificador: ${identity?.id ?? ''}'),
             ],
           ),
         ),
@@ -289,66 +323,390 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
         linkedWallet != null &&
         connect?.isConnected == true &&
         connect?.address?.toLowerCase() == linkedWallet.address.toLowerCase();
-    return Card(
-      key: const ValueKey('customer-wallet-section'),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              'Wallet externa',
-              style: Theme.of(context).textTheme.titleMedium,
+            Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    color: AndeanColors.secondary,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'IDENTIDAD CRIPTOGRÁFICA',
+                  style: AndeanTypography.labelSm.copyWith(
+                    color: AndeanColors.secondary,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
-            if (linkedWallet != null)
-              Text(
-                'Verificada: ${linkedWallet.address}',
-                key: const ValueKey('linked-wallet'),
-              )
-            else
-              const Text(
-                'Vinculá una wallet EVM para firmar operaciones de reserva.',
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: AndeanColors.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(9999),
               ),
-            if (_walletMessage != null) ...[
-              const SizedBox(height: 8),
-              Text(_walletMessage!, key: const ValueKey('wallet-message')),
-            ],
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                key: const ValueKey('wallet-connect'),
-                onPressed: _walletBusy || linkedWalletConnected
-                    ? null
-                    : linkedWallet == null
-                    ? _linkWallet
-                    : _connectLinkedWallet,
-                icon: _walletBusy
-                    ? const SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.account_balance_wallet_outlined),
-                label: Text(
-                  _walletBusy
-                      ? 'Conectando…'
-                      : linkedWallet == null
-                      ? 'Conectar y verificar wallet'
-                      : linkedWalletConnected
-                      ? 'Wallet conectada'
-                      : 'Conectar wallet vinculada',
+              child: Text(
+                'EVM v1.4.2',
+                style: AndeanTypography.labelSm.copyWith(
+                  color: AndeanColors.secondary,
                 ),
               ),
             ),
-            if (connect?.isConfigured == false)
-              const Padding(
-                padding: EdgeInsets.only(top: 8),
-                child: Text('Falta configurar el Project ID público de Reown.'),
-              ),
           ],
         ),
-      ),
+        const SizedBox(height: 8),
+        Text(
+          'Billetera Externa EVM',
+          style: AndeanTypography.headlineSm.copyWith(fontSize: 20),
+        ),
+        const SizedBox(height: 2),
+        const Text(
+          'EIP-191 & Protocolo WalletConnect (Reown AppKit)',
+          style: AndeanTypography.bodySm,
+        ),
+        const SizedBox(height: 14),
+        Container(
+          decoration: BoxDecoration(
+            color: AndeanColors.surfaceContainerLowest,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AndeanColors.border),
+          ),
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AndeanColors.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.shield_outlined,
+                  size: 20,
+                  color: AndeanColors.secondary,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Text(
+                          'Principio No Custodiado',
+                          style: AndeanTypography.labelLg,
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AndeanColors.secondaryFixed,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'AUDITABLE',
+                            style: AndeanTypography.labelSm.copyWith(
+                              color: AndeanColors.onSecondaryFixedVariant,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'RoomForge nunca solicitará ni almacenará tus claves privadas ni frase semilla. Toda firma u operación se autoriza directamente en tu aplicación de billetera externa.',
+                      style: AndeanTypography.bodySm.copyWith(
+                        color: AndeanColors.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Card(
+          key: const ValueKey('customer-wallet-section'),
+          color: AndeanColors.surfaceContainerLowest,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: AndeanColors.border),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'ESTADO DE CONEXIÓN',
+                      style: AndeanTypography.labelSm.copyWith(
+                        color: AndeanColors.outline,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: linkedWalletConnected
+                            ? AndeanColors.successBg
+                            : AndeanColors.errorContainer,
+                        borderRadius: BorderRadius.circular(9999),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              color: linkedWalletConnected
+                                  ? AndeanColors.successText
+                                  : AndeanColors.error,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            linkedWalletConnected
+                                ? 'Sesión Conectada'
+                                : 'Sesión Desconectada',
+                            style: AndeanTypography.labelSm.copyWith(
+                              color: linkedWalletConnected
+                                  ? AndeanColors.successText
+                                  : AndeanColors.onErrorContainer,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AndeanColors.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Red vinculada',
+                            style: AndeanTypography.bodySm,
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AndeanColors.surfaceContainer,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.lan_outlined,
+                                  size: 14,
+                                  color: AndeanColors.secondary,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Hardhat Local Node (31337)',
+                                  style: AndeanTypography.monoData.copyWith(
+                                    color: AndeanColors.primaryContainer,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Dirección registrada',
+                            style: AndeanTypography.bodySm,
+                          ),
+                          if (linkedWallet != null)
+                            IconButton(
+                              icon: const Icon(Icons.content_copy, size: 16),
+                              tooltip: 'Copiar dirección',
+                              constraints: const BoxConstraints(
+                                minWidth: 32,
+                                minHeight: 32,
+                              ),
+                              padding: EdgeInsets.zero,
+                              color: AndeanColors.secondary,
+                              onPressed: () {
+                                Clipboard.setData(
+                                  ClipboardData(text: linkedWallet.address),
+                                );
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Dirección copiada al portapapeles',
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                        ],
+                      ),
+                      if (linkedWallet != null) ...[
+                        const SizedBox(height: 4),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Verificada: ${linkedWallet.address}',
+                            key: const ValueKey('linked-wallet'),
+                            style: AndeanTypography.monoData.copyWith(
+                              color: AndeanColors.onSurface,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.verified_outlined,
+                              size: 14,
+                              color: AndeanColors.secondary,
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                'Verificada previamente mediante firma criptográfica EIP-191',
+                                style: AndeanTypography.labelSm.copyWith(
+                                  color: AndeanColors.secondary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ] else ...[
+                        const SizedBox(height: 4),
+                        const Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Vinculá una wallet EVM para firmar operaciones de reserva.',
+                            style: AndeanTypography.bodySm,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (_walletMessage != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AndeanColors.errorContainer,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      _walletMessage!,
+                      key: const ValueKey('wallet-message'),
+                      style: AndeanTypography.bodySm.copyWith(
+                        color: AndeanColors.onErrorContainer,
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: FilledButton.icon(
+                    key: const ValueKey('wallet-connect'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AndeanColors.primaryContainer,
+                      foregroundColor: AndeanColors.onPrimary,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    onPressed: _walletBusy || linkedWalletConnected
+                        ? null
+                        : linkedWallet == null
+                        ? _linkWallet
+                        : _connectLinkedWallet,
+                    icon: _walletBusy
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AndeanColors.onPrimary,
+                            ),
+                          )
+                        : const Icon(Icons.account_balance_wallet_outlined),
+                    label: Text(
+                      _walletBusy
+                          ? 'Conectando…'
+                          : linkedWallet == null
+                          ? 'Conectar y verificar wallet'
+                          : linkedWalletConnected
+                          ? 'Wallet conectada'
+                          : 'Conectar wallet vinculada',
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Center(
+                  child: Text(
+                    'Compatible con MetaMask, Rainbow, Rabby y Ledger',
+                    style: AndeanTypography.labelSm,
+                  ),
+                ),
+                if (connect?.isConfigured == false)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      'Falta configurar el Project ID público de Reown.',
+                      style: AndeanTypography.bodySm.copyWith(
+                        color: AndeanColors.error,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 

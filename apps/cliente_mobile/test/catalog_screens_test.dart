@@ -18,7 +18,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fake_catalog_backend.dart';
 
-
 class _MemoryCustomerTokenStore implements CustomerTokenStore {
   String? token;
 
@@ -110,77 +109,84 @@ void _setNarrowViewport(WidgetTester tester) {
 }
 
 void main() {
-
-
-group('customer reservations', () {
-  testWidgets('offers on-chain expiry only after a deposit was confirmed', (
-    tester,
-  ) async {
-    final tokenStore = _MemoryCustomerTokenStore();
-    final session = CustomerSessionController(
-      api: CustomerAuthApi(
-        baseUrl: 'https://api.example.test',
-        client: MockClient((request) async {
-          if (request.url.path == '/api/v1/customer/auth/login') {
+  group('customer reservations', () {
+    testWidgets('offers on-chain expiry only after a deposit was confirmed', (
+      tester,
+    ) async {
+      final tokenStore = _MemoryCustomerTokenStore();
+      final session = CustomerSessionController(
+        api: CustomerAuthApi(
+          baseUrl: 'https://api.example.test',
+          client: MockClient((request) async {
+            if (request.url.path == '/api/v1/customer/auth/login') {
+              return http.Response(
+                jsonEncode({
+                  'access_token': 'access-token',
+                  'refresh_token': 'refresh-token',
+                  'access_expires_in': 300,
+                }),
+                200,
+              );
+            }
+            if (request.url.path == '/api/v1/customer/auth/me') {
+              return http.Response(
+                jsonEncode({
+                  'id': 'customer-1',
+                  'email': 'customer@example.test',
+                }),
+                200,
+              );
+            }
+            return http.Response('not found', 404);
+          }),
+        ),
+        tokenStore: tokenStore,
+      );
+      await session.signIn(
+        email: 'customer@example.test',
+        password: 'password',
+      );
+      final controller = CustomerReservationsController(
+        api: CustomerBookingApi(
+          baseUrl: 'https://api.example.test',
+          accessTokenProvider: session.obtainAccessToken,
+          client: MockClient((request) async {
+            expect(request.url.path, '/api/v1/reservations');
             return http.Response(
-              jsonEncode({
-                'access_token': 'access-token',
-                'refresh_token': 'refresh-token',
-                'access_expires_in': 300,
-              }),
+              jsonEncode([
+                _reservationForUi(deposited: false),
+                _reservationForUi(deposited: true),
+              ]),
               200,
             );
-          }
-          if (request.url.path == '/api/v1/customer/auth/me') {
-            return http.Response(
-              jsonEncode({'id': 'customer-1', 'email': 'customer@example.test'}),
-              200,
-            );
-          }
-          return http.Response('not found', 404);
-        }),
-      ),
-      tokenStore: tokenStore,
-    );
-    await session.signIn(email: 'customer@example.test', password: 'password');
-    final controller = CustomerReservationsController(
-      api: CustomerBookingApi(
-        baseUrl: 'https://api.example.test',
-        accessTokenProvider: session.obtainAccessToken,
-        client: MockClient((request) async {
-          expect(request.url.path, '/api/v1/reservations');
-          return http.Response(
-            jsonEncode([
-              _reservationForUi(deposited: false),
-              _reservationForUi(deposited: true),
-            ]),
-            200,
-          );
-        }),
-      ),
-    );
+          }),
+        ),
+      );
 
-    await controller.loadReservations();
+      await controller.loadReservations();
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: CustomerReservationsScreen(
-            controller: controller,
-            sessionController: session,
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CustomerReservationsScreen(
+              controller: controller,
+              sessionController: session,
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('expire-unpaid-reservation')), findsNothing);
-    expect(
-      find.byKey(const ValueKey('expire-deposited-reservation')),
-      findsOneWidget,
-    );
+      expect(
+        find.byKey(const ValueKey('expire-unpaid-reservation')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('expire-deposited-reservation')),
+        findsOneWidget,
+      );
+    });
   });
-});
 
   group('formatting', () {
     test('formats amounts with the server currency code', () {

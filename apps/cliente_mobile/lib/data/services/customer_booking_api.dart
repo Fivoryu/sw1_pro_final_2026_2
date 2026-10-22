@@ -106,6 +106,52 @@ class CustomerBookingApi {
     return _parse(() => ReservationRecord.fromJson(body));
   }
 
+  Future<ReservationRecord> createCardReservation({
+    required String listingId,
+    required String quoteId,
+    required String idempotencyKey,
+  }) async {
+    final body = await _send(
+      'POST',
+      '/api/v1/reservations',
+      body: {
+        'listing_id': listingId,
+        'quote_id': quoteId,
+        'payment_method': 'card',
+      },
+      authenticated: true,
+      headers: {'Idempotency-Key': idempotencyKey},
+    );
+    return _parse(() => ReservationRecord.fromJson(body));
+  }
+
+  Future<CardPaymentSession> createCardPaymentIntent(
+    String reservationId,
+  ) async {
+    final body = await _send(
+      'POST',
+      '/api/v1/reservations/${Uri.encodeComponent(reservationId)}/card-payment-intent',
+      authenticated: true,
+    );
+    return _parse(() => CardPaymentSession.fromJson(body));
+  }
+
+  Future<void> cancelCardReservation(String reservationId) async {
+    await _send(
+      'POST',
+      '/api/v1/reservations/${Uri.encodeComponent(reservationId)}/card-cancel',
+      authenticated: true,
+    );
+  }
+
+  Future<void> expireCardReservation(String reservationId) async {
+    await _send(
+      'POST',
+      '/api/v1/reservations/${Uri.encodeComponent(reservationId)}/card-expire',
+      authenticated: true,
+    );
+  }
+
   Future<List<ReservationRecord>> listReservations() async {
     final body = await _send(
       'GET',

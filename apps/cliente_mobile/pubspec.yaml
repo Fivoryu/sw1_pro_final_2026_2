@@ -15,6 +15,7 @@ dependencies:
   convert: ^3.1.2
   web3dart: ^3.0.3
   wallet: ^0.0.18
+  flutter_stripe: ^14.2.0
 
 dev_dependencies:
   flutter_test:

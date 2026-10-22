@@ -330,6 +330,41 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
       return;
     }
     if (reservations == null) return;
+    final paymentMethod = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Elegí cómo reservar'),
+        content: const Text(
+          'La wallet y la tarjeta son alternativas separadas. La tarjeta se procesa en Stripe en modo de prueba.',
+        ),
+        actions: [
+          TextButton(
+            key: const ValueKey('choose-wallet-payment'),
+            onPressed: () => Navigator.pop(context, 'wallet'),
+            child: const Text('Wallet'),
+          ),
+          FilledButton(
+            key: const ValueKey('choose-card-payment'),
+            onPressed: () => Navigator.pop(context, 'card'),
+            child: const Text('Tarjeta'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || paymentMethod == null) return;
+    if (paymentMethod == 'card') {
+      final reservation = await reservations.createCardReservation(
+        quote: quote,
+      );
+      if (!mounted) return;
+      setState(() {
+        _bookingMessage = reservation == null
+            ? reservations.message
+            : reservations.message ??
+                  'Solicitud ${reservation.reservationId} creada. Stripe está verificando el pago.';
+      });
+      return;
+    }
     final wallets = await reservations.loadWallets();
     if (!mounted) return;
     if (wallets == null) {
