@@ -29,7 +29,7 @@ docker compose --env-file infra/docker/local-env.example -f infra/docker/compose
 docker compose --env-file infra/docker/local-env.example -f infra/docker/compose.local.yml exec -T floci aws --endpoint-url http://127.0.0.1:4566 sqs create-queue --queue-name roomforge-local-reconstruction
 ```
 
-`init-local-resources.ps1` puede fallar al aplicar la política de reintentos de la cola de **detección** (F08); no afecta a F07, pero conviene corregirlo.
+`init-local-resources.ps1` configura además la política de reintentos de la cola de **detección** (F08). Los atributos viajan por stdin (`file:///dev/stdin`) porque Windows PowerShell 5.1 elimina las comillas internas de los argumentos nativos, lo que antes hacía fallar `set-queue-attributes` con exit 252.
 
 ## 2. Base de datos y agente de prueba
 
