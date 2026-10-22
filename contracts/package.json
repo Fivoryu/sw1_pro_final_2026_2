@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "description": "Local-only RoomForge test-token reservation escrow",
+  "scripts": {
+    "test": "hardhat test",
+    "deploy:local": "hardhat run scripts/deploy-local.ts --network localhost"
+  },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "2.0.8",
     "@nomicfoundation/hardhat-ethers": "3.0.8",

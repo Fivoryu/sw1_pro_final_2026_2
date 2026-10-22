@@ -1,13 +1,23 @@
 import 'package:flutter/material.dart';
 
+import '../../../../data/models/reservation_models.dart';
+import '../../../../data/services/customer_booking_api.dart';
+import '../../../../data/services/local_wallet_connect.dart';
 import '../../../../domain/customer_session_controller.dart';
 
 /// Account tab: renders the customer session state and drives login,
 /// registration, retry, and logout.
 class CustomerAccountScreen extends StatefulWidget {
-  const CustomerAccountScreen({super.key, required this.controller});
+  const CustomerAccountScreen({
+    super.key,
+    required this.controller,
+    this.bookingApi,
+    this.walletConnect,
+  });
 
   final CustomerSessionController controller;
+  final CustomerBookingApi? bookingApi;
+  final LocalWalletConnect? walletConnect;
 
   @override
   State<CustomerAccountScreen> createState() => _CustomerAccountScreenState();
@@ -19,12 +29,143 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
   final _password = TextEditingController();
   bool _registering = false;
   bool _submitting = false;
+  bool _walletBusy = false;
+  List<CustomerWallet> _wallets = const [];
+  String? _walletMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_sessionChanged);
+    widget.walletConnect?.addListener(_walletChanged);
+    _sessionChanged();
+  }
 
   @override
   void dispose() {
+    widget.controller.removeListener(_sessionChanged);
+    widget.walletConnect?.removeListener(_walletChanged);
     _email.dispose();
     _password.dispose();
     super.dispose();
+  }
+
+  void _walletChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _sessionChanged() {
+    if (widget.controller.status == CustomerSessionStatus.signedIn &&
+        widget.bookingApi != null) {
+      _loadWallets();
+    } else if (widget.controller.status == CustomerSessionStatus.signedOut) {
+      _wallets = const [];
+      _walletMessage = null;
+    }
+  }
+
+  Future<void> _loadWallets() async {
+    final api = widget.bookingApi;
+    if (api == null || _walletBusy) return;
+    _walletBusy = true;
+    try {
+      final wallets = await api.listWallets();
+      if (mounted) setState(() => _wallets = wallets);
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _walletMessage = 'No pudimos consultar la wallet vinculada.',
+        );
+      }
+    } finally {
+      _walletBusy = false;
+    }
+  }
+
+  Future<void> _linkWallet() async {
+    final api = widget.bookingApi;
+    final connect = widget.walletConnect;
+    if (api == null || connect == null) return;
+    setState(() {
+      _walletBusy = true;
+      _walletMessage = null;
+    });
+    try {
+      if (!connect.isConnected) await connect.openConnect();
+      final address = connect.address;
+      if (address == null) {
+        setState(
+          () => _walletMessage = 'Conectá una wallet EVM para continuar.',
+        );
+        return;
+      }
+      final challenge = await api.createWalletChallenge(address: address);
+      final signature = await connect.signPersonalMessage(challenge.message);
+      final linked = await api.linkWallet(
+        challengeId: challenge.challengeId,
+        signature: signature,
+      );
+      setState(() {
+        _wallets = [linked];
+        _walletMessage = 'Wallet verificada y vinculada a tu cuenta.';
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() => _walletMessage = _safeWalletMessage(error));
+      }
+    } finally {
+      if (mounted) setState(() => _walletBusy = false);
+    }
+  }
+
+  Future<void> _connectLinkedWallet() async {
+    final connect = widget.walletConnect;
+    if (connect == null || _wallets.isEmpty) return;
+    setState(() {
+      _walletBusy = true;
+      _walletMessage = null;
+    });
+    try {
+      await connect.openConnect();
+      if (!connect.isConfigured) {
+        setState(
+          () => _walletMessage =
+              'Falta configurar el Project ID público de Reown.',
+        );
+        return;
+      }
+      final address = connect.address;
+      if (!connect.isConnected || address == null) {
+        setState(
+          () => _walletMessage = 'Conectá la wallet vinculada para continuar.',
+        );
+        return;
+      }
+      if (address.toLowerCase() != _wallets.single.address.toLowerCase()) {
+        setState(
+          () => _walletMessage =
+              'La cuenta conectada no coincide con la wallet verificada de RoomForge.',
+        );
+        return;
+      }
+      setState(
+        () =>
+            _walletMessage = 'Wallet verificada conectada y lista para operar.',
+      );
+    } catch (error) {
+      if (mounted) setState(() => _walletMessage = _safeWalletMessage(error));
+    } finally {
+      if (mounted) setState(() => _walletBusy = false);
+    }
+  }
+
+  String _safeWalletMessage(Object error) {
+    final text = error.toString().toLowerCase();
+    if (text.contains('reject') || text.contains('user denied')) {
+      return 'La firma fue rechazada. No se vinculó ninguna wallet.';
+    }
+    if (error is StateError) return error.message;
+    return 'No se pudo verificar la wallet. Podés intentarlo de nuevo.';
   }
 
   Future<void> _submit() async {
@@ -48,14 +189,12 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
 
   Widget _content(BuildContext context) {
     final status = widget.controller.status;
-    return _scroll(
-      switch (status) {
-        CustomerSessionStatus.restoring => _restoring(context),
-        CustomerSessionStatus.unavailable => _unavailable(context),
-        CustomerSessionStatus.signedIn => _signedIn(context),
-        CustomerSessionStatus.signedOut => _form(context),
-      },
-    );
+    return _scroll(switch (status) {
+      CustomerSessionStatus.restoring => _restoring(context),
+      CustomerSessionStatus.unavailable => _unavailable(context),
+      CustomerSessionStatus.signedIn => _signedIn(context),
+      CustomerSessionStatus.signedOut => _form(context),
+    });
   }
 
   Widget _scroll(List<Widget> children) => Center(
@@ -65,10 +204,8 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
     ),
   );
 
-  Widget _title(BuildContext context, String text) => Text(
-    text,
-    style: Theme.of(context).textTheme.headlineSmall,
-  );
+  Widget _title(BuildContext context, String text) =>
+      Text(text, style: Theme.of(context).textTheme.headlineSmall);
 
   List<Widget> _restoring(BuildContext context) => [
     _title(context, 'Cuenta'),
@@ -119,6 +256,10 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
           ),
         ),
       ),
+      if (widget.bookingApi != null) ...[
+        const SizedBox(height: 20),
+        _walletSection(context),
+      ],
       const SizedBox(height: 20),
       if (widget.controller.message != null) ...[
         _notice(context, widget.controller.message, isError: true),
@@ -139,6 +280,76 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
         ),
       ),
     ];
+  }
+
+  Widget _walletSection(BuildContext context) {
+    final linkedWallet = _wallets.isEmpty ? null : _wallets.single;
+    final connect = widget.walletConnect;
+    final linkedWalletConnected =
+        linkedWallet != null &&
+        connect?.isConnected == true &&
+        connect?.address?.toLowerCase() == linkedWallet.address.toLowerCase();
+    return Card(
+      key: const ValueKey('customer-wallet-section'),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Wallet externa',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            if (linkedWallet != null)
+              Text(
+                'Verificada: ${linkedWallet.address}',
+                key: const ValueKey('linked-wallet'),
+              )
+            else
+              const Text(
+                'Vinculá una wallet EVM para firmar operaciones de reserva.',
+              ),
+            if (_walletMessage != null) ...[
+              const SizedBox(height: 8),
+              Text(_walletMessage!, key: const ValueKey('wallet-message')),
+            ],
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                key: const ValueKey('wallet-connect'),
+                onPressed: _walletBusy || linkedWalletConnected
+                    ? null
+                    : linkedWallet == null
+                    ? _linkWallet
+                    : _connectLinkedWallet,
+                icon: _walletBusy
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.account_balance_wallet_outlined),
+                label: Text(
+                  _walletBusy
+                      ? 'Conectando…'
+                      : linkedWallet == null
+                      ? 'Conectar y verificar wallet'
+                      : linkedWalletConnected
+                      ? 'Wallet conectada'
+                      : 'Conectar wallet vinculada',
+                ),
+              ),
+            ),
+            if (connect?.isConfigured == false)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text('Falta configurar el Project ID público de Reown.'),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   List<Widget> _form(BuildContext context) => [
@@ -205,7 +416,11 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
     ),
   ];
 
-  Widget _notice(BuildContext context, String? message, {bool isError = false}) {
+  Widget _notice(
+    BuildContext context,
+    String? message, {
+    bool isError = false,
+  }) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
       key: const ValueKey('account-message'),

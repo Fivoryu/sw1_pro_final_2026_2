@@ -26,8 +26,7 @@ String chargeLabel(CatalogMoney money, ListingOperation operation) {
 /// Note shown on the detail when the listing's currency differs from the
 /// chosen display currency: prices stay in the server currency, and a quote
 /// can be requested in the chosen one.
-String cotizableNote(String displayCurrency) =>
-    'Cotizable en $displayCurrency';
+String cotizableNote(String displayCurrency) => 'Cotizable en $displayCurrency';
 
 String operationLabel(ListingOperation operation) => switch (operation) {
   ListingOperation.sale => 'Venta',

@@ -1,3 +1,13 @@
+import 'dart:convert';
+
+import 'package:cliente_mobile/data/services/customer_auth_api.dart';
+import 'package:cliente_mobile/data/services/customer_booking_api.dart';
+import 'package:cliente_mobile/data/services/customer_token_store.dart';
+import 'package:cliente_mobile/domain/customer_reservations_controller.dart';
+import 'package:cliente_mobile/domain/customer_session_controller.dart';
+import 'package:cliente_mobile/ui/features/reservations/customer_reservations_screen.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:cliente_mobile/data/models/catalog_models.dart';
 import 'package:cliente_mobile/data/services/catalog_api.dart';
 import 'package:cliente_mobile/domain/catalog_controller.dart';
@@ -7,6 +17,50 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fake_catalog_backend.dart';
+
+
+class _MemoryCustomerTokenStore implements CustomerTokenStore {
+  String? token;
+
+  @override
+  Future<void> clearRefreshToken() async {
+    token = null;
+  }
+
+  @override
+  Future<String?> readRefreshToken() async => token;
+
+  @override
+  Future<void> writeRefreshToken(String token) async {
+    this.token = token;
+  }
+}
+
+Map<String, Object?> _reservationForUi({required bool deposited}) => {
+  'reservation_id': deposited ? 'deposited-reservation' : 'unpaid-reservation',
+  'listing_id': 'listing-1',
+  'status': 'pending',
+  'api_created_at': '2026-10-06T12:00:00Z',
+  'decision_deadline_at': '2020-10-06T12:00:00Z',
+  'quote_snapshot': {
+    'quote_id': 'quote-1',
+    'offer_version': 2,
+    'operation': 'sale',
+    'lines': [
+      {
+        'kind': 'base',
+        'extra_id': null,
+        'amount': '100.00',
+        'currency': 'USD',
+        'charge_period': 'one_time',
+      },
+    ],
+    'one_time_total': {'amount': '100.00', 'currency': 'USD'},
+    'monthly_total': {'amount': '0.00', 'currency': 'USD'},
+  },
+  'deposit_amount': '5.00',
+  'deposit_confirmed_at': deposited ? '2026-10-06T12:30:00Z' : null,
+};
 
 ({CatalogController controller, FakeCatalogBackend backend}) _build() {
   final backend = FakeCatalogBackend();
@@ -56,6 +110,78 @@ void _setNarrowViewport(WidgetTester tester) {
 }
 
 void main() {
+
+
+group('customer reservations', () {
+  testWidgets('offers on-chain expiry only after a deposit was confirmed', (
+    tester,
+  ) async {
+    final tokenStore = _MemoryCustomerTokenStore();
+    final session = CustomerSessionController(
+      api: CustomerAuthApi(
+        baseUrl: 'https://api.example.test',
+        client: MockClient((request) async {
+          if (request.url.path == '/api/v1/customer/auth/login') {
+            return http.Response(
+              jsonEncode({
+                'access_token': 'access-token',
+                'refresh_token': 'refresh-token',
+                'access_expires_in': 300,
+              }),
+              200,
+            );
+          }
+          if (request.url.path == '/api/v1/customer/auth/me') {
+            return http.Response(
+              jsonEncode({'id': 'customer-1', 'email': 'customer@example.test'}),
+              200,
+            );
+          }
+          return http.Response('not found', 404);
+        }),
+      ),
+      tokenStore: tokenStore,
+    );
+    await session.signIn(email: 'customer@example.test', password: 'password');
+    final controller = CustomerReservationsController(
+      api: CustomerBookingApi(
+        baseUrl: 'https://api.example.test',
+        accessTokenProvider: session.obtainAccessToken,
+        client: MockClient((request) async {
+          expect(request.url.path, '/api/v1/reservations');
+          return http.Response(
+            jsonEncode([
+              _reservationForUi(deposited: false),
+              _reservationForUi(deposited: true),
+            ]),
+            200,
+          );
+        }),
+      ),
+    );
+
+    await controller.loadReservations();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomerReservationsScreen(
+            controller: controller,
+            sessionController: session,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('expire-unpaid-reservation')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('expire-deposited-reservation')),
+      findsOneWidget,
+    );
+  });
+});
+
   group('formatting', () {
     test('formats amounts with the server currency code', () {
       expect(formatMoney('1750000.00', 'BOB'), 'BOB 1.750.000,00');
@@ -318,6 +444,10 @@ void main() {
     testWidgets('shows the base price, rooms, extras and honest notices', (
       tester,
     ) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       final harness = _build();
       harness.backend.seed(
         id: 'rent-1',
@@ -342,14 +472,16 @@ void main() {
         'Recorrido 3D no disponible.',
         'Disponibilidad no consultada ni confirmada.',
       ]) {
-        // The gallery sits on top; scroll the detail to reach lower sections.
-        await tester.scrollUntilVisible(
-          find.text(text),
-          200,
-          scrollable: find
-              .descendant(of: detail, matching: find.byType(Scrollable))
-              .first,
-        );
+        if (find.text(text).evaluate().isEmpty) {
+          await tester.scrollUntilVisible(
+            find.text(text),
+            300,
+            scrollable: find.byType(Scrollable).first,
+          );
+        } else {
+          await tester.ensureVisible(find.text(text));
+          await tester.pumpAndSettle();
+        }
         expect(
           find.descendant(of: detail, matching: find.text(text)),
           findsOneWidget,
@@ -384,28 +516,29 @@ void main() {
       expect(find.textContaining('por mes'), findsNothing);
     });
 
-    testWidgets('notes that a foreign-currency listing is quotable in the chosen one', (
-      tester,
-    ) async {
-      final harness = _build();
-      harness.backend.seed(id: 'usd-1', currency: 'USD');
+    testWidgets(
+      'notes that a foreign-currency listing is quotable in the chosen one',
+      (tester) async {
+        final harness = _build();
+        harness.backend.seed(id: 'usd-1', currency: 'USD');
 
-      await _pumpCatalog(tester, harness.controller);
-      await _tap(tester, find.byKey(const ValueKey('catalog-listing-usd-1')));
+        await _pumpCatalog(tester, harness.controller);
+        await _tap(tester, find.byKey(const ValueKey('catalog-listing-usd-1')));
 
-      final detail = find.byKey(const ValueKey('property-detail-content'));
-      expect(
-        find.descendant(
-          of: detail,
-          matching: find.text('USD 350.000.000,00'),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: detail, matching: find.text('Cotizable en BOB')),
-        findsOneWidget,
-      );
-    });
+        final detail = find.byKey(const ValueKey('property-detail-content'));
+        expect(
+          find.descendant(
+            of: detail,
+            matching: find.text('USD 350.000.000,00'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: detail, matching: find.text('Cotizable en BOB')),
+          findsOneWidget,
+        );
+      },
+    );
 
     testWidgets('adds no quotable note when the currencies already match', (
       tester,

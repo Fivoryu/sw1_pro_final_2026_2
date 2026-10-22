@@ -4,6 +4,8 @@ import '../../../../data/models/catalog_models.dart';
 import '../../../../data/services/quote_api.dart';
 import '../../../../data/services/scene_api.dart';
 import '../../../../domain/catalog_controller.dart';
+import '../../../../domain/customer_reservations_controller.dart';
+import '../../../../domain/customer_session_controller.dart';
 import 'catalog_filters_sheet.dart';
 import 'catalog_format.dart';
 import 'listing_detail_screen.dart';
@@ -15,11 +17,15 @@ class CatalogScreen extends StatefulWidget {
   const CatalogScreen({
     super.key,
     required this.controller,
+    this.reservationsController,
+    this.sessionController,
     this.sceneApi,
     this.quoteApi,
   });
 
   final CatalogController controller;
+  final CustomerReservationsController? reservationsController;
+  final CustomerSessionController? sessionController;
 
   /// When provided, the detail can offer the 3D walkthrough of a listing.
   final SceneApi? sceneApi;
@@ -58,6 +64,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
         builder: (_) => ListingDetailScreen(
           controller: _controller,
           listingId: listing.listingId,
+          reservationsController: widget.reservationsController,
+          sessionController: widget.sessionController,
           sceneApi: widget.sceneApi,
           quoteApi: widget.quoteApi,
         ),

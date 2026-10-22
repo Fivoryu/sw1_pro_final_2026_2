@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 
 import 'data/services/catalog_api.dart';
+import 'data/services/customer_booking_api.dart';
+import 'data/services/local_wallet_connect.dart';
 import 'data/services/customer_auth_api.dart';
 import 'data/services/customer_token_store.dart';
 import 'data/services/quote_api.dart';
 import 'data/services/scene_api.dart';
 import 'domain/catalog_controller.dart';
+import 'domain/customer_reservations_controller.dart';
 import 'domain/customer_session_controller.dart';
 import 'ui/features/auth/views/customer_account_screen.dart';
 import 'ui/features/catalog/views/catalog_screen.dart';
+import 'ui/features/reservations/customer_reservations_screen.dart';
 
 /// Backend used by the running app. Override it per environment with
 /// `--dart-define=ROOMFORGE_API_BASE_URL=https://host`.
@@ -19,27 +23,36 @@ const _apiBaseUrl = String.fromEnvironment(
 
 void main() => runApp(
   RoomForgeApp(
-    sessionController: CustomerSessionController(
-      api: CustomerAuthApi(baseUrl: _apiBaseUrl),
-      tokenStore: SecureCustomerTokenStore(),
-    ),
+    sessionController: _customerSession,
     catalogApi: CatalogApi(baseUrl: _apiBaseUrl),
+    bookingApi: CustomerBookingApi(
+      baseUrl: _apiBaseUrl,
+      accessTokenProvider: () => _customerSession.obtainAccessToken(),
+    ),
     sceneApi: SceneApi(baseUrl: _apiBaseUrl),
     quoteApi: QuoteApi(baseUrl: _apiBaseUrl),
   ),
 );
+
+late final CustomerSessionController _customerSession =
+    CustomerSessionController(
+      api: CustomerAuthApi(baseUrl: _apiBaseUrl),
+      tokenStore: SecureCustomerTokenStore(),
+    );
 
 class RoomForgeApp extends StatelessWidget {
   const RoomForgeApp({
     super.key,
     required this.sessionController,
     required this.catalogApi,
+    this.bookingApi,
     this.sceneApi,
     this.quoteApi,
   });
 
   final CustomerSessionController sessionController;
   final CatalogApi catalogApi;
+  final CustomerBookingApi? bookingApi;
   final SceneApi? sceneApi;
   final QuoteApi? quoteApi;
 
@@ -53,6 +66,7 @@ class RoomForgeApp extends StatelessWidget {
     home: CustomerShell(
       sessionController: sessionController,
       catalogApi: catalogApi,
+      bookingApi: bookingApi,
       sceneApi: sceneApi,
       quoteApi: quoteApi,
     ),
@@ -64,12 +78,14 @@ class CustomerShell extends StatefulWidget {
     super.key,
     required this.sessionController,
     required this.catalogApi,
+    this.bookingApi,
     this.sceneApi,
     this.quoteApi,
   });
 
   final CustomerSessionController sessionController;
   final CatalogApi catalogApi;
+  final CustomerBookingApi? bookingApi;
   final SceneApi? sceneApi;
   final QuoteApi? quoteApi;
 
@@ -80,6 +96,13 @@ class CustomerShell extends StatefulWidget {
 class _CustomerShellState extends State<CustomerShell> {
   int _selectedIndex = 0;
   late final _catalog = CatalogController(api: widget.catalogApi);
+  late final _reservations = widget.bookingApi == null
+      ? null
+      : CustomerReservationsController(
+          api: widget.bookingApi!,
+          wallet: _walletConnect,
+        );
+  late final _walletConnect = LocalWalletConnect(context: context);
 
   @override
   void initState() {
@@ -90,6 +113,8 @@ class _CustomerShellState extends State<CustomerShell> {
   @override
   void dispose() {
     _catalog.dispose();
+    _reservations?.dispose();
+    _walletConnect.dispose();
     super.dispose();
   }
 
@@ -99,14 +124,22 @@ class _CustomerShellState extends State<CustomerShell> {
     body: IndexedStack(
       index: _selectedIndex,
       children: [
-        CatalogScreen(controller: _catalog, sceneApi: widget.sceneApi, quoteApi: widget.quoteApi),
-        _placeholder(
-          context,
-          'Prototipo de reservas',
-          'No hay reservas reales ni datos conectados.',
-          Icons.event_note_outlined,
+        CatalogScreen(
+          controller: _catalog,
+          reservationsController: _reservations,
+          sessionController: widget.sessionController,
+          sceneApi: widget.sceneApi,
+          quoteApi: widget.quoteApi,
         ),
-        CustomerAccountScreen(controller: widget.sessionController),
+        CustomerReservationsScreen(
+          controller: _reservations,
+          sessionController: widget.sessionController,
+        ),
+        CustomerAccountScreen(
+          controller: widget.sessionController,
+          bookingApi: widget.bookingApi,
+          walletConnect: widget.bookingApi == null ? null : _walletConnect,
+        ),
       ],
     ),
     bottomNavigationBar: NavigationBar(
@@ -129,62 +162,6 @@ class _CustomerShellState extends State<CustomerShell> {
           label: 'Cuenta',
         ),
       ],
-    ),
-  );
-
-  Widget _placeholder(
-    BuildContext context,
-    String title,
-    String message,
-    IconData icon,
-  ) => _content(
-    ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        Text(title, style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 20),
-        _messageCard(context, '', message, icon),
-      ],
-    ),
-  );
-
-  Widget _messageCard(
-    BuildContext context,
-    String title,
-    String message,
-    IconData icon,
-  ) {
-    final theme = Theme.of(context);
-    return Card(
-      color: theme.colorScheme.surfaceContainerLow,
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ExcludeSemantics(
-              child: Icon(icon, size: 36, color: theme.colorScheme.primary),
-            ),
-            const SizedBox(height: 16),
-            if (title.isNotEmpty)
-              Text(title, style: theme.textTheme.titleLarge),
-            if (title.isNotEmpty && message.isNotEmpty)
-              const SizedBox(height: 8),
-            if (message.isNotEmpty)
-              Text(
-                message,
-                style: theme.textTheme.bodyLarge?.copyWith(height: 1.5),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _content(Widget child) => Center(
-    child: ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 720),
-      child: child,
     ),
   );
 }

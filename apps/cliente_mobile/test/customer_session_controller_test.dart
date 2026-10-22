@@ -6,7 +6,11 @@ import 'support/fake_customer_backend.dart';
 
 const _baseUrl = 'https://api.example.test';
 
-({CustomerSessionController controller, FakeCustomerBackend backend, InMemoryCustomerTokenStore store})
+({
+  CustomerSessionController controller,
+  FakeCustomerBackend backend,
+  InMemoryCustomerTokenStore store,
+})
 _build({String? storedToken}) {
   final backend = FakeCustomerBackend();
   final store = InMemoryCustomerTokenStore(storedToken);
@@ -83,19 +87,41 @@ void main() {
       expect(harness.store.token, 'refresh-token-1');
     });
 
-    test('signs out with a message when the credentials are rejected', () async {
-      final harness = _build();
-      harness.backend.loginRejected = true;
+    test(
+      'provides the in-memory access token without rotating refresh again',
+      () async {
+        final harness = _build();
+        await harness.controller.signIn(
+          email: 'client@example.test',
+          password: 'password123',
+        );
 
-      await harness.controller.signIn(
-        email: 'client@example.test',
-        password: 'wrong-password',
-      );
+        expect(await harness.controller.obtainAccessToken(), 'access-token');
+        expect(
+          harness.backend.calls.where(
+            (path) => path == '/api/v1/customer/auth/refresh',
+          ),
+          isEmpty,
+        );
+      },
+    );
 
-      expect(harness.controller.status, CustomerSessionStatus.signedOut);
-      expect(harness.controller.message, 'Rejected by the API.');
-      expect(harness.store.token, isNull);
-    });
+    test(
+      'signs out with a message when the credentials are rejected',
+      () async {
+        final harness = _build();
+        harness.backend.loginRejected = true;
+
+        await harness.controller.signIn(
+          email: 'client@example.test',
+          password: 'wrong-password',
+        );
+
+        expect(harness.controller.status, CustomerSessionStatus.signedOut);
+        expect(harness.controller.message, 'Rejected by the API.');
+        expect(harness.store.token, isNull);
+      },
+    );
 
     test('reports an unavailable session when the transport fails', () async {
       final harness = _build();
@@ -166,15 +192,18 @@ void main() {
       expect(harness.store.token, 'refresh-token-2');
     });
 
-    test('still signs out locally when the token was already rejected', () async {
-      final harness = _build(storedToken: 'stored-refresh');
-      await harness.controller.restore();
-      harness.backend.logoutRejected = true;
+    test(
+      'still signs out locally when the token was already rejected',
+      () async {
+        final harness = _build(storedToken: 'stored-refresh');
+        await harness.controller.restore();
+        harness.backend.logoutRejected = true;
 
-      await harness.controller.signOut();
+        await harness.controller.signOut();
 
-      expect(harness.controller.status, CustomerSessionStatus.signedOut);
-      expect(harness.store.token, isNull);
-    });
+        expect(harness.controller.status, CustomerSessionStatus.signedOut);
+        expect(harness.store.token, isNull);
+      },
+    );
   });
 }

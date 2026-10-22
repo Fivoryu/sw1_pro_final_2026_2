@@ -276,7 +276,10 @@ void main() {
       await tester.pumpWidget(MaterialApp(home: detail));
       await tester.pumpAndSettle();
 
-      await tester.scrollUntilVisible(find.text('Recorrido 3D'), 200);
+      await tester.scrollUntilVisible(
+        find.text('Recorrido 3D no disponible.'),
+        200,
+      );
 
       expect(find.text('Recorrido 3D no disponible.'), findsOneWidget);
       expect(find.byKey(const ValueKey('detail-open-viewer')), findsNothing);
@@ -299,7 +302,10 @@ void main() {
       await tester.pumpWidget(MaterialApp(home: detail));
       await tester.pumpAndSettle();
 
-      await tester.scrollUntilVisible(find.text('Recorrido 3D'), 200);
+      await tester.scrollUntilVisible(
+        find.text('Recorrido 3D no disponible.'),
+        200,
+      );
 
       expect(find.text('Recorrido 3D no disponible.'), findsOneWidget);
       expect(find.byKey(const ValueKey('detail-open-viewer')), findsNothing);

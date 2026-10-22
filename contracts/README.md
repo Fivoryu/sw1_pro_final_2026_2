@@ -96,6 +96,33 @@ Terminal state and nonce updates occur before token transfers; `SafeERC20` and `
 
 Decision, cancellation, and expiry events are emitted even when the refunded/transferred amount is zero. For expiry, the event nonce is the reservation's next nonce before expiry consumes it.
 
+## Persistent local node for app/API testing
+
+The Hardhat tests above use an ephemeral chain. To keep a local chain running for
+the customer app and backend API, open two terminals in `contracts/`:
+
+```sh
+# Terminal 1: keep this process running while testing.
+npx hardhat node
+
+# Terminal 2: deploy the local assets and escrows to that node.
+npm run deploy:local
+```
+
+`deploy:local` prints the deployed addresses and local account addresses as
+JSON. BOB and USD share the two-decimal RFT escrow; USDT uses its own six-decimal
+token and escrow. The script mints test tokens only to the local customer
+account. Hardhat prints the deterministic local development account keys when
+the node starts; use them only in the local emulator/wallet and never fund or
+reuse them on a public network.
+
+The app also requires a public Reown Project ID at build/run time as
+`ROOMFORGE_REOWN_PROJECT_ID`. Configure the backend with the same local RPC,
+chain ID, escrow addresses, and backend signer key from the Hardhat node's test
+accounts. Keep local signer keys in untracked environment configuration, never
+in source control. The default Android emulator RPC is `10.0.2.2:8545`; the
+backend process running on the host uses `127.0.0.1:8545`.
+
 ## Local test coverage
 
 The Hardhat suite covers token decimals/mint access for both test assets, the token-configuration floor (deployment rejects tokens below 2 decimals), exact scaling with the 2-decimal token and the 6-decimal USDT-like token (deposit/accept/reject/cancel/expiry in exact base units), EIP-712 domain/signer/actor/deadline/nonce checks, reservation isolation and immutable terms, deposit/allowance/replay rules, first-action zero-deposit transitions, positive-deposit accept/reject/cancel/expiry, exact refunds and payouts, accepted-state locking, atomic rollback on transfer failure, and a token-callback reentrancy attempt.

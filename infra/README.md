@@ -1,6 +1,6 @@
 # Infraestructura local
 
-Este stack de desarrollo inicia PostgreSQL, Floci, la API FastAPI real y el panel `panel/staff-shell`. No inicia worker, aplicaciones móviles ni contratos. Floci emula S3/SQS para pruebas locales; no es un despliegue en AWS ni ofrece paridad completa con AWS.
+Este stack de desarrollo inicia PostgreSQL, Floci, la API FastAPI real, el panel `panel/staff-shell` y un nodo Hardhat con los contratos locales de F09 desplegados. Las apps móviles se ejecutan en un emulador Android conectado a los puertos publicados del host. Floci emula S3/SQS para pruebas locales; no es un despliegue en AWS ni ofrece paridad completa con AWS.
 
 ## Requisitos
 
@@ -23,20 +23,24 @@ Los servicios se publican solo en loopback; los puertos del host se configuran e
 | PostgreSQL | `127.0.0.1:5434` (`POSTGRES_PORT`) | `5432` |
 | Floci, S3/SQS local | `http://127.0.0.1:4566` (`FLOCI_PORT`) | `4566` |
 | API FastAPI | `http://127.0.0.1:8000` (`API_PORT`) | `8000` |
+| Hardhat RPC | `http://127.0.0.1:8545` (`HARDHAT_PORT`) | `8545` |
 | Panel staff-shell | `http://127.0.0.1:5173` (`PANEL_PORT`) | `5173` |
 
 Dentro de Compose, la API se conecta a PostgreSQL por el hostname `postgres` y recibe los endpoints de Floci por `http://floci:4566`. El proxy Vite del panel apunta a `http://api:8000`; al ejecutar Vite directamente en el host, su valor por defecto existente sigue siendo `http://127.0.0.1:8000`. La plantilla contiene secretos ficticios solo para desarrollo local; Compose fija credenciales AWS de prueba (`local-test-key`/`local-test-secret`) y nunca debe recibir credenciales reales. Para verificar la app móvil desde un teléfono en la misma red, `API_BIND_ADDRESS=0.0.0.0` publica la API en la interfaz LAN; por defecto queda solo en loopback y no expone nada fuera del equipo. Ojo con dos cosas más: si la Wi-Fi tiene **aislamiento de clientes** el teléfono no alcanza al host aunque estén en la misma subred, y el enlace de subida se firma con `S3_PUBLIC_ENDPOINT_URL` (`http://127.0.0.1:4566` por defecto), así que la prueba por USB necesita **los dos** túneles, `adb reverse tcp:8000` y `adb reverse tcp:4566`; sin el segundo la subida se queda esperando y no muestra ningún error.
 
+Hardhat comparte el namespace de red del contenedor `api`. Así la API usa `http://127.0.0.1:8545` (RPC de loopback validado por el backend), mientras Docker publica el nodo en el host/emulador. Al arrancar, Hardhat despliega RFT, MockUSDT y ambos escrows con direcciones deterministas. Todos los fondos y claves son de desarrollo local.
+
 ## Salud del stack, API y panel
 
-Compose define healthchecks para los cuatro servicios:
+Compose define healthchecks para los cinco servicios:
 
 - PostgreSQL ejecuta `pg_isready`.
 - Floci consulta `aws s3api list-buckets`.
 - La API solicita `/openapi.json`, ejecuta `SELECT 1` en PostgreSQL y comprueba conectividad TCP con Floci.
 - El panel comprueba que la raíz de Vite responda con HTTP exitoso.
+- Hardhat comprueba que JSON-RPC responda con `chainId` 31337.
 
-La API espera a que PostgreSQL y Floci estén saludables; el panel espera a que la API esté saludable. El healthcheck del panel valida Vite, mientras que la condición de dependencia ordena su inicio después de la API.
+La API espera a que PostgreSQL y Floci estén saludables; el panel espera a que la API esté saludable. Hardhat comparte la red de la API y espera a que su contenedor inicie; su propio healthcheck comprueba la disponibilidad del RPC. El healthcheck del panel valida Vite.
 
 Consultar el estado de los servicios y probar las respuestas HTTP desde PowerShell:
 
@@ -46,7 +50,57 @@ Invoke-WebRequest -Uri http://127.0.0.1:8000/openapi.json -UseBasicParsing
 Invoke-WebRequest -Uri http://127.0.0.1:5173/ -UseBasicParsing
 ```
 
-Se espera que los cuatro servicios figuren como `healthy` y que ambas solicitudes HTTP tengan éxito. La API comprueba conectividad con Floci, pero esto no demuestra operaciones S3/SQS ejecutadas por la aplicación.
+Se espera que los cinco servicios figuren como `healthy` y que las solicitudes HTTP tengan éxito. La API comprueba conectividad con Floci, pero esto no demuestra operaciones S3/SQS ejecutadas por la aplicación.
+
+### Migrar la base y ejecutar el cliente Android
+
+La imagen de la API no ejecuta migraciones automáticamente. Con Compose iniciado, aplicar la cadena completa en PostgreSQL local:
+
+```powershell
+docker compose --env-file infra/docker/local-env.example -f infra/docker/compose.local.yml exec -T api python -m alembic upgrade head
+```
+
+Comprobar que la API quedó lista y que Hardhat respondió:
+
+```powershell
+docker compose --env-file infra/docker/local-env.example -f infra/docker/compose.local.yml ps
+Invoke-WebRequest -Uri http://127.0.0.1:8000/health/ready -UseBasicParsing
+Invoke-RestMethod -Uri http://127.0.0.1:8545 -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'
+```
+
+Para ejecutar el cliente en un emulador Android, abrir un terminal en `apps/cliente_mobile/` y pasar las URLs/direcciones de `local-env.example` como dart-defines. Reown requiere el Project ID público del equipo:
+
+```powershell
+flutter run `
+  --dart-define=ROOMFORGE_API_BASE_URL=http://10.0.2.2:8000 `
+  --dart-define=ROOMFORGE_HARDHAT_RPC_URL=http://10.0.2.2:8545 `
+  --dart-define=ROOMFORGE_RFT_ADDRESS=0x5FbDB2315678afecb367f032d93F642f64180aa3 `
+  --dart-define=ROOMFORGE_USDT_ADDRESS=0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512 `
+  --dart-define=ROOMFORGE_ESCROW_BOB_ADDRESS=0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0 `
+  --dart-define=ROOMFORGE_ESCROW_USD_ADDRESS=0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0 `
+  --dart-define=ROOMFORGE_ESCROW_USDT_ADDRESS=0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9 `
+  --dart-define=ROOMFORGE_REOWN_PROJECT_ID=ID_PUBLICO_DEL_EQUIPO
+```
+
+El nodo muestra las cuentas de prueba al arrancar. Importarlas solo en una wallet conectada a la red local `31337`; no usar esas claves en redes públicas ni con fondos reales. Sin Project ID Reown, catálogo/cuenta siguen ejecutables, pero WalletConnect queda deshabilitado.
+
+### Cargar datos demo para F09
+
+Después de registrar la cuenta de cliente en el teléfono, se puede preparar un inmueble local para probar cotización y solicitud de reserva:
+
+```powershell
+docker compose --env-file infra/docker/local-env.example -f infra/docker/compose.local.yml exec -T api python -m app.devtools.seed_f09_demo --customer-email TU_CORREO_DE_CLIENTE
+```
+
+El seed es idempotente: crea `f09-demo-agency`, un inmueble BOB publicado con precio `250000.00` y depósito `10.00`, y asocia las wallets de prueba de Hardhat al cliente y a la agencia si aún no tienen una. **Enlaza las wallets directamente en la base local sin verificar firmas** para facilitar la demostración; no usar fuera del entorno local. La bandera `ROOMFORGE_ALLOW_LOCAL_DEMO_SEED=true` de `local-env.example` habilita explícitamente el comando.
+
+Si hay más de una cuenta cliente local, asignar la wallet de prueba secundaria (Hardhat account #3) a otra cuenta para respetar la unicidad de direcciones:
+
+```powershell
+docker compose --env-file infra/docker/local-env.example -f infra/docker/compose.local.yml exec -T api python -m app.devtools.seed_f09_demo --customer-email TU_CORREO_DE_CLIENTE --customer-wallet-address 0x90F79bf6EB2c4f870365E785982E1f101E93b906
+```
+
+Después del seed, cierra sesión y vuelve a entrar en la app para que recargue la wallet demo. En **Explorar**, abre el inmueble, cotiza en BOB y solicita la reserva; aparecerá en **Reservas**. Para probar el depósito on-chain real aún debes configurar un Project ID Reown y conectar desde el teléfono la cuenta cliente de prueba del nodo Hardhat. El nodo entrega tokens de prueba a esa cuenta; nunca uses cuentas ni fondos reales.
 
 Para reducir el consumo local cuando no se necesita la API ni el panel, se puede iniciar solo PostgreSQL y Floci:
 
@@ -57,7 +111,7 @@ docker compose --env-file infra/docker/local-env.example -f infra/docker/compose
 Si API o panel ya estuvieran ejecutándose, se pueden detener sin parar las dependencias:
 
 ```powershell
-docker compose --env-file infra/docker/local-env.example -f infra/docker/compose.local.yml stop api panel
+docker compose --env-file infra/docker/local-env.example -f infra/docker/compose.local.yml stop api hardhat panel
 ```
 
 ### Aprovisionar recursos S3 y SQS

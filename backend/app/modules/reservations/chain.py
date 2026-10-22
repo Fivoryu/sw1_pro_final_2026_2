@@ -131,8 +131,10 @@ def _checksum_address(value: Any) -> str:
     return checksum
 
 
-def _resolve_configuration(settings: Settings) -> tuple[str, str, str, str]:
-    rpc_url, escrow_address = _read_configuration(settings)
+def _resolve_configuration(
+    settings: Settings, *, currency: str = "BOB"
+) -> tuple[str, str, str, str]:
+    rpc_url, escrow_address = _read_configuration(settings, currency=currency)
     private_key = settings.escrow_signer_private_key
     if not isinstance(private_key, str) or not private_key:
         raise PermitUnavailableError
@@ -147,10 +149,12 @@ def _resolve_configuration(settings: Settings) -> tuple[str, str, str, str]:
     return rpc_url, escrow_address, normalized_key, signer_address
 
 
-def _read_configuration(settings: Settings) -> tuple[str, str]:
+def _read_configuration(
+    settings: Settings, *, currency: str = "BOB"
+) -> tuple[str, str]:
     """Resolve the loopback escrow reader config without requiring a signing key."""
     rpc_url = settings.escrow_rpc_url
-    escrow_address = settings.escrow_address
+    escrow_address = settings.escrow_address_for(currency)
     configured_chain_id = settings.escrow_chain_id
     if (
         not isinstance(rpc_url, str)
@@ -272,6 +276,7 @@ def issue_permit(
     action: str,
     amount: int,
     deadline: int,
+    currency: str = "BOB",
 ) -> dict[str, Any]:
     """Read local chain identity/nonce and sign one contract-compatible action."""
     try:
@@ -290,7 +295,9 @@ def issue_permit(
     ):
         raise PermitUnavailableError
 
-    rpc_url, escrow_address, private_key, signer_address = _resolve_configuration(settings)
+    rpc_url, escrow_address, private_key, signer_address = _resolve_configuration(
+        settings, currency=currency
+    )
     customer = _checksum_address(customer_address)
     agency = _checksum_address(agency_address)
     actor = _checksum_address(actor_address)
@@ -431,6 +438,7 @@ def verify_action_receipt(
     nonce: int,
     deadline: datetime,
     actor_address: str | None = None,
+    currency: str = "BOB",
 ) -> dict[str, Any]:
     """Validate one mined local escrow receipt/event against explicit expected context.
 
@@ -459,7 +467,7 @@ def verify_action_receipt(
         raise PermitUnavailableError from None
     contract_deadline = contract_deadline_seconds(deadline)
 
-    rpc_url, escrow_address = _read_configuration(settings)
+    rpc_url, escrow_address = _read_configuration(settings, currency=currency)
     customer = _checksum_address(customer_address)
     agency = _checksum_address(agency_address)
     expected_actor, participant = _expected_actor_for(

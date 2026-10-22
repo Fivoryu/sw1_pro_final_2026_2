@@ -8,7 +8,11 @@ import 'support/fake_customer_backend.dart';
 
 const _baseUrl = 'https://api.example.test';
 
-({CustomerSessionController controller, FakeCustomerBackend backend, InMemoryCustomerTokenStore store})
+({
+  CustomerSessionController controller,
+  FakeCustomerBackend backend,
+  InMemoryCustomerTokenStore store,
+})
 _build({String? storedToken}) {
   final backend = FakeCustomerBackend();
   final store = InMemoryCustomerTokenStore(storedToken);
@@ -22,20 +26,29 @@ _build({String? storedToken}) {
   );
 }
 
-Widget _wrap(CustomerSessionController controller) =>
-    MaterialApp(home: Scaffold(body: CustomerAccountScreen(controller: controller)));
+Widget _wrap(CustomerSessionController controller) => MaterialApp(
+  home: Scaffold(body: CustomerAccountScreen(controller: controller)),
+);
 
 Future<void> _fillCredentials(
   WidgetTester tester, {
   String email = 'client@example.test',
   String password = 'password123',
 }) async {
-  await tester.enterText(find.byKey(const ValueKey('account-email-field')), email);
-  await tester.enterText(find.byKey(const ValueKey('account-password-field')), password);
+  await tester.enterText(
+    find.byKey(const ValueKey('account-email-field')),
+    email,
+  );
+  await tester.enterText(
+    find.byKey(const ValueKey('account-password-field')),
+    password,
+  );
 }
 
 void main() {
-  testWidgets('shows a restoration state while the stored session loads', (tester) async {
+  testWidgets('shows a restoration state while the stored session loads', (
+    tester,
+  ) async {
     final harness = _build(storedToken: 'stored-refresh');
 
     await tester.pumpWidget(_wrap(harness.controller));
@@ -59,21 +72,29 @@ void main() {
     expect(find.byKey(const ValueKey('account-logout')), findsOneWidget);
   });
 
-  testWidgets('rejects incomplete credentials locally without calling the API', (tester) async {
-    final harness = _build();
-    await harness.controller.restore();
-    await tester.pumpWidget(_wrap(harness.controller));
+  testWidgets(
+    'rejects incomplete credentials locally without calling the API',
+    (tester) async {
+      final harness = _build();
+      await harness.controller.restore();
+      await tester.pumpWidget(_wrap(harness.controller));
 
-    await _fillCredentials(tester, email: '', password: 'short');
-    await tester.tap(find.byKey(const ValueKey('account-submit')));
-    await tester.pumpAndSettle();
+      await _fillCredentials(tester, email: '', password: 'short');
+      await tester.tap(find.byKey(const ValueKey('account-submit')));
+      await tester.pumpAndSettle();
 
-    expect(find.text('Ingresá tu correo electrónico'), findsOneWidget);
-    expect(find.text('La contraseña necesita al menos 8 caracteres'), findsOneWidget);
-    expect(harness.backend.calls, isEmpty);
-  });
+      expect(find.text('Ingresá tu correo electrónico'), findsOneWidget);
+      expect(
+        find.text('La contraseña necesita al menos 8 caracteres'),
+        findsOneWidget,
+      );
+      expect(harness.backend.calls, isEmpty);
+    },
+  );
 
-  testWidgets('shows the API message when the credentials are rejected', (tester) async {
+  testWidgets('shows the API message when the credentials are rejected', (
+    tester,
+  ) async {
     final harness = _build();
     await harness.controller.restore();
     harness.backend.loginRejected = true;
@@ -88,7 +109,9 @@ void main() {
     expect(find.byKey(const ValueKey('account-submit')), findsOneWidget);
   });
 
-  testWidgets('registers an account and asks the customer to sign in', (tester) async {
+  testWidgets('registers an account and asks the customer to sign in', (
+    tester,
+  ) async {
     final harness = _build();
     await harness.controller.restore();
     await tester.pumpWidget(_wrap(harness.controller));
