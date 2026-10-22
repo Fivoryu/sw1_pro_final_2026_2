@@ -26,21 +26,25 @@ vi.mock("../../application/exchangeRatesApi", async (importOriginal) => {
 function currentRates(
   overrides: CurrentExchangeRate[] = [],
 ): CurrentExchangeRatesResponse {
+  const defaults: CurrentExchangeRate[] = [
+    {
+      currency: "BOB",
+      units_per_usd: "6.96000000",
+      created_at: "2026-10-03T12:00:00Z",
+      source: "bcb-static",
+    },
+    { currency: "USD", units_per_usd: "1.00000000", created_at: null, source: null },
+    {
+      currency: "USDT",
+      units_per_usd: null,
+      created_at: null,
+      source: null,
+    },
+  ];
+  const overriddenCurrencies = new Set(overrides.map((rate) => rate.currency));
   return {
     rates: [
-      {
-        currency: "BOB",
-        units_per_usd: "6.96000000",
-        created_at: "2026-10-03T12:00:00Z",
-        source: "bcb-static",
-      },
-      { currency: "USD", units_per_usd: "1.00000000", created_at: null, source: null },
-      {
-        currency: "USDT",
-        units_per_usd: null,
-        created_at: null,
-        source: null,
-      },
+      ...defaults.filter((rate) => !overriddenCurrencies.has(rate.currency)),
       ...overrides,
     ],
   };
