@@ -121,3 +121,75 @@ it("requests inference and shows actual pending or failed jobs", async () => {
   await user.click(screen.getByRole("button", { name: "Detectar foto photo-1" }));
   await waitFor(() => expect(requestPhotoDetection).toHaveBeenCalledWith("token", "agency-1", "listing-1", "photo-1"));
 });
+
+const volume = { capture_id: "capture-1", object_id: "box-1", model_id: "model-1", label: "sofa", score: 0.77,
+  position: { x: 1.5, y: 0.45, z: -2 }, dimensions: { width: 2, height: 0.9, depth: 0.95 },
+  status: "pending" as const, extra_id: null };
+
+it("renders volume suggestions with class, score and metric volume, without confirming", async () => {
+  vi.mocked(getFurnitureReview).mockResolvedValue({ ...data, volume_suggestions: [volume] });
+  open();
+  expect(await screen.findByText(/sofa · Pendiente/)).toBeInTheDocument();
+  expect(screen.getByText(/Puntuación: 0.77/)).toBeInTheDocument();
+  expect(screen.getByText(/Posición \(m\): 1.5, 0.45, -2/)).toBeInTheDocument();
+  expect(screen.getByText(/Dimensiones \(m\): 2 × 0.9 × 0.95/)).toBeInTheDocument();
+  expect(reviewFurniture).not.toHaveBeenCalled();
+});
+
+it("confirms a volume suggestion by capture and object, prefilled from the volume", async () => {
+  vi.mocked(getFurnitureReview).mockResolvedValue({ ...data, volume_suggestions: [volume] });
+  const user = userEvent.setup(); open();
+  await user.click(await screen.findByRole("button", { name: /Revisar sofa \(volumen box-1\)/ }));
+  expect(screen.getByLabelText("Posición X (m)")).toHaveValue(1.5);
+  expect(screen.getByLabelText("Posición Z (m)")).toHaveValue(-2);
+  expect(screen.getByLabelText("Ancho (cm)")).toHaveValue(200);
+  expect(screen.getByLabelText("Precio (BOB)")).toHaveValue(null);
+  fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Sofá" } });
+  fireEvent.change(screen.getByLabelText("Precio (BOB)"), { target: { value: "300" } });
+  await user.click(screen.getByRole("button", { name: "Confirmar mobiliario" }));
+  await waitFor(() => expect(reviewFurniture).toHaveBeenCalled());
+  const command = vi.mocked(reviewFurniture).mock.lastCall?.[3];
+  expect(command).toEqual(expect.objectContaining({
+    action: "confirmed", capture_id: "capture-1", object_id: "box-1", expected_offer_version: 4,
+    item: expect.objectContaining({ name: "Sofá", position: { x: 1.5, y: 0.45, z: -2 }, width_cm: 200, height_cm: 90, depth_cm: 95 }),
+  }));
+  expect(command).not.toHaveProperty("job_id");
+  expect(command).not.toHaveProperty("detection_index");
+});
+
+it("rejects a volume suggestion by capture and object", async () => {
+  vi.mocked(getFurnitureReview).mockResolvedValue({ ...data, volume_suggestions: [volume] });
+  const user = userEvent.setup(); open();
+  await user.click(await screen.findByRole("button", { name: /Descartar sofa \(volumen box-1\)/ }));
+  await waitFor(() => expect(reviewFurniture).toHaveBeenCalled());
+  const command = vi.mocked(reviewFurniture).mock.lastCall?.[3];
+  expect(command).toEqual(expect.objectContaining({ action: "rejected", capture_id: "capture-1", object_id: "box-1" }));
+  expect(command).not.toHaveProperty("job_id");
+  expect(command).not.toHaveProperty("detection_index");
+  expect(command).not.toHaveProperty("item");
+});
+
+it("renders non-pending volume suggestions read-only", async () => {
+  vi.mocked(getFurnitureReview).mockResolvedValue({ ...data, volume_suggestions: [{ ...volume, status: "confirmed", extra_id: "extra-9" }] });
+  open();
+  expect(await screen.findByText(/sofa · Confirmado/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Revisar sofa/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Descartar sofa/ })).not.toBeInTheDocument();
+});
+
+it("still renders photo suggestions when the server omits volume_suggestions", async () => {
+  open();
+  expect(await screen.findByText(/Puntuación: 0.91/)).toBeInTheDocument();
+  expect(screen.queryByText(/Sugerencias por volumen/)).not.toBeInTheDocument();
+});
+
+it("keeps photo confirmation referencing job and detection only", async () => {
+  vi.mocked(getFurnitureReview).mockResolvedValue({ ...data, volume_suggestions: [volume] });
+  const user = userEvent.setup(); open();
+  await user.click(await screen.findByRole("button", { name: /Descartar chair/ }));
+  await waitFor(() => expect(reviewFurniture).toHaveBeenCalled());
+  const command = vi.mocked(reviewFurniture).mock.lastCall?.[3];
+  expect(command).toEqual(expect.objectContaining({ job_id: "job-1", detection_index: 0 }));
+  expect(command).not.toHaveProperty("capture_id");
+  expect(command).not.toHaveProperty("object_id");
+});

@@ -27,9 +27,23 @@ export interface FurnitureSuggestion {
   extra_id: string | null;
 }
 
+export interface VolumeSuggestion {
+  capture_id: string;
+  object_id: string;
+  model_id: string;
+  label: string;
+  score: number;
+  position: ScenePoint3D;
+  dimensions: { width: number; height: number; depth: number };
+  status: "pending" | "confirmed" | "rejected" | "expired";
+  extra_id: string | null;
+}
+
 export interface FurnitureReviewView {
   listing: StaffListing & { extras: FurnitureExtra[] };
   suggestions: FurnitureSuggestion[];
+  /** Absent on servers that predate volume suggestions; treat as empty. */
+  volume_suggestions?: VolumeSuggestion[];
   history: {
     request_id: string;
     job_id: string | null;
@@ -48,6 +62,8 @@ export interface FurnitureCommand {
   action: "manual" | "confirmed" | "rejected";
   job_id?: string;
   detection_index?: number;
+  capture_id?: string;
+  object_id?: string;
   existing_extra_id?: string;
   item?: {
     name: string; price: string; width_cm: number; height_cm: number; depth_cm: number;
