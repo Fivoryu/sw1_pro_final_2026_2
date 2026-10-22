@@ -65,6 +65,13 @@ class Settings:
     detection_visibility_timeout_seconds: int = 60
     detection_lease_seconds: int = DETECTION_LEASE_SECONDS_DEFAULT
     detection_sweep_seconds: int = 60
+    reconstruction_queue_name: str = "roomforge-local-reconstruction"
+    # Falls back to the detection worker token when unset: no new required env var.
+    reconstruction_worker_token: str | None = None
+    reconstruction_max_attempts: int = 3
+    reconstruction_lease_seconds: int = DETECTION_LEASE_SECONDS_DEFAULT
+    reconstruction_sweep_seconds: int = 60
+    capture_retention_days: int = 30
     escrow_rpc_url: str | None = None
     escrow_address: str | None = None
     escrow_chain_id: str | None = None
@@ -130,6 +137,19 @@ class Settings:
             detection_sweep_seconds=_positive_timeout_from_env(
                 "ROOMFORGE_DETECTION_SWEEP_SECONDS", 60
             ),
+            reconstruction_queue_name=os.environ.get("RECONSTRUCTION_QUEUE_NAME")
+            or "roomforge-local-reconstruction",
+            reconstruction_worker_token=os.environ.get("RECONSTRUCTION_WORKER_TOKEN") or None,
+            reconstruction_max_attempts=_positive_timeout_from_env(
+                "RECONSTRUCTION_MAX_ATTEMPTS", 3
+            ),
+            reconstruction_lease_seconds=_positive_timeout_from_env(
+                "RECONSTRUCTION_LEASE_SECONDS", DETECTION_LEASE_SECONDS_DEFAULT
+            ),
+            reconstruction_sweep_seconds=_positive_timeout_from_env(
+                "ROOMFORGE_RECONSTRUCTION_SWEEP_SECONDS", 60
+            ),
+            capture_retention_days=_positive_timeout_from_env("CAPTURE_RETENTION_DAYS", 30),
             escrow_rpc_url=os.environ.get("ROOMFORGE_ESCROW_RPC_URL"),
             escrow_address=os.environ.get("ROOMFORGE_ESCROW_ADDRESS"),
             escrow_chain_id=os.environ.get("ROOMFORGE_ESCROW_CHAIN_ID"),
@@ -157,6 +177,10 @@ class Settings:
             self.detection_visibility_timeout_seconds,
             self.detection_lease_seconds,
             self.detection_sweep_seconds,
+            self.reconstruction_max_attempts,
+            self.reconstruction_lease_seconds,
+            self.reconstruction_sweep_seconds,
+            self.capture_retention_days,
         ) < 1:
             raise ValueError("Timeouts and recovery-code count must be positive")
         if self.detection_lease_seconds < self.detection_visibility_timeout_seconds:

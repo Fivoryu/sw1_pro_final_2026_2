@@ -46,6 +46,16 @@ from app.modules.exchange_rates.router import (
 )
 from app.modules.exchange_rates.service import refresh_official_rates
 from app.modules.identity.router import router as identity_router
+from app.modules.reconstruction.job_queue import (
+    ReconstructionQueue,
+    create_reconstruction_queue,
+)
+from app.modules.reconstruction.router import router as reconstruction_router
+from app.modules.reconstruction.router import worker_router as reconstruction_worker_router
+from app.modules.reconstruction.service import (
+    run_capture_retention_sweep,
+    run_reconstruction_recovery_sweep,
+)
 from app.modules.reservations.errors import ReservationApiError
 from app.modules.reservations.router import router as reservations_router
 from app.modules.reservations.router import staff_router as staff_reservations_router
@@ -152,6 +162,43 @@ async def _detection_recovery_loop(
             continue
 
 
+async def _reconstruction_maintenance_loop(
+    application: FastAPI,
+    session_factory: sessionmaker[Session],
+    queue: ReconstructionQueue,
+    *,
+    clock: Callable[[], datetime],
+    settings: Settings,
+) -> None:
+    """Recover expired reconstruction leases and delete frames that are due."""
+    while True:
+        await asyncio.sleep(settings.reconstruction_sweep_seconds)
+        try:
+            await asyncio.to_thread(
+                run_reconstruction_recovery_sweep,
+                session_factory,
+                queue,
+                now=clock(),
+                max_attempts=settings.reconstruction_max_attempts,
+                pending_republish_after_seconds=settings.reconstruction_lease_seconds,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a later sweep retries transient failures
+            LOGGER.warning("Reconstruction recovery loop failed; the next sweep will retry")
+        storage = application.state.photo_storage
+        if storage is None:
+            continue
+        try:
+            await asyncio.to_thread(
+                run_capture_retention_sweep, session_factory, storage, now=clock()
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - frames stay recorded and are retried
+            logger.exception("Capture frame retention sweep failed")
+
+
 def _run_photo_upload_cleanup(
     session_factory: sessionmaker[Session],
     storage: PhotoStorage,
@@ -255,6 +302,7 @@ def _build_lifespan(
     settings: Settings,
     job_queue: JobQueue,
     clock: Callable[[], datetime],
+    reconstruction_queue: ReconstructionQueue,
 ) -> StatelessLifespan[FastAPI]:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -303,10 +351,25 @@ def _build_lifespan(
                     pending_republish_after_seconds=settings.detection_lease_seconds,
                 )
             )
+        reconstruction_sweeper = asyncio.create_task(
+            _reconstruction_maintenance_loop(
+                application,
+                session_factory,
+                reconstruction_queue,
+                clock=clock,
+                settings=settings,
+            )
+        )
         try:
             yield
         finally:
-            for task in (refresher, photo_cleaner, photo_deleter, detection_sweeper):
+            for task in (
+                refresher,
+                photo_cleaner,
+                photo_deleter,
+                detection_sweeper,
+                reconstruction_sweeper,
+            ):
                 if task is not None:
                     task.cancel()
                     with suppress(asyncio.CancelledError):
@@ -323,6 +386,7 @@ def create_app(
     clock: Callable[[], datetime] | None = None,
     photo_storage: PhotoStorage | None = None,
     job_queue: JobQueue | None = None,
+    reconstruction_queue: ReconstructionQueue | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_env()
     resolved_settings.validate()
@@ -339,11 +403,20 @@ def create_app(
 
     resolved_clock = clock or (lambda: datetime.now(timezone.utc))
     resolved_job_queue = job_queue if job_queue is not None else create_job_queue(resolved_settings)
+    resolved_reconstruction_queue = (
+        reconstruction_queue
+        if reconstruction_queue is not None
+        else create_reconstruction_queue(resolved_settings)
+    )
     app = FastAPI(
         title="RoomForge Staff API",
         version="1.0.0",
         lifespan=_build_lifespan(
-            session_factory, resolved_settings, resolved_job_queue, resolved_clock
+            session_factory,
+            resolved_settings,
+            resolved_job_queue,
+            resolved_clock,
+            resolved_reconstruction_queue,
         ),
     )
     app.state.settings = resolved_settings
@@ -358,6 +431,7 @@ def create_app(
         resolved_settings, injected_storage=photo_storage
     )
     app.state.job_queue = resolved_job_queue
+    app.state.reconstruction_queue = resolved_reconstruction_queue
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[resolved_settings.web_origin.rstrip("/")],
@@ -386,6 +460,8 @@ def create_app(
     app.include_router(detection_router)
     app.include_router(furniture_review_router)
     app.include_router(detection_worker_router)
+    app.include_router(reconstruction_router)
+    app.include_router(reconstruction_worker_router)
     app.include_router(reservations_router)
     app.include_router(staff_reservations_router)
 
