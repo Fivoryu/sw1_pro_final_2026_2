@@ -418,3 +418,53 @@ def test_scene_draft_has_the_structure_of_the_captured_scene_fixture(tmp_path: P
     assert {o["source"] for o in scene["objects"]} <= {"depth", "manual"}
     # JSON-serialisable as is.
     json.dumps(scene)
+
+
+# --- camera views of the volumes (class labeler input) ----------------------------------------
+
+_IMAGE = (640.0, 480.0, 500.0, 500.0, 320.0, 240.0)
+
+
+def test_project_box_matches_a_hand_computed_pinhole_projection() -> None:
+    # Camera at (2, 3, 1.5) looking straight down: a 1 x 1 x 0.8 m box centred under it spans
+    # the top face (2.2 m away, +-0.5 m -> +-113.6 px) and the floor face (3 m away, +-83.3 px).
+    box = {"x": 2.0, "z": 1.5, "width": 1.0, "depth": 1.0, "height": 0.8}
+
+    projected = reconstruct.project_box(box, 0.0, [2.0, _CAMERA_HEIGHT, 1.5, *_DOWN], _IMAGE)
+
+    assert projected == pytest.approx([206.36, 126.36, 433.64, 353.64], abs=0.05)
+
+
+def test_project_box_is_none_when_the_box_is_behind_the_camera() -> None:
+    box = {"x": 2.0, "z": 1.5, "width": 1.0, "depth": 1.0, "height": 0.8}
+
+    # Same camera but below the floor looking down: every corner is behind it.
+    assert reconstruct.project_box(box, 0.0, [2.0, -1.0, 1.5, *_DOWN], _IMAGE) is None
+
+
+def test_project_box_is_none_when_it_falls_outside_the_image() -> None:
+    box = {"x": 20.0, "z": 1.5, "width": 1.0, "depth": 1.0, "height": 0.8}
+
+    assert reconstruct.project_box(box, 0.0, [2.0, _CAMERA_HEIGHT, 1.5, *_DOWN], _IMAGE) is None
+
+
+def test_volume_views_point_at_the_observing_keyframe_and_its_pixel_box(tmp_path: Path) -> None:
+    package = _depth_package(tmp_path / "p", [(1.5, 1.0, 2.5, 2.0, 0.8)])
+
+    result = reconstruct.reconstruct(package)
+
+    [view] = result.volume_views
+    assert view["objectId"] == result.scene_draft["objects"][0]["id"] == "box-1"
+    assert view["keyframe"] == 1 and view["image"] == "frames/000001.jpg"
+    # The grid snaps the box to 5 cm cells, hence the pixel tolerance.
+    assert view["box"] == pytest.approx([206.4, 126.4, 433.6, 353.6], abs=12)
+
+
+def test_volume_views_are_empty_without_usable_image_intrinsics(tmp_path: Path) -> None:
+    zero = {"width": 640, "height": 480, "fx": 0, "fy": 0, "cx": 0, "cy": 0}
+    package = _depth_package(tmp_path / "p", [(1.5, 1.0, 2.5, 2.0, 0.8)], image=zero)
+
+    result = reconstruct.reconstruct(package)
+
+    assert len(result.scene_draft["objects"]) == 1
+    assert result.volume_views == []

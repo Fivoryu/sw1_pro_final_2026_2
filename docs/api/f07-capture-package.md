@@ -96,7 +96,7 @@ confidence/000001.png    # confianza de profundidad 0–255, PNG de 8 bits (opci
 |---|---|
 | Mensaje de cola | `{ "job_id": "…" }` en una cola propia de reconstrucción. |
 | `POST /api/v1/reconstruction/jobs/{job_id}/claim` | Token del worker. Responde `{ "job_id", "status": "running", "download_url", "claim_token" }` o un estado terminal si no hay trabajo que hacer. |
-| `POST /api/v1/reconstruction/jobs/{job_id}/complete` | Token del worker + `X-Reconstruction-Claim-Token`. Cuerpo `{ "sceneDraft", "warnings" }`; la API valida `sceneDraft` con la validación estricta de la escena v2 antes de guardarlo. |
+| `POST /api/v1/reconstruction/jobs/{job_id}/complete` | Token del worker + `X-Reconstruction-Claim-Token`. Cuerpo `{ "sceneDraft", "warnings", "volumeSuggestions"? }`; la API valida `sceneDraft` con la validación estricta de la escena v2 antes de guardarlo. `volumeSuggestions` es opcional (ver «Resultado»). |
 | `POST /api/v1/reconstruction/jobs/{job_id}/fail` | Token del worker + claim token. Cuerpo `{ "reason", "retryable" }`. |
 
 La API es la única que escribe el estado; los leases vencidos se recuperan por barrido; los reintentos son acotados y un paquete inválido (`retryable: false`) termina en `failed` con motivo, sin reintentar.
@@ -106,6 +106,7 @@ La API es la única que escribe el estado; los leases vencidos se recuperan por 
 - `sceneDraft`: escena v2 completa (contrato `docs/api/f06-scene-contract.md`) que usa solo los campos de procedencia que ese contrato admite (`walls[].heightSource`; `objects[].source: "depth"` con `confidence`); volúmenes sin clase ni precio (F07.6). La procedencia «reconstrucción» de todo el borrador la registra la captura en la API, no cada elemento de la escena.
 - `warnings`: lista de textos para la agencia (por ejemplo, «Pared sin observar entre…», «Sin profundidad: no se generaron volúmenes»).
 - Los muebles con clase sugerida por el detector entran como sugerencias de F08.5, nunca como inventario.
+- `volumeSuggestions` (opcional, aditivo): `{ "modelId": str (1..64), "items": [ { "objectId": str (1..64), "label": str (1..64), "score": 0..1, "keyframe": entero ≥ 1, "box": [x1, y1, x2, y2] } ] }`, máximo 100 ítems. Cada `objectId` debe ser un objeto `occupancy` del `sceneDraft` y no repetirse; de lo contrario `422` con `code: "volume_suggestions_invalid"` y la captura sigue en `processing`. Se guarda en `listing_capture.volume_suggestions` (migración `0026_capture_volume_suggestions`) y solo lo lee la revisión de F08.5; nunca modifica la escena ni el inventario. Sin el campo el comportamiento es idéntico al anterior y se guarda `NULL`.
 - La agencia carga el borrador en el editor (F06.3) y lo guarda con el `PUT` de escena existente; nada se publica solo.
 
 ## Privacidad y retención (decisión del operador, 2026-10-21)

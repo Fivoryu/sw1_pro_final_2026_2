@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
@@ -423,6 +423,26 @@ def complete_reconstruction_job(
     except InvalidSceneIntegrityError as error:
         return _scene_error_response(422, error.detail, "scene_invalid")
 
+    suggestions: dict[str, Any] | None = None
+    if result.volume_suggestions is not None:
+        volumes = {obj.id for obj in scene.objects if obj.type == "occupancy"}
+        seen: set[str] = set()
+        for item in result.volume_suggestions.items:
+            if item.object_id not in volumes:
+                return _scene_error_response(
+                    422,
+                    f"volumeSuggestions objectId {item.object_id} is not an occupancy object",
+                    "volume_suggestions_invalid",
+                )
+            if item.object_id in seen:
+                return _scene_error_response(
+                    422,
+                    f"volumeSuggestions repeats objectId {item.object_id}",
+                    "volume_suggestions_invalid",
+                )
+            seen.add(item.object_id)
+        suggestions = result.volume_suggestions.model_dump(mode="json", by_alias=True)
+
     with _session_factory(request).begin() as session:
         capture = _lock_job(session, job_id)
         if not _claim_token_matches(capture.claim_token, claim_token):
@@ -434,6 +454,7 @@ def complete_reconstruction_job(
         capture.status = CAPTURE_COMPLETED
         capture.scene_draft = scene.model_dump(mode="json", by_alias=True, exclude_unset=True)
         capture.warnings = list(result.warnings)
+        capture.volume_suggestions = suggestions
         capture.failure_reason = None
         capture.lease_expires_at = None
         capture.finished_at = request.app.state.clock()

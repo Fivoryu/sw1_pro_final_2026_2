@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
   getFurnitureReview, listDetectionJobs, requestPhotoDetection, reviewFurniture,
-  type DetectionJobStatus, type FurnitureCommand, type FurnitureReviewView, type FurnitureSuggestion,
+  type DetectionJobStatus, type FurnitureCommand, type FurnitureReviewView, type FurnitureSuggestion, type VolumeSuggestion,
 } from "../../application/furnitureReviewApi";
 import { listListingPhotos, StaffListingsApiError, type ListingPhoto } from "../../application/staffListingsApi";
 import "./FurnitureReviewPanel.css";
@@ -28,6 +28,16 @@ function message(error: unknown): string {
     if (error.status === 422) return "Revisa los campos: precio exacto, medidas positivas y posición en metros.";
   }
   return "No se pudo completar la operación. Reintenta o actualiza la revisión.";
+}
+
+const cm = (metres: number) => String(Math.max(1, Math.round(metres * 100)));
+
+function volumeDefaults(volume: VolumeSuggestion): Record<string, string> {
+  const { position, dimensions } = volume;
+  return {
+    ...(position ? { x: String(position.x), y: String(position.y), z: String(position.z) } : {}),
+    ...(dimensions ? { width: cm(dimensions.width), height: cm(dimensions.height), depth: cm(dimensions.depth) } : {}),
+  };
 }
 
 function Photo({ photo, suggestions }: { photo: ListingPhoto; suggestions: FurnitureSuggestion[] }) {
@@ -58,9 +68,11 @@ export function FurnitureReviewPanel({ accessToken, agencyId, listingId, disable
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<FurnitureSuggestion | null>(null);
+  const [selectedVolume, setSelectedVolume] = useState<VolumeSuggestion | null>(null);
   const [destination, setDestination] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
   const pending = useRef<{ key: string; requestId: string } | null>(null);
+  const volumes = view?.volume_suggestions ?? [];
   const blocked = busy || disabled || loading;
 
   useEffect(() => {
@@ -68,6 +80,7 @@ export function FurnitureReviewPanel({ accessToken, agencyId, listingId, disable
     setLoading(true);
     setError(null);
     setSelected(null);
+    setSelectedVolume(null);
     setDestination("");
     Promise.all([
       getFurnitureReview(accessToken, agencyId, listingId),
@@ -93,7 +106,7 @@ export function FurnitureReviewPanel({ accessToken, agencyId, listingId, disable
     try {
       const updated = await reviewFurniture(accessToken, agencyId, listingId, command);
       pending.current = null;
-      setView(updated); setSelected(null); setDestination(""); formRef.current?.reset();
+      setView(updated); setSelected(null); setSelectedVolume(null); setDestination(""); formRef.current?.reset();
       setNotice(content.action === "rejected" ? "Sugerencia descartada; inventario sin cambios." : "Mobiliario confirmado. Las altas quedan en borrador para revisión.");
       onChanged();
     } catch (failure) { setError(message(failure)); }
@@ -104,14 +117,16 @@ export function FurnitureReviewPanel({ accessToken, agencyId, listingId, disable
     event.preventDefault();
     if (!view || blocked) return;
     const values = new FormData(event.currentTarget);
-    const reference = selected ? { job_id: selected.job_id, detection_index: selected.detection_index } : {};
-    if (selected && destination) {
+    const reference = selectedVolume ? { capture_id: selectedVolume.capture_id, object_id: selectedVolume.object_id }
+      : selected ? { job_id: selected.job_id, detection_index: selected.detection_index } : {};
+    const reviewing = selected !== null || selectedVolume !== null;
+    if (reviewing && destination) {
       void decide({ action: "confirmed", ...reference, existing_extra_id: destination });
       return;
     }
     const number = (name: string) => Number(values.get(name));
     void decide({
-      action: selected ? "confirmed" : "manual", ...reference,
+      action: reviewing ? "confirmed" : "manual", ...reference,
       item: {
         name: String(values.get("name")), price: String(values.get("price")),
         width_cm: number("width"), height_cm: number("height"), depth_cm: number("depth"),
@@ -134,11 +149,12 @@ export function FurnitureReviewPanel({ accessToken, agencyId, listingId, disable
   }
 
   function input(name: string, label: string, options: { integer?: boolean; min?: number; text?: boolean; required?: boolean } = {}) {
+    const prefill = selectedVolume ? volumeDefaults(selectedVolume)[name] : undefined;
     return <label htmlFor={`${formId}-${name}`}>{label}
       <input id={`${formId}-${name}`} name={name} type={options.text ? "text" : "number"}
         required={options.required !== false} min={options.min}
         step={options.text ? undefined : options.integer ? "1" : "any"}
-        defaultValue={name === "quantity" ? "1" : undefined}
+        defaultValue={name === "quantity" ? "1" : prefill}
         maxLength={options.text ? (name === "name" ? 120 : 32) : undefined} />
     </label>;
   }
@@ -179,7 +195,7 @@ export function FurnitureReviewPanel({ accessToken, agencyId, listingId, disable
           {suggestion.extra_id ? <p>Extra vinculado: {suggestion.extra_id}</p> : null}
           {suggestion.status === "pending" ? <div className="furniture-review__actions">
             <button className="review-button" type="button" disabled={blocked} onClick={() => {
-              setSelected(suggestion); setDestination(""); formRef.current?.reset(); setNotice(null);
+              setSelected(suggestion); setSelectedVolume(null); setDestination(""); formRef.current?.reset(); setNotice(null);
             }}>Revisar {suggestion.label} (foto {suggestion.photo_id})</button>
             <button className="review-button review-button--secondary" type="button" disabled={blocked}
               onClick={() => void decide({ action: "rejected", job_id: suggestion.job_id, detection_index: suggestion.detection_index })}>
@@ -187,12 +203,35 @@ export function FurnitureReviewPanel({ accessToken, agencyId, listingId, disable
           </div> : null}
         </li>)}</ul> : <p>Sin resultados de detección. No se ha inventado ningún objeto.</p>}
 
-      <form ref={formRef} onSubmit={submit}>
-        <h4>{selected ? `Confirmar sugerencia: ${selected.label}` : "Añadir mobiliario manualmente"}</h4>
-        {selected ? <button type="button" disabled={blocked} className="review-button review-button--secondary"
-          onClick={() => { setSelected(null); setDestination(""); formRef.current?.reset(); }}>Volver al alta manual</button> : null}
+      {volumes.length ? <>
+        <h4>Sugerencias por volumen</h4>
+        <ul className="furniture-review__suggestions">{volumes.map((volume) =>
+          <li key={`${volume.capture_id}:${volume.object_id}`}>
+            <strong>{volume.label} · {STATUS[volume.status]}</strong>
+            <p>Puntuación: {volume.score.toFixed(2)} · Volumen {volume.object_id} · Modelo {volume.model_id}</p>
+            {volume.position && volume.dimensions ? <>
+              <p>Posición (m): {volume.position.x}, {volume.position.y}, {volume.position.z}</p>
+              <p>Dimensiones (m): {volume.dimensions.width} × {volume.dimensions.height} × {volume.dimensions.depth}</p>
+            </> : <p>Volumen ya no disponible en la captura.</p>}
+            {volume.extra_id ? <p>Extra vinculado: {volume.extra_id}</p> : null}
+            {volume.status === "pending" && volume.position && volume.dimensions ? <div className="furniture-review__actions">
+              <button className="review-button" type="button" disabled={blocked} onClick={() => {
+                setSelectedVolume(volume); setSelected(null); setDestination(""); formRef.current?.reset(); setNotice(null);
+              }}>Revisar {volume.label} (volumen {volume.object_id})</button>
+              <button className="review-button review-button--secondary" type="button" disabled={blocked}
+                onClick={() => void decide({ action: "rejected", capture_id: volume.capture_id, object_id: volume.object_id })}>
+                Descartar {volume.label} (volumen {volume.object_id})</button>
+            </div> : null}
+          </li>)}</ul>
+      </> : null}
+
+      <form key={selectedVolume ? `${selectedVolume.capture_id}:${selectedVolume.object_id}` : "form"} ref={formRef} onSubmit={submit}>
+        <h4>{selected || selectedVolume ? `Confirmar sugerencia: ${(selected ?? selectedVolume)?.label}` : "Añadir mobiliario manualmente"}</h4>
+        {selectedVolume ? <p>Posición y medidas precargadas desde el volumen; completa nombre y precio antes de confirmar.</p> : null}
+        {selected || selectedVolume ? <button type="button" disabled={blocked} className="review-button review-button--secondary"
+          onClick={() => { setSelected(null); setSelectedVolume(null); setDestination(""); formRef.current?.reset(); }}>Volver al alta manual</button> : null}
         <fieldset disabled={blocked}>
-          {selected ? <label htmlFor={`${formId}-destination`}>Destino
+          {selected || selectedVolume ? <label htmlFor={`${formId}-destination`}>Destino
             <select id={`${formId}-destination`} value={destination} onChange={(event) => setDestination(event.target.value)}>
               <option value="">Crear un mueble nuevo</option>
               {view.listing.extras.map((extra) => <option key={extra.extra_id} value={extra.extra_id}>Mismo mueble ya inventariado: {extra.name}</option>)}

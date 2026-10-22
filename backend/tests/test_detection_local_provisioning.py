@@ -97,7 +97,8 @@ function docker {{
     }}
     if ($joined -match 'sqs set-queue-attributes') {{
         $attributesIndex = [Array]::IndexOf($args, '--attributes')
-        $global:capturedAttributes = [string]$args[$attributesIndex + 1]
+        $global:capturedAttributesArgument = [string]$args[$attributesIndex + 1]
+        $global:capturedAttributes = (@($input) -join '')
         return '{{}}'
     }}
     throw "Unexpected mocked Docker invocation: $joined"
@@ -107,6 +108,7 @@ function docker {{
 function docker.exe {{ docker @args }}
 . '{script_literal}'
 Write-Output ("CAPTURED-ATTRIBUTES:" + $global:capturedAttributes)
+Write-Output ("CAPTURED-ATTRIBUTES-ARGUMENT:" + $global:capturedAttributesArgument)
 Write-Output ("CAPTURED-QUEUES:" + ($global:queueNames -join ','))
 '''
     result = subprocess.run(
@@ -124,6 +126,14 @@ Write-Output ("CAPTURED-QUEUES:" + ($global:queueNames -join ','))
         "",
     )
     assert attributes_line, "the provisioner must set the detection queue redrive policy"
+    # Windows PowerShell 5.1 strips the inner double quotes of native arguments,
+    # so the JSON must travel through stdin instead of the command line.
+    argument_line = next(
+        (line.removeprefix("CAPTURED-ATTRIBUTES-ARGUMENT:") for line in lines
+         if line.startswith("CAPTURED-ATTRIBUTES-ARGUMENT:")),
+        "",
+    )
+    assert argument_line == "file:///dev/stdin"
     attributes = json.loads(attributes_line)
     redrive_policy = json.loads(attributes["RedrivePolicy"])
     assert redrive_policy == {
