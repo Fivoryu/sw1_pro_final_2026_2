@@ -16,15 +16,24 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Use a temporary server default to backfill existing wallet reservations,
+    # then remove it so the database schema matches the ORM metadata.
+    op.add_column(
+        "reservation",
+        sa.Column("payment_method", sa.String(length=8), nullable=False, server_default="wallet"),
+    )
     with op.batch_alter_table("reservation") as batch:
         batch.alter_column("customer_wallet_id", existing_type=sa.String(length=36), nullable=True)
         batch.alter_column("agency_wallet_id", existing_type=sa.String(length=36), nullable=True)
         batch.alter_column("customer_wallet_address", existing_type=sa.String(length=42), nullable=True)
         batch.alter_column("agency_wallet_address", existing_type=sa.String(length=42), nullable=True)
-        batch.add_column(
-            sa.Column("payment_method", sa.String(length=8), nullable=False, server_default="wallet")
-        )
         batch.create_check_constraint("ck_reservation_payment_method", "payment_method IN ('wallet', 'card')")
+        batch.alter_column(
+            "payment_method",
+            existing_type=sa.String(length=8),
+            existing_server_default="wallet",
+            server_default=None,
+        )
 
     op.create_table(
         "stripe_connect_account",

@@ -97,6 +97,7 @@ def test_stripe_migration_preserves_wallet_rows_and_allows_card_rows() -> None:
             assert columns["customer_wallet_id"]["nullable"]
             assert columns["agency_wallet_id"]["nullable"]
             assert columns["payment_method"]["nullable"] is False
+            assert columns["payment_method"]["default"] is None
             assert (
                 connection.execute(
                     text("SELECT payment_method FROM reservation WHERE id = 'wallet-reservation'")
