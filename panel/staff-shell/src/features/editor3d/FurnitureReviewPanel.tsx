@@ -33,9 +33,10 @@ function message(error: unknown): string {
 const cm = (metres: number) => String(Math.max(1, Math.round(metres * 100)));
 
 function volumeDefaults(volume: VolumeSuggestion): Record<string, string> {
+  const { position, dimensions } = volume;
   return {
-    x: String(volume.position.x), y: String(volume.position.y), z: String(volume.position.z),
-    width: cm(volume.dimensions.width), height: cm(volume.dimensions.height), depth: cm(volume.dimensions.depth),
+    ...(position ? { x: String(position.x), y: String(position.y), z: String(position.z) } : {}),
+    ...(dimensions ? { width: cm(dimensions.width), height: cm(dimensions.height), depth: cm(dimensions.depth) } : {}),
   };
 }
 
@@ -208,10 +209,12 @@ export function FurnitureReviewPanel({ accessToken, agencyId, listingId, disable
           <li key={`${volume.capture_id}:${volume.object_id}`}>
             <strong>{volume.label} · {STATUS[volume.status]}</strong>
             <p>Puntuación: {volume.score.toFixed(2)} · Volumen {volume.object_id} · Modelo {volume.model_id}</p>
-            <p>Posición (m): {volume.position.x}, {volume.position.y}, {volume.position.z}</p>
-            <p>Dimensiones (m): {volume.dimensions.width} × {volume.dimensions.height} × {volume.dimensions.depth}</p>
+            {volume.position && volume.dimensions ? <>
+              <p>Posición (m): {volume.position.x}, {volume.position.y}, {volume.position.z}</p>
+              <p>Dimensiones (m): {volume.dimensions.width} × {volume.dimensions.height} × {volume.dimensions.depth}</p>
+            </> : <p>Volumen ya no disponible en la captura.</p>}
             {volume.extra_id ? <p>Extra vinculado: {volume.extra_id}</p> : null}
-            {volume.status === "pending" ? <div className="furniture-review__actions">
+            {volume.status === "pending" && volume.position && volume.dimensions ? <div className="furniture-review__actions">
               <button className="review-button" type="button" disabled={blocked} onClick={() => {
                 setSelectedVolume(volume); setSelected(null); setDestination(""); formRef.current?.reset(); setNotice(null);
               }}>Revisar {volume.label} (volumen {volume.object_id})</button>

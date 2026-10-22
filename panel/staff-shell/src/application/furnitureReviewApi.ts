@@ -33,8 +33,9 @@ export interface VolumeSuggestion {
   model_id: string;
   label: string;
   score: number;
-  position: ScenePoint3D;
-  dimensions: { width: number; height: number; depth: number };
+  // Null once the capture draft no longer holds the object (expired or decided entries).
+  position: ScenePoint3D | null;
+  dimensions: { width: number; height: number; depth: number } | null;
   status: "pending" | "confirmed" | "rejected" | "expired";
   extra_id: string | null;
 }

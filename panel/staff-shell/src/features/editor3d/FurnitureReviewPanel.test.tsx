@@ -193,3 +193,13 @@ it("keeps photo confirmation referencing job and detection only", async () => {
   expect(command).not.toHaveProperty("capture_id");
   expect(command).not.toHaveProperty("object_id");
 });
+
+it("renders a decided volume whose geometry is gone without crashing", async () => {
+  vi.mocked(getFurnitureReview).mockResolvedValue({ ...data, volume_suggestions: [
+    { ...volume, status: "expired", position: null, dimensions: null },
+  ] });
+  open();
+  expect(await screen.findByText(/sofa · /)).toBeInTheDocument();
+  expect(screen.getByText(/Volumen ya no disponible en la captura/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Revisar sofa \(volumen box-1\)/ })).not.toBeInTheDocument();
+});
