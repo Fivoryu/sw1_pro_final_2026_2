@@ -121,6 +121,7 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
   final _password = TextEditingController();
   final _code = TextEditingController();
   bool _submitting = false;
+  bool _passwordVisible = false;
 
   @override
   void initState() {
@@ -218,10 +219,21 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
           TextFormField(
             key: const ValueKey('access-password-field'),
             controller: _password,
-            obscureText: true,
-            decoration: const InputDecoration(
+            obscureText: !_passwordVisible,
+            decoration: InputDecoration(
               labelText: 'Contraseña',
-              border: OutlineInputBorder(),
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                key: const ValueKey('access-password-visibility'),
+                tooltip: _passwordVisible
+                    ? 'Ocultar contraseña'
+                    : 'Mostrar contraseña',
+                icon: Icon(
+                  _passwordVisible ? Icons.visibility_off : Icons.visibility,
+                ),
+                onPressed: () =>
+                    setState(() => _passwordVisible = !_passwordVisible),
+              ),
             ),
             validator: (value) => (value == null || value.isEmpty)
                 ? 'Ingresá tu contraseña'

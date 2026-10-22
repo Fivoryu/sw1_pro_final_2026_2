@@ -88,6 +88,28 @@ void main() {
     expect(find.byKey(const ValueKey('access-password-field')), findsOneWidget);
   });
 
+  testWidgets('the password can be shown and hidden again', (tester) async {
+    await pumpCaptureApp(tester, signedIn: false);
+
+    EditableText passwordText() => tester.widget<EditableText>(
+      find.descendant(
+        of: find.byKey(const ValueKey('access-password-field')),
+        matching: find.byType(EditableText),
+      ),
+    );
+
+    expect(passwordText().obscureText, isTrue);
+    await tester.tap(find.byKey(const ValueKey('access-password-visibility')));
+    await tester.pump();
+    expect(passwordText().obscureText, isFalse);
+    expect(find.byTooltip('Ocultar contraseña'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('access-password-visibility')));
+    await tester.pump();
+    expect(passwordText().obscureText, isTrue);
+    expect(find.byTooltip('Mostrar contraseña'), findsOneWidget);
+  });
+
   testWidgets('continues from access to the agent listings', (tester) async {
     await pumpCaptureApp(tester, signedIn: true);
 
