@@ -453,3 +453,28 @@ def test_label_volumes_keeps_the_highest_scores_when_truncating(tmp_path: Path) 
     assert result is not None and len(result["items"]) == 100
     assert result["items"][0]["objectId"] == "box-105"
     assert "box-1" not in {item["objectId"] for item in result["items"]}
+
+
+def test_warnings_stay_within_the_api_cap_and_keep_the_labeler_warning() -> None:
+    http = FakeHttpClient()
+
+    def crowded(package_dir: Path) -> reconstruct.ReconstructionResult:
+        result = reconstruct.reconstruct(package_dir)
+        many = [f"warning {n}" for n in range(reconstruction_worker.MAX_WARNINGS)]
+        return reconstruct.ReconstructionResult(result.scene_draft, many, [_VIEW])
+
+    def unavailable(_dir: Path, _views: list[dict[str, Any]]) -> None:
+        raise reconstruction_worker.DetectorUnavailable
+
+    reconstruction_worker.ReconstructionJobWorker(
+        api_base_url="http://api:8000",
+        service_token="service-token",
+        queue=FakeQueue(),
+        http_client=http,
+        reconstructor=crowded,
+        labeler=unavailable,
+    ).run_once()
+
+    warnings = _complete_body(http)["warnings"]
+    assert len(warnings) == reconstruction_worker.MAX_WARNINGS
+    assert warnings[-1] == "Class suggestions skipped: detector unavailable"

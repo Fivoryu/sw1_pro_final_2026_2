@@ -39,6 +39,8 @@ Labeler = Callable[[Path, list[dict[str, Any]]], dict[str, Any] | None]
 
 MIN_SUGGESTION_IOU = 0.3
 MAX_SUGGESTIONS = 100
+# Mirrors MAX_WARNINGS in backend/app/modules/reconstruction/schemas.py; more is a 422.
+MAX_WARNINGS = 200
 WARNING_DETECTOR_UNAVAILABLE = "Class suggestions skipped: detector unavailable"
 WARNING_LABELING_FAILED = "Class suggestions skipped: labeling failed"
 
@@ -242,7 +244,8 @@ class ReconstructionJobWorker:
 
         payload: dict[str, Any] = {
             "sceneDraft": result.scene_draft,
-            "warnings": [*result.warnings, *extra_warnings],
+            # Keep the worker's own warnings when the reconstruction already fills the cap.
+            "warnings": [*result.warnings[: MAX_WARNINGS - len(extra_warnings)], *extra_warnings],
         }
         if suggestions is not None:
             payload["volumeSuggestions"] = suggestions
