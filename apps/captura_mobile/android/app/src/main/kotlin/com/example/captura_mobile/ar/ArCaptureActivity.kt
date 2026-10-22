@@ -139,6 +139,9 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
     @Volatile
     private var depthSupported = false
 
+    /** The session's configuration, kept to switch depth on when the walkthrough starts recording. */
+    private var sessionConfig: Config? = null
+
     @Volatile
     private var viewportWidth = 0
 
@@ -297,19 +300,23 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
                 ArCoreApk.InstallStatus.INSTALLED -> Unit
             }
             val created = Session(this)
+            depthSupported = created.isDepthModeSupported(Config.DepthMode.AUTOMATIC)
             val config = Config(created).apply {
                 planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
-                focusMode = Config.FocusMode.AUTO
+                // Fixed focus is ARCore's default and keeps the image stable for motion tracking.
+                focusMode = Config.FocusMode.FIXED
                 lightEstimationMode = Config.LightEstimationMode.AMBIENT_INTENSITY
                 updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
-                depthMode = if (created.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) {
+                // Depth from motion is CPU-heavy: in walkthrough mode it starts with the recording, so
+                // tracking and plane finding get the CPU while the agent looks for the floor.
+                depthMode = if (depthSupported && mode != CaptureMode.WALKTHROUGH) {
                     Config.DepthMode.AUTOMATIC
                 } else {
                     Config.DepthMode.DISABLED
                 }
             }
             created.configure(config)
-            depthSupported = config.depthMode == Config.DepthMode.AUTOMATIC
+            sessionConfig = config
             session = created
             runOnUiThread { refreshButtons(tracking = false) }
             return true
@@ -636,6 +643,7 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
             return
         }
         recording = true
+        enableDepthForRecording()
         startPackage()
         trajectory = TrajectorySampler()
         maxWallCount = liveWalls.size
@@ -656,6 +664,20 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
      * Uses the planes tracked right now (ARCore refines them over time); planes that were seen but are
      * now paused or stopped are left out. Rejected finishes keep recording.
      */
+    /** Turns depth on when the walkthrough starts recording; keyframes need it, the floor search does not. */
+    private fun enableDepthForRecording() {
+        val current = session ?: return
+        val config = sessionConfig ?: return
+        if (!depthSupported || config.depthMode == Config.DepthMode.AUTOMATIC) return
+        try {
+            config.depthMode = Config.DepthMode.AUTOMATIC
+            current.configure(config)
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not enable depth for the recording; keyframes go without depth", e)
+            config.depthMode = Config.DepthMode.DISABLED
+        }
+    }
+
     private fun finishWalkthrough() {
         val current = session ?: return
         val planes = trackedPlanes(current)
