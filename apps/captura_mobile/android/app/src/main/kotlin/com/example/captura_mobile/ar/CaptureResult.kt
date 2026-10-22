@@ -73,13 +73,21 @@ object CaptureResult {
         metrics: CaptureMetrics,
         /** Only in walkthrough mode; the key is omitted otherwise. */
         observations: WalkthroughObservations? = null,
+        /** Only in walkthrough mode, when the package was built; the key is omitted otherwise. */
+        capturePackage: CapturePackageResult? = null,
+        /** Only in walkthrough mode, when the package could not be built: why, for the agent. */
+        capturePackageError: String? = null,
     ): Map<String, Any?> = linkedMapOf<String, Any?>(
         "outcome" to "captured",
         "corners" to corners.map { it.toMap() },
         "height" to height?.toMap(),
         "boxes" to boxes.map { it.toMap() },
         "metrics" to metrics.toMap(),
-    ).also { map -> observations?.let { map["observations"] = it.toMap() } }
+    ).also { map ->
+        observations?.let { map["observations"] = it.toMap() }
+        capturePackage?.let { map["capturePackage"] = it.toMap() }
+        capturePackageError?.let { map["capturePackageError"] = it }
+    }
 
     fun cancelled(): Map<String, Any?> = linkedMapOf("outcome" to "cancelled")
 

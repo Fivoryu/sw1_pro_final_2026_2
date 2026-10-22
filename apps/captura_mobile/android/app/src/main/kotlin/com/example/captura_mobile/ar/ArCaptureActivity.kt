@@ -10,6 +10,7 @@ import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.os.Build
 import android.os.Bundle
+import android.media.Image
 import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
@@ -44,7 +45,14 @@ import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException
 import com.google.ar.core.exceptions.UnavailableDeviceNotCompatibleException
 import com.google.ar.core.exceptions.UnavailableSdkTooOldException
 import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationException
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
+import kotlin.concurrent.thread
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.atan2
@@ -67,12 +75,18 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
         const val EXTRA_ROOM_NAME = "roomName"
         const val EXTRA_RESULT_JSON = "resultJson"
         const val EXTRA_MODE = "mode"
+
+        /** Optional; written to the capture package manifest when the channel passes it. */
+        const val EXTRA_LISTING_ID = "listingId"
         private const val TAG = "ArCaptureActivity"
         private const val CAMERA_PERMISSION_REQUEST = 4107
         private const val STATUS_INTERVAL_MS = 150L
 
         /** Plane and trajectory sampling period in walkthrough mode (10 Hz). */
         private const val WALKTHROUGH_SAMPLE_INTERVAL_MS = 100L
+
+        /** How long finishing waits for queued keyframes to be written. */
+        private const val KEYFRAME_FLUSH_TIMEOUT_MS = 30_000L
 
         private const val WALKTHROUGH_GUIDANCE =
             "Caminá despacio por el borde del ambiente apuntando a la unión entre piso y pared. " +
@@ -108,6 +122,7 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
     private lateinit var finishButton: Button
     private lateinit var cancelButton: Button
     private lateinit var recordButton: Button
+    private lateinit var nextRoomButton: Button
 
     private val backgroundRenderer = BackgroundRenderer()
 
@@ -154,6 +169,20 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
     private var liveFloorArea = 0.0
     private var lastWalkSampleAtMs = 0L
 
+    // GL-thread state, capture package (S13): keyframes, rooms and trajectory with room ids.
+    private var recorder: KeyframeRecorder? = null
+    private var keyframeSelector = KeyframeSelector()
+    private var rooms = RoomSequence("")
+    private var captureId = ""
+    private var listingId: String? = null
+    private var recordStartedAtMs = 0L
+    private val trajectoryLog = mutableListOf<TrajectorySample>()
+    private var imageIntrinsics: Intrinsics? = null
+    private var depthIntrinsics: Intrinsics? = null
+
+    @Volatile
+    private var packagingStarted = false
+
     // GL-thread state, walkthrough guidance (S12).
     private val motionMeter = MotionMeter()
     private var lastMotion: MotionSample? = null
@@ -184,6 +213,7 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         roomName = intent.getStringExtra(EXTRA_ROOM_NAME).orEmpty()
         mode = CaptureMode.fromArgument(intent.getStringExtra(EXTRA_MODE))
+        listingId = intent.getStringExtra(EXTRA_LISTING_ID)
         startedAtMs = SystemClock.elapsedRealtime()
         if (mode == CaptureMode.WALKTHROUGH) feedback = GuidanceFeedback(this)
         setContentView(buildLayout())
@@ -229,6 +259,8 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
     }
 
     override fun onDestroy() {
+        if (!packagingStarted) recorder?.abort()
+        recorder = null
         feedback?.shutdown()
         feedback = null
         session?.close()
@@ -367,6 +399,7 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
             // Tracking loss pauses the walkthrough: nothing is sampled until tracking returns.
             updateGuidanceSignals(frame, camera, tracking)
             if (tracking) sampleWalkthrough(current, camera)
+            if (recording && tracking) recordKeyframe(frame, camera)
             publishWalkthroughOverlay(camera, tracking, centreHits)
             publishWalkthroughStatus(camera)
             return
@@ -603,15 +636,17 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
             return
         }
         recording = true
+        startPackage()
         trajectory = TrajectorySampler()
         maxWallCount = liveWalls.size
         motionMeter.reset()
         val pose = camera.pose
-        trajectory.offer(pose.tx().toDouble(), pose.tz().toDouble())
+        if (trajectory.offer(pose.tx().toDouble(), pose.tz().toDouble())) logTrajectory(pose.tx().toDouble(), pose.tz().toDouble())
         runOnUiThread {
             recordingShown = true
             recordButton.text = "Terminar recorrido"
             recordButton.isEnabled = true
+            nextRoomButton.isEnabled = true
         }
         postMessage(WALKTHROUGH_GUIDANCE)
         feedback?.speak(WALKTHROUGH_GUIDANCE)
@@ -633,27 +668,49 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
             return
         }
         if (floorY == null) return
-        val result = CaptureResult.captured(
-            corners = emptyList(),
-            height = roomHeight,
-            boxes = emptyList(),
-            metrics = CaptureMetrics(
-                durationMs = SystemClock.elapsedRealtime() - startedAtMs,
-                trackingLossCount = lossCounter.count,
-                depthSupported = depthSupported,
-                cornerHitDistances = emptyList(),
-                floorY = floorY,
-                method = CaptureMetrics.METHOD_WALKTHROUGH,
-            ),
-            observations = WalkthroughObservations(
-                floorY = floorY,
-                walls = walls,
-                floors = floorPolygons(planes, floorY),
-                trajectory = trajectory.points,
-            ),
+        val metrics = CaptureMetrics(
+            durationMs = SystemClock.elapsedRealtime() - startedAtMs,
+            trackingLossCount = lossCounter.count,
+            depthSupported = depthSupported,
+            cornerHitDistances = emptyList(),
+            floorY = floorY,
+            method = CaptureMetrics.METHOD_WALKTHROUGH,
+        )
+        val observations = WalkthroughObservations(
+            floorY = floorY,
+            walls = walls,
+            floors = floorPolygons(planes, floorY),
+            trajectory = trajectory.points,
+        )
+        val height = roomHeight
+        // Everything the packager needs is snapshotted here, on the GL thread, before it stops.
+        val snapshot = PackageSnapshot(
+            recorder = recorder,
+            captureId = captureId,
+            listingId = listingId,
+            floorY = floorY,
+            planes = packagePlanes(planes, floorY),
+            rooms = rooms.rooms,
+            trajectory = trajectoryLog.toList(),
+            image = imageIntrinsics,
+            depth = depthIntrinsics,
         )
         finished = true
-        runOnUiThread { deliver(result) }
+        packagingStarted = true
+        postMessage("Armando el paquete de captura. Esperá un momento…")
+        thread(name = "capture-packager") {
+            val (capturePackage, packageError) = buildPackage(snapshot)
+            val result = CaptureResult.captured(
+                corners = emptyList(),
+                height = height,
+                boxes = emptyList(),
+                metrics = metrics,
+                observations = observations,
+                capturePackage = capturePackage,
+                capturePackageError = packageError,
+            )
+            runOnUiThread { deliver(result) }
+        }
     }
 
     // endregion
@@ -672,10 +729,227 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
         } ?: 0.0
         if (recording) {
             val pose = camera.pose
-            trajectory.offer(pose.tx().toDouble(), pose.tz().toDouble())
+            if (trajectory.offer(pose.tx().toDouble(), pose.tz().toDouble())) logTrajectory(pose.tx().toDouble(), pose.tz().toDouble())
         }
         coverage = WalkthroughCoverage.compute(liveWalls, coverageCentre(camera))
     }
+
+    // region Capture package (S13)
+
+    /** What the packager thread needs; built on the GL thread. */
+    private class PackageSnapshot(
+        val recorder: KeyframeRecorder?,
+        val captureId: String,
+        val listingId: String?,
+        val floorY: Double,
+        val planes: List<PackagePlane>,
+        val rooms: List<PackageRoom>,
+        val trajectory: List<TrajectorySample>,
+        val image: Intrinsics?,
+        val depth: Intrinsics?,
+    )
+
+    private fun startPackage() {
+        captureId = UUID.randomUUID().toString()
+        recordStartedAtMs = SystemClock.elapsedRealtime()
+        keyframeSelector = KeyframeSelector()
+        rooms = RoomSequence(roomName)
+        trajectoryLog.clear()
+        imageIntrinsics = null
+        depthIntrinsics = null
+        // Only one capture runs at a time, so anything left in the work folder is from a dead run.
+        File(cacheDir, "capture_work").deleteRecursively()
+        recorder = KeyframeRecorder(File(cacheDir, "capture_work/$captureId"), AndroidKeyframeEncoder())
+    }
+
+    private fun logTrajectory(x: Double, z: Double) {
+        trajectoryLog.add(TrajectorySample(SystemClock.elapsedRealtime() - recordStartedAtMs, x, z, rooms.currentId))
+    }
+
+    /** «Siguiente ambiente»: later trajectory samples and keyframes carry the new room id. */
+    private fun nextRoom() {
+        if (!recording) return
+        val room = rooms.next()
+        postMessage("Empezaste «${room.name}». Pasá al nuevo ambiente y recorré sus paredes.")
+    }
+
+    private fun recordKeyframe(frame: Frame, camera: Camera) {
+        val target = recorder ?: return
+        val pose = toCameraPose(camera.pose)
+        val timestampNs = frame.timestamp
+        if (!keyframeSelector.offer(timestampNs / 1_000_000L, tracking = true, pose = pose)) return
+        target.submit(timestampNs, rooms.currentId, pose) { copyKeyframe(frame, camera) }
+    }
+
+    /**
+     * Copies the CPU camera image (and the raw depth with its confidence when supported) out of the
+     * ARCore images, which are closed right away. Encoding and writing happen on the writer thread.
+     * Depth is the raw 16-bit depth because only it has a matching confidence image.
+     */
+    private fun copyKeyframe(frame: Frame, camera: Camera): KeyframePayload? {
+        val yuv = try {
+            val image = frame.acquireCameraImage()
+            try {
+                val planes = image.planes
+                RawYuv(
+                    width = image.width,
+                    height = image.height,
+                    y = bytesOf(planes[0].buffer),
+                    yRowStride = planes[0].rowStride,
+                    u = bytesOf(planes[1].buffer),
+                    v = bytesOf(planes[2].buffer),
+                    uvRowStride = planes[1].rowStride,
+                    uvPixelStride = planes[1].pixelStride,
+                )
+            } finally {
+                image.close()
+            }
+        } catch (e: NotYetAvailableException) {
+            return null
+        }
+        if (imageIntrinsics == null) {
+            val intrinsics = camera.imageIntrinsics
+            val focal = intrinsics.focalLength
+            val principal = intrinsics.principalPoint
+            val size = intrinsics.imageDimensions
+            imageIntrinsics = Intrinsics(size[0], size[1], focal[0].toDouble(), focal[1].toDouble(), principal[0].toDouble(), principal[1].toDouble())
+                .scaledTo(yuv.width, yuv.height)
+        }
+        val depth = if (depthSupported) {
+            acquireGray { frame.acquireRawDepthImage16Bits() }?.let {
+                DepthDecoder.millimetres(it.bytes, it.width, it.height, it.rowStride)
+            }
+        } else {
+            null
+        }
+        val confidence = if (depth != null) {
+            acquireGray { frame.acquireRawDepthConfidenceImage() }
+                ?.takeIf { it.width == depth.width && it.height == depth.height }
+                ?.let { DepthDecoder.gray8(it.bytes, it.width, it.height, it.rowStride) }
+        } else {
+            null
+        }
+        if (depth != null && depthIntrinsics == null) {
+            depthIntrinsics = imageIntrinsics?.scaledTo(depth.width, depth.height)
+        }
+        return KeyframePayload(yuv, depth, confidence)
+    }
+
+    private class GrayCopy(val bytes: ByteArray, val width: Int, val height: Int, val rowStride: Int)
+
+    /** Copies plane 0 of a single-plane ARCore image and closes it; null while not yet available. */
+    private fun acquireGray(acquire: () -> Image): GrayCopy? {
+        val image = try {
+            acquire()
+        } catch (e: NotYetAvailableException) {
+            return null
+        }
+        return try {
+            val plane = image.planes[0]
+            GrayCopy(bytesOf(plane.buffer), image.width, image.height, plane.rowStride)
+        } finally {
+            image.close()
+        }
+    }
+
+    private fun bytesOf(buffer: java.nio.ByteBuffer): ByteArray {
+        val copy = buffer.duplicate()
+        copy.rewind()
+        return ByteArray(copy.remaining()).also { copy.get(it) }
+    }
+
+    private fun toCameraPose(pose: com.google.ar.core.Pose) = CameraPose(
+        pose.tx().toDouble(), pose.ty().toDouble(), pose.tz().toDouble(),
+        pose.qx().toDouble(), pose.qy().toDouble(), pose.qz().toDouble(), pose.qw().toDouble(),
+    )
+
+    /**
+     * Floor (upward plane at the floor level), ceiling (downward plane) and wall (vertical) planes
+     * tracked at the end of the session. Other upward planes (tables, beds) have no contract type
+     * and are left out.
+     */
+    private fun packagePlanes(planes: List<Plane>, floorY: Double): List<PackagePlane> {
+        val result = mutableListOf<PackagePlane>()
+        for (plane in planes) {
+            val kind = when (plane.type) {
+                Plane.Type.HORIZONTAL_UPWARD_FACING ->
+                    if (WalkthroughGeometry.isAtFloorHeight(plane.centerPose.ty().toDouble(), floorY)) PlaneKind.FLOOR else null
+                Plane.Type.HORIZONTAL_DOWNWARD_FACING -> PlaneKind.CEILING
+                Plane.Type.VERTICAL -> PlaneKind.WALL
+                else -> null
+            } ?: continue
+            val buffer = plane.polygon.duplicate()
+            buffer.rewind()
+            val polygon = ArrayList<Pair<Double, Double>>(buffer.remaining() / 2)
+            while (buffer.remaining() >= 2) polygon.add(buffer.get().toDouble() to buffer.get().toDouble())
+            result.add(PackagePlane("p${result.size + 1}", kind, toCameraPose(plane.centerPose), polygon))
+        }
+        return result
+    }
+
+    /** Runs on the packager thread: waits for the writer, writes the manifest and zips the package. */
+    private fun buildPackage(snapshot: PackageSnapshot): Pair<CapturePackageResult?, String?> {
+        val target = snapshot.recorder ?: return null to "No se registraron cuadros del recorrido."
+        return try {
+            val recording = target.finish(KEYFRAME_FLUSH_TIMEOUT_MS)
+            val image = snapshot.image
+            if (recording.keyframes.isEmpty() || image == null) {
+                target.abort()
+                return null to "No se guardaron cuadros del recorrido. Caminá más despacio y con más luz."
+            }
+            val workDir = File(cacheDir, "capture_work/${snapshot.captureId}")
+            val manifest = ManifestBuilder.build(
+                ManifestInput(
+                    captureId = snapshot.captureId,
+                    listingId = snapshot.listingId,
+                    capturedAt = utcNow(),
+                    deviceModel = Build.MODEL,
+                    arcoreVersion = arcoreVersion(),
+                    depthSupported = depthSupported,
+                    image = image,
+                    depth = snapshot.depth,
+                    floorY = snapshot.floorY,
+                    rooms = snapshot.rooms,
+                    planes = snapshot.planes,
+                    trajectory = snapshot.trajectory,
+                    keyframes = recording.keyframes.map {
+                        PackageKeyframe(
+                            it.index, it.timestampNs, it.roomId, it.pose,
+                            it.files.image, it.files.depth, it.files.confidence,
+                        )
+                    },
+                ),
+            )
+            File(workDir, "manifest.json").writeText(JsonWriter.write(manifest))
+            val zip = File(filesDir, "capture_packages/${snapshot.captureId}.zip").also { it.parentFile?.mkdirs() }
+            PackageZip.zipDirectory(workDir, zip)
+            workDir.deleteRecursively()
+            CapturePackageResult(
+                zipPath = zip.absolutePath,
+                captureId = snapshot.captureId,
+                sizeBytes = zip.length(),
+                keyframeCount = recording.keyframes.size,
+                droppedKeyframes = recording.dropped,
+                failedKeyframes = recording.failed,
+                rooms = snapshot.rooms,
+            ) to null
+        } catch (e: Exception) {
+            Log.e(TAG, "Capture package failed", e)
+            target.abort()
+            null to "No pudimos armar el paquete de captura (¿poco espacio en el teléfono?)."
+        }
+    }
+
+    private fun utcNow(): String =
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ROOT).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
+
+    private fun arcoreVersion(): String = try {
+        packageManager.getPackageInfo("com.google.ar.core", 0).versionName ?: "unknown"
+    } catch (e: Exception) {
+        "unknown"
+    }
+
+    // endregion
 
     /** Centre of the walked path, which approximates the room centre when walking along the walls. */
     private fun coverageCentre(camera: Camera): Corner2 {
@@ -998,6 +1272,7 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
             // «Terminar recorrido» stays available; the finish rule decides with what is tracked then.
             recordButton.isEnabled = tracking || recordingShown
             heightButton.isEnabled = tracking
+            nextRoomButton.isEnabled = recordingShown
             if (!tracking) {
                 messageText.text = "Sin seguimiento el recorrido queda en pausa y no se registra nada. " +
                     "Mové el teléfono despacio apuntando al piso."
@@ -1017,6 +1292,7 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
     private fun cancelCapture() {
         if (finished) return
         finished = true
+        if (!packagingStarted) recorder?.abort()
         deliver(CaptureResult.cancelled())
     }
 
@@ -1087,9 +1363,10 @@ class ArCaptureActivity : Activity(), GLSurfaceView.Renderer {
         bottom.addView(messageText)
         if (mode == CaptureMode.WALKTHROUGH) {
             recordButton = button("Iniciar recorrido") { enqueue { _, camera -> toggleRecording(camera) } }
+            nextRoomButton = button("Siguiente ambiente") { enqueue { _, _ -> nextRoom() } }
             heightButton = button("Medir altura") { enqueue(::measureRoomHeight) }
             cancelButton = button("Cancelar") { cancelCapture() }
-            bottom.addView(row(recordButton))
+            bottom.addView(row(recordButton, nextRoomButton))
             bottom.addView(row(heightButton, cancelButton))
         } else {
             addWallControls(bottom)

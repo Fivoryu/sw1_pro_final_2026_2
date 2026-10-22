@@ -5,10 +5,13 @@ import '../data/services/ar_capture_channel.dart';
 import '../data/services/capture_draft_store.dart';
 import '../data/services/photo_source.dart';
 import '../data/services/staff_auth_failure.dart';
+import '../data/services/staff_capture_api.dart';
 import '../data/services/staff_listing_photos_api.dart';
 import '../data/services/staff_listings_api.dart';
 import '../data/services/staff_scene_api.dart';
 import 'listing_photos_controller.dart';
+import 'spatial/capture_upload.dart';
+import 'spatial/capture_upload_controller.dart';
 import 'spatial_capture_controller.dart';
 import 'staff_session_controller.dart';
 
@@ -29,13 +32,19 @@ class ListingDraftsController extends ChangeNotifier {
     StaffSceneApi? sceneApi,
     CaptureDraftStore? captureStore,
     ArCapture? arCapture,
+    StaffCaptureApi? captureApi,
+    PendingUploadStore? uploadStore,
+    CapturePackageFiles packageFiles = const IoCapturePackageFiles(),
   }) : _api = api,
        _session = session,
        _photosApi = photosApi,
        _photoSource = photoSource,
        _sceneApi = sceneApi,
        _captureStore = captureStore,
-       _arCapture = arCapture;
+       _arCapture = arCapture,
+       _captureApi = captureApi,
+       _uploadStore = uploadStore,
+       _packageFiles = packageFiles;
 
   static const String _noAgencyMessage =
       'Tu cuenta no pertenece a una inmobiliaria con sesión activa. Volvé a '
@@ -48,6 +57,9 @@ class ListingDraftsController extends ChangeNotifier {
   final StaffSceneApi? _sceneApi;
   final CaptureDraftStore? _captureStore;
   final ArCapture? _arCapture;
+  final StaffCaptureApi? _captureApi;
+  final PendingUploadStore? _uploadStore;
+  final CapturePackageFiles _packageFiles;
 
   ListingStatus _tab = ListingStatus.draft;
   ListingsLoadState _loadState = ListingsLoadState.loading;
@@ -145,12 +157,23 @@ class ListingDraftsController extends ChangeNotifier {
     final store = _captureStore;
     final ar = _arCapture;
     if (sceneApi == null || store == null || ar == null) return null;
+    final captureApi = _captureApi;
+    final uploadStore = _uploadStore;
     return SpatialCaptureController(
       listingId: listingId,
       session: _session,
       sceneApi: sceneApi,
       store: store,
       ar: ar,
+      uploads: captureApi == null || uploadStore == null
+          ? null
+          : CaptureUploadController(
+              listingId: listingId,
+              session: _session,
+              api: captureApi,
+              store: uploadStore,
+              files: _packageFiles,
+            ),
     );
   }
 

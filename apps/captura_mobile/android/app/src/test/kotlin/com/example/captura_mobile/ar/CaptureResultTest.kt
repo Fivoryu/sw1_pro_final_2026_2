@@ -134,4 +134,53 @@ class CaptureResultTest {
         )
         assertEquals("wall_lines", metrics["method"])
     }
+
+    @Test
+    fun capturePackageIsAnAdditiveKeyAndOtherFieldsAreUnchanged() {
+        val packageResult = CapturePackageResult(
+            zipPath = "/files/capture_packages/cap-1.zip",
+            captureId = "cap-1",
+            sizeBytes = 1234L,
+            keyframeCount = 12,
+            droppedKeyframes = 1,
+            failedKeyframes = 0,
+            rooms = listOf(PackageRoom("room-1", "Sala"), PackageRoom("room-2", "Ambiente 2")),
+        )
+        val base = sampleCaptured()
+        val result = CaptureResult.captured(
+            corners = emptyList(),
+            height = null,
+            boxes = emptyList(),
+            metrics = CaptureMetrics(1L, 0, true, emptyList(), -1.4, CaptureMetrics.METHOD_WALKTHROUGH),
+            capturePackage = packageResult,
+        )
+        assertEquals(listOf("outcome", "corners", "height", "boxes", "metrics", "capturePackage"), result.keys.toList())
+        assertEquals(
+            mapOf(
+                "zipPath" to "/files/capture_packages/cap-1.zip",
+                "captureId" to "cap-1",
+                "sizeBytes" to 1234L,
+                "keyframeCount" to 12,
+                "droppedKeyframes" to 1,
+                "failedKeyframes" to 0,
+                "rooms" to listOf(mapOf("id" to "room-1", "name" to "Sala"), mapOf("id" to "room-2", "name" to "Ambiente 2")),
+            ),
+            result["capturePackage"],
+        )
+        // Walls mode result keeps exactly its previous keys.
+        assertEquals(listOf("outcome", "corners", "height", "boxes", "metrics"), base.keys.toList())
+    }
+
+    @Test
+    fun capturePackageErrorIsReportedInsteadOfAPackage() {
+        val result = CaptureResult.captured(
+            corners = emptyList(),
+            height = null,
+            boxes = emptyList(),
+            metrics = CaptureMetrics(1L, 0, false, emptyList(), -1.4, CaptureMetrics.METHOD_WALKTHROUGH),
+            capturePackageError = "No se pudo armar el paquete.",
+        )
+        assertEquals("No se pudo armar el paquete.", result["capturePackageError"])
+        assertTrue(!result.containsKey("capturePackage"))
+    }
 }

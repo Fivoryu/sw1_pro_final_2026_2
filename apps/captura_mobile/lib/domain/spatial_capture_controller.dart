@@ -4,6 +4,7 @@ import '../data/services/ar_capture_channel.dart';
 import '../data/services/capture_draft_store.dart';
 import '../data/services/staff_auth_failure.dart';
 import '../data/services/staff_scene_api.dart';
+import 'spatial/capture_upload_controller.dart';
 import 'spatial/spatial.dart';
 import 'staff_session_controller.dart';
 
@@ -37,17 +38,25 @@ class SpatialCaptureController extends ChangeNotifier {
     required StaffSceneApi sceneApi,
     required CaptureDraftStore store,
     required ArCapture ar,
+    this.uploads,
     DateTime Function()? now,
   }) : _session = session,
        _sceneApi = sceneApi,
        _store = store,
        _ar = ar,
-       _now = now ?? DateTime.now;
+       _now = now ?? DateTime.now {
+    uploads?.addListener(_notify);
+  }
 
   static const String _noSessionMessage =
       'Tu cuenta no tiene una sesión activa. Volvé a ingresar.';
 
   final String listingId;
+
+  /// Sends walkthrough capture packages for server-side reconstruction
+  /// (F07.7); null when this build has no upload support. This controller
+  /// owns it and disposes it.
+  final CaptureUploadController? uploads;
   final StaffSessionController _session;
   final StaffSceneApi _sceneApi;
   final CaptureDraftStore _store;
@@ -85,6 +94,8 @@ class SpatialCaptureController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    uploads?.removeListener(_notify);
+    uploads?.dispose();
     super.dispose();
   }
 
@@ -99,6 +110,7 @@ class SpatialCaptureController extends ChangeNotifier {
       _notify();
       return;
     }
+    await uploads?.load();
     final stored = await _store.read(owner, listingId);
     if (stored != null) {
       try {
@@ -140,13 +152,17 @@ class SpatialCaptureController extends ChangeNotifier {
     if (availability == ArAvailability.unsupported) {
       return MethodChannelArCapture.messageFor('arcore_unavailable');
     }
-    final result = await _ar.captureRoom(name, mode: mode);
+    final result = await _ar.captureRoom(
+      name,
+      mode: mode,
+      listingId: listingId,
+    );
     switch (result) {
       case ArCaptureCancelled():
         return null;
       case ArCaptureFailed(:final message):
         return message;
-      case ArCaptured(:final payload):
+      case ArCaptured(:final payload, :final capturePackage, :final packageProblem):
         var capture = payload;
         String? notice;
         final metrics = payload['metrics'];
@@ -191,8 +207,35 @@ class SpatialCaptureController extends ChangeNotifier {
           return 'La captura llegó incompleta. Intentá de nuevo.';
         }
         await _change(_capture.copyWith(rooms: [..._capture.rooms, room]));
-        return notice;
+        final reconstruction = await _handlePackage(
+          capturePackage,
+          packageProblem,
+        );
+        if (reconstruction == null) return notice;
+        return notice == null ? reconstruction : '$notice $reconstruction';
     }
+  }
+
+  /// Hands the capture package to the upload queue and says what happens
+  /// next, or why there is no package. Null when there is nothing to say.
+  Future<String?> _handlePackage(
+    CapturePackageInfo? package,
+    String? problem,
+  ) async {
+    if (problem != null) {
+      return 'No pudimos preparar el recorrido para la reconstrucción '
+          'en el servidor ($problem) El contorno propuesto sigue disponible.';
+    }
+    final queue = uploads;
+    if (package == null || queue == null) return null;
+    await queue.enqueue(package);
+    final rooms = package.rooms.length;
+    final preview = rooms > 1
+        ? ' Recorriste $rooms ambientes: el contorno de arriba es solo una '
+              'vista previa, porque la reconstrucción los separa en el servidor.'
+        : '';
+    return 'El recorrido se sube para reconstruir el ambiente; seguí el '
+        'estado más abajo.$preview';
   }
 
   String _newRoomId() {

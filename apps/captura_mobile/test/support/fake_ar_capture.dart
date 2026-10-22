@@ -6,6 +6,7 @@ class FakeArCapture implements ArCapture {
   final List<ArCaptureResult> results = [];
   final List<String> names = [];
   final List<CaptureMode> modes = [];
+  final List<String?> listingIds = [];
 
   @override
   Future<ArAvailability> availability() async => available;
@@ -14,9 +15,11 @@ class FakeArCapture implements ArCapture {
   Future<ArCaptureResult> captureRoom(
     String roomName, {
     CaptureMode mode = CaptureMode.walls,
+    String? listingId,
   }) async {
     names.add(roomName);
     modes.add(mode);
+    listingIds.add(listingId);
     return results.removeAt(0);
   }
 }

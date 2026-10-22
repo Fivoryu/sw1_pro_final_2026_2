@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/services/ar_capture_channel.dart';
+import '../../domain/spatial/capture_upload_controller.dart';
 import '../../domain/spatial/spatial.dart';
 import '../../domain/spatial_capture_controller.dart';
+import 'capture_upload_format.dart';
 import 'floor_plan_view.dart';
 import 'room_editor_screen.dart';
 import 'spatial_format.dart';
@@ -39,6 +43,9 @@ class _SpatialCaptureScreenState extends State<SpatialCaptureScreen> {
     super.initState();
     _controller.addListener(_onChanged);
     _refreshStorage();
+    // Packages left over from a closed app or a lost connection resume here.
+    final uploads = _controller.uploads;
+    if (uploads != null) unawaited(uploads.retry());
   }
 
   @override
@@ -150,6 +157,11 @@ class _SpatialCaptureScreenState extends State<SpatialCaptureScreen> {
                   onClearLocal: _clearLocal,
                 ),
                 const SizedBox(height: 16),
+                if (_controller.uploads case final uploads?
+                    when uploads.items.isNotEmpty) ...[
+                  _UploadsCard(uploads: uploads),
+                  const SizedBox(height: 16),
+                ],
                 if (preview != null) ...[
                   FloorPlanView(document: preview.document),
                   const SizedBox(height: 12),
@@ -231,6 +243,101 @@ class _SpatialCaptureScreenState extends State<SpatialCaptureScreen> {
         )
         .name;
     return '${name(connection.roomA)} ↔ ${name(connection.roomB)}';
+  }
+}
+
+/// Upload progress and reconstruction status of the walkthrough packages.
+class _UploadsCard extends StatelessWidget {
+  const _UploadsCard({required this.uploads});
+
+  final CaptureUploadController uploads;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      key: const ValueKey('uploads-card'),
+      color: theme.colorScheme.surfaceContainerLow,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Recorridos para reconstrucción',
+              style: theme.textTheme.titleMedium,
+            ),
+            if (uploads.message != null) ...[
+              const SizedBox(height: 8),
+              Text(uploads.message!),
+            ],
+            for (final item in uploads.items) ...[
+              const SizedBox(height: 12),
+              _UploadTile(item: item, uploads: uploads),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _UploadTile extends StatelessWidget {
+  const _UploadTile({required this.item, required this.uploads});
+
+  final CaptureUploadItem item;
+  final CaptureUploadController uploads;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final text = captureUploadText(item);
+    final inProgress = item.phase != UploadPhase.idle;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(text.title, style: theme.textTheme.titleSmall),
+        const SizedBox(height: 4),
+        Text(text.detail),
+        if (inProgress) ...[
+          const SizedBox(height: 8),
+          LinearProgressIndicator(
+            key: const ValueKey('upload-progress'),
+            value: text.progress,
+          ),
+        ],
+        if (text.canRetry || text.canRefresh || text.canDismiss) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: [
+              if (text.canRetry)
+                FilledButton.icon(
+                  key: const ValueKey('upload-retry-button'),
+                  style: FilledButton.styleFrom(minimumSize: _actionMinSize),
+                  onPressed: uploads.busy ? null : uploads.retry,
+                  icon: const Icon(Icons.cloud_upload_outlined),
+                  label: const Text('Reintentar subida'),
+                ),
+              if (text.canRefresh)
+                OutlinedButton.icon(
+                  key: const ValueKey('upload-refresh-button'),
+                  style: OutlinedButton.styleFrom(minimumSize: _actionMinSize),
+                  onPressed: uploads.busy ? null : uploads.retry,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Actualizar estado'),
+                ),
+              if (text.canDismiss)
+                TextButton(
+                  key: const ValueKey('upload-dismiss-button'),
+                  onPressed: () => uploads.dismiss(item.upload.captureId),
+                  child: const Text('Quitar de la lista'),
+                ),
+            ],
+          ),
+        ],
+      ],
+    );
   }
 }
 

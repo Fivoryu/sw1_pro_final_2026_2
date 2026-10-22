@@ -37,6 +37,7 @@ class MainActivity : FlutterActivity() {
                 "captureRoom" -> startCapture(
                     roomName = call.argument<String>("roomName").orEmpty(),
                     mode = CaptureMode.fromArgument(call.argument<String>("mode")),
+                    listingId = call.argument<String>("listingId"),
                     result = result,
                 )
                 else -> result.notImplemented()
@@ -60,7 +61,7 @@ class MainActivity : FlutterActivity() {
         result.success(mapOf("status" to CaptureRules.availabilityStatus(availability.name)))
     }
 
-    private fun startCapture(roomName: String, mode: CaptureMode, result: MethodChannel.Result) {
+    private fun startCapture(roomName: String, mode: CaptureMode, listingId: String?, result: MethodChannel.Result) {
         if (pendingCapture != null) {
             result.success(CaptureResult.error(CaptureResult.ERROR_SESSION_FAILED, "Ya hay una captura en curso."))
             return
@@ -70,6 +71,7 @@ class MainActivity : FlutterActivity() {
             val intent = Intent(this, ArCaptureActivity::class.java)
                 .putExtra(ArCaptureActivity.EXTRA_ROOM_NAME, roomName)
                 .putExtra(ArCaptureActivity.EXTRA_MODE, mode.wireName)
+                .putExtra(ArCaptureActivity.EXTRA_LISTING_ID, listingId)
             @Suppress("DEPRECATION")
             startActivityForResult(intent, CAPTURE_REQUEST)
         } catch (e: Exception) {

@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../../domain/spatial/capture_upload.dart';
+
 /// On-device storage of spatial capture drafts, keyed by staff account and
 /// listing. Each account only sees and cleans its own drafts.
 abstract interface class CaptureDraftStore {
@@ -110,5 +112,100 @@ class FileCaptureDraftStore implements CaptureDraftStore {
     if (!_safeId.hasMatch(id)) {
       throw ArgumentError.value(id, 'id', 'must be a plain identifier');
     }
+  }
+}
+
+/// On-device record of capture packages still on their way to the server
+/// (F07.5), keyed by staff account and capture id. Each account only sees and
+/// removes its own.
+abstract interface class PendingUploadStore {
+  Future<List<PendingCaptureUpload>> list(String ownerId);
+
+  Future<void> save(String ownerId, PendingCaptureUpload upload);
+
+  Future<void> delete(String ownerId, String captureId);
+}
+
+/// [PendingUploadStore] with one JSON file per capture under
+/// `capture_uploads/<staff id>/<capture id>.json`. Records survive app
+/// restarts; each write goes through a temporary file and a rename.
+class FilePendingUploadStore implements PendingUploadStore {
+  FilePendingUploadStore({required Future<Directory> Function() root})
+    : _root = root;
+
+  final Future<Directory> Function() _root;
+
+  static final _safeId = RegExp(r'^[A-Za-z0-9_-]{1,128}$');
+
+  @override
+  Future<List<PendingCaptureUpload>> list(String ownerId) async {
+    final dir = await _ownerDir(ownerId);
+    if (!await dir.exists()) return const [];
+    final uploads = <PendingCaptureUpload>[];
+    await for (final entry in dir.list()) {
+      if (entry is! File || !entry.path.endsWith('.json')) continue;
+      try {
+        final decoded = jsonDecode(await entry.readAsString());
+        if (decoded is Map<String, Object?>) {
+          uploads.add(PendingCaptureUpload.fromJson(decoded));
+          continue;
+        }
+      } on FormatException {
+        // Falls through: the unreadable record is kept aside below.
+      }
+      await entry.rename('${entry.path}.corrupt');
+    }
+    uploads.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return uploads;
+  }
+
+  @override
+  Future<void> save(String ownerId, PendingCaptureUpload upload) async {
+    final file = await _file(ownerId, upload.captureId);
+    await file.parent.create(recursive: true);
+    final temporary = File('${file.path}.tmp');
+    await temporary.writeAsString(jsonEncode(upload.toJson()), flush: true);
+    await temporary.rename(file.path);
+  }
+
+  @override
+  Future<void> delete(String ownerId, String captureId) async {
+    final file = await _file(ownerId, captureId);
+    if (await file.exists()) await file.delete();
+  }
+
+  Future<Directory> _ownerDir(String ownerId) async {
+    _checkId(ownerId);
+    final root = await _root();
+    return Directory('${root.path}/capture_uploads/$ownerId');
+  }
+
+  Future<File> _file(String ownerId, String captureId) async {
+    _checkId(captureId);
+    final dir = await _ownerDir(ownerId);
+    return File('${dir.path}/$captureId.json');
+  }
+
+  void _checkId(String id) {
+    if (!_safeId.hasMatch(id)) {
+      throw ArgumentError.value(id, 'id', 'must be a plain identifier');
+    }
+  }
+}
+
+/// [CapturePackageFiles] over the real file system.
+class IoCapturePackageFiles implements CapturePackageFiles {
+  const IoCapturePackageFiles();
+
+  @override
+  Future<bool> exists(String path) => File(path).exists();
+
+  @override
+  Stream<List<int>> open(String path) => File(path).openRead();
+
+  @override
+  Future<void> delete(String path) async {
+    final file = File(path);
+    if (await file.exists()) await file.delete();
   }
 }
