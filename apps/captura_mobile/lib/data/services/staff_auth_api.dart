@@ -108,7 +108,19 @@ class StaffAuthApi {
       csrfToken: csrfToken,
       refreshCookie: refreshCookie,
     );
-    return _grant(response);
+    // The API rotates the tokens without echoing the user, so the account is
+    // loaded with the new access token when the body does not carry it.
+    final json = _decodeObject(response);
+    final accessToken = json['access_token'];
+    if (json['user'] != null || accessToken is! String) return _grant(response);
+    final csrf = json['csrf_token'];
+    if (csrf is! String) throw malformedResponseFailure();
+    return StaffAccessGrant(
+      accessToken: accessToken,
+      csrfToken: csrf,
+      account: await fetchAccount(accessToken: accessToken),
+      refreshCookie: readRefreshCookie(response.headers),
+    );
   }
 
   Future<void> logout({

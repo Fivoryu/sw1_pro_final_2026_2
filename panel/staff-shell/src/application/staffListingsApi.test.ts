@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getAgencyListing,
+  getListingScene,
   listAgencyListings,
   listListingPhotos,
   listListingTransitions,
   StaffListingsApiError,
+  putListingScene,
   transitionListing,
   type StaffListing,
 } from "./staffListingsApi";
+import { DEFAULT_SCENE_DOCUMENT } from "./sceneContract";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -188,6 +191,53 @@ describe("staff listings API", () => {
   });
 });
 
+describe("staff listing scene API", () => {
+  it("gets a listing scene with the agency staff access token", async () => {
+    respondWithJson(DEFAULT_SCENE_DOCUMENT);
+
+    const result = await getListingScene("volatile-access", "agency 1", "listing/1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/staff/agencies/agency%201/listings/listing%2F1/scene",
+      { method: "GET", headers: bearer },
+    );
+    expect(result).toEqual(DEFAULT_SCENE_DOCUMENT);
+  });
+
+  it("preserves the scene_not_defined code from the documented 404 response", async () => {
+    respondWithJson({ detail: "Scene is not defined", code: "scene_not_defined" }, 404);
+
+    await expect(
+      getListingScene("volatile-access", "agency-1", "listing-1"),
+    ).rejects.toMatchObject({
+      status: 404,
+      code: "scene_not_defined",
+      message: "Scene is not defined",
+    });
+  });
+
+  it("puts the complete scene document and returns the stored representation", async () => {
+    respondWithJson(DEFAULT_SCENE_DOCUMENT);
+
+    const result = await putListingScene(
+      "volatile-access",
+      "agency-1",
+      "listing-1",
+      DEFAULT_SCENE_DOCUMENT,
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/staff/agencies/agency-1/listings/listing-1/scene",
+      {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "application/json" },
+        body: JSON.stringify(DEFAULT_SCENE_DOCUMENT),
+      },
+    );
+    expect(result).toEqual(DEFAULT_SCENE_DOCUMENT);
+  });
+});
+
 describe("staff listing photos API", () => {
   it("lists a listing's confirmed photos with the access token", async () => {
     const photo = {
@@ -211,8 +261,8 @@ describe("staff listing photos API", () => {
   it("raises the server detail when the photos cannot be listed", async () => {
     respondWithJson({ detail: "Photo storage is not configured", code: "dependency_unavailable" }, 503);
 
-    await expect(listListingPhotos("volatile-access", "agency-1", "listing-1")).rejects.toEqual(
-      new StaffListingsApiError(503, "Photo storage is not configured"),
+    await expect(listListingPhotos("volatile-access", "agency-1", "listing-1")).rejects.toMatchObject(
+      new StaffListingsApiError(503, "Photo storage is not configured", "dependency_unavailable"),
     );
   });
 });

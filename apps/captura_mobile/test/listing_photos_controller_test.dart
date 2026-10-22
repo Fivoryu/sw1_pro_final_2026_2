@@ -121,7 +121,10 @@ void main() {
 
       await harness.controller.add(PhotoOrigin.gallery);
 
-      expect(harness.controller.message, contains('JPG, PNG o WebP'));
+      expect(
+        harness.controller.message,
+        contains('JPG, PNG, WebP, HEIC o HEIF'),
+      );
       expect(harness.controller.uploads, isEmpty);
       expect(
         harness.backend.requests.where((r) => r.method == 'POST'),
@@ -129,18 +132,33 @@ void main() {
       );
     });
 
-    test('rejects a photo above 5 MB before uploading', () async {
+    test('rejects a photo above 20 MiB before uploading', () async {
       final harness = await _build();
       await harness.controller.load();
       harness.source.next = PickedPhoto(
-        bytes: Uint8List(5 * 1024 * 1024 + 1)..setAll(0, [0xFF, 0xD8, 0xFF]),
+        bytes: Uint8List(20 * 1024 * 1024 + 1)..setAll(0, [0xFF, 0xD8, 0xFF]),
         contentType: 'image/jpeg',
       );
 
       await harness.controller.add(PhotoOrigin.gallery);
 
-      expect(harness.controller.message, contains('5 MB'));
+      expect(harness.controller.message, contains('20 MiB'));
       expect(harness.controller.uploads, isEmpty);
+    });
+
+    test('accepts a photo at exactly 20 MiB', () async {
+      final harness = await _build();
+      await harness.controller.load();
+      harness.source.next = PickedPhoto(
+        bytes: Uint8List(20 * 1024 * 1024)..setAll(0, [0xFF, 0xD8, 0xFF]),
+        contentType: 'image/jpeg',
+      );
+
+      await harness.controller.add(PhotoOrigin.gallery);
+
+      expect(harness.controller.message, isNull);
+      expect(harness.controller.uploads, isEmpty);
+      expect(harness.controller.photos, hasLength(1));
     });
 
     test('keeps a failed upload to retry it with the same link', () async {
@@ -204,9 +222,9 @@ void main() {
       expect(harness.backend.photos['listing-1'], isEmpty);
     });
 
-    test('explains the ten photo limit', () async {
+    test('explains the twenty photo limit', () async {
       final harness = await _build();
-      for (var i = 0; i < 10; i++) {
+      for (var i = 0; i < 20; i++) {
         harness.backend.seedPhoto('listing-1');
       }
       await harness.controller.load();

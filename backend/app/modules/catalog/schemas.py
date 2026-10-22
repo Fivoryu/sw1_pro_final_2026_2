@@ -6,7 +6,15 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    model_validator,
+)
 
 from app.core.money import SupportedCurrency
 
@@ -14,6 +22,101 @@ from app.core.money import SupportedCurrency
 # string guarded by a CHECK constraint, so routers cast database values to this alias.
 ListingOperation = Literal["sale", "rent"]
 ListingApprovalStatus = Literal["draft", "pending", "approved", "rejected"]
+
+# JSON has one number type, but the contract must reject strings and booleans.
+# StrictInt | StrictFloat preserves integer-valued coordinates from the fixture.
+SceneNumber = StrictInt | StrictFloat
+# Optional provenance declared by the F07 spatial capture; "assumed" means not measured.
+SceneWallHeightSource = Literal["ceiling_plane", "wall_point", "manual", "assumed"]
+SceneObjectSource = Literal["depth", "manual"]
+
+
+class SceneContractModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ScenePoint(SceneContractModel):
+    x: SceneNumber
+    z: SceneNumber
+
+
+class ScenePosition(SceneContractModel):
+    x: SceneNumber
+    y: SceneNumber
+    z: SceneNumber
+
+
+class SceneDimensions(SceneContractModel):
+    width: SceneNumber
+    height: SceneNumber
+    depth: SceneNumber
+
+
+class SceneWall(SceneContractModel):
+    id: StrictStr
+    start: ScenePoint
+    end: ScenePoint
+    height: Annotated[SceneNumber, Field(gt=0)]
+    thickness: Annotated[SceneNumber, Field(gt=0)]
+    color: StrictStr | None = None
+    # F07 capture provenance; absent unless the client declares it.
+    height_source: SceneWallHeightSource | None = Field(default=None, alias="heightSource")
+
+    @model_validator(mode="after")
+    def endpoints_must_differ(self) -> SceneWall:
+        if self.start == self.end:
+            raise ValueError("start and end must be different")
+        return self
+
+
+class SceneOpening(SceneContractModel):
+    id: StrictStr
+    wall_id: StrictStr = Field(alias="wallId")
+    position: Annotated[SceneNumber, Field(ge=0, le=1)]
+    width: Annotated[SceneNumber, Field(gt=0)]
+    height: Annotated[SceneNumber, Field(gt=0)]
+    type: Literal["door", "window"]
+    sill_height: Annotated[SceneNumber, Field(ge=0)] = Field(default=0, alias="sillHeight")
+
+    @model_validator(mode="before")
+    @classmethod
+    def apply_window_sill_height(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        if (
+            value.get("type") == "window"
+            and "sillHeight" not in value
+            and "sill_height" not in value
+        ):
+            return {**value, "sillHeight": 0.9}
+        return value
+
+
+class SceneRoom(SceneContractModel):
+    id: StrictStr
+    name: StrictStr | None = None
+    wall_ids: list[StrictStr] = Field(alias="wallIds", min_length=3)
+    color: StrictStr | None = None
+
+
+class SceneObject(SceneContractModel):
+    id: StrictStr
+    type: StrictStr
+    position: ScenePosition
+    dimensions: SceneDimensions
+    color: StrictStr
+    # F07 capture provenance; absent unless the client declares it.
+    source: SceneObjectSource | None = None
+    confidence: Annotated[SceneNumber, Field(ge=0, le=1)] | None = None
+
+
+class ListingSceneDocument(SceneContractModel):
+    version: Literal["2.0"]
+    unit: Literal["meters"]
+    walls: list[SceneWall]
+    openings: list[SceneOpening]
+    rooms: list[SceneRoom]
+    objects: list[SceneObject]
 
 
 class CatalogMoney(BaseModel):
@@ -272,14 +375,17 @@ class ListingTransitionResponse(BaseModel):
     created_at: datetime
 
 
+ListingPhotoUploadContentType = Literal[
+    "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"
+]
 ListingPhotoContentType = Literal["image/jpeg", "image/png", "image/webp"]
 
 
 class ListingPhotoUploadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    content_type: ListingPhotoContentType
-    size_bytes: Annotated[StrictInt, Field(ge=1, le=5 * 1024 * 1024)]
+    content_type: ListingPhotoUploadContentType
+    size_bytes: Annotated[StrictInt, Field(ge=1, le=20 * 1024 * 1024)]
 
 
 class ListingPhotoUploadResponse(BaseModel):

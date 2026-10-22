@@ -97,11 +97,12 @@ docker compose -f infra/docker/compose.postgres.yml up -d
 
 | Superficie | Estado |
 | --- | --- |
-| `backend/` | Identidad de personal y de cliente, agencias, catálogo con publicaciones, fotos (F04) y mobiliario, cotizaciones multi-moneda (BOB, USD y USDT) y reservas con escrow local. |
-| `panel/` | Panel de personal (React + TypeScript + Vite): acceso con TOTP, administración de agencias, bandeja de revisión de inmuebles con fotos y administración de tipos de cambio. |
+| `backend/` | Identidad de personal y de cliente, agencias, catálogo con publicaciones, fotos (F04) y mobiliario, cotizaciones multi-moneda (BOB, USD y USDT) y reservas con escrow local. Módulo de detección de mobiliario con trabajos asíncronos (F08.4, PR #20) y revisión humana de sugerencias que confirma el inventario y la escena (F08.5, PR #54), ambos integrados. |
+| `panel/` | Panel de personal (React + TypeScript + Vite): acceso con TOTP, administración de agencias, bandeja de revisión de inmuebles con fotos, administración de tipos de cambio y visor 3D paramétrico del recorrido (F06.2, PR #18) y revisión humana de sugerencias de mobiliario en el editor de escena (F08.5, PR #54). |
 | `apps/captura_mobile/` | App de captura (Flutter): acceso de personal y borradores de inmuebles con moneda y fotos; las pantallas de captura espacial (F07) siguen siendo prototipos. |
-| `apps/cliente_mobile/` | App cliente (Flutter): cuenta y sesión de cliente, catálogo público con filtros, detalle, fotos y moneda de visualización; cotización, wallet y reservas sin interfaz. |
-| `worker3d/`, `contracts/` | 🔲 Sin trabajo aún |
+| `apps/cliente_mobile/` | App cliente (Flutter): cuenta y sesión de cliente, catálogo público con filtros, detalle, fotos y moneda de visualización; cotización, wallet y reservas sin interfaz en `main` (el flujo de reserva del cliente avanza en la rama `F09`/`develop`). |
+| `worker3d/` | Piloto de detección de mobiliario con trabajos asíncronos (F08, integrado con PR #20): CLI de detección, conjunto CC0 con guardia de licencia, cola con claim atómico y hoja de revisión humana. |
+| `contracts/` | Escrow de reserva con Hardhat (F09): `ReservationEscrow.sol`, tokens de prueba y pruebas locales. |
 
 ## 7. Documentación y trazabilidad (convenciones)
 
@@ -111,6 +112,7 @@ docker compose -f infra/docker/compose.postgres.yml up -d
 - **Regla de gaps**: un GAP no se "arregla silenciosamente" ni se inventa el dato faltante; se documenta y se deja la marca.
 - **Idioma**: toda la documentación de Ingeniería de Software se escribe en **español profesional y neutral**; el código y sus identificadores en **inglés** (convención del proyecto).
 - **Rutas HTTP públicas**: los paths y endpoints siempre usan nombres en **inglés**. En la base `b6a468a`, `/api/v1/auth/*` es de personal; el contrato propuesto separa el alta/sesión de cliente en `/api/v1/customer/auth/*`. La ruta histórica `POST /api/v1/auth/register` no debe tratarse como endpoint vigente de esta base.
+- **Fuentes de trabajo**: `docs/plan-maestro-roomforge.md` + `docs/redefinicion-roomforge.md` + la **issue activa** de GitHub (ver §10). El plan manda sobre las issues; una issue no amplía el plan.
 - **Commits**: conventional commits (`feat|fix|test|docs|chore|refactor(scope): ...`), una unidad de trabajo por commit, **sin atribución de IA**.
 
 ## 8. Skills del proyecto
@@ -132,15 +134,27 @@ Los cambios de producto se planifican con **SDD** (Spec-Driven Development). Hay
 
 Para un cambio nuevo: seguir el pipeline SDD completo y persistir ambos backends. No inventar artefactos de fases que el dispatcher nativo no haya autorizado.
 
-## 10. Gaps abiertos relevantes
+## 10. Issues de GitHub y espejo del plan maestro
 
-- **GAP-092**: migraciones del Sprint 1 pendientes contra PostgreSQL real — solo `0001`/`0002` ejecutadas; quedan 12 tablas.
+El trabajo pendiente se organiza en issues de `Fivoryu/sw1_pro_final_2026_2`, en espejo con el plan maestro (§1.4.5). Reglas:
+
+1. **Fuentes de trabajo**: plan maestro + redefinición + la **issue activa**. `odd/tasks/` es registro de ejecución, no fuente de requisitos.
+2. **Granularidad**: una issue por unidad de trabajo (≈ un PR). La issue trae estado actual verificado, alcance, tareas, criterios de aceptación y referencias — leerla completa antes de arrancar.
+3. **Regla del espejo**: la fila de fase en §1.4.1 y la tabla §1.4.5 del plan maestro son la fuente de verdad del estado. **Una issue no puede ampliar el plan**: si el detalle exige un requisito nuevo, primero se actualiza el plan maestro o la redefinición, después la issue.
+4. **Flujo**: tomar issue → rama `feat/<fase>-<tema>` desde `main` actualizado → PR con `Closes #N` → revisión y merge → actualizar la fila de §1.4.1 con la evidencia y mover la issue a "cerradas" en §1.4.5.
+5. **Labels**: cada issue lleva el label de su fase (`f06`…`f14`) y `type:feature` o `mejora`.
+6. **Superficies compartidas**: revisar §1.4.4 del plan antes de paralelizar (migraciones Alembic, módulo `catalog`, `apps/cliente_mobile/` compartido entre F06/F09/F14).
+
+## 11. Gaps abiertos relevantes
+
+- **GAP-092**: migraciones del Sprint 1 pendientes contra PostgreSQL real — solo `0001`/`0002` ejecutadas; quedan 12 tablas. **Actualizado 2026-10-15:** la base local de Docker quedó en el head de la rama (`0021_merge_photos_detection`), con **25 tablas** en el esquema `public`; `alembic upgrade head` se aplicó contra ese PostgreSQL real partiendo de `0020_detection_job_claim_token`.
+- **GAP-093**: dos ramas numeraron migraciones desde el mismo padre (`0018_listing_photos`), así que al integrarlas la cadena Alembic queda con **dos heads** y `alembic upgrade head` deja de funcionar. Resuelto con la revisión de merge `0021_merge_photos_detection`, que hoy vive solo en `feat/alembic-merge-f04-f08`: **quien integre debe llevarla**. Causa de fondo: la numeración secuencial por rama; ya se agregó al CI el chequeo que falla cuando hay más de un head.
 - **GAP-087**: CP-003..CP-013 sin ejecutar; CP-001 y CP-002 cuentan con evidencia.
 - **GAP-073**: asignación de responsables de pruebas/documentación pendiente.
 - **GAP-088**: diagramas UML del Sprint 1 pendientes de creación en Enterprise Architect.
 - **GAP-084**: fechas exactas del Sprint 1 no confirmadas.
 
-## 11. Reglas duras de colaboración
+## 12. Reglas duras de colaboración
 
 1. No commitear/pushear sin autorización explícita del humano.
 2. No tocar `docs/diagramas/Diagrama1.eapx` (binario EA, lockeado por la app).

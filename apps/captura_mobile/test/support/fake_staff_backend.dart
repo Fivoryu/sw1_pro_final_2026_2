@@ -93,7 +93,12 @@ class FakeStaffBackend {
       '/api/v1/auth/refresh' =>
         refreshRejected
             ? _failure(401, 'unauthorized')
-            : _json(_grantBody('csrf-2'), 200, cookie: 'rotated-cookie'),
+            // The API answers a refresh without the user (router.py refresh_session).
+            : _json(
+                {'access_token': 'access-token', 'csrf_token': 'csrf-2'},
+                200,
+                cookie: 'rotated-cookie',
+              ),
       '/api/v1/auth/logout' =>
         logoutRejected ? _failure(401, 'unauthorized') : http.Response('', 204),
       '/api/v1/auth/me' => _json({

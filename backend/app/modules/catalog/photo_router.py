@@ -11,6 +11,7 @@ from app.modules.catalog.models import ListingPhoto
 from app.modules.catalog.photo_storage import PhotoStorage, PhotoStorageUnavailableError
 from app.modules.catalog.photos import (
     DOWNLOAD_LINK_SECONDS,
+    ConfirmedPhotoDeletionForbiddenError,
     ConfirmOutcome,
     PhotoLimitReachedError,
     PhotoNotUploadedError,
@@ -56,7 +57,9 @@ def _as_utc(value: datetime) -> datetime:
 
 
 def photo_response(storage: PhotoStorage, photo: ListingPhoto) -> ListingPhotoResponse:
-    content_type: ListingPhotoContentType = photo.content_type  # type: ignore[assignment]
+    content_type: ListingPhotoContentType = (
+        photo.public_content_type or photo.content_type
+    )  # type: ignore[assignment]
     return ListingPhotoResponse(
         photo_id=photo.id,
         content_type=content_type,
@@ -88,6 +91,7 @@ def request_listing_photo_upload(
                 content_type=body.content_type,
                 size_bytes=body.size_bytes,
                 now=request.app.state.clock(),
+                clock=request.app.state.clock,
             )
             return ListingPhotoUploadResponse(
                 photo_id=grant.photo.id,
@@ -168,7 +172,7 @@ def delete_listing_photo(
     staff: ActiveStaff = Depends(get_active_staff),
 ) -> Response:
     _require_listing_editor(staff, agency_id)
-    storage = _storage(request)
+    storage: PhotoStorage | None = request.app.state.photo_storage
     try:
         with _session_factory(request).begin() as session:
             listing = lock_staff_listing(session, agency_id=agency_id, listing_id=listing_id)
@@ -185,6 +189,11 @@ def delete_listing_photo(
             )
             if not deleted:
                 raise HTTPException(status_code=404, detail=_PHOTO_NOT_FOUND)
+    except ConfirmedPhotoDeletionForbiddenError:
+        raise HTTPException(
+            status_code=403,
+            detail="Only agency admins can permanently delete confirmed photos",
+        ) from None
     except PhotoStorageUnavailableError:
         raise HTTPException(status_code=503, detail="Photo storage is unavailable") from None
     return Response(status_code=204)

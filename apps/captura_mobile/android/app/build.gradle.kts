@@ -42,3 +42,12 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // ARCore SDK used directly by ArCaptureActivity (no Sceneform/SceneView); see docs/spikes/spk-07-1-ar-plugin-decision.md.
+    implementation("com.google.ar:core:1.57.0")
+
+    testImplementation("junit:junit:4.13.2")
+    // Android's org.json is a stub on the JVM; the real implementation backs JsonReader tests.
+    testImplementation("org.json:json:20250517")
+}

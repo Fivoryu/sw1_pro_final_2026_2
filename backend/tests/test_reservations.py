@@ -34,6 +34,8 @@ from app.modules.stripe_payments.models import (
     StripeWebhookEvent,
 )
 
+from testclient_app import client_app
+
 
 @dataclass
 class FrozenClock:
@@ -100,14 +102,14 @@ def _configure_fake_escrow(context: ReservationsContext):
     private_key = "0x" + "11" * 32
     signer = Account.from_key(private_key).address
     rpc = _ReservationPermitRpc(signer=signer)
-    context.client.app.state.settings = replace(
-        context.client.app.state.settings,
+    client_app(context.client).state.settings = replace(
+        client_app(context.client).state.settings,
         escrow_rpc_url="http://127.0.0.1:8545",
         escrow_address="0x" + "22" * 20,
         escrow_chain_id="31337",
         escrow_signer_private_key=private_key,
     )
-    context.client.app.state.reservation_rpc_transport = rpc
+    client_app(context.client).state.reservation_rpc_transport = rpc
     return rpc
 
 
@@ -138,7 +140,7 @@ def _use_staff_principal(
 ) -> None:
     from app.modules.identity.session import get_active_staff
 
-    context.client.app.dependency_overrides[get_active_staff] = lambda: {
+    client_app(context.client).dependency_overrides[get_active_staff] = lambda: {
         "id": "staff-one",
         "email": "staff@example.test",
         "role": role,

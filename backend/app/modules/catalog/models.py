@@ -23,6 +23,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -100,10 +101,36 @@ class Listing(Base):
     )
 
 
-# Photo limits shared by the model constraints and the photo service.
-LISTING_PHOTO_CONTENT_TYPES = ("image/jpeg", "image/png", "image/webp")
-LISTING_PHOTO_MAX_BYTES = 5 * 1024 * 1024
-LISTING_PHOTO_MAX_COUNT = 10
+# Photo limits shared by the model constraints, schemas, and photo service.
+LISTING_PHOTO_CONTENT_TYPES = (
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+)
+LISTING_PHOTO_PUBLIC_CONTENT_TYPES = ("image/jpeg", "image/png", "image/webp")
+LISTING_PHOTO_MAX_BYTES = 20 * 1024 * 1024
+LISTING_PHOTO_MAX_COUNT = 20
+
+
+class ListingScene(Base):
+    """The complete editable parametric scene associated with one listing."""
+
+    __tablename__ = "listing_scene"
+
+    listing_id: Mapped[str] = mapped_column(
+        ForeignKey("listing.id", ondelete="CASCADE"), primary_key=True
+    )
+    scene: Mapped[dict[str, object]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Optimistic concurrency token exposed as the staff ETag; bumped on every save.
+    revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
 
 
 class ListingPhoto(Base):
@@ -113,30 +140,70 @@ class ListingPhoto(Base):
     __table_args__ = (
         CheckConstraint("status IN ('pending', 'confirmed')", name="ck_listing_photo_status"),
         CheckConstraint(
-            "content_type IN ('image/jpeg', 'image/png', 'image/webp')",
+            "content_type IN ('image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif')",
             name="ck_listing_photo_content_type",
         ),
         CheckConstraint(
-            "size_bytes > 0 AND size_bytes <= 5242880", name="ck_listing_photo_size_bytes"
+            "size_bytes > 0 AND size_bytes <= 20971520", name="ck_listing_photo_size_bytes"
+        ),
+        CheckConstraint(
+            "public_content_type IS NULL OR public_content_type IN "
+            "('image/jpeg', 'image/png', 'image/webp')",
+            name="ck_listing_photo_public_content_type",
         ),
         CheckConstraint(
             "(status = 'confirmed') = (confirmed_at IS NOT NULL)",
             name="ck_listing_photo_confirmed_at",
         ),
         UniqueConstraint("object_key", name="uq_listing_photo_object_key"),
+        UniqueConstraint("upload_object_key", name="uq_listing_photo_upload_object_key"),
+        UniqueConstraint("original_object_key", name="uq_listing_photo_original_object_key"),
         Index("ix_listing_photo_listing_id_created_at", "listing_id", "created_at"),
+        Index("ix_listing_photo_status_expires_at", "status", "expires_at"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     agency_id: Mapped[str] = mapped_column(ForeignKey("agency.id"), nullable=False)
     listing_id: Mapped[str] = mapped_column(ForeignKey("listing.id"), nullable=False)
     object_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    upload_object_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    original_object_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    public_content_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     content_type: Mapped[str] = mapped_column(String(32), nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ListingPhotoDeletion(Base):
+    """Durable intent to delete every object for a confirmed photo."""
+
+    __tablename__ = "listing_photo_deletion"
+    __table_args__ = (
+        CheckConstraint("attempts >= 0", name="ck_listing_photo_deletion_attempts"),
+        UniqueConstraint("photo_id", name="uq_listing_photo_deletion_photo_id"),
+        Index("ix_listing_photo_deletion_due", "next_attempt_at", "id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    agency_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    listing_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    photo_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    object_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    original_object_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    upload_object_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    upload_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_error: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class ListingTransition(Base):

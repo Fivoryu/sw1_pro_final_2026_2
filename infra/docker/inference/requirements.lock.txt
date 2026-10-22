@@ -1,0 +1,20 @@
+# Versiones resueltas del servicio de inferencia (F08.2)
+# Generado con: docker compose ... run -T --rm --entrypoint pip inference freeze
+# Fecha: 2026-10-14  Imagen: roomforge-local-dev-inference
+# Digest: sha256:100a36e164ad99057ad456c04bd8ca774ddb360685774d50a03addc08650cb4d
+#
+# requirements.txt fija las dependencias directas; este archivo registra el árbol
+# completo efectivamente instalado, para que una reconstrucción sea verificable.
+filelock==4.1.1
+fsspec==2026.9.0
+Jinja2==3.1.6
+MarkupSafe==3.0.4
+mpmath==1.3.0
+networkx==3.7
+numpy==2.5.4
+pillow==12.3.0
+setuptools==84.0.0
+sympy==1.14.0
+torch==2.14.1+cpu
+torchvision==0.29.1+cpu
+typing_extensions==4.16.0

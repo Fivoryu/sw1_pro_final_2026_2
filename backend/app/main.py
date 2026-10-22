@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Callable
+from dataclasses import replace
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from cryptography.fernet import Fernet
@@ -16,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.config import Settings
+from app.core.config import DETECTION_LEASE_SECONDS_DEFAULT, Settings
 from app.core.errors import ErrorResponse, error_code_for_status
 from app.core.rate_source import official_rate_refresh_interval_seconds
 from app.db.session import create_session_factory, protect_session_factory
@@ -24,9 +27,18 @@ from app.modules.agencies.router import agency_wallet_router, router as agencies
 from app.modules.catalog.errors import QuoteApiError
 from app.modules.catalog.photo_router import router as catalog_photo_router
 from app.modules.catalog.photo_storage import PhotoStorage, create_photo_storage
+from app.modules.catalog.photos import (
+    cleanup_expired_photo_uploads,
+    cleanup_photo_deletion_intents,
+)
 from app.modules.catalog.router import router as catalog_router
 from app.modules.customer_identity.router import router as customer_identity_router
 from app.modules.customer_identity.router import wallet_router as customer_wallet_router
+from app.modules.detection.furniture_review import router as furniture_review_router
+from app.modules.detection.job_queue import JobQueue, create_job_queue
+from app.modules.detection.router import router as detection_router
+from app.modules.detection.router import worker_router as detection_worker_router
+from app.modules.detection.service import run_detection_recovery_sweep
 from app.modules.health.router import router as health_router
 from app.modules.exchange_rates.router import (
     platform_router as platform_exchange_rates_router,
@@ -34,10 +46,53 @@ from app.modules.exchange_rates.router import (
 )
 from app.modules.exchange_rates.service import refresh_official_rates
 from app.modules.identity.router import router as identity_router
+from app.modules.reconstruction.job_queue import (
+    ReconstructionQueue,
+    create_reconstruction_queue,
+)
+from app.modules.reconstruction.router import router as reconstruction_router
+from app.modules.reconstruction.router import worker_router as reconstruction_worker_router
+from app.modules.reconstruction.service import (
+    run_capture_retention_sweep,
+    run_reconstruction_recovery_sweep,
+)
 from app.modules.reservations.errors import ReservationApiError
 from app.modules.reservations.router import router as reservations_router
 from app.modules.reservations.router import staff_router as staff_reservations_router
 from app.modules.stripe_payments.router import router as stripe_payments_router
+
+LOGGER = logging.getLogger("roomforge.detection.recovery")
+
+
+def _create_worker_photo_storage(
+    settings: Settings,
+    *,
+    injected_storage: PhotoStorage | None,
+) -> PhotoStorage | None:
+    """Sign worker downloads for the local service network, never a public AWS host."""
+    if injected_storage is not None:
+        return injected_storage
+    endpoint = settings.s3_endpoint_url
+    if not settings.s3_bucket_name or not endpoint:
+        return None
+    parsed = urlparse(endpoint)
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in {
+        "floci",
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }:
+        return None
+    # Browser photo links keep using S3_PUBLIC_ENDPOINT_URL. Worker links need a
+    # signature for the service-to-service Floci hostname reachable in Compose.
+    return create_photo_storage(replace(settings, s3_public_endpoint_url=endpoint))
+
+
+logger = logging.getLogger(__name__)
+PHOTO_UPLOAD_CLEANUP_INTERVAL_SECONDS = 60.0
+PHOTO_UPLOAD_CLEANUP_BATCH_SIZE = 100
+PHOTO_DELETION_RETRY_INTERVAL_SECONDS = 60.0
+PHOTO_DELETION_CLEANUP_BATCH_SIZE = 100
 
 
 def _run_official_rate_refresh(session_factory: sessionmaker[Session]) -> None:
@@ -62,26 +117,262 @@ async def _official_rate_refresh_loop(
             continue
 
 
+def _run_detection_recovery_sweep(
+    session_factory: sessionmaker[Session],
+    job_queue: JobQueue,
+    *,
+    now: datetime,
+    max_attempts: int,
+    pending_republish_after_seconds: int = DETECTION_LEASE_SECONDS_DEFAULT,
+) -> int:
+    """Run one detection recovery sweep inside the API process."""
+    return run_detection_recovery_sweep(
+        session_factory,
+        job_queue,
+        now=now,
+        max_attempts=max_attempts,
+        pending_republish_after_seconds=pending_republish_after_seconds,
+    )
+
+
+async def _detection_recovery_loop(
+    session_factory: sessionmaker[Session],
+    job_queue: JobQueue,
+    *,
+    clock: Callable[[], datetime],
+    max_attempts: int,
+    interval_seconds: float,
+    pending_republish_after_seconds: int = DETECTION_LEASE_SECONDS_DEFAULT,
+) -> None:
+    """Periodically recover jobs whose workers stopped reporting."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await asyncio.to_thread(
+                _run_detection_recovery_sweep,
+                session_factory,
+                job_queue,
+                now=clock(),
+                max_attempts=max_attempts,
+                pending_republish_after_seconds=pending_republish_after_seconds,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a later sweep retries transient failures
+            LOGGER.warning("Detection recovery loop failed; the next sweep will retry")
+            continue
+
+
+async def _reconstruction_maintenance_loop(
+    application: FastAPI,
+    session_factory: sessionmaker[Session],
+    queue: ReconstructionQueue,
+    *,
+    clock: Callable[[], datetime],
+    settings: Settings,
+) -> None:
+    """Recover expired reconstruction leases and delete frames that are due."""
+    while True:
+        await asyncio.sleep(settings.reconstruction_sweep_seconds)
+        try:
+            await asyncio.to_thread(
+                run_reconstruction_recovery_sweep,
+                session_factory,
+                queue,
+                now=clock(),
+                max_attempts=settings.reconstruction_max_attempts,
+                pending_republish_after_seconds=settings.reconstruction_lease_seconds,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a later sweep retries transient failures
+            LOGGER.warning("Reconstruction recovery loop failed; the next sweep will retry")
+        storage = application.state.photo_storage
+        if storage is None:
+            continue
+        try:
+            await asyncio.to_thread(
+                run_capture_retention_sweep, session_factory, storage, now=clock()
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - frames stay recorded and are retried
+            logger.exception("Capture frame retention sweep failed")
+
+
+def _run_photo_upload_cleanup(
+    session_factory: sessionmaker[Session],
+    storage: PhotoStorage,
+    clock: Callable[[], datetime],
+) -> int:
+    with session_factory.begin() as session:
+        return cleanup_expired_photo_uploads(
+            session,
+            storage,
+            now=clock(),
+            batch_size=PHOTO_UPLOAD_CLEANUP_BATCH_SIZE,
+            skip_locked=True,
+        )
+
+
+def _run_photo_deletion_cleanup(
+    session_factory: sessionmaker[Session],
+    storage: PhotoStorage,
+    clock: Callable[[], datetime],
+    *,
+    retry_interval_seconds: float,
+) -> int:
+    with session_factory.begin() as session:
+        return cleanup_photo_deletion_intents(
+            session,
+            storage,
+            now=clock(),
+            retry_after=timedelta(seconds=retry_interval_seconds),
+            batch_size=PHOTO_DELETION_CLEANUP_BATCH_SIZE,
+            skip_locked=True,
+        )
+
+
+async def _photo_upload_cleanup_loop(
+    application: FastAPI,
+    session_factory: sessionmaker[Session],
+    *,
+    interval_seconds: float,
+) -> None:
+    """Sweep expired staging assets periodically and retry failures next interval."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        storage = application.state.photo_storage
+        if storage is None:
+            continue
+        try:
+            cleaned = 0
+            while True:
+                batch_count = await asyncio.to_thread(
+                    _run_photo_upload_cleanup,
+                    session_factory,
+                    storage,
+                    application.state.clock,
+                )
+                if batch_count == 0:
+                    break
+                cleaned += batch_count
+            if cleaned:
+                logger.info("Cleaned %d expired listing-photo records", cleaned)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - retain rows and retry on the next interval
+            logger.exception("Expired listing-photo cleanup failed")
+
+
+async def _photo_deletion_cleanup_loop(
+    application: FastAPI,
+    session_factory: sessionmaker[Session],
+    *,
+    interval_seconds: float,
+) -> None:
+    """Delete due confirmed-photo assets and keep retrying failed intents."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        storage = application.state.photo_storage
+        if storage is None:
+            continue
+        try:
+            attempted = 0
+            while True:
+                batch_count = await asyncio.to_thread(
+                    _run_photo_deletion_cleanup,
+                    session_factory,
+                    storage,
+                    application.state.clock,
+                    retry_interval_seconds=interval_seconds,
+                )
+                if batch_count == 0:
+                    break
+                attempted += batch_count
+            if attempted:
+                logger.info("Attempted %d listing photo deletion intents", attempted)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - keep intents and retry on the next interval
+            logger.exception("Listing photo deletion sweep failed")
+
+
 def _build_lifespan(
     session_factory: sessionmaker[Session],
+    settings: Settings,
+    job_queue: JobQueue,
+    clock: Callable[[], datetime],
+    reconstruction_queue: ReconstructionQueue,
 ) -> StatelessLifespan[FastAPI]:
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         interval = official_rate_refresh_interval_seconds()
         refresher: asyncio.Task[None] | None = None
+        photo_cleaner: asyncio.Task[None] | None = None
+        photo_deleter: asyncio.Task[None] | None = None
         if interval > 0:
             # The first run happens only after the first full interval, so startup
             # never touches the network and the test suite never fetches.
             refresher = asyncio.create_task(
                 _official_rate_refresh_loop(session_factory, interval_seconds=interval)
             )
+        if application.state.photo_storage is not None:
+            # Expired objects are eligible at 15 minutes and are swept at most a
+            # minute later while the API process is running.
+            photo_cleaner = asyncio.create_task(
+                _photo_upload_cleanup_loop(
+                    application,
+                    session_factory,
+                    interval_seconds=PHOTO_UPLOAD_CLEANUP_INTERVAL_SECONDS,
+                )
+            )
+            photo_deleter = asyncio.create_task(
+                _photo_deletion_cleanup_loop(
+                    application,
+                    session_factory,
+                    interval_seconds=PHOTO_DELETION_RETRY_INTERVAL_SECONDS,
+                )
+            )
+            # Exposed so an operator, and the tests, can confirm the workers started: they
+            # answer to the photo storage, never to the exchange-rate refresher.
+            application.state.photo_cleaner_task = photo_cleaner
+            application.state.photo_deleter_task = photo_deleter
+        detection_sweeper: asyncio.Task[None] | None = None
+        if settings.detection_sweep_seconds > 0:
+            detection_sweeper = asyncio.create_task(
+                _detection_recovery_loop(
+                    session_factory,
+                    job_queue,
+                    clock=clock,
+                    max_attempts=settings.detection_max_attempts,
+                    interval_seconds=settings.detection_sweep_seconds,
+                    pending_republish_after_seconds=settings.detection_lease_seconds,
+                )
+            )
+        reconstruction_sweeper = asyncio.create_task(
+            _reconstruction_maintenance_loop(
+                application,
+                session_factory,
+                reconstruction_queue,
+                clock=clock,
+                settings=settings,
+            )
+        )
         try:
             yield
         finally:
-            if refresher is not None:
-                refresher.cancel()
-                with suppress(asyncio.CancelledError):
-                    await refresher
+            for task in (
+                refresher,
+                photo_cleaner,
+                photo_deleter,
+                detection_sweeper,
+                reconstruction_sweeper,
+            ):
+                if task is not None:
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
 
     return lifespan
 
@@ -93,6 +384,8 @@ def create_app(
     email_sender: Any = None,
     clock: Callable[[], datetime] | None = None,
     photo_storage: PhotoStorage | None = None,
+    job_queue: JobQueue | None = None,
+    reconstruction_queue: ReconstructionQueue | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_env()
     resolved_settings.validate()
@@ -107,25 +400,51 @@ def create_app(
         )
     protect_session_factory(session_factory)
 
+    resolved_clock = clock or (lambda: datetime.now(timezone.utc))
+    resolved_job_queue = job_queue if job_queue is not None else create_job_queue(resolved_settings)
+    resolved_reconstruction_queue = (
+        reconstruction_queue
+        if reconstruction_queue is not None
+        else create_reconstruction_queue(resolved_settings)
+    )
     app = FastAPI(
         title="RoomForge Staff API",
         version="1.0.0",
-        lifespan=_build_lifespan(session_factory),
+        lifespan=_build_lifespan(
+            session_factory,
+            resolved_settings,
+            resolved_job_queue,
+            resolved_clock,
+            resolved_reconstruction_queue,
+        ),
     )
     app.state.settings = resolved_settings
     app.state.session_factory = session_factory
     app.state.email_sender = email_sender
-    app.state.clock = clock or (lambda: datetime.now(timezone.utc))
+    app.state.clock = resolved_clock
     app.state.engine = engine
     app.state.photo_storage = (
         photo_storage if photo_storage is not None else create_photo_storage(resolved_settings)
     )
+    app.state.worker_photo_storage = _create_worker_photo_storage(
+        resolved_settings, injected_storage=photo_storage
+    )
+    app.state.job_queue = resolved_job_queue
+    app.state.reconstruction_queue = resolved_reconstruction_queue
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[resolved_settings.web_origin.rstrip("/")],
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "Idempotency-Key"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "X-CSRF-Token",
+            "Idempotency-Key",
+            "If-Match",
+            "If-None-Match",
+        ],
+        expose_headers=["ETag"],
     )
     app.include_router(health_router)
     app.include_router(identity_router)
@@ -137,6 +456,11 @@ def create_app(
     app.include_router(public_exchange_rates_router)
     app.include_router(catalog_router)
     app.include_router(catalog_photo_router)
+    app.include_router(detection_router)
+    app.include_router(furniture_review_router)
+    app.include_router(detection_worker_router)
+    app.include_router(reconstruction_router)
+    app.include_router(reconstruction_worker_router)
     app.include_router(reservations_router)
     app.include_router(staff_reservations_router)
     app.include_router(stripe_payments_router)

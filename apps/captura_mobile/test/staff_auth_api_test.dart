@@ -158,6 +158,50 @@ void main() {
       },
     );
 
+    test(
+      'refresh without a user, as the API answers, loads the account from /me',
+      () async {
+        final paths = <String>[];
+        final api = StaffAuthApi(
+          baseUrl: _baseUrl,
+          client: MockClient((request) async {
+            paths.add(request.url.path);
+            if (request.url.path == '/api/v1/auth/me') {
+              expect(request.headers['Authorization'], 'Bearer rotated-access');
+              return _json(const {
+                'user': {
+                  'id': 'staff-1',
+                  'email': 'agent@example.test',
+                  'role': 'agent',
+                  'tenant_id': 'agency-1',
+                },
+              }, 200);
+            }
+            return _json(
+              const {'access_token': 'rotated-access', 'csrf_token': 'csrf-2'},
+              200,
+              headers: {
+                'set-cookie':
+                    'roomforge_refresh=rotated-value; HttpOnly; Path=/api/v1/auth',
+              },
+            );
+          }),
+        );
+
+        final grant = await api.refresh(
+          csrfToken: 'csrf-token',
+          refreshCookie: 'refresh-value',
+        );
+
+        expect(paths, ['/api/v1/auth/refresh', '/api/v1/auth/me']);
+        expect(grant.accessToken, 'rotated-access');
+        expect(grant.csrfToken, 'csrf-2');
+        expect(grant.refreshCookie, 'rotated-value');
+        expect(grant.account.email, 'agent@example.test');
+        expect(grant.account.tenantId, 'agency-1');
+      },
+    );
+
     test('logout sends the cookie and CSRF header and tolerates 204', () async {
       late http.Request captured;
       final api = StaffAuthApi(
