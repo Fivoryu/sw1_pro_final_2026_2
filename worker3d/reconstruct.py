@@ -92,6 +92,9 @@ class InvalidPackage(ValueError):
 class ReconstructionResult:
     scene_draft: dict[str, Any]
     warnings: list[str] = field(default_factory=list)
+    # One entry per occupancy object that has a usable camera view, for the optional class
+    # labeler: {"objectId", "keyframe", "image", "box": [x1, y1, x2, y2] in image pixels}.
+    volume_views: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -866,9 +869,11 @@ def _extract_volumes(
                       min(p[1] for p in r.corners), max(p[1] for p in r.corners)) for r in rooms]
     y_low = floor_y + VOLUME_MIN_ABOVE_FLOOR_M
     y_high = floor_y + VOLUME_MAX_ABOVE_FLOOR_M
-    cells: dict[tuple[int, int, int], list[float]] = {}
+    # Per cell: point count, highest point, keyframes whose depth reached the cell.
+    cells: dict[tuple[int, int, int], list[Any]] = {}
 
-    for keyframe in keyframes:
+    for position, keyframe in enumerate(keyframes):
+        frame_id = _keyframe_id(keyframe, position)
         depth = _load_gray(package_dir, keyframe["depth"], width, height, 16)
         confidence = (
             _load_gray(package_dir, keyframe["confidence"], width, height, 8)
@@ -908,10 +913,11 @@ def _extract_volumes(
                 key = (room_index, math.floor(wx / GRID_CELL_M), math.floor(wz / GRID_CELL_M))
                 cell = cells.get(key)
                 if cell is None:
-                    cells[key] = [1.0, wy]
+                    cells[key] = [1.0, wy, {frame_id}]
                 else:
                     cell[0] += 1
                     cell[1] = max(cell[1], wy)
+                    cell[2].add(frame_id)
 
     boxes = _components_to_boxes(cells, floor_y)
     if not boxes:
@@ -946,8 +952,15 @@ def _room_containing(
     return None
 
 
+def _keyframe_id(keyframe: dict[str, Any], position: int) -> int:
+    index = keyframe.get("index")
+    if isinstance(index, int) and not isinstance(index, bool) and index >= 1:
+        return index
+    return position + 1
+
+
 def _components_to_boxes(
-    cells: dict[tuple[int, int, int], list[float]], floor_y: float
+    cells: dict[tuple[int, int, int], list[Any]], floor_y: float
 ) -> list[dict[str, Any]]:
     occupied = {key for key, value in cells.items() if value[0] >= MIN_CELL_POINTS}
     seen: set[tuple[int, int, int]] = set()
@@ -984,9 +997,100 @@ def _components_to_boxes(
                 "depth": z1 - z0,
                 "height": top - floor_y,
                 "confidence": round(min(1.0, support), 2),
+                # Keyframes that observed the volume; internal, never part of the scene.
+                "views": sorted(set().union(*(cells[m][2] for m in members))),
             }
         )
     return boxes
+
+
+# --- Camera views of the volumes (input of the optional class labeler) ----------------------
+
+# A corner closer than this to the camera plane makes the projection meaningless.
+VIEW_MIN_DEPTH_M = 0.05
+
+
+def _image_intrinsics(manifest: dict[str, Any]) -> tuple[float, ...] | None:
+    """(width, height, fx, fy, cx, cy) of the camera image, or None when unusable."""
+    value = manifest.get("image")
+    if not isinstance(value, dict):
+        return None
+    keys = ("width", "height", "fx", "fy", "cx", "cy")
+    if not all(_is_number(value.get(k)) for k in keys):
+        return None
+    width, height, fx, fy, cx, cy = (float(value[k]) for k in keys)
+    if width <= 0 or height <= 0 or fx <= 0 or fy <= 0:
+        return None
+    return width, height, fx, fy, cx, cy
+
+
+def project_box(
+    box: dict[str, Any], floor_y: float, pose: list[float], intrinsics: tuple[float, ...]
+) -> list[float] | None:
+    """Pixel box [x1, y1, x2, y2] of a floor-standing volume seen from one camera pose.
+
+    ``box`` uses the world frame of the manifest (x, z centre, width, depth, height above
+    ``floor_y``); the pose is camera -> world with the camera looking along local -z. Returns
+    None when a corner is behind the camera or the clipped box has no area.
+    """
+    width, height, fx, fy, cx, cy = intrinsics
+    r = _rotation(pose)
+    tx, ty, tz = pose[:3]
+    us: list[float] = []
+    vs: list[float] = []
+    for dx in (-0.5, 0.5):
+        for dz in (-0.5, 0.5):
+            for y in (floor_y, floor_y + box["height"]):
+                px = box["x"] + dx * box["width"] - tx
+                py = y - ty
+                pz = box["z"] + dz * box["depth"] - tz
+                # World -> camera is the transpose of the camera -> world rotation.
+                x_cam = r[0][0] * px + r[1][0] * py + r[2][0] * pz
+                y_cam = r[0][1] * px + r[1][1] * py + r[2][1] * pz
+                depth = -(r[0][2] * px + r[1][2] * py + r[2][2] * pz)
+                if depth <= VIEW_MIN_DEPTH_M:
+                    return None
+                us.append(fx * x_cam / depth + cx)
+                vs.append(cy - fy * y_cam / depth)
+    x1, x2 = max(0.0, min(us)), min(width, max(us))
+    y1, y2 = max(0.0, min(vs)), min(height, max(vs))
+    if x2 - x1 <= 0 or y2 - y1 <= 0:
+        return None
+    return [round(x1, 2), round(y1, 2), round(x2, 2), round(y2, 2)]
+
+
+def _volume_views(
+    boxes: list[dict[str, Any]], manifest: dict[str, Any], floor_y: float
+) -> list[dict[str, Any]]:
+    """Per volume, the observing keyframe where its projection covers the most image area."""
+    intrinsics = _image_intrinsics(manifest)
+    if intrinsics is None:
+        return []
+    frames = {
+        _keyframe_id(k, position): k
+        for position, k in enumerate(manifest["keyframes"])
+        if k.get("depth") is not None
+    }
+    views: list[dict[str, Any]] = []
+    for number, box in enumerate(boxes, start=1):
+        best: tuple[float, int, list[float]] | None = None
+        for frame_id in box["views"]:
+            projected = project_box(box, floor_y, frames[frame_id]["pose"], intrinsics)
+            if projected is None:
+                continue
+            area = (projected[2] - projected[0]) * (projected[3] - projected[1])
+            if best is None or area > best[0]:
+                best = (area, frame_id, projected)
+        if best is not None:
+            views.append(
+                {
+                    "objectId": f"box-{number}",
+                    "keyframe": best[1],
+                    "image": frames[best[1]]["image"],
+                    "box": best[2],
+                }
+            )
+    return views
 
 
 # --- Orchestration -------------------------------------------------------------------------
@@ -1069,6 +1173,8 @@ def reconstruct(package_dir: Path, *, depth_stride: int = DEPTH_PIXEL_STRIDE) ->
         )
 
     boxes = _extract_volumes(package_dir, manifest, rooms, floor_y, max(1, depth_stride), warnings)
+    # Projected before the reference rescale: poses and floorY are still in the manifest frame.
+    volume_views = _volume_views(boxes, manifest, floor_y)
 
     reference = manifest.get("reference")
     if reference is not None:
@@ -1091,7 +1197,7 @@ def reconstruct(package_dir: Path, *, depth_stride: int = DEPTH_PIXEL_STRIDE) ->
     warnings.append(
         "Las aberturas no se detectan automáticamente: marque las puertas y ventanas en el editor antes de publicar."
     )
-    return ReconstructionResult(scene_draft=scene, warnings=warnings)
+    return ReconstructionResult(scene_draft=scene, warnings=warnings, volume_views=volume_views)
 
 
 def _room_height(

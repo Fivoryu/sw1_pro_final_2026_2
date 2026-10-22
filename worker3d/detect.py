@@ -18,7 +18,7 @@ import argparse
 import json
 import sys
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -203,7 +203,23 @@ def detect_images(
     images: Iterable[Path], threshold: float, device: str
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Detect over every readable image; unreadable files are skipped and reported."""
-    model, weights, preprocess = load_detector(device)
+    return _detect_with(load_detector(device), images, threshold)
+
+
+# Detects over a list of images with a model that is already loaded.
+Detector = Callable[[Iterable[Path], float], tuple[list[dict[str, Any]], list[str]]]
+
+
+def build_detector(device: str = "cpu") -> Detector:
+    """Load the pinned detector once and return a callable that can be reused per image set."""
+    loaded = load_detector(device)
+    return lambda images, threshold: _detect_with(loaded, images, threshold)
+
+
+def _detect_with(
+    loaded: tuple[Any, Any, Any], images: Iterable[Path], threshold: float
+) -> tuple[list[dict[str, Any]], list[str]]:
+    model, weights, preprocess = loaded
     categories = list(weights.meta["categories"])
     records: list[dict[str, Any]] = []
     skipped: list[str] = []

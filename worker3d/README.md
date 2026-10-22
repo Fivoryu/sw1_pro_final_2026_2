@@ -32,6 +32,10 @@ Algoritmo v1:
 6. Escena: muros sobre la línea central, muros compartidos soldados, sin aberturas (la agencia las marca en el editor).
 7. Si hay `reference`, reescala la escena y declara el factor aplicado.
 
+### Sugerencias de clase por volumen
+
+`reconstruct.py` conserva, por cada volumen `box-N`, el cuadro clave que lo observó con mayor área visible y su caja en píxeles (`ReconstructionResult.volume_views`, proyección con la pose y `manifest.image`; sin intrínsecos de imagen no hay vistas). `reconstruction_worker.py` corre después el detector de F08 una vez por cuadro elegido (modelo cargado una sola vez, umbral 0,5) y asocia a cada volumen la detección de mayor IoU (mínimo 0,3). Si hay coincidencias, `/complete` agrega `volumeSuggestions: {modelId, items: [{objectId, label, score, keyframe, box}]}` (máximo 100); sin coincidencias el campo se omite. Sin `torch` el trabajo no falla: no envía sugerencias y agrega la advertencia `Class suggestions skipped: detector unavailable`. Son sugerencias para la revisión humana de F08.5; nunca asignan clase al borrador de la escena.
+
 ### Límites declarados
 
 1. Los umbrales (celdas de 5 cm, tamaño mínimo de un volumen, confianza mínima de profundidad, separación de las paredes) son heurísticas de v1, no tolerancias medidas.
