@@ -6,6 +6,16 @@ POSTGRES_PORT=5434
 FLOCI_PORT=4566
 API_PORT=8000
 PANEL_PORT=5173
+# Stripe test-mode only. Replace locally; never commit real keys.
+STRIPE_SECRET_KEY=sk_test_replace_with_your_test_key
+STRIPE_PUBLISHABLE_KEY=pk_test_replace_with_your_test_key
+STRIPE_WEBHOOK_SECRET=whsec_replace_with_stripe_cli_secret
+STRIPE_CONNECT_ACCOUNT_COUNTRY=US
+# Bind addresses: 0.0.0.0 enables external devices (e.g. mobile phone on Wi-Fi), 127.0.0.1 restricts to loopback.
+API_BIND_ADDRESS=0.0.0.0
+HARDHAT_BIND_ADDRESS=0.0.0.0
+FLOCI_BIND_ADDRESS=0.0.0.0
+PANEL_BIND_ADDRESS=0.0.0.0
 DATABASE_CONNECT_TIMEOUT_SECONDS=5
 DATABASE_POOL_TIMEOUT_SECONDS=5
 DATABASE_STATEMENT_TIMEOUT_SECONDS=10

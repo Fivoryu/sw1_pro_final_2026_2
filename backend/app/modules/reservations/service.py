@@ -101,10 +101,13 @@ def _deposit_token_units(reservation: Reservation) -> int:
     )
 
 
-def _fingerprint(*, listing_id: str, quote_id: str, customer_wallet_id: str) -> str:
+def _fingerprint(
+    *, listing_id: str, quote_id: str, customer_wallet_id: str | None, payment_method: str
+) -> str:
     body = {
         "customer_wallet_id": customer_wallet_id,
         "listing_id": listing_id,
+        "payment_method": payment_method,
         "quote_id": quote_id,
     }
     canonical = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -137,6 +140,7 @@ def _reservation_response(reservation: Reservation) -> ReservationResponse:
                 },
             },
             "deposit_amount": format_money_amount(deposit) if deposit is not None else None,
+            "payment_method": reservation.payment_method,
             "deposit_confirmed_at": (
                 _as_utc(reservation.deposit_confirmed_at)
                 if reservation.deposit_confirmed_at is not None
@@ -221,7 +225,8 @@ def create_reservation(
     customer_id: str,
     listing_id: str,
     quote_id: str,
-    customer_wallet_id: str,
+    customer_wallet_id: str | None,
+    payment_method: str = "wallet",
     idempotency_key: str,
     now: datetime,
 ) -> ReservationResponse:
@@ -238,7 +243,16 @@ def create_reservation(
         listing_id=listing_id,
         quote_id=quote_id,
         customer_wallet_id=customer_wallet_id,
+        payment_method=payment_method,
     )
+    if payment_method not in {"wallet", "card"}:
+        raise ReservationApiError(422, "validation_error", "The payment method is invalid.")
+    if payment_method == "wallet" and customer_wallet_id is None:
+        raise ReservationApiError(422, "customer_wallet_required", "A linked wallet is required.")
+    if payment_method == "card" and customer_wallet_id is not None:
+        raise ReservationApiError(
+            422, "wallet_not_allowed_for_card", "Card reservations do not use a wallet."
+        )
     try:
         with session_factory.begin() as session:
             if session.get_bind().dialect.name == "sqlite":
@@ -281,31 +295,38 @@ def create_reservation(
                     "The listing already has an active reservation.",
                 )
 
-            customer_wallet = (
-                session.query(CustomerWallet)
-                .filter(
-                    CustomerWallet.id == customer_wallet_id,
-                    CustomerWallet.customer_id == customer_id,
+            customer_wallet = None
+            agency_wallet = None
+            if payment_method == "wallet":
+                customer_wallet = (
+                    session.query(CustomerWallet)
+                    .filter(
+                        CustomerWallet.id == customer_wallet_id,
+                        CustomerWallet.customer_id == customer_id,
+                    )
+                    .one_or_none()
                 )
-                .one_or_none()
-            )
-            if customer_wallet is None:
-                raise ReservationApiError(
-                    403,
-                    "customer_wallet_not_linked",
-                    "A linked customer wallet is required to reserve a listing.",
-                )
+                if customer_wallet is None:
+                    raise ReservationApiError(
+                        403,
+                        "customer_wallet_not_linked",
+                        "A linked customer wallet is required to reserve a listing.",
+                    )
 
-            agency_wallet = (
-                session.query(AgencyWallet)
-                .filter(AgencyWallet.agency_id == listing.agency_id)
-                .one_or_none()
-            )
-            if agency_wallet is None:
+                agency_wallet = (
+                    session.query(AgencyWallet)
+                    .filter(AgencyWallet.agency_id == listing.agency_id)
+                    .one_or_none()
+                )
+                if agency_wallet is None:
+                    raise ReservationApiError(
+                        409,
+                        "agency_wallet_not_linked",
+                        "The listing agency must link a wallet before reservations can be created.",
+                    )
+            elif listing.deposit_amount is None:
                 raise ReservationApiError(
-                    409,
-                    "agency_wallet_not_linked",
-                    "The listing agency must link a wallet before reservations can be created.",
+                    409, "deposit_not_configured", "The listing has no deposit configured."
                 )
 
             quote = (
@@ -336,10 +357,11 @@ def create_reservation(
                 listing_id=listing.id,
                 quote_id=quote.id,
                 customer_id=customer_id,
-                customer_wallet_id=customer_wallet.id,
-                agency_wallet_id=agency_wallet.id,
-                customer_wallet_address=customer_wallet.address,
-                agency_wallet_address=agency_wallet.address,
+                customer_wallet_id=customer_wallet.id if customer_wallet is not None else None,
+                agency_wallet_id=agency_wallet.id if agency_wallet is not None else None,
+                customer_wallet_address=(customer_wallet.address if customer_wallet is not None else None),
+                agency_wallet_address=(agency_wallet.address if agency_wallet is not None else None),
+                payment_method=payment_method,
                 offer_version=quote.offer_version,
                 operation=quote.operation,
                 quote_lines=[dict(line) for line in quote.lines],
@@ -493,6 +515,23 @@ def issue_reservation_permit(
                 "reservation_not_found",
                 "The reservation was not found.",
             )
+        if reservation.payment_method != "wallet":
+            raise ReservationApiError(
+                409,
+                "reservation_payment_method_mismatch",
+                "On-chain actions are only available for wallet reservations.",
+            )
+        if (
+            reservation.customer_wallet_id is None
+            or reservation.agency_wallet_id is None
+            or reservation.customer_wallet_address is None
+            or reservation.agency_wallet_address is None
+        ):
+            raise ReservationApiError(
+                409,
+                "reservation_wallet_snapshot_missing",
+                "The wallet reservation snapshot is incomplete.",
+            )
 
         agency_wallet = session.get(AgencyWallet, reservation.agency_wallet_id)
         if agency_wallet is None:
@@ -557,9 +596,7 @@ def issue_reservation_permit(
                 "The persisted reservation deposit is invalid.",
             ) from None
         deadline = contract_deadline_seconds(reservation.decision_deadline_at)
-        action_actor = (
-            reservation.agency_wallet_address if is_staff else reservation.customer_wallet_address
-        )
+        action_actor = reservation.agency_wallet_address if is_staff else reservation.customer_wallet_address
         permit_terms = {
             "reservation_id": reservation.id,
             "listing_id": reservation.listing_id,
@@ -701,6 +738,23 @@ def _load_chain_context(
     reservation = session.get(Reservation, reservation_id)
     if reservation is None:
         raise ReservationApiError(404, "reservation_not_found", "The reservation was not found.")
+    if reservation.payment_method != "wallet":
+        raise ReservationApiError(
+            409,
+            "reservation_payment_method_mismatch",
+            "On-chain actions are only available for wallet reservations.",
+        )
+    if (
+        reservation.customer_wallet_id is None
+        or reservation.agency_wallet_id is None
+        or reservation.customer_wallet_address is None
+        or reservation.agency_wallet_address is None
+    ):
+        raise ReservationApiError(
+            409,
+            "reservation_wallet_snapshot_missing",
+            "The wallet reservation snapshot is incomplete.",
+        )
     if action not in _CHAIN_ACTIONS:
         raise ReservationApiError(422, "validation_error", "The reservation action is invalid.")
 
@@ -773,9 +827,7 @@ def _load_chain_context(
                 "customer_wallet_mismatch",
                 "The reservation customer wallet is unavailable.",
             )
-        if not _wallet_snapshot_matches(
-            customer_wallet.address, reservation.customer_wallet_address
-        ):
+        if not _wallet_snapshot_matches(customer_wallet.address, reservation.customer_wallet_address):
             raise ReservationApiError(
                 409,
                 "customer_wallet_mismatch",
@@ -785,9 +837,7 @@ def _load_chain_context(
             raise ReservationApiError(404, "reservation_not_found", "The reservation was not found.")
         if action == "deposit":
             if not allow_replay:
-                _ensure_deposit_request_eligible(
-                    reservation, now=now, require_before_deadline=False
-                )
+                _ensure_deposit_request_eligible(reservation, now=now, require_before_deadline=False)
         elif action == "expire":
             if not allow_replay and (
                 reservation.status != "pending" or reservation.deposit_confirmed_at is None
@@ -882,9 +932,11 @@ def reconcile_chain_transaction(
                     "The transaction hash is already bound to another reservation action.",
                 )
             return _chain_transaction_response(existing, status=reservation.status, replayed=True)
-        _, actor_address, expected_amount = _load_chain_context(
+        reservation, actor_address, expected_amount = _load_chain_context(
             session, reservation_id=reservation_id, actor=actor, action=action, now=now
         )
+        assert reservation.customer_wallet_address is not None
+        assert reservation.agency_wallet_address is not None
 
     try:
         proof = chain.verify_action_receipt(
@@ -928,9 +980,7 @@ def reconcile_chain_transaction(
                 reservation_query = reservation_query.with_for_update()
             locked_reservation = reservation_query.one_or_none()
             if locked_reservation is None:
-                raise ReservationApiError(
-                    404, "reservation_not_found", "The reservation was not found."
-                )
+                raise ReservationApiError(404, "reservation_not_found", "The reservation was not found.")
             _, locked_actor_address, locked_amount = _load_chain_context(
                 session,
                 reservation_id=reservation_id,
@@ -961,9 +1011,7 @@ def reconcile_chain_transaction(
                         "chain_transaction_reused",
                         "The transaction hash is already bound to another reservation action.",
                     )
-                return _chain_transaction_response(
-                    existing, status=locked_reservation.status, replayed=True
-                )
+                return _chain_transaction_response(existing, status=locked_reservation.status, replayed=True)
             _, locked_actor_address, locked_amount = _load_chain_context(
                 session,
                 reservation_id=reservation_id,
@@ -984,9 +1032,7 @@ def reconcile_chain_transaction(
                 block_hash=str(proof["blockHash"]),
                 block_timestamp=int(proof["blockTimestamp"]),
                 transaction_index=(
-                    int(proof["transactionIndex"])
-                    if proof.get("transactionIndex") is not None
-                    else None
+                    int(proof["transactionIndex"]) if proof.get("transactionIndex") is not None else None
                 ),
                 amount=int(proof["amount"]),
                 nonce=int(proof["nonce"]),
@@ -1007,9 +1053,7 @@ def reconcile_chain_transaction(
                     "expire": "expired",
                 }[action]
             session.flush()
-            return _chain_transaction_response(
-                audit, status=locked_reservation.status, replayed=False
-            )
+            return _chain_transaction_response(audit, status=locked_reservation.status, replayed=False)
     except IntegrityError:
         with session_factory() as session:
             existing = (
@@ -1039,9 +1083,7 @@ def reconcile_chain_transaction(
                         amount=replay_amount,
                         actor_address=replay_actor_address,
                     ):
-                        return _chain_transaction_response(
-                            existing, status=reservation.status, replayed=True
-                        )
+                        return _chain_transaction_response(existing, status=reservation.status, replayed=True)
         raise ReservationApiError(
             409,
             "chain_transaction_reused",

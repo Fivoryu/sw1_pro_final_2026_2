@@ -46,6 +46,10 @@ class Settings:
     escrow_usdt_address: str | None = None
     escrow_chain_id: str | None = None
     escrow_signer_private_key: str | None = None
+    stripe_secret_key: str | None = None
+    stripe_publishable_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    stripe_connect_account_country: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -75,15 +79,11 @@ class Settings:
             database_connect_timeout_seconds=_positive_timeout_from_env(
                 "DATABASE_CONNECT_TIMEOUT_SECONDS", 5
             ),
-            database_pool_timeout_seconds=_positive_timeout_from_env(
-                "DATABASE_POOL_TIMEOUT_SECONDS", 5
-            ),
+            database_pool_timeout_seconds=_positive_timeout_from_env("DATABASE_POOL_TIMEOUT_SECONDS", 5),
             database_statement_timeout_seconds=_positive_timeout_from_env(
                 "DATABASE_STATEMENT_TIMEOUT_SECONDS", 10
             ),
-            email_send_timeout_seconds=_positive_timeout_from_env(
-                "STAFF_EMAIL_SEND_TIMEOUT_SECONDS", 10
-            ),
+            email_send_timeout_seconds=_positive_timeout_from_env("STAFF_EMAIL_SEND_TIMEOUT_SECONDS", 10),
             s3_endpoint_url=os.environ.get("S3_ENDPOINT_URL"),
             s3_bucket_name=os.environ.get("S3_BUCKET_NAME") or None,
             s3_public_endpoint_url=os.environ.get("S3_PUBLIC_ENDPOINT_URL") or None,
@@ -95,6 +95,10 @@ class Settings:
             escrow_usdt_address=os.environ.get("ROOMFORGE_ESCROW_USDT_ADDRESS"),
             escrow_chain_id=os.environ.get("ROOMFORGE_ESCROW_CHAIN_ID"),
             escrow_signer_private_key=os.environ.get("ROOMFORGE_ESCROW_SIGNER_PRIVATE_KEY"),
+            stripe_secret_key=os.environ.get("STRIPE_SECRET_KEY") or None,
+            stripe_publishable_key=os.environ.get("STRIPE_PUBLISHABLE_KEY") or None,
+            stripe_webhook_secret=os.environ.get("STRIPE_WEBHOOK_SECRET") or None,
+            stripe_connect_account_country=os.environ.get("STRIPE_CONNECT_ACCOUNT_COUNTRY") or None,
         )
 
     def escrow_address_for(self, currency: str) -> str | None:
@@ -114,17 +118,28 @@ class Settings:
             raise ValueError("JWT signing key must contain at least 32 bytes")
         if not self.web_origin.startswith(("https://", "http://localhost", "http://127.0.0.1")):
             raise ValueError("Web origin must be an exact HTTP(S) origin")
-        if min(
-            self.access_token_minutes,
-            self.refresh_token_days,
-            self.invitation_ttl_hours,
-            self.enrollment_ttl_minutes,
-            self.login_challenge_minutes,
-            self.admin_idle_minutes,
-            self.recovery_code_count,
-            self.database_connect_timeout_seconds,
-            self.database_pool_timeout_seconds,
-            self.database_statement_timeout_seconds,
-            self.email_send_timeout_seconds,
-        ) < 1:
+        if self.stripe_secret_key and not self.stripe_secret_key.startswith("sk_test_"):
+            raise ValueError("Only Stripe test-mode secret keys are permitted")
+        if self.stripe_publishable_key and not self.stripe_publishable_key.startswith("pk_test_"):
+            raise ValueError("Only Stripe test-mode publishable keys are permitted")
+        if self.stripe_connect_account_country and (
+            len(self.stripe_connect_account_country) != 2 or not self.stripe_connect_account_country.isalpha()
+        ):
+            raise ValueError("STRIPE_CONNECT_ACCOUNT_COUNTRY must be a two-letter country code")
+        if (
+            min(
+                self.access_token_minutes,
+                self.refresh_token_days,
+                self.invitation_ttl_hours,
+                self.enrollment_ttl_minutes,
+                self.login_challenge_minutes,
+                self.admin_idle_minutes,
+                self.recovery_code_count,
+                self.database_connect_timeout_seconds,
+                self.database_pool_timeout_seconds,
+                self.database_statement_timeout_seconds,
+                self.email_send_timeout_seconds,
+            )
+            < 1
+        ):
             raise ValueError("Timeouts and recovery-code count must be positive")

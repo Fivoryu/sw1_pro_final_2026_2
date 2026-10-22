@@ -73,6 +73,7 @@ def create(
         listing_id=body.listing_id,
         quote_id=body.quote_id,
         customer_wallet_id=body.customer_wallet_id,
+        payment_method=body.payment_method,
         idempotency_key=idempotency_key,
         now=request.app.state.clock(),
     )
@@ -101,7 +102,12 @@ def list_own(
         401: {"model": ErrorResponse, "description": "Invalid customer session"},
         **{
             code: {"model": schema, "description": "Chain proof conflict or validation error"}
-            for code, schema in {403: ReservationErrorResponse, 404: ReservationErrorResponse, 409: ReservationErrorResponse, 422: ReservationErrorResponse}.items()
+            for code, schema in {
+                403: ReservationErrorResponse,
+                404: ReservationErrorResponse,
+                409: ReservationErrorResponse,
+                422: ReservationErrorResponse,
+            }.items()
         },
     },
 )
@@ -182,7 +188,12 @@ def customer_permit(
         401: {"description": "Invalid staff session"},
         **{
             code: {"model": schema, "description": "Chain proof conflict or validation error"}
-            for code, schema in {403: ReservationErrorResponse, 404: ReservationErrorResponse, 409: ReservationErrorResponse, 422: ReservationErrorResponse}.items()
+            for code, schema in {
+                403: ReservationErrorResponse,
+                404: ReservationErrorResponse,
+                409: ReservationErrorResponse,
+                422: ReservationErrorResponse,
+            }.items()
         },
     },
 )
