@@ -209,14 +209,24 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
               ],
             ),
             const SizedBox(height: 24),
-            Text('Lados y tolerancia', style: theme.textTheme.titleLarge),
-            const SizedBox(height: 4),
-            const Text(
-              'El teléfono da la forma del ambiente; la escala exacta la da una '
-              'medida con cinta o medidor láser. Medí al menos un lado: la app '
-              'corrige todo el ambiente con esa referencia. Sin referencia solo '
-              'afirmamos que la captura es repetible, no que sea exacta.',
+            Text(
+              room.acquisition.method == RoomAcquisitionMethod.manual
+                  ? 'Lados'
+                  : 'Lados y tolerancia',
+              style: theme.textTheme.titleLarge,
             ),
+            const SizedBox(height: 4),
+            if (room.acquisition.method == RoomAcquisitionMethod.manual)
+              const Text(
+                'Estas dimensiones son las medidas reales ingresadas para el ambiente.',
+              )
+            else
+              const Text(
+                'El teléfono da la forma del ambiente; la escala exacta la da una '
+                'medida con cinta o medidor láser. Medí al menos un lado: la app '
+                'corrige todo el ambiente con esa referencia. Sin referencia solo '
+                'afirmamos que la captura es repetible, no que sea exacta.',
+              ),
             if (correction != null) ...[
               const SizedBox(height: 8),
               Text(
@@ -253,40 +263,43 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
                                 'capturado → ${metres(correctedLengths[index])} '
                                 'corregido',
                     ),
-                    if (tolerances[index] case final record?)
-                      Text(
-                        'Error observado: '
-                        '${record.absoluteError >= 0 ? '+' : '−'}'
-                        '${metres(record.absoluteError.abs())} '
-                        '(${record.relativeErrorPercent.abs().toStringAsFixed(1).replaceAll('.', ',')} %)',
-                      ),
+                    if (room.acquisition.method != RoomAcquisitionMethod.manual)
+                      if (tolerances[index] case final record?)
+                        Text(
+                          'Error observado: '
+                          '${record.absoluteError >= 0 ? '+' : '−'}'
+                          '${metres(record.absoluteError.abs())} '
+                          '(${record.relativeErrorPercent.abs().toStringAsFixed(1).replaceAll('.', ',')} %)',
+                        ),
                     const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            key: ValueKey('reference-field-$index'),
-                            controller: _references.putIfAbsent(
-                              index,
-                              TextEditingController.new,
-                            ),
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            decoration: const InputDecoration(
-                              labelText: 'Medida con cinta (m)',
-                              isDense: true,
+                    if (room.acquisition.method != RoomAcquisitionMethod.manual)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              key: ValueKey('reference-field-$index'),
+                              controller: _references.putIfAbsent(
+                                index,
+                                TextEditingController.new,
+                              ),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: const InputDecoration(
+                                labelText: 'Medida con cinta (m)',
+                                isDense: true,
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        OutlinedButton(
-                          key: ValueKey('reference-save-$index'),
-                          onPressed: () => _saveReference(room, index),
-                          child: const Text('Registrar'),
-                        ),
-                      ],
-                    ),
+                          const SizedBox(width: 8),
+                          OutlinedButton(
+                            key: ValueKey('reference-save-$index'),
+                            onPressed: () => _saveReference(room, index),
+                            child: const Text('Registrar'),
+                          ),
+                        ],
+                      ),
                   ],
                 ),
               ),

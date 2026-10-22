@@ -15,6 +15,7 @@ export 'geometry.dart'
         signedArea,
         pointInPolygon,
         segmentsIntersect;
+export 'manual_room.dart';
 export 'scale_correction.dart';
 export 'scene_builder.dart';
 export 'validation.dart';

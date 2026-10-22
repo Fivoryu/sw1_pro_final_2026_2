@@ -91,6 +91,9 @@ class SpatialCaptureController extends ChangeNotifier {
 
   String? get ownerId => _session.account?.id;
 
+  /// Checks ARCore only when the agent explicitly chooses automatic capture.
+  Future<ArAvailability> arAvailability() => _ar.availability();
+
   @override
   void dispose() {
     _disposed = true;
@@ -218,6 +221,32 @@ class SpatialCaptureController extends ChangeNotifier {
         if (reconstruction == null) return notice;
         return notice == null ? reconstruction : '$notice $reconstruction';
     }
+  }
+
+  /// Adds a room whose real dimensions were measured and entered by hand.
+  /// This path is deliberately independent from ARCore and reconstruction.
+  Future<String?> createManualRectangularRoom({
+    required String name,
+    required double length,
+    required double width,
+    required double height,
+  }) async {
+    if (ownerId == null) return _noSessionMessage;
+    final CapturedRoom room;
+    try {
+      room = buildManualRectangularRoom(
+        id: _newRoomId(),
+        name: name,
+        length: length,
+        width: width,
+        height: height,
+      );
+    } on ArgumentError {
+      return 'RevisÃ¡ las medidas: el ambiente debe tener al menos 1 mÂ², '
+          'paredes de 30 cm o mÃ¡s y una altura mayor que cero.';
+    }
+    await _change(_capture.copyWith(rooms: [..._capture.rooms, room]));
+    return null;
   }
 
   /// Hands the capture package to the upload queue and says what happens

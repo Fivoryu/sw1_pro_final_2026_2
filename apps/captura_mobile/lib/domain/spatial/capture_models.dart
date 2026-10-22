@@ -285,6 +285,66 @@ class CaptureMetrics {
   };
 }
 
+/// Technology used to obtain a room's geometry.
+///
+/// Only the two ARCore methods are operational camera captures today. The
+/// remaining values make provenance explicit without exposing unfinished UI.
+enum RoomAcquisitionMethod {
+  arcoreWalkthrough('arcore_walkthrough'),
+  arcoreWalls('arcore_walls'),
+  manual('manual'),
+  floorplan('floorplan'),
+  assistedCamera('assisted_camera');
+
+  const RoomAcquisitionMethod(this.wire);
+
+  final String wire;
+
+  bool get usesArCore => this == arcoreWalkthrough || this == arcoreWalls;
+
+  static RoomAcquisitionMethod fromWire(Object? wire) => values.firstWhere(
+    (method) => method.wire == wire,
+    orElse: () => throw FormatException('Unknown acquisition method: $wire'),
+  );
+}
+
+/// Provenance of a room geometry and, only for ARCore captures, its native
+/// session metrics. Manual geometry never fabricates AR tracking values.
+class RoomAcquisition {
+  const RoomAcquisition({required this.method, this.arMetrics})
+    : assert(
+        (method != RoomAcquisitionMethod.arcoreWalkthrough &&
+                method != RoomAcquisitionMethod.arcoreWalls) ||
+            arMetrics != null,
+        'ARCore acquisitions require capture metrics',
+      ),
+      assert(
+        method == RoomAcquisitionMethod.arcoreWalkthrough ||
+            method == RoomAcquisitionMethod.arcoreWalls ||
+            arMetrics == null,
+        'Non-AR acquisitions cannot contain ARCore metrics',
+      );
+
+  factory RoomAcquisition.fromJson(Map<String, Object?> json) {
+    final method = RoomAcquisitionMethod.fromWire(json['method']);
+    final rawMetrics = json['arMetrics'];
+    return RoomAcquisition(
+      method: method,
+      arMetrics: rawMetrics == null
+          ? null
+          : CaptureMetrics.fromJson(asJsonMap(rawMetrics, 'arMetrics')),
+    );
+  }
+
+  final RoomAcquisitionMethod method;
+  final CaptureMetrics? arMetrics;
+
+  Map<String, Object?> toJson() => {
+    'method': method.wire,
+    if (arMetrics != null) 'arMetrics': arMetrics!.toJson(),
+  };
+}
+
 /// Rigid transform of a room-local frame into the property frame:
 /// `world = rotate(local, rotationDegrees) + (x, z)`, where a positive
 /// rotation turns +x towards +z.
@@ -342,10 +402,10 @@ class RoomPlacement {
   String toString() => 'RoomPlacement($x, $z, $rotationDegrees°)';
 }
 
-/// One room captured in its own AR session, in its room-local frame: the
-/// first corner is the origin, the first edge lies on +x and corners run
-/// counter-clockwise (see [FloorPoint] for the orientation convention).
-/// Corners trace the interior face of the walls.
+/// One room geometry in its room-local frame. Its acquisition technology is
+/// recorded separately in [acquisition]. The first corner is the origin, the
+/// first edge lies on +x and corners run counter-clockwise (see [FloorPoint]
+/// for the orientation convention). Corners trace the interior wall faces.
 class CapturedRoom {
   const CapturedRoom({
     required this.id,
@@ -355,7 +415,7 @@ class CapturedRoom {
     required this.openings,
     required this.boxes,
     required this.references,
-    required this.metrics,
+    required this.acquisition,
     this.placement = RoomPlacement.identity,
   });
 
@@ -442,7 +502,16 @@ class CapturedRoom {
       openings: const [],
       boxes: boxes,
       references: const [],
-      metrics: CaptureMetrics.fromJson(asJsonMap(json['metrics'], 'metrics')),
+      acquisition: RoomAcquisition(
+        method:
+            json['metrics'] is Map &&
+                (json['metrics']! as Map)['method'] == 'walkthrough'
+            ? RoomAcquisitionMethod.arcoreWalkthrough
+            : RoomAcquisitionMethod.arcoreWalls,
+        arMetrics: CaptureMetrics.fromJson(
+          asJsonMap(json['metrics'], 'metrics'),
+        ),
+      ),
     );
   }
 
@@ -466,7 +535,19 @@ class CapturedRoom {
       for (final reference in asJsonList(json['references'], 'references'))
         ReferenceMeasurement.fromJson(asJsonMap(reference, 'references[]')),
     ],
-    metrics: CaptureMetrics.fromJson(asJsonMap(json['metrics'], 'metrics')),
+    acquisition: json['acquisition'] == null
+        // Drafts written before adaptive capture were exclusively ARCore
+        // rooms. Their exact native mode was not persisted, so the safe
+        // interpretation is the legacy wall-marking AR flow, never manual.
+        ? RoomAcquisition(
+            method: RoomAcquisitionMethod.arcoreWalls,
+            arMetrics: CaptureMetrics.fromJson(
+              asJsonMap(json['metrics'], 'metrics'),
+            ),
+          )
+        : RoomAcquisition.fromJson(
+            asJsonMap(json['acquisition'], 'acquisition'),
+          ),
     placement: RoomPlacement.fromJson(
       asJsonMap(json['placement'], 'placement'),
     ),
@@ -479,7 +560,10 @@ class CapturedRoom {
   final List<RoomOpening> openings;
   final List<OccupancyBox> boxes;
   final List<ReferenceMeasurement> references;
-  final CaptureMetrics metrics;
+  final RoomAcquisition acquisition;
+
+  /// Native metrics for an ARCore room, absent for technology-neutral rooms.
+  CaptureMetrics? get metrics => acquisition.arMetrics;
   final RoomPlacement placement;
 
   /// Corners in the property frame after applying [placement].
@@ -494,6 +578,7 @@ class CapturedRoom {
     List<RoomOpening>? openings,
     List<OccupancyBox>? boxes,
     List<ReferenceMeasurement>? references,
+    RoomAcquisition? acquisition,
     RoomPlacement? placement,
   }) => CapturedRoom(
     id: id,
@@ -503,7 +588,7 @@ class CapturedRoom {
     openings: openings ?? this.openings,
     boxes: boxes ?? this.boxes,
     references: references ?? this.references,
-    metrics: metrics,
+    acquisition: acquisition ?? this.acquisition,
     placement: placement ?? this.placement,
   );
 
@@ -515,7 +600,7 @@ class CapturedRoom {
     'openings': [for (final opening in openings) opening.toJson()],
     'boxes': [for (final box in boxes) box.toJson()],
     'references': [for (final reference in references) reference.toJson()],
-    'metrics': metrics.toJson(),
+    'acquisition': acquisition.toJson(),
     'placement': placement.toJson(),
   };
 }

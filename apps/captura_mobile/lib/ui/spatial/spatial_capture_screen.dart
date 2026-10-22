@@ -74,9 +74,33 @@ class _SpatialCaptureScreenState extends State<SpatialCaptureScreen> {
   }
 
   Future<void> _captureRoom() async {
+    final method = await showDialog<_RoomCreationMethod>(
+      context: context,
+      builder: (context) => _RoomCreationMethodDialog(
+        checkArAvailability: _controller.arAvailability,
+      ),
+    );
+    if (method == null || !mounted) return;
+    if (method == _RoomCreationMethod.manual) {
+      final dimensions = await showDialog<_ManualRoomDimensions>(
+        context: context,
+        builder: (context) => _ManualRoomDialog(
+          suggestedName: 'Ambiente ${_controller.rooms.length + 1}',
+        ),
+      );
+      if (dimensions == null || !mounted) return;
+      final message = await _controller.createManualRectangularRoom(
+        name: dimensions.name,
+        length: dimensions.length,
+        width: dimensions.width,
+        height: dimensions.height,
+      );
+      if (message != null && mounted) _show(message);
+      return;
+    }
     final choice = await showDialog<(String, CaptureMode)>(
       context: context,
-      builder: (context) => _RoomNameDialog(
+      builder: (context) => _ArRoomDialog(
         suggestedName: 'Ambiente ${_controller.rooms.length + 1}',
       ),
     );
@@ -475,7 +499,9 @@ class _RoomCard extends StatelessWidget {
             Text(
               'Superficie estimada: ${squareMetres(polygonArea(shape.corners))}',
             ),
-            if (correction != null && correction.applied)
+            if (room.acquisition.method == RoomAcquisitionMethod.manual)
+              const Text('Medidas ingresadas manualmente')
+            else if (correction != null && correction.applied)
               Text(
                 'Escala corregida con ${correction.referenceCount} '
                 '${correction.referenceCount == 1 ? 'referencia' : 'referencias'}',
@@ -524,17 +550,197 @@ class _RoomCard extends StatelessWidget {
   }
 }
 
-class _RoomNameDialog extends StatefulWidget {
-  const _RoomNameDialog({required this.suggestedName});
+enum _RoomCreationMethod { automatic, manual }
+
+class _RoomCreationMethodDialog extends StatefulWidget {
+  const _RoomCreationMethodDialog({required this.checkArAvailability});
+
+  final Future<ArAvailability> Function() checkArAvailability;
+
+  @override
+  State<_RoomCreationMethodDialog> createState() =>
+      _RoomCreationMethodDialogState();
+}
+
+class _RoomCreationMethodDialogState extends State<_RoomCreationMethodDialog> {
+  bool _checking = false;
+  bool _unsupported = false;
+
+  Future<void> _chooseAutomatic() async {
+    if (_checking || _unsupported) return;
+    setState(() => _checking = true);
+    final availability = await widget.checkArAvailability();
+    if (!mounted) return;
+    if (availability == ArAvailability.unsupported) {
+      setState(() {
+        _checking = false;
+        _unsupported = true;
+      });
+      return;
+    }
+    Navigator.of(context).pop(_RoomCreationMethod.automatic);
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Crear ambiente'),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            key: const ValueKey('automatic-capture-method'),
+            leading: const Icon(Icons.view_in_ar),
+            title: const Text('Captura automática'),
+            subtitle: Text(
+              _unsupported
+                  ? 'No disponible: este teléfono no admite ARCore.'
+                  : 'Usa ARCore para recorrer o marcar las paredes.',
+            ),
+            enabled: !_checking && !_unsupported,
+            trailing: _checking
+                ? const SizedBox.square(
+                    dimension: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : null,
+            onTap: _chooseAutomatic,
+          ),
+          ListTile(
+            key: const ValueKey('manual-capture-method'),
+            leading: const Icon(Icons.straighten),
+            title: const Text('Plano o medidas'),
+            subtitle: const Text(
+              'Ingresá el largo, ancho y alto de un ambiente rectangular.',
+            ),
+            onTap: () => Navigator.of(context).pop(_RoomCreationMethod.manual),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancelar'),
+      ),
+    ],
+  );
+}
+
+typedef _ManualRoomDimensions = ({
+  String name,
+  double length,
+  double width,
+  double height,
+});
+
+class _ManualRoomDialog extends StatefulWidget {
+  const _ManualRoomDialog({required this.suggestedName});
+
+  final String suggestedName;
+
+  @override
+  State<_ManualRoomDialog> createState() => _ManualRoomDialogState();
+}
+
+class _ManualRoomDialogState extends State<_ManualRoomDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final _name = TextEditingController(text: widget.suggestedName);
+  final _length = TextEditingController();
+  final _width = TextEditingController();
+  final _height = TextEditingController();
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _length.dispose();
+    _width.dispose();
+    _height.dispose();
+    super.dispose();
+  }
+
+  String? _requiredName(String? value) => value == null || value.trim().isEmpty
+      ? 'Escribí un nombre para el ambiente.'
+      : null;
+
+  String? _dimension(String? value) {
+    final metres = parseMetres(value ?? '');
+    return metres == null || metres <= 0
+        ? 'Ingresá una medida mayor que cero.'
+        : null;
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    Navigator.of(context).pop((
+      name: _name.text.trim(),
+      length: parseMetres(_length.text)!,
+      width: parseMetres(_width.text)!,
+      height: parseMetres(_height.text)!,
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Plano o medidas'),
+    content: SingleChildScrollView(
+      child: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              key: const ValueKey('manual-room-name'),
+              controller: _name,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Nombre del ambiente',
+              ),
+              validator: _requiredName,
+            ),
+            for (final field in [
+              (_length, 'manual-room-length', 'Largo (m)'),
+              (_width, 'manual-room-width', 'Ancho (m)'),
+              (_height, 'manual-room-height', 'Alto (m)'),
+            ])
+              TextFormField(
+                key: ValueKey(field.$2),
+                controller: field.$1,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(labelText: field.$3),
+                validator: _dimension,
+              ),
+          ],
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancelar'),
+      ),
+      FilledButton(
+        key: const ValueKey('manual-room-confirm'),
+        onPressed: _submit,
+        child: const Text('Guardar ambiente'),
+      ),
+    ],
+  );
+}
+
+class _ArRoomDialog extends StatefulWidget {
+  const _ArRoomDialog({required this.suggestedName});
 
   /// Prefilled so the camera opens in one tap; the agent can rename it.
   final String suggestedName;
 
   @override
-  State<_RoomNameDialog> createState() => _RoomNameDialogState();
+  State<_ArRoomDialog> createState() => _ArRoomDialogState();
 }
 
-class _RoomNameDialogState extends State<_RoomNameDialog> {
+class _ArRoomDialogState extends State<_ArRoomDialog> {
   late final _name = TextEditingController(text: widget.suggestedName);
   String? _nameError;
   CaptureMode _mode = CaptureMode.walkthrough;

@@ -74,6 +74,11 @@ Future<void> _tapAndSettle(WidgetTester tester, Finder finder) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> _chooseAutomaticCapture(WidgetTester tester) => _tapAndSettle(
+  tester,
+  find.byKey(const ValueKey('automatic-capture-method')),
+);
+
 void main() {
   testWidgets('captures a room and shows its estimated dimensions', (
     tester,
@@ -88,6 +93,7 @@ void main() {
       tester,
       find.byKey(const ValueKey('capture-room-button')),
     );
+    await _chooseAutomaticCapture(tester);
     await tester.enterText(
       find.byKey(const ValueKey('room-name-field')),
       'Estar',
@@ -102,6 +108,74 @@ void main() {
     expect(find.text('Altura: 2,50 m (medida al techo)'), findsOneWidget);
     expect(find.bySemanticsLabel('Plano de la captura'), findsOneWidget);
     expect(find.text('Pendiente de enviar'), findsOneWidget);
+  });
+
+  testWidgets('creates a manual room without consulting ARCore', (
+    tester,
+  ) async {
+    final built = await _build(tester);
+    built.ar.available = ArAvailability.unsupported;
+    await _pump(tester, built.controller);
+
+    await _tapAndSettle(
+      tester,
+      find.byKey(const ValueKey('capture-room-button')),
+    );
+    await _tapAndSettle(
+      tester,
+      find.byKey(const ValueKey('manual-capture-method')),
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('manual-room-name')),
+      'Dormitorio',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('manual-room-length')),
+      '4,20',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('manual-room-width')),
+      '3,70',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('manual-room-height')),
+      '2,60',
+    );
+    await _tapAndSettle(
+      tester,
+      find.byKey(const ValueKey('manual-room-confirm')),
+    );
+
+    expect(built.ar.availabilityChecks, 0);
+    expect(find.text('Dormitorio'), findsOneWidget);
+    expect(find.text('Superficie estimada: 15,54 m²'), findsOneWidget);
+    expect(find.text('Medidas ingresadas manualmente'), findsOneWidget);
+    expect(find.bySemanticsLabel('Plano de la captura'), findsOneWidget);
+  });
+
+  testWidgets('shows automatic capture unavailable on unsupported devices', (
+    tester,
+  ) async {
+    final built = await _build(tester);
+    built.ar.available = ArAvailability.unsupported;
+    await _pump(tester, built.controller);
+
+    await _tapAndSettle(
+      tester,
+      find.byKey(const ValueKey('capture-room-button')),
+    );
+    await _tapAndSettle(
+      tester,
+      find.byKey(const ValueKey('automatic-capture-method')),
+    );
+
+    expect(built.ar.availabilityChecks, 1);
+    expect(
+      find.text('No disponible: este teléfono no admite ARCore.'),
+      findsOneWidget,
+    );
+    expect(built.ar.names, isEmpty);
+    expect(find.byKey(const ValueKey('manual-capture-method')), findsOneWidget);
   });
 
   testWidgets('sends the capture and reports it as synchronized', (
@@ -220,6 +294,7 @@ void main() {
         tester,
         find.byKey(const ValueKey('capture-room-button')),
       );
+      await _chooseAutomaticCapture(tester);
       expect(find.text('Recorrido'), findsOneWidget);
       expect(find.textContaining('Recomendado.'), findsOneWidget);
       await tester.enterText(
@@ -249,6 +324,7 @@ void main() {
       tester,
       find.byKey(const ValueKey('capture-room-button')),
     );
+    await _chooseAutomaticCapture(tester);
     await tester.enterText(
       find.byKey(const ValueKey('room-name-field')),
       'Estar',
@@ -279,6 +355,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('capture-room-button')));
     await tester.pumpAndSettle();
+    await _chooseAutomaticCapture(tester);
     await tester.showKeyboard(find.byKey(const ValueKey('room-name-field')));
     await tester.pumpAndSettle();
 
@@ -297,6 +374,7 @@ void main() {
       tester,
       find.byKey(const ValueKey('capture-room-button')),
     );
+    await _chooseAutomaticCapture(tester);
     await _tapAndSettle(
       tester,
       find.byKey(const ValueKey('room-name-confirm')),
@@ -315,6 +393,7 @@ void main() {
       tester,
       find.byKey(const ValueKey('capture-room-button')),
     );
+    await _chooseAutomaticCapture(tester);
     await tester.enterText(find.byKey(const ValueKey('room-name-field')), '  ');
     await _tapAndSettle(
       tester,

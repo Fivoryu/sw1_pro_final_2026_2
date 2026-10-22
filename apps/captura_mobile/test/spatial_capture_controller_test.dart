@@ -248,6 +248,36 @@ void main() {
       expect(message, contains('ARCore'));
       expect(h.ar.names, isEmpty);
     });
+
+    test(
+      'creates and persists a manual room without checking ARCore',
+      () async {
+        final h = await harness();
+        h.ar.available = ArAvailability.unsupported;
+
+        final message = await h.controller.createManualRectangularRoom(
+          name: 'Dormitorio',
+          length: 4.2,
+          width: 3.7,
+          height: 2.6,
+        );
+
+        expect(message, isNull);
+        expect(h.ar.availabilityChecks, 0);
+        expect(h.ar.names, isEmpty);
+        final room = h.controller.rooms.single;
+        expect(room.acquisition.method, RoomAcquisitionMethod.manual);
+        expect(room.acquisition.arMetrics, isNull);
+        expect(polygonArea(room.corners), closeTo(15.54, 1e-9));
+
+        final reopened = await harness(root: h.root, backend: h.backend);
+        expect(
+          reopened.controller.rooms.single.acquisition.method,
+          RoomAcquisitionMethod.manual,
+        );
+        expect(reopened.controller.preview!.document['version'], '2.0');
+      },
+    );
   });
 
   group('editing', () {
