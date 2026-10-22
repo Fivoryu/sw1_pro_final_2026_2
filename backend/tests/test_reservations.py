@@ -359,9 +359,9 @@ def _create_paid_card_reservation(
     assert created_reservation.status_code == 201, created_reservation.text
     reservation_id = created_reservation.json()["reservation_id"]
     fake_gateway = _FakeStripeGateway()
-    context.client.app.state.stripe_gateway = fake_gateway
-    context.client.app.state.settings = replace(
-        context.client.app.state.settings,
+    client_app(context.client).state.stripe_gateway = fake_gateway
+    client_app(context.client).state.settings = replace(
+        client_app(context.client).state.settings,
         stripe_secret_key="sk_test_roomforge",
         stripe_publishable_key="pk_test_roomforge",
         stripe_webhook_secret=None,
@@ -370,8 +370,8 @@ def _create_paid_card_reservation(
         f"/api/v1/reservations/{reservation_id}/card-payment-intent", headers=auth
     )
     assert missing_webhook.status_code == 503
-    context.client.app.state.settings = replace(
-        context.client.app.state.settings,
+    client_app(context.client).state.settings = replace(
+        client_app(context.client).state.settings,
         stripe_webhook_secret="whsec_roomforge_test",
     )
     with context.session_factory.begin() as session:
@@ -473,7 +473,7 @@ def test_card_payment_intent_uses_server_deposit_without_wallet(
     assert reservation_response.status_code == 201, reservation_response.text
     reservation_id = reservation_response.json()["reservation_id"]
     fake_gateway = _FakeStripeGateway()
-    context.client.app.state.stripe_gateway = fake_gateway
+    client_app(context.client).state.stripe_gateway = fake_gateway
     with context.session_factory.begin() as session:
         session.add(
             StripeConnectAccount(
@@ -487,8 +487,8 @@ def test_card_payment_intent_uses_server_deposit_without_wallet(
                 updated_at=context.clock(),
             )
         )
-    context.client.app.state.settings = replace(
-        context.client.app.state.settings,
+    client_app(context.client).state.settings = replace(
+        client_app(context.client).state.settings,
         stripe_secret_key="sk_test_roomforge",
         stripe_publishable_key="pk_test_roomforge",
         stripe_webhook_secret="whsec_roomforge_test",
@@ -532,7 +532,7 @@ def test_card_webhook_requires_valid_signature_and_confirms_payment(
         json={"listing_id": "stripe-webhook-listing", "quote_id": quote_id, "payment_method": "card"},
     )
     reservation_id = reservation_response.json()["reservation_id"]
-    context.client.app.state.stripe_gateway = _FakeStripeGateway()
+    client_app(context.client).state.stripe_gateway = _FakeStripeGateway()
     with context.session_factory.begin() as session:
         session.add(
             StripeConnectAccount(
@@ -546,8 +546,8 @@ def test_card_webhook_requires_valid_signature_and_confirms_payment(
                 updated_at=context.clock(),
             )
         )
-    context.client.app.state.settings = replace(
-        context.client.app.state.settings,
+    client_app(context.client).state.settings = replace(
+        client_app(context.client).state.settings,
         stripe_secret_key="sk_test_roomforge",
         stripe_publishable_key="pk_test_roomforge",
         stripe_webhook_secret="whsec_roomforge_test",
@@ -610,9 +610,9 @@ def test_connect_onboarding_creates_and_scopes_agency_account(
     context = reservations_context
     _use_staff_principal(context)
     fake_gateway = _FakeStripeGateway()
-    context.client.app.state.stripe_gateway = fake_gateway
-    context.client.app.state.settings = replace(
-        context.client.app.state.settings,
+    client_app(context.client).state.stripe_gateway = fake_gateway
+    client_app(context.client).state.settings = replace(
+        client_app(context.client).state.settings,
         stripe_secret_key="sk_test_roomforge",
         stripe_connect_account_country="US",
     )
