@@ -1,11 +1,18 @@
 import 'package:flutter/foundation.dart';
 
 import '../data/models/staff_listing.dart';
+import '../data/services/ar_capture_channel.dart';
+import '../data/services/capture_draft_store.dart';
 import '../data/services/photo_source.dart';
 import '../data/services/staff_auth_failure.dart';
+import '../data/services/staff_capture_api.dart';
 import '../data/services/staff_listing_photos_api.dart';
 import '../data/services/staff_listings_api.dart';
+import '../data/services/staff_scene_api.dart';
 import 'listing_photos_controller.dart';
+import 'spatial/capture_upload.dart';
+import 'spatial/capture_upload_controller.dart';
+import 'spatial_capture_controller.dart';
 import 'staff_session_controller.dart';
 
 /// Loading state of the agent's listing list.
@@ -22,10 +29,22 @@ class ListingDraftsController extends ChangeNotifier {
     required StaffSessionController session,
     required StaffListingPhotosApi photosApi,
     required PhotoSource photoSource,
+    StaffSceneApi? sceneApi,
+    CaptureDraftStore? captureStore,
+    ArCapture? arCapture,
+    StaffCaptureApi? captureApi,
+    PendingUploadStore? uploadStore,
+    CapturePackageFiles packageFiles = const IoCapturePackageFiles(),
   }) : _api = api,
        _session = session,
        _photosApi = photosApi,
-       _photoSource = photoSource;
+       _photoSource = photoSource,
+       _sceneApi = sceneApi,
+       _captureStore = captureStore,
+       _arCapture = arCapture,
+       _captureApi = captureApi,
+       _uploadStore = uploadStore,
+       _packageFiles = packageFiles;
 
   static const String _noAgencyMessage =
       'Tu cuenta no pertenece a una inmobiliaria con sesión activa. Volvé a '
@@ -35,6 +54,12 @@ class ListingDraftsController extends ChangeNotifier {
   final StaffSessionController _session;
   final StaffListingPhotosApi _photosApi;
   final PhotoSource _photoSource;
+  final StaffSceneApi? _sceneApi;
+  final CaptureDraftStore? _captureStore;
+  final ArCapture? _arCapture;
+  final StaffCaptureApi? _captureApi;
+  final PendingUploadStore? _uploadStore;
+  final CapturePackageFiles _packageFiles;
 
   ListingStatus _tab = ListingStatus.draft;
   ListingsLoadState _loadState = ListingsLoadState.loading;
@@ -120,6 +145,37 @@ class ListingDraftsController extends ChangeNotifier {
     listingId: listingId,
     onListingChanged: onListingChanged,
   );
+
+  /// Whether this build wires the spatial capture services (F07).
+  bool get supportsSpatialCapture =>
+      _sceneApi != null && _captureStore != null && _arCapture != null;
+
+  /// Spatial capture (F07) of a saved listing; null when this build has no
+  /// capture services wired.
+  SpatialCaptureController? spatialCaptureFor(String listingId) {
+    final sceneApi = _sceneApi;
+    final store = _captureStore;
+    final ar = _arCapture;
+    if (sceneApi == null || store == null || ar == null) return null;
+    final captureApi = _captureApi;
+    final uploadStore = _uploadStore;
+    return SpatialCaptureController(
+      listingId: listingId,
+      session: _session,
+      sceneApi: sceneApi,
+      store: store,
+      ar: ar,
+      uploads: captureApi == null || uploadStore == null
+          ? null
+          : CaptureUploadController(
+              listingId: listingId,
+              session: _session,
+              api: captureApi,
+              store: uploadStore,
+              files: _packageFiles,
+            ),
+    );
+  }
 
   /// Reads the observation of the most recent rejection, if any.
   Future<String?> latestRejectionReason(String listingId) async {

@@ -9,7 +9,10 @@ import {
   type StaffListing,
 } from "../../application/staffListingsApi";
 import { DEFAULT_SCENE_DOCUMENT, type SceneDocument, type ScenePoint2D } from "../../application/sceneContract";
+import { acceptCapture, listCaptures } from "../../application/captureReviewApi";
 import { SceneEditor } from "./SceneEditor";
+
+vi.mock("../../application/captureReviewApi", () => ({ listCaptures: vi.fn(), getCapture: vi.fn(), acceptCapture: vi.fn() }));
 
 vi.mock("../../application/staffListingsApi", async (importOriginal) => {
   const actual =
@@ -91,6 +94,8 @@ beforeEach(() => {
   vi.mocked(listAgencyListings).mockReset().mockResolvedValue(listingsPage);
   vi.mocked(getListingScene).mockReset().mockResolvedValue(DEFAULT_SCENE_DOCUMENT);
   vi.mocked(putListingScene).mockReset().mockResolvedValue(DEFAULT_SCENE_DOCUMENT);
+  vi.mocked(listCaptures).mockReset();
+  vi.mocked(acceptCapture).mockReset();
 });
 
 describe("SceneEditor", () => {
@@ -229,5 +234,90 @@ describe("SceneEditor", () => {
 
     expect(await screen.findByText(/Escena sin guardar/)).toBeVisible();
     expect(documentInViewer()).toEqual(DEFAULT_SCENE_DOCUMENT);
+  });
+});
+
+describe("SceneEditor capture drafts", () => {
+  const draft: SceneDocument = {
+    ...DEFAULT_SCENE_DOCUMENT,
+    walls: DEFAULT_SCENE_DOCUMENT.walls.map((wall, index) =>
+      index === 0 ? { ...wall, start: { x: 0.5, z: 0.5 } } : wall),
+  };
+  const completed = { captureId: "cap-1", status: "completed" as const, sceneDraft: draft, warnings: [], failureReason: null };
+
+  async function openPanel(user: ReturnType<typeof userEvent.setup>) {
+    vi.mocked(listCaptures).mockResolvedValue([completed]);
+    render(<SceneEditor accessToken="volatile-access" agencyId="agency-1" />);
+    await chooseListing(user);
+    await user.click(screen.getByRole("button", { name: "Capturas reconstruidas" }));
+    return await screen.findByRole("button", { name: "Cargar borrador en el editor" });
+  }
+
+  it("does not render the capture panel nor call the capture API until requested", async () => {
+    const user = userEvent.setup();
+    render(<SceneEditor accessToken="volatile-access" agencyId="agency-1" />);
+    await chooseListing(user);
+    expect(screen.queryByRole("region", { name: "Borradores de capturas" })).not.toBeInTheDocument();
+    expect(listCaptures).not.toHaveBeenCalled();
+    expect(acceptCapture).not.toHaveBeenCalled();
+  });
+
+  it("loads the draft into the shared editor state without saving or accepting", async () => {
+    const user = userEvent.setup();
+    await user.click(await openPanel(user));
+    await waitFor(() => expect(documentInViewer().walls[0].start).toEqual({ x: 0.5, z: 0.5 }));
+    expect(screen.getByText("Hay cambios sin guardar.")).toBeVisible();
+    expect(putListingScene).not.toHaveBeenCalled();
+    expect(acceptCapture).not.toHaveBeenCalled();
+  });
+
+  it("asks for confirmation before replacing unsaved edits and keeps them when declined", async () => {
+    const user = userEvent.setup();
+    const button = await openPanel(user);
+    const original = documentInViewer().walls[0].start;
+    dispatchPointer(screen.getByTestId("wall-endpoint-wall-north-start"), "pointerdown", { x: 0, z: 0 }, 1);
+    dispatchPointer(screen.getByTestId("scene-editor-canvas"), "pointermove", { x: 0.23, z: 0.18 }, 1);
+    dispatchPointer(screen.getByTestId("scene-editor-canvas"), "pointerup", { x: 0.23, z: 0.18 }, 1);
+    await waitFor(() => expect(documentInViewer().walls[0].start).toEqual({ x: 0.2, z: 0.2 }));
+    expect(original).toEqual({ x: 0, z: 0 });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await user.click(button);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(documentInViewer().walls[0].start).toEqual({ x: 0.2, z: 0.2 });
+    confirm.mockReturnValue(true);
+    await user.click(button);
+    await waitFor(() => expect(documentInViewer().walls[0].start).toEqual({ x: 0.5, z: 0.5 }));
+    confirm.mockRestore();
+  });
+
+  it("accepts the capture only after the scene save succeeds", async () => {
+    const user = userEvent.setup();
+    vi.mocked(putListingScene).mockResolvedValue(draft);
+    vi.mocked(acceptCapture).mockResolvedValue({ ...completed, status: "accepted" as never });
+    await user.click(await openPanel(user));
+    expect(acceptCapture).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Guardar escena" }));
+    await waitFor(() => expect(acceptCapture).toHaveBeenCalledWith(
+      "volatile-access", "agency-1", "listing-1", "cap-1"));
+    expect(putListingScene).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not accept the capture when the scene save fails", async () => {
+    const user = userEvent.setup();
+    vi.mocked(putListingScene).mockRejectedValue(new StaffListingsApiError(500, "boom"));
+    await user.click(await openPanel(user));
+    await user.click(screen.getByRole("button", { name: "Guardar escena" }));
+    await screen.findByRole("alert");
+    expect(acceptCapture).not.toHaveBeenCalled();
+  });
+
+  it("reports an accept failure after a saved scene without losing the save", async () => {
+    const user = userEvent.setup();
+    vi.mocked(putListingScene).mockResolvedValue(draft);
+    vi.mocked(acceptCapture).mockRejectedValue(new StaffListingsApiError(409, "x"));
+    await user.click(await openPanel(user));
+    await user.click(screen.getByRole("button", { name: "Guardar escena" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/no se pudo aceptar la captura/i);
+    expect(screen.getByText("Escena guardada.")).toBeVisible();
   });
 });

@@ -1,12 +1,43 @@
 # Worker 3D
 
-Dos responsabilidades conviven acá: la reconstrucción Meshroom sigue pendiente y la detección de mobiliario incluye el piloto y los trabajos asíncronos F08.4 implementados.
+Dos responsabilidades conviven acá: la reconstrucción del plano y la escena a partir del paquete de captura (F07.7) y la detección de mobiliario, que incluye el piloto y los trabajos asíncronos F08.4.
 
-1. **Reconstrucción 3D con Meshroom** (F06/F07): pendiente de detalle.
-   - Stack: ver `docs/scrum/sprint-0-requerimientos/09-infraestructura.md`
-   - Repo destino futuro: `<pendiente de separación>`
-   - Estado: estructura inicial, **sin código**.
+1. **Reconstrucción de la captura espacial** (F07.7): implementada. La fotogrametría (Meshroom) queda excluida por decisión del plan maestro del 2026-10-19; el worker no reconstruye texturas ni mallas.
+   - Entrada: el paquete de captura v1 (`docs/api/f07-capture-package.md`), un ZIP con `manifest.json` y, si el dispositivo lo permite, profundidad y confianza en PNG.
+   - Salida: un borrador de escena v2 (`docs/api/f06-scene-contract.md`) y una lista de advertencias en español para la agencia. Nada se publica solo.
 2. **Detección de mobiliario con IA preentrenada** (F08/F08.4): piloto de inferencia implementado y ejecutado; el procesamiento asíncrono por cola también está implementado. La API es la única escritora del estado de los trabajos.
+
+## Reconstrucción de la captura (F07.7)
+
+| Pieza | Ruta |
+|---|---|
+| Reconstrucción (función pura y CLI) | `worker3d/reconstruct.py` |
+| Lector de PNG en escala de grises de 8/16 bits | `worker3d/png16.py` |
+| Consumidor de trabajos asíncronos | `worker3d/reconstruction_worker.py` |
+
+Solo usa la biblioteca estándar de Python (sin numpy ni Pillow).
+
+```bash
+# Reconstruye un paquete (carpeta descomprimida o ZIP) e imprime {sceneDraft, warnings}
+.venv/Scripts/python.exe worker3d/reconstruct.py <carpeta|paquete.zip>
+```
+
+Algoritmo v1:
+
+1. Valida el manifiesto (`schemaVersion` 1, `floorY` presente, al menos un ambiente). Un paquete inválido termina en `fail` con `retryable: false`.
+2. Lleva los polígonos de los planos al mundo con su pose, ajusta un segmento de piso a cada pared y la asigna al ambiente de la muestra de trayectoria más cercana.
+3. Propone el contorno de cada ambiente con las mismas reglas que la app de captura; un ambiente que no cierra contorno se omite con una advertencia.
+4. Altura: plano de techo menos piso (`ceiling_plane`, medida) o 2,40 m con procedencia `assumed` y advertencia; una altura supuesta nunca se presenta como medida.
+5. Volúmenes: proyecta la profundidad de los cuadros clave al mundo y agrupa los puntos ocupados en cajas sin clase ni precio (`source: "depth"`). Sin profundidad no genera volúmenes y lo advierte.
+6. Escena: muros sobre la línea central, muros compartidos soldados, sin aberturas (la agencia las marca en el editor).
+7. Si hay `reference`, reescala la escena y declara el factor aplicado.
+
+### Límites declarados
+
+1. Los umbrales (celdas de 5 cm, tamaño mínimo de un volumen, confianza mínima de profundidad, separación de las paredes) son heurísticas de v1, no tolerancias medidas.
+2. La exactitud de la reconstrucción frente a medidas reales está **sin medir**; se prueba con paquetes sintéticos.
+3. Una pared compartida vista desde ambos lados solo se suelda si las dos caras difieren aproximadamente en el espesor de la pared.
+4. El contrato de escena no admite hoy `source: "reconstruction"`; el borrador solo usa los valores de procedencia admitidos (`heightSource`, `source: "depth"`).
 
 ## Detección de mobiliario (F08)
 
@@ -18,7 +49,7 @@ Detector COCO preentrenado que **sugiere** mobiliario en una fotografía de un i
 | Consumidor de trabajos asíncronos | `worker3d/job_worker.py` |
 | Descargador del conjunto CC0 | `worker3d/fetch_cc0_pilot_set.py` |
 | Planchas de revisión manual | `worker3d/review_sheet.py` |
-| Pruebas de contrato (31) | `worker3d/tests/` |
+| Pruebas de contrato de detección | `worker3d/tests/` |
 | Servicio (sólo CPU) | `infra/docker/compose.inference.yml`, `infra/docker/inference/` |
 
 ### Modelo

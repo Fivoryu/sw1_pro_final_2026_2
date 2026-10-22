@@ -127,6 +127,10 @@ class ListingScene(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Optimistic concurrency token exposed as the staff ETag; bumped on every save.
+    revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
 
 
 class ListingPhoto(Base):

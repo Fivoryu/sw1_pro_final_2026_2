@@ -6,6 +6,7 @@ import '../../domain/listing_drafts_controller.dart';
 import '../../domain/listing_photos_controller.dart';
 import 'listing_format.dart';
 import 'listing_photos_section.dart';
+import '../spatial/spatial_capture_screen.dart';
 
 /// Minimum 48 dp touch target for primary actions.
 const _actionMinSize = Size.fromHeight(48);
@@ -91,6 +92,54 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     final listing = _listing;
     if (!mounted || listing == null) return;
     setState(() => _listing = listing.reopenedAsDraft());
+  }
+
+  /// Entry to the spatial capture (F07); it needs a saved listing.
+  Widget _spatialCaptureSection(BuildContext context) {
+    final listing = _listing;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Captura espacial', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 8),
+        if (listing == null)
+          const Text(
+            'Guardá el borrador para medir sus ambientes con la cámara.',
+            key: ValueKey('spatial-capture-unsaved'),
+          )
+        else
+          OutlinedButton.icon(
+            key: const ValueKey('open-spatial-capture'),
+            style: OutlinedButton.styleFrom(minimumSize: _actionMinSize),
+            onPressed: () => _openSpatialCapture(listing),
+            icon: const Icon(Icons.view_in_ar),
+            label: const Text('Medir ambientes'),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _openSpatialCapture(StaffListing listing) async {
+    final controller = widget.controller.spatialCaptureFor(listing.listingId);
+    if (controller == null) return;
+    await controller.load();
+    if (!mounted) {
+      controller.dispose();
+      return;
+    }
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => SpatialCaptureScreen(
+          controller: controller,
+          syncBlockedReason: _reopensReview
+              ? 'Este inmueble está en revisión o aprobado. Para enviar una '
+                    'escena nueva, primero editá y guardá la ficha: vuelve a '
+                    'borrador. Mientras tanto la captura queda en el teléfono.'
+              : null,
+        ),
+      ),
+    );
+    controller.dispose();
   }
 
   bool get _reopensReview {
@@ -513,6 +562,10 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
                       onAdd: _addPhoto,
                       onDelete: _deletePhoto,
                     ),
+                    if (widget.controller.supportsSpatialCapture) ...[
+                      const SizedBox(height: 24),
+                      _spatialCaptureSection(context),
+                    ],
                     const SizedBox(height: 24),
                     OutlinedButton.icon(
                       key: const ValueKey('listing-save-button'),

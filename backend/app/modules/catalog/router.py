@@ -5,7 +5,17 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    Header,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+)
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
@@ -66,8 +76,10 @@ from app.modules.catalog.service import (
     get_public_listing,
     get_listing_scene,
     InvalidSceneIntegrityError,
+    SceneConflictError,
     list_listing_extras,
     normalize_geo_key,
+    scene_etag,
     search_public_listings,
     transition_staff_listing,
     upsert_listing_scene,
@@ -738,10 +750,17 @@ def get_agency_listing_transitions(
         ]
 
 
-def _scene_error_response(status_code: int, detail: str, code: str) -> JSONResponse:
+def _scene_error_response(
+    status_code: int,
+    detail: str,
+    code: str,
+    *,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content={"detail": detail, "code": code},
+        headers=headers,
     )
 
 
@@ -766,6 +785,7 @@ def get_agency_listing_scene(
     agency_id: str,
     listing_id: str,
     request: Request,
+    response: Response,
     staff: ActiveStaff = Depends(get_active_staff),
 ) -> ListingSceneDocument | JSONResponse:
     _require_listing_editor(staff, agency_id)
@@ -786,6 +806,7 @@ def get_agency_listing_scene(
             return _scene_error_response(
                 404, "Scene is not defined for this listing", "scene_not_defined"
             )
+        response.headers["ETag"] = scene_etag(stored.revision)
         return scene
 
 
@@ -798,9 +819,16 @@ def replace_agency_listing_scene(
     agency_id: str,
     listing_id: str,
     request: Request,
+    response: Response,
     body: object = Body(...),
     staff: ActiveStaff = Depends(get_active_staff),
+    if_match: Annotated[str | None, Header()] = None,
+    if_none_match: Annotated[str | None, Header()] = None,
 ) -> ListingSceneDocument | JSONResponse:
+    """Replace the scene; optional If-Match/If-None-Match make the write conditional.
+
+    Precedence: 422 scene_invalid, then 404 listing_not_found, then 412 scene_conflict.
+    """
     _require_listing_editor(staff, agency_id)
     try:
         scene = ListingSceneDocument.model_validate(body)
@@ -813,18 +841,36 @@ def replace_agency_listing_scene(
         return _scene_error_response(422, error.detail, "scene_invalid")
 
     session_factory: sessionmaker[Session] = request.app.state.session_factory
-    with session_factory.begin() as session:
-        stored = upsert_listing_scene(
-            session,
-            agency_id=agency_id,
-            listing_id=listing_id,
-            scene=scene.model_dump(mode="json", by_alias=True, exclude_unset=True),
-            updated_at=request.app.state.clock(),
-            updated_by=staff["id"],
+    try:
+        with session_factory.begin() as session:
+            stored = upsert_listing_scene(
+                session,
+                agency_id=agency_id,
+                listing_id=listing_id,
+                scene=scene.model_dump(mode="json", by_alias=True, exclude_unset=True),
+                updated_at=request.app.state.clock(),
+                updated_by=staff["id"],
+                if_match=if_match,
+                if_none_match=if_none_match,
+            )
+            if stored is None:
+                return _scene_error_response(404, "Listing not found", "listing_not_found")
+            revision = stored.revision
+            saved = ListingSceneDocument.model_validate(stored.scene)
+    except SceneConflictError as conflict:
+        headers = (
+            {"ETag": scene_etag(conflict.current_revision)}
+            if conflict.current_revision is not None
+            else None
         )
-        if stored is None:
-            return _scene_error_response(404, "Listing not found", "listing_not_found")
-        return ListingSceneDocument.model_validate(stored.scene)
+        return _scene_error_response(
+            412,
+            "Scene was modified by another writer; reload it and retry",
+            "scene_conflict",
+            headers=headers,
+        )
+    response.headers["ETag"] = scene_etag(revision)
+    return saved
 
 
 router.include_router(listings_router)

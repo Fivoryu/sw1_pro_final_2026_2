@@ -238,14 +238,29 @@ export function roomPolygon(document_, roomId) {
     !hasPointCoordinates(wall.start, ["x", "z"]) ||
     !hasPointCoordinates(wall.end, ["x", "z"]))) return null;
 
-  const points = [];
-  for (let index = 0; index < walls.length; index += 1) {
-    const wall = walls[index];
-    if (index > 0 && !samePoint(walls[index - 1].end, wall.start)) return null;
-    points.push({ x: wall.start.x, z: wall.start.z });
+  // A wall shared by two rooms runs backwards in one of them, so each wall may
+  // be walked in either direction (same rule as the panel's roomPolygon).
+  for (const reverseFirst of [false, true]) {
+    const first = walls[0];
+    const start = reverseFirst ? first.end : first.start;
+    let current = reverseFirst ? first.start : first.end;
+    const points = [{ x: start.x, z: start.z }];
+    let closed = true;
+    for (let index = 1; index < walls.length; index += 1) {
+      const wall = walls[index];
+      points.push({ x: current.x, z: current.z });
+      if (samePoint(wall.start, current)) {
+        current = wall.end;
+      } else if (samePoint(wall.end, current)) {
+        current = wall.start;
+      } else {
+        closed = false;
+        break;
+      }
+    }
+    if (closed && samePoint(current, start)) return points;
   }
-  if (!samePoint(walls[walls.length - 1].end, walls[0].start)) return null;
-  return points;
+  return null;
 }
 
 /**

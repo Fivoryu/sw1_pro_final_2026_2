@@ -13,6 +13,10 @@ export interface SceneDimensions {
   depth: number;
 }
 
+export type SceneWallHeightSource = "ceiling_plane" | "wall_point" | "manual" | "assumed";
+
+export type SceneObjectSource = "depth" | "manual";
+
 export interface SceneWall {
   id: string;
   start: ScenePoint2D;
@@ -20,6 +24,8 @@ export interface SceneWall {
   height: number;
   thickness: number;
   color?: string;
+  /** F07 capture provenance of `height`; `assumed` means it was not measured. */
+  heightSource?: SceneWallHeightSource;
 }
 
 export interface SceneOpeningV2 {
@@ -46,6 +52,10 @@ export interface SceneObject {
   position: ScenePoint3D;
   dimensions: SceneDimensions;
   color: string;
+  /** F07 capture provenance: measured from depth data or placed by hand. */
+  source?: SceneObjectSource;
+  /** Capture confidence in [0, 1]; absent when not declared. */
+  confidence?: number;
 }
 
 export interface SceneDocument {

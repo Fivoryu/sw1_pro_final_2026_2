@@ -26,6 +26,9 @@ ListingApprovalStatus = Literal["draft", "pending", "approved", "rejected"]
 # JSON has one number type, but the contract must reject strings and booleans.
 # StrictInt | StrictFloat preserves integer-valued coordinates from the fixture.
 SceneNumber = StrictInt | StrictFloat
+# Optional provenance declared by the F07 spatial capture; "assumed" means not measured.
+SceneWallHeightSource = Literal["ceiling_plane", "wall_point", "manual", "assumed"]
+SceneObjectSource = Literal["depth", "manual"]
 
 
 class SceneContractModel(BaseModel):
@@ -56,6 +59,8 @@ class SceneWall(SceneContractModel):
     height: Annotated[SceneNumber, Field(gt=0)]
     thickness: Annotated[SceneNumber, Field(gt=0)]
     color: StrictStr | None = None
+    # F07 capture provenance; absent unless the client declares it.
+    height_source: SceneWallHeightSource | None = Field(default=None, alias="heightSource")
 
     @model_validator(mode="after")
     def endpoints_must_differ(self) -> SceneWall:
@@ -100,6 +105,9 @@ class SceneObject(SceneContractModel):
     position: ScenePosition
     dimensions: SceneDimensions
     color: StrictStr
+    # F07 capture provenance; absent unless the client declares it.
+    source: SceneObjectSource | None = None
+    confidence: Annotated[SceneNumber, Field(ge=0, le=1)] | None = None
 
 
 class ListingSceneDocument(SceneContractModel):
