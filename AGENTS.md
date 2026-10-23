@@ -47,7 +47,7 @@ proyecto_final/
 ├── backend/         # API FastAPI (ver §5)
 ├── panel/           # Panel web React (estructura inicial)
 ├── apps/            # Apps Flutter (estructura inicial)
-├── openspec/        # Cambios SDD: openspec/changes/{registro-cliente, autenticacion, prueba-hu001}
+├── openspec/        # Cambios SDD; los anteriores al plan maestro están en openspec/changes/archive/
 ├── infra/           # Docker Compose local (compose.postgres.yml: postgres:16-alpine, puerto 5434)
 ├── contracts/       # Contratos Solidity/Hardhat (escrow de token de prueba) — pendiente
 ├── worker3d/        # Worker de reconstrucción 3D (Python + Meshroom) — pendiente
@@ -131,6 +131,8 @@ Los cambios de producto se planifican con **SDD** (Spec-Driven Development). Hay
 | `registro-cliente` | PB-001 / HU-001 | Archivado (backend implementado) |
 | `autenticacion` | PB-002 / HU-002 | Archivado (backend implementado) |
 | `prueba-hu001` | CP-001 real | Archivado (ejecución contra PostgreSQL real + evidencia) |
+
+Desde el 2026-10-23 los doce cambios de `openspec/changes/` están en `openspec/changes/archive/<cambio>/`: los tres de la tabla y nueve que quedaron superados por el plan maestro y el flujo ODD (`hu003-*`, `hu004`, `hu005`, `hu007`, `hu008`, `hu022-025` y los dos de F08). Los cambios nuevos se crean en `openspec/changes/<cambio>/`.
 
 Para un cambio nuevo: seguir el pipeline SDD completo y persistir ambos backends. No inventar artefactos de fases que el dispatcher nativo no haya autorizado.
 

@@ -14,8 +14,8 @@ Las historias completadas formalmente deben incorporarse únicamente cuando exis
 
 **Evidencia disponible:**
 
-- [Informe archivado de integración pública del backend](../../backend/openspec/changes/archive/2026-09-07-hu003-integracion-publica-backend/verify-report.md): reporta `PASS`, con 7/7 requisitos, 20/20 escenarios y 120 pruebas pasadas.
-- [Informe de verificación de HU-003](../../backend/openspec/changes/hu003-verificacion-correo/verify-report.md): reporta `PASS WITH WARNINGS` y cierra explícitamente únicamente el Slice 1 del backend; no es un cierre de la HU-003 académica completa.
+- Informe archivado de integración pública del backend **[no conservado]**: reporta `PASS`, con 7/7 requisitos, 20/20 escenarios y 120 pruebas pasadas.
+- Informe de verificación de HU-003 **[no conservado]**: reporta `PASS WITH WARNINGS` y cierra explícitamente únicamente el Slice 1 del backend; no es un cierre de la HU-003 académica completa.
 
 Esta evidencia documenta una superficie backend verificable. No se presenta como evidencia de cierre integral ni como sustituto del registro académico de pruebas.
 
@@ -26,3 +26,7 @@ Esta evidencia documenta una superficie backend verificable. No se presenta como
 - Los documentos de Sprint 3 no definen un identificador de caso de prueba; por ello, el seguimiento se formula con los requisitos y la evidencia de HU-003.
 
 **Última actualización:** no registrada.
+
+## Nota sobre evidencias no conservadas
+
+Los informes marcados como **[no conservado]** vivían en el repositorio `backend` anterior al aplanado del monorepo y no se trasladaron a este repositorio ni a su historial de git. Se conserva la mención como trazabilidad; su contenido no puede verificarse desde este repositorio.
