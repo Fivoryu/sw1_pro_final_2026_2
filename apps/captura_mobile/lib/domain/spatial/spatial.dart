@@ -17,6 +17,7 @@ export 'geometry.dart'
         segmentsIntersect;
 export 'manual_room.dart';
 export 'manual_geometry.dart';
+export 'floorplan_trace.dart';
 export 'scale_correction.dart';
 export 'scene_builder.dart';
 export 'validation.dart';

@@ -72,6 +72,49 @@ void main() {
     expect(await store.sizeBytes('agent-2'), 0);
   });
 
+  test('keeps private trace sources and includes them in local size', () async {
+    await store.write('agent-1', 'listing-1', draft);
+    final sourceId = await store.saveTraceSource('agent-1', 'listing-1', [
+      1,
+      2,
+      3,
+      4,
+    ], 'image/png');
+    final reopened = FileCaptureDraftStore(root: () async => root);
+
+    expect(await reopened.readTraceSource('agent-1', 'listing-1', sourceId), [
+      1,
+      2,
+      3,
+      4,
+    ]);
+    expect(
+      await reopened.sizeBytes('agent-1'),
+      utf8.encode(jsonEncode(draft)).length + 4,
+    );
+    expect(sourceId, isNot(contains('listing-1')));
+  });
+
+  test(
+    'cleans only the trace sources associated with the deleted draft',
+    () async {
+      final first = await store.saveTraceSource('agent-1', 'listing-1', [
+        1,
+      ], 'image/jpeg');
+      final second = await store.saveTraceSource('agent-1', 'listing-2', [
+        2,
+      ], 'image/webp');
+
+      await store.delete('agent-1', 'listing-1');
+
+      expect(
+        await store.readTraceSource('agent-1', 'listing-1', first),
+        isNull,
+      );
+      expect(await store.readTraceSource('agent-1', 'listing-2', second), [2]);
+    },
+  );
+
   test('deletes only the requested draft', () async {
     await store.write('agent-1', 'listing-1', draft);
     await store.write('agent-1', 'listing-2', draft);
@@ -97,5 +140,9 @@ void main() {
       throwsArgumentError,
     );
     expect(() => store.read('..', 'listing-1'), throwsArgumentError);
+    expect(
+      () => store.readTraceSource('agent-1', 'listing-1', '../secret.png'),
+      throwsArgumentError,
+    );
   });
 }

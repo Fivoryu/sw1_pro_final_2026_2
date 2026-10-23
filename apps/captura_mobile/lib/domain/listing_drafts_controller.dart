@@ -165,6 +165,7 @@ class ListingDraftsController extends ChangeNotifier {
       sceneApi: sceneApi,
       store: store,
       ar: ar,
+      traceSource: _photoSource,
       uploads: captureApi == null || uploadStore == null
           ? null
           : CaptureUploadController(

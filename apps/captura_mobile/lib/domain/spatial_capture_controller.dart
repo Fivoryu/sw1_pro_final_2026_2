@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../data/services/ar_capture_channel.dart';
 import '../data/services/capture_draft_store.dart';
+import '../data/services/photo_source.dart';
 import '../data/services/staff_auth_failure.dart';
 import '../data/services/staff_scene_api.dart';
 import 'spatial/capture_upload_controller.dart';
@@ -38,12 +39,14 @@ class SpatialCaptureController extends ChangeNotifier {
     required StaffSceneApi sceneApi,
     required CaptureDraftStore store,
     required ArCapture ar,
+    PhotoSource? traceSource,
     this.uploads,
     DateTime Function()? now,
   }) : _session = session,
        _sceneApi = sceneApi,
        _store = store,
        _ar = ar,
+       _traceSource = traceSource,
        _now = now ?? DateTime.now {
     uploads?.addListener(_notify);
   }
@@ -61,6 +64,7 @@ class SpatialCaptureController extends ChangeNotifier {
   final StaffSceneApi _sceneApi;
   final CaptureDraftStore _store;
   final ArCapture _ar;
+  final PhotoSource? _traceSource;
   final DateTime Function() _now;
 
   late PropertyCapture _capture = PropertyCapture(
@@ -77,6 +81,7 @@ class SpatialCaptureController extends ChangeNotifier {
   bool _busy = false;
   bool _disposed = false;
   SceneBuildResult? _preview;
+  final Map<String, FloorplanTraceMetadata> _traces = {};
 
   List<CapturedRoom> get rooms => _capture.rooms;
   List<DoorConnection> get connections => _capture.connections;
@@ -90,6 +95,7 @@ class SpatialCaptureController extends ChangeNotifier {
   SceneBuildResult? get preview => _preview;
 
   String? get ownerId => _session.account?.id;
+  FloorplanTraceMetadata? traceForRoom(String roomId) => _traces[roomId];
 
   /// Checks ARCore only when the agent explicitly chooses automatic capture.
   Future<ArAvailability> arAvailability() => _ar.availability();
@@ -131,6 +137,19 @@ class SpatialCaptureController extends ChangeNotifier {
           _ => CaptureSyncState.pending,
         };
         _conflictEtag = sync['conflictEtag'] as String?;
+        final traces = stored['traces'];
+        if (traces is List) {
+          for (final value in traces) {
+            try {
+              final trace = FloorplanTraceMetadata.fromJson(
+                (value as Map).cast<String, Object?>(),
+              );
+              _traces[trace.roomId] = trace;
+            } on Object {
+              // A damaged local tracing aid must not invalidate metric rooms.
+            }
+          }
+        }
       } on Object {
         _message =
             'No pudimos leer la captura guardada en el teléfono. '
@@ -301,6 +320,46 @@ class SpatialCaptureController extends ChangeNotifier {
     }
   }
 
+  Future<LocalTraceSource?> pickFloorplanSource() async {
+    final owner = ownerId;
+    final picker = _traceSource;
+    if (owner == null || picker == null) return null;
+    final picked = await picker.pick(PhotoOrigin.gallery);
+    if (picked == null) return null;
+    if (!const {
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+    }.contains(picked.contentType)) {
+      throw const UnsupportedPhotoFormat();
+    }
+    final sourceId = await _store.saveTraceSource(
+      owner,
+      listingId,
+      picked.bytes,
+      picked.contentType,
+    );
+    return LocalTraceSource(
+      sourceId: sourceId,
+      contentType: picked.contentType,
+      bytes: picked.bytes,
+    );
+  }
+
+  Future<void> discardFloorplanSource(String sourceId) async {
+    final owner = ownerId;
+    if (owner != null) {
+      await _store.deleteTraceSource(owner, listingId, sourceId);
+    }
+  }
+
+  Future<List<int>?> floorplanSourceBytes(String sourceId) async {
+    final owner = ownerId;
+    return owner == null
+        ? null
+        : _store.readTraceSource(owner, listingId, sourceId);
+  }
+
   /// Hands the capture package to the upload queue and says what happens
   /// next, or why there is no package. Null when there is nothing to say.
   Future<String?> _handlePackage(
@@ -341,19 +400,23 @@ class SpatialCaptureController extends ChangeNotifier {
     ),
   );
 
-  Future<void> removeRoom(String roomId) => _change(
-    _capture.copyWith(
-      rooms: [
-        for (final room in _capture.rooms)
-          if (room.id != roomId) room,
-      ],
-      connections: [
-        for (final connection in _capture.connections)
-          if (connection.roomA != roomId && connection.roomB != roomId)
-            connection,
-      ],
-    ),
-  );
+  Future<void> removeRoom(String roomId) async {
+    final trace = _traces.remove(roomId);
+    if (trace != null) await discardFloorplanSource(trace.sourceId);
+    await _change(
+      _capture.copyWith(
+        rooms: [
+          for (final room in _capture.rooms)
+            if (room.id != roomId) room,
+        ],
+        connections: [
+          for (final connection in _capture.connections)
+            if (connection.roomA != roomId && connection.roomB != roomId)
+              connection,
+        ],
+      ),
+    );
+  }
 
   /// Places room B so its door meets room A's door and records the link.
   Future<String?> connect({
@@ -512,6 +575,7 @@ class SpatialCaptureController extends ChangeNotifier {
     if (owner == null || _syncState != CaptureSyncState.synced) return false;
     await _store.delete(owner, listingId);
     _capture = _capture.copyWith(rooms: const [], connections: const []);
+    _traces.clear();
     _syncState = CaptureSyncState.empty;
     _rebuild();
     _notify();
@@ -583,6 +647,7 @@ class SpatialCaptureController extends ChangeNotifier {
         'conflictEtag': _conflictEtag,
         'lastSyncedAt': _lastSyncedAt?.toIso8601String(),
       },
+      'traces': [for (final trace in _traces.values) trace.toJson()],
     });
   }
 
