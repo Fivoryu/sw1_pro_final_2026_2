@@ -271,10 +271,10 @@ void main() {
     addTearDown(tester.view.reset);
 
     await tester.pumpWidget(
-      MaterialApp(
-        home: PrimaryScrollController(
-          controller: inheritedScroll,
-          child: SpatialCaptureScreen(controller: built.controller),
+      PrimaryScrollController(
+        controller: inheritedScroll,
+        child: MaterialApp(
+          home: SpatialCaptureScreen(controller: built.controller),
         ),
       ),
     );
@@ -303,6 +303,103 @@ void main() {
     await tester.ensureVisible(roomName);
     await tester.pump();
     expect(roomName.hitTestable(), findsOneWidget);
+  });
+
+  testWidgets('room editor owns its scroll state on a narrow phone', (
+    tester,
+  ) async {
+    final built = await _build(tester);
+    await tester.runAsync(
+      () => built.controller.createManualRectangularRoom(
+        name: 'Dormitorio prueba',
+        length: 4.20,
+        width: 3.70,
+        height: 2.60,
+      ),
+    );
+    expect(built.controller.rooms.single.acquisition.arMetrics, isNull);
+    final inheritedScroll = ScrollController(initialScrollOffset: 1200);
+    addTearDown(inheritedScroll.dispose);
+    tester.view.physicalSize = const Size(720, 1600);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      PrimaryScrollController(
+        controller: inheritedScroll,
+        child: MaterialApp(
+          home: SpatialCaptureScreen(controller: built.controller),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final editButton = find.byKey(const ValueKey('edit-room-room-1'));
+    await tester.scrollUntilVisible(
+      editButton,
+      400,
+      scrollable: find.descendant(
+        of: find.byKey(const ValueKey('spatial-capture-screen')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(editButton.hitTestable(), findsOneWidget);
+    await tester.tap(editButton);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(RoomEditorScreen), findsOneWidget);
+    for (final text in [
+      'Dormitorio prueba',
+      'Altura',
+      'Altura: 2,60 m (ingresada a mano)',
+      'Lados',
+      'Puertas y ventanas',
+      'Agregar puerta o ventana',
+    ]) {
+      final finder = find.text(text);
+      await tester.ensureVisible(finder);
+      await tester.pump();
+      expect(finder.hitTestable(), findsOneWidget);
+    }
+  });
+
+  testWidgets('room editor rejects an inherited primary scroll offset', (
+    tester,
+  ) async {
+    final built = await _build(tester);
+    await tester.runAsync(
+      () => built.controller.createManualRectangularRoom(
+        name: 'Dormitorio prueba',
+        length: 4.20,
+        width: 3.70,
+        height: 2.60,
+      ),
+    );
+    final inheritedScroll = ScrollController(initialScrollOffset: 1200);
+    addTearDown(inheritedScroll.dispose);
+    tester.view.physicalSize = const Size(720, 1600);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PrimaryScrollController(
+          controller: inheritedScroll,
+          child: RoomEditorScreen(
+            controller: built.controller,
+            roomId: 'room-1',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Dormitorio prueba').hitTestable(), findsOneWidget);
+    expect(find.text('Altura').hitTestable(), findsOneWidget);
+    expect(
+      find.text('Altura: 2,60 m (ingresada a mano)').hitTestable(),
+      findsOneWidget,
+    );
   });
 
   testWidgets('shows automatic capture unavailable on unsupported devices', (

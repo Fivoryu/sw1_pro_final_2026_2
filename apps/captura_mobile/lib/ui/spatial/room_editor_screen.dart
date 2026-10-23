@@ -22,6 +22,7 @@ class RoomEditorScreen extends StatefulWidget {
 }
 
 class _RoomEditorScreenState extends State<RoomEditorScreen> {
+  final _scrollController = ScrollController();
   final _height = TextEditingController();
   final _references = <int, TextEditingController>{};
   final _boxHeights = <String, TextEditingController>{};
@@ -44,6 +45,7 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
   @override
   void dispose() {
     _controller.removeListener(_onChanged);
+    _scrollController.dispose();
     _height.dispose();
     for (final controller in [..._references.values, ..._boxHeights.values]) {
       controller.dispose();
@@ -176,6 +178,7 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
       appBar: AppBar(title: Text(room.name)),
       body: SafeArea(
         child: ListView(
+          controller: _scrollController,
           padding: const EdgeInsets.all(20),
           children: [
             Text('Altura', style: theme.textTheme.titleLarge),
