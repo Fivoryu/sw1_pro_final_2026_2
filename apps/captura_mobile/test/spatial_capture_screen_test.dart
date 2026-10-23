@@ -140,10 +140,16 @@ void main() {
       tester,
       find.byKey(const ValueKey('capture-room-button')),
     );
+    expect(find.text('Captura automática'), findsOneWidget);
+    expect(find.text('Medidas manuales'), findsOneWidget);
+    expect(find.textContaining('importar'), findsNothing);
     await _tapAndSettle(
       tester,
       find.byKey(const ValueKey('manual-capture-method')),
     );
+    expect(find.text('Largo del ambiente (m)'), findsOneWidget);
+    expect(find.text('Ancho del ambiente (m)'), findsOneWidget);
+    expect(find.text('Altura del ambiente (m)'), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('manual-room-name')),
       'Dormitorio',
@@ -301,7 +307,14 @@ void main() {
     );
     await tester.pumpAndSettle();
     final roomName = find.text('Dormitorio prueba');
-    await tester.ensureVisible(roomName);
+    await tester.scrollUntilVisible(
+      roomName,
+      300,
+      scrollable: find.descendant(
+        of: find.byKey(const ValueKey('spatial-capture-screen')),
+        matching: find.byType(Scrollable),
+      ),
+    );
     await tester.pump();
     expect(roomName.hitTestable(), findsOneWidget);
   });
@@ -495,6 +508,60 @@ void main() {
       built.controller.rooms.single.references.single.referenceMeters,
       4.15,
     );
+  });
+
+  testWidgets('opening position uses metres and preserves normalized domain', (
+    tester,
+  ) async {
+    final built = await _build(tester);
+    await tester.runAsync(
+      () => built.controller.createManualRectangularRoom(
+        name: 'Dormitorio prueba',
+        length: 4.20,
+        width: 3.70,
+        height: 2.65,
+      ),
+    );
+    tester.view.physicalSize = const Size(720, 1600);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: andeanTheme(),
+        home: RoomEditorScreen(controller: built.controller, roomId: 'room-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    final add = find.byKey(const ValueKey('add-opening-button'));
+    await tester.ensureVisible(add);
+    await tester.tap(add);
+    await tester.pumpAndSettle();
+    final position = find.byKey(const ValueKey('opening-position-metres'));
+    expect(tester.widget<TextField>(position).controller!.text, '2,10');
+    await tester.enterText(position, '2.10');
+    await tester.tap(find.byKey(const ValueKey('opening-confirm')));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(built.controller.rooms.single.openings.single.position, 0.5);
+
+    final openingTile = find.textContaining('Puerta 1');
+    await tester.ensureVisible(openingTile);
+    await tester.tap(openingTile);
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(position).controller!.text, '2,10');
+    await tester.enterText(position, '0,10');
+    await tester.tap(find.byKey(const ValueKey('opening-confirm')));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(
+      find.text(
+        'La abertura se sale de la pared. Mové su posición hacia el centro.',
+      ),
+      findsOneWidget,
+    );
+    expect(built.controller.rooms.single.openings.single.position, 0.5);
   });
 
   testWidgets('shows automatic capture unavailable on unsupported devices', (

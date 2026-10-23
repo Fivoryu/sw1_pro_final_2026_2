@@ -171,10 +171,9 @@ class _SpatialCaptureScreenState extends State<SpatialCaptureScreen> {
               padding: const EdgeInsets.all(20),
               children: [
                 const Text(
-                  'Recorré cada ambiente con la cámara: la app detecta las paredes '
-                  'y propone el contorno, que podés revisar. Después medí un '
-                  'lado con cinta o láser para corregir la escala de todo el '
-                  'ambiente.',
+                  'Capturá cada ambiente con el método disponible en tu dispositivo. '
+                  'Podés usar captura automática compatible o ingresar las medidas '
+                  'manualmente. Antes de enviar, revisá el plano y las aberturas.',
                 ),
                 const SizedBox(height: 16),
                 _SyncCard(
@@ -614,9 +613,9 @@ class _RoomCreationMethodDialogState extends State<_RoomCreationMethodDialog> {
           ListTile(
             key: const ValueKey('manual-capture-method'),
             leading: const Icon(Icons.straighten),
-            title: const Text('Plano o medidas'),
+            title: const Text('Medidas manuales'),
             subtitle: const Text(
-              'Ingresá el largo, ancho y alto de un ambiente rectangular.',
+              'Ingresá las dimensiones del ambiente sin usar ARCore.',
             ),
             onTap: () => Navigator.of(context).pop(_RoomCreationMethod.manual),
           ),
@@ -687,7 +686,7 @@ class _ManualRoomDialogState extends State<_ManualRoomDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Plano o medidas'),
+    title: const Text('Medidas manuales'),
     content: SingleChildScrollView(
       child: Form(
         key: _formKey,
@@ -703,10 +702,13 @@ class _ManualRoomDialogState extends State<_ManualRoomDialog> {
               ),
               validator: _requiredName,
             ),
+            const Text(
+              'Largo y ancho corresponden a dos paredes perpendiculares.',
+            ),
             for (final field in [
-              (_length, 'manual-room-length', 'Largo (m)'),
-              (_width, 'manual-room-width', 'Ancho (m)'),
-              (_height, 'manual-room-height', 'Alto (m)'),
+              (_length, 'manual-room-length', 'Largo del ambiente (m)'),
+              (_width, 'manual-room-width', 'Ancho del ambiente (m)'),
+              (_height, 'manual-room-height', 'Altura del ambiente (m)'),
             ])
               TextFormField(
                 key: ValueKey(field.$2),

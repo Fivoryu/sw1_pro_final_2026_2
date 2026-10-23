@@ -425,7 +425,12 @@ class _OpeningDialog extends StatefulWidget {
 class _OpeningDialogState extends State<_OpeningDialog> {
   late OpeningType _type = widget.opening?.type ?? OpeningType.door;
   late int _edge = widget.opening?.edgeIndex ?? 0;
-  late double _position = widget.opening?.position ?? 0.5;
+  late final _position = TextEditingController(
+    text: _decimal(
+      (widget.opening?.position ?? 0.5) *
+          edgeLengths(widget.room.corners)[_edge],
+    ),
+  );
   late final _width = TextEditingController(
     text: _decimal(widget.opening?.width ?? 0.9),
   );
@@ -435,12 +440,14 @@ class _OpeningDialogState extends State<_OpeningDialog> {
   late final _sill = TextEditingController(
     text: _decimal(widget.opening?.sillHeight ?? 0.9),
   );
+  String? _positionError;
 
   static String _decimal(double value) =>
       value.toStringAsFixed(2).replaceAll('.', ',');
 
   @override
   void dispose() {
+    _position.dispose();
     _width.dispose();
     _height.dispose();
     _sill.dispose();
@@ -457,23 +464,33 @@ class _OpeningDialogState extends State<_OpeningDialog> {
   }
 
   void _submit() {
+    final positionMetres = parseMetres(_position.text);
     final width = parseMetres(_width.text);
     final height = parseMetres(_height.text);
     final sill = _type == OpeningType.window
         ? double.tryParse(_sill.text.trim().replaceAll(',', '.'))
         : null;
-    if (width == null || height == null) return;
-    Navigator.of(context).pop(
-      RoomOpening(
-        id: widget.opening?.id ?? _newId(),
-        edgeIndex: _edge,
-        position: _position,
-        width: width,
-        height: height,
-        type: _type,
-        sillHeight: sill,
-      ),
+    if (positionMetres == null || width == null || height == null) {
+      setState(
+        () => _positionError = 'Ingresá una distancia válida en metros.',
+      );
+      return;
+    }
+    final opening = RoomOpening(
+      id: widget.opening?.id ?? _newId(),
+      edgeIndex: _edge,
+      position: positionMetres / edgeLengths(widget.room.corners)[_edge],
+      width: width,
+      height: height,
+      type: _type,
+      sillHeight: sill,
     );
+    final issues = validateOpening(widget.room, opening);
+    if (issues.isNotEmpty) {
+      setState(() => _positionError = openingIssueMessage(issues.first));
+      return;
+    }
+    Navigator.of(context).pop(opening);
   }
 
   @override
@@ -501,6 +518,7 @@ class _OpeningDialogState extends State<_OpeningDialog> {
             const SizedBox(height: 12),
             DropdownButtonFormField<int>(
               key: const ValueKey('opening-edge'),
+              isExpanded: true,
               initialValue: _edge,
               decoration: const InputDecoration(labelText: 'Lado'),
               items: [
@@ -512,16 +530,30 @@ class _OpeningDialogState extends State<_OpeningDialog> {
                     ),
                   ),
               ],
-              onChanged: (value) => setState(() => _edge = value ?? 0),
+              onChanged: (value) {
+                if (value == null) return;
+                setState(() {
+                  _edge = value;
+                  _positionError = null;
+                  if (widget.opening == null) {
+                    _position.text = _decimal(lengths[_edge] / 2);
+                  }
+                });
+              },
             ),
             const SizedBox(height: 12),
-            Text(
-              'Posición a lo largo del lado: '
-              '${metres(_position * lengths[_edge])}',
-            ),
-            Slider(
-              value: _position,
-              onChanged: (value) => setState(() => _position = value),
+            TextField(
+              key: const ValueKey('opening-position-metres'),
+              controller: _position,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: InputDecoration(
+                labelText: 'Posición desde el inicio del lado (m)',
+                helperText:
+                    'Distancia desde la esquina inicial del lado hasta el centro de la abertura.',
+                errorText: _positionError,
+              ),
             ),
             TextField(
               key: const ValueKey('opening-width'),
