@@ -183,7 +183,7 @@ cd backend && /mnt/d/Universidad/Proyectos/2doSemestre2026/sw1/proyecto_final/.v
 18 errors, 0 warnings, 0 informations
 ```
 
-Pyright conserva los 18 errores preexistentes de resolución de `eth_account`/`eth_utils`; no señala los archivos de esta unidad. No se ejecutaron Docker Compose efectivo, provisionamiento contra Floci, redrive real, PostgreSQL, inferencia dentro del contenedor ni SQS de AWS. La duración de inferencia tampoco se midió; el límite de no tener heartbeat del lease queda declarado en §4 y en `openspec/changes/f08-trabajos-asincronos/design.md`.
+Pyright conserva los 18 errores preexistentes de resolución de `eth_account`/`eth_utils`; no señala los archivos de esta unidad. No se ejecutaron Docker Compose efectivo, provisionamiento contra Floci, redrive real, PostgreSQL, inferencia dentro del contenedor ni SQS de AWS. La duración de inferencia tampoco se midió; el límite de no tener heartbeat del lease queda declarado en §4 y en `openspec/changes/archive/f08-trabajos-asincronos/design.md`.
 
 ## 7. Cierre de los hallazgos de la cuarta verificación
 

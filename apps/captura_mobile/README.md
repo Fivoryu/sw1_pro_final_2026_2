@@ -5,7 +5,7 @@ App de captura del agente inmobiliario: acceso de personal y borradores de inmue
 - Stack: Flutter 3.41.8 / Dart 3.11.5, Material 3.
 - Superficie real: acceso de personal con contraseña y TOTP (F03), y «Mis inmuebles» (F04): lista por estado (borradores, rechazados, en revisión), ficha del inmueble con validación, fotos (F04.2), guardar borrador y envío a revisión con confirmación.
 - Prototipos de fases futuras (sin backend): ambientes/fotos, geometría y objetos, preparación de oferta y resumen de envío.
-- Trazabilidad: `odd/tasks/f04-capture-drafts.md`, `odd/tasks/f04-photos.md`, `odd/tasks/f03-capture-staff-origin.md`, `odd/tasks/f02-t4e-capture-prototype.md` y `docs/ux/f02-surface-map.md`.
+- Trazabilidad: `odd/tasks/f04-capture-drafts.md`, `odd/tasks/f04-photos.md`, `odd/tasks/f03-capture-staff-origin.md`, `odd/tasks/archivo/f02-t4e-capture-prototype.md` y `docs/ux/f02-surface-map.md`.
 
 ## Alcance y límites
 

@@ -1,7 +1,7 @@
 # F08 — IA preentrenada para mobiliario: piloto de inferencia (F08.1–F08.3)
 
 Este documento es la especificación que leen los subagentes: leer hasta `## Log`.
-Fase F08 del `docs/plan-maestro-roomforge.md`. Rama `feat/f08-furniture-ai-pilot`, worktree `proyecto_final-f08-ai-wt`, base `origin/main` `452fcd7`. Registro SDD en `openspec/changes/f08-ia-mobiliario/`.
+Fase F08 del `docs/plan-maestro-roomforge.md`. Rama `feat/f08-furniture-ai-pilot`, worktree `proyecto_final-f08-ai-wt`, base `origin/main` `452fcd7`. Registro SDD en `openspec/changes/archive/f08-ia-mobiliario/`.
 
 ## Specs
 

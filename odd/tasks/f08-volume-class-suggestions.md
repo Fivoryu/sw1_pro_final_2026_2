@@ -16,7 +16,7 @@ S5. Revisión F08.5 (aditivo). `GET .../furniture-review` agrega `volume_suggest
 
 S6. Panel: `FurnitureReviewPanel` lista las sugerencias por volumen (clase, puntuación, volumen) con confirmar/rechazar; al confirmar, posición y dimensiones vienen precargadas del volumen; nunca se confirma sin acción humana.
 
-S7. `infra/docker/init-local-resources.ps1` aplica la redrive policy de la cola de detección sin error (antes: «exit 25 en `set-queue-attributes`»), y documentación (`docs/f07-guia-prueba-dispositivo.md`, `docs/api/f07-capture-package.md` o contrato de revisión) refleja S3–S7.
+S7. `infra/docker/init-local-resources.ps1` aplica la redrive policy de la cola de detección sin error (antes: «exit 25 en `set-queue-attributes`»), y documentación (`docs/guias/f07-guia-prueba-dispositivo.md`, `docs/api/f07-capture-package.md` o contrato de revisión) refleja S3–S7.
 
 ## Tasks
 

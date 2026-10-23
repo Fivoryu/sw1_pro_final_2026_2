@@ -6,7 +6,7 @@ Cerrar F04.1, F04.2 y F04.3 del `docs/plan-maestro-roomforge.md`, más la regres
 
 ## Fuentes canónicas (regla del 2026-09-30)
 
-Por decisión del usuario, las **únicas** fuentes canónicas de requisitos son `docs/redefinicion-roomforge.md` y `docs/plan-maestro-roomforge.md`. Ningún artefacto de `openspec/changes/` es fuente de requisitos ni de alcance para esta unidad; en particular, `openspec/changes/hu022-025-publicaciones/` **no se usa**, y se deja constancia de que describe un módulo `publications` con la migración `0010_hu006_publication_revisions.py` que no existen en este repositorio (evidencia en `docs/plan-maestro-roomforge.md` §1.4.3).
+Por decisión del usuario, las **únicas** fuentes canónicas de requisitos son `docs/redefinicion-roomforge.md` y `docs/plan-maestro-roomforge.md`. Ningún artefacto de `openspec/changes/` es fuente de requisitos ni de alcance para esta unidad; en particular, `openspec/changes/archive/hu022-025-publicaciones/` **no se usa**, y se deja constancia de que describe un módulo `publications` con la migración `0010_hu006_publication_revisions.py` que no existen en este repositorio (evidencia en `docs/plan-maestro-roomforge.md` §1.4.3).
 
 Reglas canónicas que gobiernan F04:
 

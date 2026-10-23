@@ -14,10 +14,10 @@ El Sprint 1 **no está globalmente cerrado**. Las historias implementadas solo p
 | --- | --- | --- | --- |
 | HU-001 — Registro de cliente | CP-001 | Completada con verificación técnica (slice backend/API) | Registro válido, rechazo de duplicados y validaciones HTTP en la superficie backend. |
 | HU-002 — Autenticación y sesión | CP-002 | Completada con verificación técnica (slice backend/API) | Login, continuidad de sesión, logout e invalidación por inactividad mediante la API y la base de datos local. |
-| HU-004 — Alta de inmobiliaria | CP-003 | Completada con verificación técnica | El [informe OpenSpec de verificación](../../backend/openspec/changes/archive/2026-09-03-hu004-alta-inmobiliaria/verify-report.md) registra PASS, 36/36 tareas completas y 70 pruebas reportadas. CP-003 permanece `not executed` en el reporte académico del Sprint 1. |
-| HU-005 — Trial y suscripción mensual | CP-004 | Completada con verificación técnica | El [informe OpenSpec de verificación](../../backend/openspec/changes/hu005-trial-suscripcion/verify-report.md) registra PASS, 36/36 tareas completas y 77 pruebas reportadas. La evidencia técnica de CP-004 no cambia el estado académico `not executed` de CP-004. |
-| HU-006 — Ciclo de suscripción | CP-005 | Completada con verificación técnica | El [informe OpenSpec de verificación](../../backend/openspec/changes/archive/2026-09-11-hu006-ciclo-suscripcion/verify-report.md) registra PASS, 19/19 tareas completas, 209 pruebas backend y 49 pruebas panel; el [paquete técnico de evidencia de CP-005](../../backend/openspec/changes/archive/2026-09-11-hu006-ciclo-suscripcion/cp-005-evidence/) documenta CP-005.1–CP-005.8 como PASS. El registro académico de CP-005 permanece `not executed`. |
-| HU-008 — Gestión de membresías | CP-007 | Completada con verificación técnica (backend) | El [informe OpenSpec de verificación](../../backend/openspec/changes/archive/2026-09-13-hu008-membresias-agentes/verify-report.md) y el [informe de archivo](../../backend/openspec/changes/archive/2026-09-13-hu008-membresias-agentes/archive-report.md) registran 33/33 tareas, suite fresca de 271 pruebas pasadas y 3 warnings, foco HU-007 + HU-008 de 61 pruebas pasadas, PostgreSQL real con 6 pruebas pasadas y Ruff/Pyright/py_compile limpios. El alcance se limita al ciclo de vida backend de membresías, autorización administrativa con alcance por tenant, unicidad parcial de membresías activas y verificación de auditoría, transacciones y concurrencia. CP-007 permanece `not executed` en la línea base académica. |
+| HU-004 — Alta de inmobiliaria | CP-003 | Completada con verificación técnica | El informe OpenSpec de verificación **[no conservado]** registra PASS, 36/36 tareas completas y 70 pruebas reportadas. CP-003 permanece `not executed` en el reporte académico del Sprint 1. |
+| HU-005 — Trial y suscripción mensual | CP-004 | Completada con verificación técnica | El informe OpenSpec de verificación **[no conservado]** registra PASS, 36/36 tareas completas y 77 pruebas reportadas. La evidencia técnica de CP-004 no cambia el estado académico `not executed` de CP-004. |
+| HU-006 — Ciclo de suscripción | CP-005 | Completada con verificación técnica | El informe OpenSpec de verificación **[no conservado]** registra PASS, 19/19 tareas completas, 209 pruebas backend y 49 pruebas panel; el paquete técnico de evidencia de CP-005 **[no conservado]** documenta CP-005.1–CP-005.8 como PASS. El registro académico de CP-005 permanece `not executed`. |
+| HU-008 — Gestión de membresías | CP-007 | Completada con verificación técnica (backend) | El informe OpenSpec de verificación **[no conservado]** y el informe de archivo **[no conservado]** registran 33/33 tareas, suite fresca de 271 pruebas pasadas y 3 warnings, foco HU-007 + HU-008 de 61 pruebas pasadas, PostgreSQL real con 6 pruebas pasadas y Ruff/Pyright/py_compile limpios. El alcance se limita al ciclo de vida backend de membresías, autorización administrativa con alcance por tenant, unicidad parcial de membresías activas y verificación de auditoría, transacciones y concurrencia. CP-007 permanece `not executed` en la línea base académica. |
 
 ### Nota sobre la línea base académica
 
@@ -29,7 +29,7 @@ Estas historias cuentan con observaciones de implementación o validación parci
 
 | Historia | Caso académico relacionado | Estado | Alcance y límites de la evidencia |
 | --- | --- | --- | --- |
-| HU-007 — Invitación de agentes | CP-006 | Implementada por superficie | Las superficies backend y panel están implementadas. El [apply-progress activo de OpenSpec](../../openspec/changes/hu007-invitacion-agentes/apply-progress.md) mantiene el resultado como `partial`; CP-006 continúa pendiente y `not executed`. |
+| HU-007 — Invitación de agentes | CP-006 | Implementada por superficie | Las superficies backend y panel están implementadas. El [apply-progress activo de OpenSpec](../../openspec/changes/archive/hu007-invitacion-agentes/apply-progress.md) mantiene el resultado como `partial`; CP-006 continúa pendiente y `not executed`. |
 | HU-022 — Crear y editar borrador | CP-009 | Implementada por superficie | Existe un flujo interno backend de publicación observado en la auditoría. CP-009 permanece `not executed` y no se cuenta con evidencia del flujo web/API completo. |
 | HU-023 — Enviar a revisión | CP-010 | Implementada por superficie | Existe un flujo interno backend de publicación observado en la auditoría. CP-010 permanece `not executed` y no se cuenta con evidencia del flujo web/API completo. |
 | HU-024 — Aprobar o rechazar publicaciones | CP-011 | Implementada por superficie | Existe un flujo interno backend de publicación observado en la auditoría. CP-011 permanece `not executed` y no se cuenta con evidencia del flujo web/API completo. |
@@ -55,12 +55,16 @@ No se observó evidencia suficiente para registrar estas historias como completa
 - [Evidencia de CP-001 — Registro](../scrum/sprint-1/evidencia/cp001-registro-transcripto.txt).
 - [Evidencia de CP-002 — Autenticación](../scrum/sprint-1/evidencia/cp002-autenticacion-transcripto.txt).
 - [Evidencia complementaria de concurrencia de refresh](../scrum/sprint-1/evidencia/req05-refresh-concurrency-postgres.txt).
-- [Verificación técnica de HU-004](../../backend/openspec/changes/archive/2026-09-03-hu004-alta-inmobiliaria/verify-report.md).
-- [Verificación técnica de HU-005](../../backend/openspec/changes/hu005-trial-suscripcion/verify-report.md).
-- [Verificación técnica de HU-006](../../backend/openspec/changes/archive/2026-09-11-hu006-ciclo-suscripcion/verify-report.md) y [paquete cp-005-evidence](../../backend/openspec/changes/archive/2026-09-11-hu006-ciclo-suscripcion/cp-005-evidence/).
-- [Progreso activo de HU-007](../../openspec/changes/hu007-invitacion-agentes/apply-progress.md).
-- [Verificación técnica de HU-008](../../backend/openspec/changes/archive/2026-09-13-hu008-membresias-agentes/verify-report.md) y [informe de archivo de HU-008](../../backend/openspec/changes/archive/2026-09-13-hu008-membresias-agentes/archive-report.md).
+- Verificación técnica de HU-004 **[no conservado]**.
+- Verificación técnica de HU-005 **[no conservado]**.
+- Verificación técnica de HU-006 **[no conservado]** y paquete cp-005-evidence **[no conservado]**.
+- [Progreso activo de HU-007](../../openspec/changes/archive/hu007-invitacion-agentes/apply-progress.md).
+- Verificación técnica de HU-008 **[no conservado]** y informe de archivo de HU-008 **[no conservado]**.
 
 La evidencia disponible permite reconocer seis historias con verificación técnica, sin alterar el estado de los casos académicos ni aprobar globalmente el Sprint 1. HU-008 no incluye HU-009/RBAC, publicaciones, UI/mobile, producción ni commits/pushes.
 
 **Última actualización:** no registrada.
+
+## Nota sobre evidencias no conservadas
+
+Los informes marcados como **[no conservado]** vivían en el repositorio `backend` anterior al aplanado del monorepo y no se trasladaron a este repositorio ni a su historial de git. Se conserva la mención como trazabilidad; su contenido no puede verificarse desde este repositorio.

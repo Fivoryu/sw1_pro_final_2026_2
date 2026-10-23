@@ -17,7 +17,7 @@ Las recomendaciones son advisory-only. La implementación posterior deberá conv
 
 ## 1. Continuidad y relación con la propuesta original
 
-La [propuesta original de RoomForge](propuesta-roomforge-original.md) se conserva sin modificación. Describe captura de espacios con teléfono, asistencia local de IA y reconstrucción 3D asíncrona, y debe seguir leyéndose como antecedente, no como especificación completa de esta redefinición.
+La [propuesta original de RoomForge](archivo/propuesta-roomforge-original.md) se conserva sin modificación. Describe captura de espacios con teléfono, asistencia local de IA y reconstrucción 3D asíncrona, y debe seguir leyéndose como antecedente, no como especificación completa de esta redefinición.
 
 La [infraestructura del Sprint 0](scrum/sprint-0-requerimientos/09-infraestructura.md) también conserva su valor histórico. Documenta FastAPI, PostgreSQL, S3/SQS, Floci, Meshroom, Hardhat y una topología AWS prevista; no prueba por sí sola que cada componente esté implementado, desplegable o siga siendo la selección adecuada.
 

@@ -6,7 +6,7 @@ Completar la Fase 4 del `docs/plan-maestro-roomforge.md` a partir del backend ya
 
 ## Fuentes canónicas
 
-Rige la regla del 2026-09-30 (`docs/plan-maestro-roomforge.md` §1.4.3): las únicas fuentes de requisitos son `docs/redefinicion-roomforge.md` y `docs/plan-maestro-roomforge.md`. `openspec/changes/hu022-025-publicaciones/` no se usa.
+Rige la regla del 2026-09-30 (`docs/plan-maestro-roomforge.md` §1.4.3): las únicas fuentes de requisitos son `docs/redefinicion-roomforge.md` y `docs/plan-maestro-roomforge.md`. `openspec/changes/archive/hu022-025-publicaciones/` no se usa.
 
 Reglas que gobiernan esta unidad:
 

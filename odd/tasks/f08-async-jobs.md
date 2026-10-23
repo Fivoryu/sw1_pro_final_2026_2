@@ -1,7 +1,7 @@
 # F08.4 — Trabajos asíncronos de detección (API + cola + worker)
 
 Este documento es la especificación que leen los subagentes: leer hasta `## Log`.
-Subfase F08.4 del `docs/plan-maestro-roomforge.md`. Rama `feat/f08-furniture-ai-pilot`, worktree `proyecto_final-f08-ai-wt`. Registro SDD en `openspec/changes/f08-trabajos-asincronos/`.
+Subfase F08.4 del `docs/plan-maestro-roomforge.md`. Rama `feat/f08-furniture-ai-pilot`, worktree `proyecto_final-f08-ai-wt`. Registro SDD en `openspec/changes/archive/f08-trabajos-asincronos/`.
 Unidad **grande y de riesgo alto** (concurrencia): exige verificación independiente al cerrar.
 
 ## Specs

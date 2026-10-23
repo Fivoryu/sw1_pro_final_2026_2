@@ -18,7 +18,7 @@ Crear una configuración nueva de Docker Compose para PostgreSQL y Floci (S3/SQS
 ## Estado inicial y decisiones
 
 - Rama: `chore/roomforge-reset-01a0d0ec`.
-- El estado inicial ya tenía modificaciones en los submódulos móvil/backend/panel, eliminación de `infra/docker/compose.postgres.yml`, documentos sin seguimiento (`docs/redefinicion-roomforge.md`, `odd/tasks/project-reset.md`) y otros cambios OpenSpec/.pi. No atribuirlos a este trabajo.
+- El estado inicial ya tenía modificaciones en los submódulos móvil/backend/panel, eliminación de `infra/docker/compose.postgres.yml`, documentos sin seguimiento (`docs/redefinicion-roomforge.md`, `odd/tasks/archivo/project-reset.md`) y otros cambios OpenSpec/.pi. No atribuirlos a este trabajo.
 - Docker Engine 29.8.0 y Compose v5.5.1 responden; no hay contenedores en ejecución.
 - Los puertos 5432, 5434, 4566 y 4576 no tenían listener en la comprobación inicial.
 - Hay numerosos volúmenes previos, incluidos `infra_postgres_data`, `roomforge_pgdata` y `proyecto_final_postgres_data`. La nueva configuración debe usar un nombre de proyecto/volúmenes distinto; no inspeccionar, montar ni borrar los existentes.

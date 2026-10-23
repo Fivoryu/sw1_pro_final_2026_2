@@ -1,61 +1,53 @@
-# RoomForge — Documentación de Ingeniería de Software
+# RoomForge — Documentación
 
-Índice de navegación del proyecto. El **orden conceptual** sigue el documento modelo `docs/modelo_doc/Documento Final - Grupo#12 - estandar de cod.pdf`:
+Índice de la documentación del proyecto. Si es la primera vez que llega acá, empiece por el plan maestro: dice qué se construye, en qué estado está cada fase y qué falta.
 
-`PAPS → PROCESO DE DESARROLLO SCRUM → CAPITULO 1 – REQUERIMIENTOS (Sprint 0) → CAPITULO 2 - PROCESO DE DESARROLLO DE SOFTWARE (Sprint 1–3) → BIBLIOGRAFIA → ANEXOS`
+## Empezar por acá
 
-## Convención de IDs
-
-Registro canónico: [`docs/sprint-0/ids-trazabilidad.md`](sprint-0/ids-trazabilidad.md) — `OBJ-###`, `RF-###`, `RNF-###`, `BR-###`, `PB-###`, `HU-###`, `CU-###`, `SP-##`, `TASK-###`, `TC-###`, `REV-##`, `GAP-###`. Los IDs se asignan una vez y no se reciclan.
-
-## Módulos
-
-| # | Módulo | Estado | Evidencia/fuentes |
-| --- | --- | --- | --- |
-| PAPS-01 | [Introducción](paps/01-introduccion.md) | planned | propuesta, ids |
-| PAPS-02 | [Descripción del problema](paps/02-descripcion-del-problema.md) | planned | propuesta |
-| PAPS-03 | [Métricas](paps/03-metricas.md) | planned | modelo (GAP-082) |
-| PAPS-04 | [Definiciones para la estimación](paps/04-definiciones-para-la-estimacion.md) | planned | modelo (GAP-083) |
-| PAPS-05 | [Métodos de estimación](paps/05-metodos-de-estimacion.md) | planned | modelo (GAP-083) |
-| PAPS-06 | [Análisis de riesgos](paps/06-analisis-de-riesgos.md) | planned | [riesgos](sprint-0/riesgos.md) |
-| PAPS-07 | [Planificación del tiempo](paps/07-planificacion-del-tiempo.md) | planned | ids §10 (GAP-084) |
-| PAPS-08 | [Recursos](paps/08-recursos.md) | planned | spk-03 (GAP-085) |
-| PAPS-09 | [Organización interna](paps/09-organizacion-interna.md) | planned | S0-03 (GAP-086) |
-| PAPS-10 | [Seguimiento/control](paps/10-seguimiento-control.md) | planned | ceremonias (GAP-087) |
-| SCRUM | [Proceso de desarrollo Scrum](scrum/README.md) | in progress | ids §10 |
-| AVANCE | [Avance por historias de usuario](avance/README.md) | in progress | evidencia CP-001/CP-002 |
-| S0-01 | [Sprint 0 — Propósito](scrum/sprint-0-requerimientos/01-proposito.md) | done | ids |
-| S0-02 | [Sprint 0 — Ámbito, objetivos y descripción](scrum/sprint-0-requerimientos/02-ambito-objetivos-descripcion.md) | done | ids, línea base |
-| S0-03 | [Sprint 0 — Equipo Scrum](scrum/sprint-0-requerimientos/03-equipo-scrum.md) | done | obs-2287/2347 |
-| S0-04 | [Sprint 0 — Requerimientos iniciales](scrum/sprint-0-requerimientos/04-requerimientos-iniciales.md) | done | ids, auditoría |
-| S0-05 | [Sprint 0 — Funciones](scrum/sprint-0-requerimientos/05-funciones.md) | done | ids |
-| S0-06 | [Sprint 0 — Product Backlog / HU](scrum/sprint-0-requerimientos/06-product-backlog-hu.md) | done | ids (GAP-070) |
-| S0-07 | [Sprint 0 — Casos de uso](scrum/sprint-0-requerimientos/07-casos-de-uso.md) | done | ids (GAP-071) |
-| S0-08 | [Sprint 0 — Planificación de sprints](scrum/sprint-0-requerimientos/08-planificacion-de-sprints.md) | done | ids §10 (GAP-072/073) |
-| S0-09 | [Sprint 0 — Infraestructura](scrum/sprint-0-requerimientos/09-infraestructura.md) | done | obs-2276..2405, spk-05 |
-| S0-10 | [Sprint 0 — Patrón de desarrollo](scrum/sprint-0-requerimientos/10-patron-de-desarrollo.md) | done | stack, blockchain-enfoque |
-| S0-11 | [Sprint 0 — Modelos iniciales](scrum/sprint-0-requerimientos/11-modelos-iniciales.md) | done | obs-2395/2406 (GAP-088) |
-| S0-12 | [Sprint 0 — Criterios de calidad](scrum/sprint-0-requerimientos/12-criterios-de-calidad.md) | done | ids §4 (GAP-065/066) |
-| S0-13 | [Sprint 0 — Conclusión](scrum/sprint-0-requerimientos/13-conclusion.md) | done | ids |
-| S1-01…08 | [Sprint 1](scrum/sprint-1/01-sprint-planning.md) | planned | por sprint |
-| S2-01…08 | [Sprint 2](scrum/sprint-2/01-sprint-planning.md) | planned | por sprint |
-| S3-01…08 | [Sprint 3](scrum/sprint-3/01-sprint-planning.md) | planned | por sprint |
-| BIB | [Bibliografía](bibliografia.md) | planned | GAP-089 |
-| ANX | [Anexos](anexos/README.md) | planned | GAP-090 |
-
-## Artefactos de análisis (evidencia del Sprint 0)
-
-| Artefacto | Rol |
+| Documento | Para qué sirve |
 | --- | --- |
-| [Auditoría de reglas de negocio](sprint-0/auditoria-br.md) | 76 BR con fuente, gaps y decisiones cerradas |
-| [IDs y matriz de trazabilidad](sprint-0/ids-trazabilidad.md) | Registro canónico de IDs, plataformas y matrices |
-| [Riesgos](sprint-0/riesgos.md) | R1–R10 con mitigación y seguimiento |
-| [Enfoque blockchain](sprint-0/blockchain-enfoque.md) | Plan de aprendizaje y TBD del escrow |
-| [SPK-01](spikes/spk-01-bitacora.md) · [SPK-02](spikes/spk-02-precisión.md) · [SPK-03](spikes/spk-03-inventario-gpu.md) · [SPK-05](spikes/spk-05-smoke-test-local.md) | Bitácoras de spikes (pendientes de ejecución) |
-| [Diagramas EA](diagramas/) | Proyecto Enterprise Architect (UML) |
+| [Plan maestro](plan-maestro-roomforge.md) | Fuente de verdad del alcance y del estado por fase (§1.4.1) y espejo de las issues (§1.4.5). |
+| [Redefinición del producto](redefinicion-roomforge.md) | Reglas de producto vigentes; el plan maestro la referencia. |
+| [IDs y trazabilidad](sprint-0/ids-trazabilidad.md) | Registro canónico de IDs (`PB`, `HU`, `CU`, `CP`, `GAP`, etc.); los IDs no se reciclan. |
+| [Guías de traspaso](guias/) | Cómo levantar, probar y cerrar una fase en otro equipo: [F07 en dispositivo](guias/f07-guia-prueba-dispositivo.md) y [cierre de F09](guias/f09-guia-cierre.md). |
 
-## Estado de evidencias clave
+## Documentación académica
 
-- Spikes SPK-01/02/03/05: **not executed** (pendientes del equipo) → sus resultados alimentan RNF-001/002 y los límites de planes (GAP-061/065/066).
-- División definitiva de sprints y estimación: **GAP-072** (módulo S0-08).
-- Asignación de responsables: **GAP-073** (cada sprint planning).
+Sigue el orden del documento modelo (`modelo_doc/Documento Final - Grupo#12 - estandar de cod.pdf`): PAPS → Proceso Scrum → Capítulo 1 (Sprint 0) → Capítulo 2 (Sprints 1–3) → Bibliografía → Anexos.
+
+| Módulo | Ubicación | Estado |
+| --- | --- | --- |
+| PAPS (introducción, problema, métricas, estimación, riesgos, tiempo, recursos, organización, seguimiento) | — | Pendiente de redactar: GAP-082 a GAP-087. Insumos: [riesgos](sprint-0/riesgos.md) y [spikes](spikes/). |
+| Proceso de desarrollo Scrum | [scrum/](scrum/README.md) | Con contenido |
+| Capítulo 1 — Requerimientos (Sprint 0) | [scrum/sprint-0-requerimientos/](scrum/sprint-0-requerimientos/01-proposito.md), módulos 01 a 13 | Con contenido |
+| Capítulo 2 — Sprint 1 | [scrum/sprint-1/](scrum/sprint-1/01-sprint-planning.md), módulos 01 a 08 y evidencia | Con contenido |
+| Capítulo 2 — Sprint 2 | [scrum/sprint-2/](scrum/sprint-2/01-sprint-planning.md), módulos 01 a 08 | Con contenido |
+| Capítulo 2 — Sprint 3 | [scrum/sprint-3/](scrum/sprint-3/01-sprint-planning.md), módulos 01 a 08 y evidencia | Con contenido |
+| Avance por historia de usuario | [avance/](avance/README.md) | Histórico; el plan maestro (F13) lo cita |
+| Bibliografía | — | Pendiente: GAP-089 |
+| Anexos | — | Pendiente: GAP-090 |
+
+**Análisis del Sprint 0** (insumos de los capítulos): [auditoría de reglas de negocio](sprint-0/auditoria-br.md), [riesgos](sprint-0/riesgos.md), [enfoque blockchain](sprint-0/blockchain-enfoque.md) y [tipos de diagramas](sprint-0/tipos-diagramas-modelo.md).
+
+**Documento modelo:** [modelo_doc/](modelo_doc/) contiene el PDF del Grupo #12, sus extractos y la [guía del Capítulo 2](modelo_doc/guia-capitulo2-modelo.md). En `modelo_doc/referencias/` quedan tres `.docx` de referencia que ningún documento cita.
+
+**Diagramas:** [diagramas/](diagramas/) contiene el proyecto de Enterprise Architect `Diagrama1.eapx`. Solo se referencia el tipo de diagrama y su ubicación; no se embeben imágenes.
+
+## Documentación técnica
+
+| Carpeta | Contenido |
+| --- | --- |
+| [api/](api/) | Contratos de API: [catálogo, cotizaciones y reservas](api/catalog-reservations-v1.md) (aprobado con observaciones), [publicaciones F04](api/f04-publications-v1.md), [escena F06](api/f06-scene-contract.md), [paquete de captura F07](api/f07-capture-package.md), [trabajos de detección F08](api/f08-detection-jobs.md) y [revisión de mobiliario F08](api/f08-furniture-review.md). |
+| [ai/](ai/) | Piloto de IA de mobiliario (F08): bitácora, ficha del modelo, mediciones y conjunto CC0. `f08-conjunto-cc0.json` lo lee `worker3d/fetch_cc0_pilot_set.py`; no moverlo. |
+| [spikes/](spikes/) | Bitácoras de spikes SPK-01 a SPK-07. SPK-01/02/03/05 siguen sin ejecutar (GAP-020, GAP-021, GAP-030 y GAP-031). |
+| [ux/](ux/f02-surface-map.md) | Mapa de superficies de la interfaz. |
+| [capturas/](capturas/README.md) | Capturas del panel que escribe la prueba E2E `panel/staff-shell/e2e/staff-login.e2e.test.mjs`; no moverla. |
+| [ci/](ci/f02-initial-ci.md) y [migrations/](migrations/f02-migration-verification.md) | Evidencia de F02: CI inicial y verificación de migraciones. |
+
+## Historial
+
+| Ubicación | Contenido |
+| --- | --- |
+| [archivo/](archivo/) | Documentos superados que se conservan para reconciliar diferencias, como la [propuesta original](archivo/propuesta-roomforge-original.md). |
+| `odd/tasks/` | Registros de ejecución por fase; los de trabajo cerrado están en `odd/tasks/archivo/`. No son fuente de requisitos. |
+| `openspec/changes/archive/` | Artefactos SDD de los cambios anteriores al plan maestro. |

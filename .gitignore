@@ -46,3 +46,6 @@ cache/
 # Nunca versionados: son datos de terceros y artefactos de evidencia, no código.
 worker3d/pilot/
 worker3d/.cache/
+
+# Instance id written by the gentle-ai SDD tooling
+.gentle-ai-instance
