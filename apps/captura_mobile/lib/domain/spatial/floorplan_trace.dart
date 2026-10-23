@@ -1,4 +1,61 @@
+import 'dart:math' as math;
+
 import 'geometry.dart';
+
+FloorPoint? normalizedTracePoint({
+  required double sceneX,
+  required double sceneY,
+  required double viewportWidth,
+  required double viewportHeight,
+  required double imageWidth,
+  required double imageHeight,
+}) {
+  if ([
+    viewportWidth,
+    viewportHeight,
+    imageWidth,
+    imageHeight,
+  ].any((value) => !value.isFinite || value <= 0)) {
+    return null;
+  }
+  final scale = (viewportWidth / imageWidth) < (viewportHeight / imageHeight)
+      ? viewportWidth / imageWidth
+      : viewportHeight / imageHeight;
+  final shownWidth = imageWidth * scale;
+  final shownHeight = imageHeight * scale;
+  final left = (viewportWidth - shownWidth) / 2;
+  final top = (viewportHeight - shownHeight) / 2;
+  if (sceneX < left ||
+      sceneY < top ||
+      sceneX > left + shownWidth ||
+      sceneY > top + shownHeight) {
+    return null;
+  }
+  return FloorPoint((sceneX - left) / shownWidth, (sceneY - top) / shownHeight);
+}
+
+/// Finds a traced vertex using a circular tolerance in rendered image pixels.
+int? nearestTraceVertex({
+  required FloorPoint point,
+  required List<FloorPoint> vertices,
+  required double renderedImageWidth,
+  required double renderedImageHeight,
+  double tolerancePixels = 24,
+}) {
+  if (renderedImageWidth <= 0 || renderedImageHeight <= 0) return null;
+  var best = tolerancePixels;
+  int? selected;
+  for (var i = 0; i < vertices.length; i++) {
+    final dx = (vertices[i].x - point.x) * renderedImageWidth;
+    final dz = (vertices[i].z - point.z) * renderedImageHeight;
+    final distance = math.sqrt(dx * dx + dz * dz);
+    if (distance < best) {
+      best = distance;
+      selected = i;
+    }
+  }
+  return selected;
+}
 
 class FloorplanTraceMetadata {
   const FloorplanTraceMetadata({

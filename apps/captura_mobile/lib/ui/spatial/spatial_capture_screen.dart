@@ -9,6 +9,7 @@ import '../../domain/spatial/spatial.dart';
 import '../../domain/spatial_capture_controller.dart';
 import 'capture_upload_format.dart';
 import 'floor_plan_view.dart';
+import 'floorplan_trace_screen.dart';
 import 'room_editor_screen.dart';
 import 'spatial_format.dart';
 
@@ -84,6 +85,14 @@ class _SpatialCaptureScreenState extends State<SpatialCaptureScreen> {
       ),
     );
     if (method == null || !mounted) return;
+    if (method == _RoomCreationMethod.floorplanTrace) {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => FloorplanTraceScreen(controller: _controller),
+        ),
+      );
+      return;
+    }
     if (method == _RoomCreationMethod.manual) {
       final shape = await showDialog<_ManualShape>(
         context: context,
@@ -256,6 +265,18 @@ class _SpatialCaptureScreenState extends State<SpatialCaptureScreen> {
                 for (final room in _controller.rooms)
                   _RoomCard(
                     room: room,
+                    onTrace:
+                        room.acquisition.method ==
+                            RoomAcquisitionMethod.floorplanTrace
+                        ? () => Navigator.of(context).push<void>(
+                            MaterialPageRoute<void>(
+                              builder: (_) => FloorplanTraceScreen(
+                                controller: _controller,
+                                roomId: room.id,
+                              ),
+                            ),
+                          )
+                        : null,
                     onEdit: () => Navigator.of(context).push<void>(
                       MaterialPageRoute<void>(
                         builder: (_) => RoomEditorScreen(
@@ -515,11 +536,13 @@ class _RoomCard extends StatelessWidget {
     required this.room,
     required this.onEdit,
     required this.onRemove,
+    this.onTrace,
   });
 
   final CapturedRoom room;
   final VoidCallback onEdit;
   final VoidCallback onRemove;
+  final VoidCallback? onTrace;
 
   @override
   Widget build(BuildContext context) {
@@ -546,6 +569,9 @@ class _RoomCard extends StatelessWidget {
             else if (room.acquisition.method ==
                 RoomAcquisitionMethod.manualSketch)
               const Text('Croquis manual calibrado con una medida real')
+            else if (room.acquisition.method ==
+                RoomAcquisitionMethod.floorplanTrace)
+              const Text('Plano o croquis trazado y calibrado')
             else if (correction != null && correction.applied)
               Text(
                 'Escala corregida con ${correction.referenceCount} '
@@ -576,6 +602,13 @@ class _RoomCard extends StatelessWidget {
               overflowAlignment: OverflowBarAlignment.end,
               overflowSpacing: 8,
               children: [
+                if (onTrace != null)
+                  TextButton.icon(
+                    key: ValueKey('edit-trace-${room.id}'),
+                    onPressed: onTrace,
+                    icon: const Icon(Icons.gesture),
+                    label: const Text('Editar trazado'),
+                  ),
                 TextButton.icon(
                   key: ValueKey('edit-room-${room.id}'),
                   onPressed: onEdit,
@@ -597,7 +630,7 @@ class _RoomCard extends StatelessWidget {
   }
 }
 
-enum _RoomCreationMethod { automatic, manual }
+enum _RoomCreationMethod { automatic, manual, floorplanTrace }
 
 enum _ManualShape { rectangular, lShape, irregular }
 
@@ -725,6 +758,16 @@ class _RoomCreationMethodDialogState extends State<_RoomCreationMethodDialog> {
               'Ingresá las dimensiones del ambiente sin usar ARCore.',
             ),
             onTap: () => Navigator.of(context).pop(_RoomCreationMethod.manual),
+          ),
+          ListTile(
+            key: const ValueKey('floorplan-capture-method'),
+            leading: const Icon(Icons.architecture_outlined),
+            title: const Text('Plano o croquis'),
+            subtitle: const Text(
+              'Importá una imagen y trazá el contorno del ambiente sobre ella.',
+            ),
+            onTap: () =>
+                Navigator.of(context).pop(_RoomCreationMethod.floorplanTrace),
           ),
         ],
       ),

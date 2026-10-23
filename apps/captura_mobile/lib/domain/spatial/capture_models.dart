@@ -295,6 +295,7 @@ enum RoomAcquisitionMethod {
   arcoreWalls('arcore_walls'),
   manual('manual'),
   manualSketch('manual_sketch'),
+  floorplanTrace('floorplan_trace'),
   floorplan('floorplan'),
   assistedCamera('assisted_camera');
 

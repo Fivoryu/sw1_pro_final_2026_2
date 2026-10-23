@@ -73,6 +73,57 @@ CapturedRoom buildCalibratedManualSketchRoom({
   required int referenceEdge,
   required double referenceMeters,
   required double height,
+}) => _buildCalibratedRoom(
+  id: id,
+  name: name,
+  sketch: sketch,
+  referenceEdge: referenceEdge,
+  referenceMeters: referenceMeters,
+  height: height,
+  method: RoomAcquisitionMethod.manualSketch,
+);
+
+/// Calibrates a floorplan trace stored as normalized image coordinates.
+///
+/// Normalized coordinates are independent per axis, so they are first mapped
+/// back to source-image pixels with the real image size. Only then is a single
+/// uniform metric scale applied, which keeps the aspect ratio of non-square
+/// source images.
+CapturedRoom buildCalibratedFloorplanTraceRoom({
+  required String id,
+  required String name,
+  required List<FloorPoint> normalizedTrace,
+  required int imageWidth,
+  required int imageHeight,
+  required int referenceEdge,
+  required double referenceMeters,
+  required double height,
+}) {
+  if (imageWidth <= 0 || imageHeight <= 0) {
+    throw ArgumentError('Trace source image size must be positive');
+  }
+  return _buildCalibratedRoom(
+    id: id,
+    name: name,
+    sketch: [
+      for (final point in normalizedTrace)
+        FloorPoint(point.x * imageWidth, point.z * imageHeight),
+    ],
+    referenceEdge: referenceEdge,
+    referenceMeters: referenceMeters,
+    height: height,
+    method: RoomAcquisitionMethod.floorplanTrace,
+  );
+}
+
+CapturedRoom _buildCalibratedRoom({
+  required String id,
+  required String name,
+  required List<FloorPoint> sketch,
+  required int referenceEdge,
+  required double referenceMeters,
+  required double height,
+  required RoomAcquisitionMethod method,
 }) {
   _validateIdentity(id, name, height);
   if (!referenceMeters.isFinite || referenceMeters <= 0) {
@@ -104,7 +155,7 @@ CapturedRoom buildCalibratedManualSketchRoom({
     name: name,
     height: height,
     corners: ordered,
-    method: RoomAcquisitionMethod.manualSketch,
+    method: method,
   );
 }
 

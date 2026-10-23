@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:captura_mobile/data/services/ar_capture_channel.dart';
 import 'package:captura_mobile/data/services/capture_draft_store.dart';
+import 'package:captura_mobile/data/services/photo_source.dart';
 import 'package:captura_mobile/data/services/staff_auth_api.dart';
 import 'package:captura_mobile/data/services/staff_scene_api.dart';
 import 'package:captura_mobile/domain/spatial/spatial.dart';
@@ -12,6 +14,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/fake_ar_capture.dart';
 import 'support/fake_scene_backend.dart';
 import 'support/fake_staff_backend.dart';
+import 'support/fake_photo_source.dart';
 
 typedef Harness = ({
   SpatialCaptureController controller,
@@ -20,6 +23,65 @@ typedef Harness = ({
   CaptureDraftStore store,
   Directory root,
 });
+
+/// [CaptureDraftStore] that can fail writes, so tests can check what survives
+/// an interrupted persistence.
+class _FailingWriteStore implements CaptureDraftStore {
+  _FailingWriteStore(this._inner);
+
+  final CaptureDraftStore _inner;
+  bool failWrites = false;
+
+  @override
+  Future<Map<String, Object?>?> read(String ownerId, String listingId) =>
+      _inner.read(ownerId, listingId);
+
+  @override
+  Future<void> write(
+    String ownerId,
+    String listingId,
+    Map<String, Object?> draft,
+  ) async {
+    if (failWrites) throw const FileSystemException('disk full');
+    await _inner.write(ownerId, listingId, draft);
+  }
+
+  @override
+  Future<void> delete(String ownerId, String listingId) =>
+      _inner.delete(ownerId, listingId);
+
+  @override
+  Future<List<String>> listingIds(String ownerId) => _inner.listingIds(ownerId);
+
+  @override
+  Future<int> sizeBytes(String ownerId) => _inner.sizeBytes(ownerId);
+
+  @override
+  Future<String> saveTraceSource(
+    String ownerId,
+    String listingId,
+    List<int> bytes,
+    String contentType,
+  ) => _inner.saveTraceSource(ownerId, listingId, bytes, contentType);
+
+  @override
+  Future<List<int>?> readTraceSource(
+    String ownerId,
+    String listingId,
+    String sourceId,
+  ) => _inner.readTraceSource(ownerId, listingId, sourceId);
+
+  @override
+  Future<void> deleteTraceSource(
+    String ownerId,
+    String listingId,
+    String sourceId,
+  ) => _inner.deleteTraceSource(ownerId, listingId, sourceId);
+
+  @override
+  Future<void> deleteTraceSources(String ownerId, String listingId) =>
+      _inner.deleteTraceSources(ownerId, listingId);
+}
 
 Future<StaffSessionController> signedIn() async {
   final session = StaffSessionController(
@@ -39,11 +101,13 @@ Future<Harness> build({
   FakeSceneBackend? backend,
   Directory? root,
   FakeArCapture? ar,
+  PhotoSource? traceSource,
+  CaptureDraftStore? store,
 }) async {
   final dir = root ?? await Directory.systemTemp.createTemp('spatial-');
   final scenes = backend ?? FakeSceneBackend();
   final capture = ar ?? FakeArCapture();
-  final store = FileCaptureDraftStore(root: () async => dir);
+  final drafts = store ?? FileCaptureDraftStore(root: () async => dir);
   final controller = SpatialCaptureController(
     listingId: 'listing-1',
     session: await signedIn(),
@@ -51,8 +115,9 @@ Future<Harness> build({
       baseUrl: 'https://api.example.test',
       client: scenes.client,
     ),
-    store: store,
+    store: drafts,
     ar: capture,
+    traceSource: traceSource,
     now: () => DateTime.utc(2026, 10, 21, 12),
   );
   await controller.load();
@@ -60,7 +125,7 @@ Future<Harness> build({
     controller: controller,
     backend: scenes,
     ar: capture,
-    store: store,
+    store: drafts,
     root: dir,
   );
 }
@@ -72,8 +137,16 @@ void main() {
     FakeSceneBackend? backend,
     Directory? root,
     FakeArCapture? ar,
+    PhotoSource? traceSource,
+    CaptureDraftStore? store,
   }) async {
-    final built = await build(backend: backend, root: root, ar: ar);
+    final built = await build(
+      backend: backend,
+      root: root,
+      ar: ar,
+      traceSource: traceSource,
+      store: store,
+    );
     roots.add(built.root);
     return built;
   }
@@ -335,6 +408,543 @@ void main() {
         expect(h.ar.names, isEmpty);
       },
     );
+
+    test('persists a local-only floorplan trace across restart', () async {
+      final source = FakePhotoSource();
+      final h = await harness(traceSource: source);
+      final picked = await h.controller.pickFloorplanSource();
+      expect(picked, isNotNull);
+      expect(
+        await h.controller.saveFloorplanTrace(
+          name: 'Dormitorio plano',
+          sourceId: picked!.sourceId,
+          contentType: picked.contentType,
+          imageWidth: 1000,
+          imageHeight: 800,
+          normalizedTrace: const [
+            FloorPoint(0.1, 0.2),
+            FloorPoint(0.5, 0.2),
+            FloorPoint(0.5, 0.6),
+            FloorPoint(0.1, 0.6),
+          ],
+          referenceEdge: 0,
+          referenceMeters: 4.2,
+          height: 2.65,
+        ),
+        isNull,
+      );
+
+      final reopened = await harness(root: h.root, backend: h.backend);
+      final room = reopened.controller.rooms.single;
+      final trace = reopened.controller.traceForRoom(room.id)!;
+      expect(room.acquisition.method, RoomAcquisitionMethod.floorplanTrace);
+      expect(room.metrics, isNull);
+      expect(trace.vertices.first, const FloorPoint(0.1, 0.2));
+      expect(trace.referenceMeters, 4.2);
+      expect(
+        await reopened.controller.floorplanSourceBytes(trace.sourceId),
+        isNotNull,
+      );
+      expect(reopened.controller.preview!.document['version'], '2.0');
+      expect(
+        reopened.controller.preview!.document.toString(),
+        isNot(contains(trace.sourceId)),
+      );
+      expect(h.ar.availabilityChecks, 0);
+      expect(h.ar.names, isEmpty);
+
+      await reopened.controller.updateRoom(
+        room.copyWith(
+          openings: const [
+            RoomOpening(
+              id: 'door-plan',
+              edgeIndex: 0,
+              position: 0.5,
+              width: 0.9,
+              height: 2.1,
+              type: OpeningType.door,
+            ),
+          ],
+        ),
+      );
+      expect(
+        await reopened.controller.saveFloorplanTrace(
+          roomId: room.id,
+          name: room.name,
+          sourceId: trace.sourceId,
+          contentType: trace.contentType,
+          imageWidth: trace.imageWidth,
+          imageHeight: trace.imageHeight,
+          normalizedTrace: const [
+            FloorPoint(0.1, 0.2),
+            FloorPoint(0.5, 0.2),
+            FloorPoint(0.55, 0.6),
+            FloorPoint(0.1, 0.6),
+          ],
+          referenceEdge: 0,
+          referenceMeters: 4.2,
+          height: 2.65,
+        ),
+        contains('datos espaciales vinculados'),
+      );
+      expect(reopened.controller.rooms.single.id, room.id);
+      expect(reopened.controller.rooms.single.openings.single.id, 'door-plan');
+
+      await reopened.controller.discardFloorplanSource(trace.sourceId);
+      final missing = await harness(root: h.root, backend: h.backend);
+      expect(missing.controller.rooms.single.id, room.id);
+      expect(missing.controller.preview!.document['version'], '2.0');
+      expect(
+        await missing.controller.floorplanSourceBytes(trace.sourceId),
+        isNull,
+      );
+
+      await missing.controller.removeRoom(room.id);
+      expect(
+        await missing.controller.floorplanSourceBytes(trace.sourceId),
+        isNull,
+      );
+    });
+  });
+
+  group('floorplan source lifecycle', () {
+    const plan = [
+      FloorPoint(0.1, 0.125),
+      FloorPoint(0.5, 0.125),
+      FloorPoint(0.5, 0.5),
+      FloorPoint(0.1, 0.5),
+    ];
+
+    Future<(_FailingWriteStore, Harness)> harnessWithFailingWrites() async {
+      final root = await Directory.systemTemp.createTemp('spatial-');
+      final drafts = _FailingWriteStore(
+        FileCaptureDraftStore(root: () async => root),
+      );
+      final h = await harness(
+        root: root,
+        traceSource: FakePhotoSource(),
+        store: drafts,
+      );
+      return (drafts, h);
+    }
+
+    test(
+      'keeps the source image when a room delete is not persisted',
+      () async {
+        final (drafts, h) = await harnessWithFailingWrites();
+        final picked = await h.controller.pickFloorplanSource();
+        expect(
+          await h.controller.saveFloorplanTrace(
+            name: 'Dormitorio plano',
+            sourceId: picked!.sourceId,
+            contentType: picked.contentType,
+            imageWidth: 1000,
+            imageHeight: 800,
+            normalizedTrace: plan,
+            referenceEdge: 0,
+            referenceMeters: 4,
+            height: 2.5,
+          ),
+          isNull,
+        );
+        final room = h.controller.rooms.single;
+        final trace = h.controller.traceForRoom(room.id)!;
+
+        drafts.failWrites = true;
+        await expectLater(
+          h.controller.removeRoom(room.id),
+          throwsA(isA<FileSystemException>()),
+        );
+
+        // Nothing was persisted, so the room, its trace and its image survive.
+        expect(h.controller.rooms.single.id, room.id);
+        expect(h.controller.traceForRoom(room.id)?.sourceId, trace.sourceId);
+        expect(
+          await h.controller.floorplanSourceBytes(trace.sourceId),
+          isNotNull,
+        );
+        final afterFailure = await harness(root: h.root, backend: h.backend);
+        expect(afterFailure.controller.rooms.single.id, room.id);
+        expect(
+          afterFailure.controller.traceForRoom(room.id)?.sourceId,
+          trace.sourceId,
+        );
+        expect(
+          await afterFailure.controller.floorplanSourceBytes(trace.sourceId),
+          isNotNull,
+        );
+
+        drafts.failWrites = false;
+        await h.controller.removeRoom(room.id);
+
+        expect(h.controller.rooms, isEmpty);
+        expect(h.controller.traceForRoom(room.id), isNull);
+        expect(await h.controller.floorplanSourceBytes(trace.sourceId), isNull);
+        final afterSuccess = await harness(root: h.root, backend: h.backend);
+        expect(afterSuccess.controller.rooms, isEmpty);
+        expect(afterSuccess.controller.traceForRoom(room.id), isNull);
+        expect(
+          await afterSuccess.controller.floorplanSourceBytes(trace.sourceId),
+          isNull,
+        );
+      },
+    );
+
+    test('keeps the previous source when a retrace is not persisted', () async {
+      final (drafts, h) = await harnessWithFailingWrites();
+      final first = await h.controller.pickFloorplanSource();
+      expect(
+        await h.controller.saveFloorplanTrace(
+          name: 'Dormitorio plano',
+          sourceId: first!.sourceId,
+          contentType: first.contentType,
+          imageWidth: 1000,
+          imageHeight: 800,
+          normalizedTrace: plan,
+          referenceEdge: 0,
+          referenceMeters: 4,
+          height: 2.5,
+        ),
+        isNull,
+      );
+      final room = h.controller.rooms.single;
+      final original = h.controller.traceForRoom(room.id)!;
+      final originalCorners = room.corners;
+      final second = await h.controller.pickFloorplanSource();
+      expect(second, isNotNull);
+      expect(second!.sourceId, isNot(original.sourceId));
+
+      drafts.failWrites = true;
+      await expectLater(
+        h.controller.saveFloorplanTrace(
+          roomId: room.id,
+          name: 'Dormitorio plano',
+          sourceId: second.sourceId,
+          contentType: second.contentType,
+          imageWidth: 1000,
+          imageHeight: 800,
+          normalizedTrace: const [
+            FloorPoint(0.1, 0.125),
+            FloorPoint(0.7, 0.125),
+            FloorPoint(0.7, 0.5),
+            FloorPoint(0.1, 0.5),
+          ],
+          referenceEdge: 0,
+          referenceMeters: 5,
+          height: 2.8,
+        ),
+        throwsA(isA<FileSystemException>()),
+      );
+
+      // The failed retrace leaves the previous room and image in place.
+      expect(h.controller.traceForRoom(room.id)?.sourceId, original.sourceId);
+      expect(h.controller.rooms.single.corners, originalCorners);
+      expect(h.controller.rooms.single.height.value, 2.5);
+      expect(
+        await h.controller.floorplanSourceBytes(original.sourceId),
+        isNotNull,
+      );
+      final afterFailure = await harness(root: h.root, backend: h.backend);
+      expect(
+        afterFailure.controller.traceForRoom(room.id)?.sourceId,
+        original.sourceId,
+      );
+      expect(
+        await afterFailure.controller.floorplanSourceBytes(original.sourceId),
+        isNotNull,
+      );
+
+      drafts.failWrites = false;
+      expect(
+        await h.controller.saveFloorplanTrace(
+          roomId: room.id,
+          name: 'Dormitorio plano',
+          sourceId: second.sourceId,
+          contentType: second.contentType,
+          imageWidth: 1000,
+          imageHeight: 800,
+          normalizedTrace: const [
+            FloorPoint(0.1, 0.125),
+            FloorPoint(0.7, 0.125),
+            FloorPoint(0.7, 0.5),
+            FloorPoint(0.1, 0.5),
+          ],
+          referenceEdge: 0,
+          referenceMeters: 5,
+          height: 2.8,
+        ),
+        isNull,
+      );
+
+      // Only now is the replaced image dropped.
+      expect(h.controller.traceForRoom(room.id)?.sourceId, second.sourceId);
+      expect(
+        await h.controller.floorplanSourceBytes(original.sourceId),
+        isNull,
+      );
+      expect(
+        await h.controller.floorplanSourceBytes(second.sourceId),
+        isNotNull,
+      );
+      final afterSuccess = await harness(root: h.root, backend: h.backend);
+      expect(
+        afterSuccess.controller.traceForRoom(room.id)?.sourceId,
+        second.sourceId,
+      );
+      expect(
+        await afterSuccess.controller.floorplanSourceBytes(original.sourceId),
+        isNull,
+      );
+    });
+  });
+
+  group('floorplan retrace', () {
+    const plan = [
+      FloorPoint(0.1, 0.125),
+      FloorPoint(0.5, 0.125),
+      FloorPoint(0.5, 0.5),
+      FloorPoint(0.1, 0.5),
+    ];
+    const retraced = [
+      FloorPoint(0.1, 0.125),
+      FloorPoint(0.55, 0.125),
+      FloorPoint(0.55, 0.5),
+      FloorPoint(0.1, 0.5),
+    ];
+
+    Future<Harness> traced({PhotoSource? source}) async {
+      final h = await harness(traceSource: source ?? FakePhotoSource());
+      final picked = await h.controller.pickFloorplanSource();
+      expect(
+        await h.controller.saveFloorplanTrace(
+          name: 'Dormitorio plano',
+          sourceId: picked!.sourceId,
+          contentType: picked.contentType,
+          imageWidth: 1000,
+          imageHeight: 800,
+          normalizedTrace: plan,
+          referenceEdge: 0,
+          referenceMeters: 4,
+          height: 2.655,
+        ),
+        isNull,
+      );
+      return h;
+    }
+
+    test(
+      'retrace without dependent data keeps identity, name, exact height and provenance',
+      () async {
+        final h = await traced();
+        final room = h.controller.rooms.single;
+
+        final second = await h.controller.pickFloorplanSource();
+        expect(
+          await h.controller.saveFloorplanTrace(
+            roomId: room.id,
+            name: 'Dormitorio plano',
+            sourceId: second!.sourceId,
+            contentType: second.contentType,
+            imageWidth: 1000,
+            imageHeight: 800,
+            normalizedTrace: retraced,
+            referenceEdge: 0,
+            referenceMeters: 4,
+            height: 2.655,
+          ),
+          isNull,
+        );
+
+        final after = h.controller.rooms.single;
+        expect(after.id, room.id);
+        expect(after.name, 'Dormitorio plano');
+        expect(after.height.value, 2.655);
+        expect(after.openings, isEmpty);
+        expect(after.boxes, isEmpty);
+        expect(after.acquisition.method, RoomAcquisitionMethod.floorplanTrace);
+        expect(h.controller.traceForRoom(room.id)!.sourceId, second.sourceId);
+
+        final reopened = await harness(root: h.root, backend: h.backend);
+        final restored = reopened.controller.rooms.single;
+        expect(restored.id, room.id);
+        expect(restored.height.value, 2.655);
+        expect(restored.openings, isEmpty);
+        expect(restored.boxes, isEmpty);
+        expect(
+          restored.acquisition.method,
+          RoomAcquisitionMethod.floorplanTrace,
+        );
+      },
+    );
+
+    test(
+      'retrace with an opening is blocked without changing room or trace',
+      () async {
+        final h = await traced();
+        final room = h.controller.rooms.single;
+        await h.controller.updateRoom(
+          room.copyWith(
+            openings: const [
+              RoomOpening(
+                id: 'door-plan',
+                edgeIndex: 3,
+                position: 0.5,
+                width: 0.9,
+                height: 2.1,
+                type: OpeningType.door,
+              ),
+            ],
+          ),
+        );
+
+        final second = await h.controller.pickFloorplanSource();
+        final message = await h.controller.saveFloorplanTrace(
+          roomId: room.id,
+          name: 'Dormitorio plano',
+          sourceId: second!.sourceId,
+          contentType: second.contentType,
+          imageWidth: 1000,
+          imageHeight: 800,
+          // A triangle: edge 3 of the previous contour no longer exists.
+          normalizedTrace: const [
+            FloorPoint(0.1, 0.125),
+            FloorPoint(0.6, 0.125),
+            FloorPoint(0.6, 0.6),
+          ],
+          referenceEdge: 0,
+          referenceMeters: 4,
+          height: 2.655,
+        );
+
+        expect(message, contains('datos espaciales vinculados'));
+        final after = h.controller.rooms.single;
+        expect(after.corners, room.corners);
+        expect(after.openings, hasLength(1));
+        expect(after.openings.single.id, 'door-plan');
+        expect(after.openings.single.edgeIndex, 3, reason: 'not relocated');
+        expect(after.openings.single.position, 0.5);
+        expect(after.openings.single.width, 0.9);
+        expect(after.openings.single.height, 2.1);
+
+        expect(
+          h.controller.traceForRoom(room.id)!.sourceId,
+          isNot(second.sourceId),
+        );
+      },
+    );
+
+    test('retrace with a box or non-identity placement is blocked', () async {
+      for (final dependent in <CapturedRoom Function(CapturedRoom)>[
+        (room) => room.copyWith(
+          boxes: const [
+            OccupancyBox(
+              id: 'box-plan',
+              centerX: 1,
+              centerZ: 1,
+              width: 0.6,
+              depth: 0.5,
+              height: null,
+              source: BoxSource.manual,
+            ),
+          ],
+        ),
+        (room) => room.copyWith(
+          placement: const RoomPlacement(x: 1, z: 0, rotationDegrees: 0),
+        ),
+      ]) {
+        final h = await traced();
+        final before = dependent(h.controller.rooms.single);
+        await h.controller.updateRoom(before);
+        final trace = h.controller.traceForRoom(before.id)!;
+        final message = await h.controller.saveFloorplanTrace(
+          roomId: before.id,
+          name: before.name,
+          sourceId: trace.sourceId,
+          contentType: trace.contentType,
+          imageWidth: trace.imageWidth,
+          imageHeight: trace.imageHeight,
+          normalizedTrace: retraced,
+          referenceEdge: 0,
+          referenceMeters: 4,
+          height: before.height.value,
+        );
+        expect(message, contains('datos espaciales vinculados'));
+        expect(h.controller.rooms.single.toJson(), before.toJson());
+        expect(h.controller.traceForRoom(before.id)!.toJson(), trace.toJson());
+      }
+    });
+
+    test('RoomEditor updates keep each acquisition method', () async {
+      final h = await harness(traceSource: FakePhotoSource());
+      await h.controller.createManualRectangularRoom(
+        name: 'Manual',
+        length: 4,
+        width: 3,
+        height: 2.6,
+      );
+      expect(
+        await h.controller.createCalibratedManualSketchRoom(
+          name: 'Croquis',
+          sketch: const [
+            FloorPoint(0, 0),
+            FloorPoint(4, 0),
+            FloorPoint(4, 3),
+            FloorPoint(0, 3),
+          ],
+          referenceEdge: 0,
+          referenceMeters: 4,
+          height: 2.6,
+        ),
+        isNull,
+      );
+      final picked = await h.controller.pickFloorplanSource();
+      expect(
+        await h.controller.saveFloorplanTrace(
+          name: 'Plano',
+          sourceId: picked!.sourceId,
+          contentType: picked.contentType,
+          imageWidth: 1000,
+          imageHeight: 800,
+          normalizedTrace: plan,
+          referenceEdge: 0,
+          referenceMeters: 4,
+          height: 2.6,
+        ),
+        isNull,
+      );
+      const expected = [
+        RoomAcquisitionMethod.manual,
+        RoomAcquisitionMethod.manualSketch,
+        RoomAcquisitionMethod.floorplanTrace,
+      ];
+      expect([
+        for (final room in h.controller.rooms) room.acquisition.method,
+      ], expected);
+
+      // What RoomEditor does when the agent saves a height or an opening.
+      for (final room in h.controller.rooms) {
+        await h.controller.updateRoom(
+          room.copyWith(height: const RoomHeight(2.55, HeightSource.manual)),
+        );
+      }
+
+      expect([
+        for (final room in h.controller.rooms) room.acquisition.method,
+      ], expected);
+
+      // The reserved legacy value stays available and distinct.
+      expect(RoomAcquisitionMethod.floorplan.wire, 'floorplan');
+      expect(
+        RoomAcquisitionMethod.fromWire('floorplan'),
+        RoomAcquisitionMethod.floorplan,
+      );
+
+      final reopened = await harness(root: h.root, backend: h.backend);
+      expect([
+        for (final room in reopened.controller.rooms) room.acquisition.method,
+      ], expected);
+      expect(reopened.controller.rooms.first.height.value, 2.55);
+    });
   });
 
   group('editing', () {
@@ -538,6 +1148,46 @@ void main() {
   });
 
   group('sync', () {
+    test('floorplan trace sends only canonical Scene v2 geometry', () async {
+      final h = await harness(traceSource: FakePhotoSource());
+      final source = await h.controller.pickFloorplanSource();
+      await h.controller.saveFloorplanTrace(
+        name: 'Plano local',
+        sourceId: source!.sourceId,
+        contentType: source.contentType,
+        imageWidth: 1000,
+        imageHeight: 800,
+        normalizedTrace: const [
+          FloorPoint(0.1, 0.125),
+          FloorPoint(0.5, 0.125),
+          FloorPoint(0.5, 0.5),
+          FloorPoint(0.1, 0.5),
+        ],
+        referenceEdge: 0,
+        referenceMeters: 4,
+        height: 2.6,
+      );
+      await h.controller.sync();
+
+      final payload = jsonEncode(h.backend.document);
+      expect(h.backend.requests.where((r) => r.method == 'PUT'), hasLength(1));
+      expect(h.backend.document!['version'], '2.0');
+      expect(payload, contains('Plano local'));
+      for (final localDetail in [
+        source.sourceId,
+        'sourceId',
+        'contentType',
+        'imageWidth',
+        'imageHeight',
+        'referenceMeters',
+        'normalizedTrace',
+        '_traces',
+        'FloorplanTraceMetadata',
+      ]) {
+        expect(payload, isNot(contains(localDetail)));
+      }
+    });
+
     test('creates the scene once and then updates its own revision', () async {
       final h = await harness();
       h.ar.results.add(rectangle(4, 3));
@@ -637,6 +1287,64 @@ void main() {
       expect(h.controller.syncState, CaptureSyncState.pending);
       expect(h.controller.message, contains('Estar'));
       expect(h.backend.requests.where((r) => r.method == 'PUT'), isEmpty);
+    });
+
+    test('sync and conflict overwrite never send blocking openings', () async {
+      final h = await harness();
+      await h.controller.createManualRectangularRoom(
+        name: 'Estar',
+        length: 4,
+        width: 3,
+        height: 2.6,
+      );
+      final room = h.controller.rooms.single;
+      await h.controller.updateRoom(
+        room.copyWith(
+          openings: const [
+            RoomOpening(
+              id: 'invalid-door',
+              edgeIndex: 99,
+              position: 0.5,
+              width: 0.9,
+              height: 2.1,
+              type: OpeningType.door,
+            ),
+          ],
+        ),
+      );
+      await h.controller.sync();
+      expect(h.backend.requests.where((r) => r.method == 'PUT'), isEmpty);
+
+      // Establish a conflict using a valid room, then make the local draft
+      // invalid before the explicit overwrite action.
+      await h.controller.updateRoom(room);
+      await h.controller.sync();
+      h.backend.editRemotely({...h.backend.document!, 'objects': <Object?>[]});
+      final mutableOpenings = <RoomOpening>[];
+      await h.controller.updateRoom(
+        room.copyWith(name: 'Cambio local', openings: mutableOpenings),
+      );
+      await h.controller.sync();
+      expect(h.controller.syncState, CaptureSyncState.conflict);
+      final putsBefore = h.backend.requests
+          .where((r) => r.method == 'PUT')
+          .length;
+      mutableOpenings.add(
+        const RoomOpening(
+          id: 'invalid-door',
+          edgeIndex: 99,
+          position: 0.5,
+          width: 0.9,
+          height: 2.1,
+          type: OpeningType.door,
+        ),
+      );
+      await h.controller.overwriteRemote();
+      expect(h.controller.syncState, CaptureSyncState.conflict);
+      expect(
+        h.backend.requests.where((r) => r.method == 'PUT').length,
+        putsBefore,
+      );
     });
   });
 

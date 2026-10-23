@@ -172,6 +172,11 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
     }
     final lengths = edgeLengths(room.corners);
     final correction = scaleCorrection(room);
+    final manuallyCalibrated = const {
+      RoomAcquisitionMethod.manual,
+      RoomAcquisitionMethod.manualSketch,
+      RoomAcquisitionMethod.floorplanTrace,
+    }.contains(room.acquisition.method);
     final correctedLengths = correction != null && correction.applied
         ? edgeLengths(correctedRoom(room).corners)
         : null;
@@ -219,15 +224,13 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
             ),
             const SizedBox(height: 24),
             Text(
-              room.acquisition.method == RoomAcquisitionMethod.manual
-                  ? 'Lados'
-                  : 'Lados y tolerancia',
+              manuallyCalibrated ? 'Lados' : 'Lados y tolerancia',
               style: theme.textTheme.titleLarge,
             ),
             const SizedBox(height: 4),
-            if (room.acquisition.method == RoomAcquisitionMethod.manual)
+            if (manuallyCalibrated)
               const Text(
-                'Estas dimensiones son las medidas reales ingresadas para el ambiente.',
+                'Estas dimensiones provienen de medidas manuales revisadas para el ambiente.',
               )
             else
               const Text(
@@ -272,7 +275,7 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
                                 'capturado → ${metres(correctedLengths[index])} '
                                 'corregido',
                     ),
-                    if (room.acquisition.method != RoomAcquisitionMethod.manual)
+                    if (!manuallyCalibrated)
                       if (tolerances[index] case final record?)
                         Text(
                           'Error observado: '
@@ -281,7 +284,7 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
                           '(${record.relativeErrorPercent.abs().toStringAsFixed(1).replaceAll('.', ',')} %)',
                         ),
                     const SizedBox(height: 4),
-                    if (room.acquisition.method != RoomAcquisitionMethod.manual)
+                    if (!manuallyCalibrated)
                       Row(
                         children: [
                           Expanded(
@@ -317,6 +320,17 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
               ),
             const SizedBox(height: 24),
             Text('Puertas y ventanas', style: theme.textTheme.titleLarge),
+            if (room.openings.any(
+              (opening) => validateOpening(room, opening).isNotEmpty,
+            )) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Hay aberturas que requieren corrección y no se representan '
+                'correctamente en la vista previa.',
+                key: const ValueKey('invalid-openings-warning'),
+                style: TextStyle(color: theme.colorScheme.error),
+              ),
+            ],
             for (final (index, opening) in room.openings.indexed)
               ListTile(
                 contentPadding: EdgeInsets.zero,
@@ -425,12 +439,20 @@ class _OpeningDialog extends StatefulWidget {
 
 class _OpeningDialogState extends State<_OpeningDialog> {
   late OpeningType _type = widget.opening?.type ?? OpeningType.door;
-  late int _edge = widget.opening?.edgeIndex ?? 0;
+  late int? _edge = _initialEdge;
+  int? get _initialEdge {
+    final edge = widget.opening?.edgeIndex;
+    if (edge == null) return 0;
+    return edge >= 0 && edge < widget.room.corners.length ? edge : null;
+  }
+
   late final _position = TextEditingController(
-    text: _decimal(
-      (widget.opening?.position ?? 0.5) *
-          edgeLengths(widget.room.corners)[_edge],
-    ),
+    text: _initialEdge == null
+        ? ''
+        : _decimal(
+            (widget.opening?.position ?? 0.5) *
+                edgeLengths(widget.room.corners)[_initialEdge!],
+          ),
   );
   late final _width = TextEditingController(
     text: _decimal(widget.opening?.width ?? 0.9),
@@ -465,6 +487,14 @@ class _OpeningDialogState extends State<_OpeningDialog> {
   }
 
   void _submit() {
+    final edge = _edge;
+    if (edge == null) {
+      setState(
+        () => _positionError =
+            'La pared guardada ya no existe. Seleccioná una pared válida.',
+      );
+      return;
+    }
     final positionMetres = parseMetres(_position.text);
     final width = parseMetres(_width.text);
     final height = parseMetres(_height.text);
@@ -479,8 +509,8 @@ class _OpeningDialogState extends State<_OpeningDialog> {
     }
     final opening = RoomOpening(
       id: widget.opening?.id ?? _newId(),
-      edgeIndex: _edge,
-      position: positionMetres / edgeLengths(widget.room.corners)[_edge],
+      edgeIndex: edge,
+      position: positionMetres / edgeLengths(widget.room.corners)[edge],
       width: width,
       height: height,
       type: _type,
@@ -536,12 +566,20 @@ class _OpeningDialogState extends State<_OpeningDialog> {
                 setState(() {
                   _edge = value;
                   _positionError = null;
-                  if (widget.opening == null) {
-                    _position.text = _decimal(lengths[_edge] / 2);
+                  if (widget.opening == null || _initialEdge == null) {
+                    _position.text = _decimal(lengths[value] / 2);
                   }
                 });
               },
             ),
+            if (_initialEdge == null && _edge == null)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                  'La pared guardada ya no existe. Seleccioná una pared válida.',
+                  key: ValueKey('invalid-opening-edge-guidance'),
+                ),
+              ),
             const SizedBox(height: 12),
             TextField(
               key: const ValueKey('opening-position-metres'),

@@ -360,6 +360,80 @@ class SpatialCaptureController extends ChangeNotifier {
         : _store.readTraceSource(owner, listingId, sourceId);
   }
 
+  Future<String?> saveFloorplanTrace({
+    String? roomId,
+    required String name,
+    required String sourceId,
+    required String contentType,
+    required int imageWidth,
+    required int imageHeight,
+    required List<FloorPoint> normalizedTrace,
+    required int referenceEdge,
+    required double referenceMeters,
+    required double height,
+  }) async {
+    if (ownerId == null) return _noSessionMessage;
+    if (await floorplanSourceBytes(sourceId) == null) {
+      return 'La imagen original ya no está disponible.';
+    }
+    final previous = roomId == null ? null : _room(roomId);
+    if (previous != null &&
+        (previous.openings.isNotEmpty ||
+            previous.boxes.isNotEmpty ||
+            previous.placement != RoomPlacement.identity)) {
+      return 'Este ambiente contiene datos espaciales vinculados a la '
+          'geometría actual. Corregí o eliminá esos elementos antes de volver '
+          'a trazar el ambiente.';
+    }
+    final id = previous?.id ?? _newRoomId();
+    try {
+      var room = buildCalibratedFloorplanTraceRoom(
+        id: id,
+        name: name,
+        normalizedTrace: normalizedTrace,
+        imageWidth: imageWidth,
+        imageHeight: imageHeight,
+        referenceEdge: referenceEdge,
+        referenceMeters: referenceMeters,
+        height: height,
+      );
+      final replacedSourceId = _traces[id]?.sourceId;
+      await _change(
+        _capture.copyWith(
+          rooms: previous == null
+              ? [..._capture.rooms, room]
+              : [
+                  for (final current in _capture.rooms)
+                    current.id == id ? room : current,
+                ],
+        ),
+        traces: {
+          ..._traces,
+          id: FloorplanTraceMetadata(
+            roomId: id,
+            sourceId: sourceId,
+            contentType: contentType,
+            imageWidth: imageWidth,
+            imageHeight: imageHeight,
+            vertices: [...normalizedTrace],
+            referenceEdge: referenceEdge,
+            referenceMeters: referenceMeters,
+          ),
+        },
+      );
+      // The previous image outlives the replacement until the new state is
+      // safely on disk, and it is only dropped when nothing references it.
+      if (replacedSourceId != null &&
+          replacedSourceId != sourceId &&
+          !_referencesSource(replacedSourceId)) {
+        await discardFloorplanSource(replacedSourceId);
+      }
+      return null;
+    } on ArgumentError {
+      return 'Revisá el trazado, la medida real y la altura del ambiente.';
+    }
+  }
+
   /// Hands the capture package to the upload queue and says what happens
   /// next, or why there is no package. Null when there is nothing to say.
   Future<String?> _handlePackage(
@@ -401,8 +475,7 @@ class SpatialCaptureController extends ChangeNotifier {
   );
 
   Future<void> removeRoom(String roomId) async {
-    final trace = _traces.remove(roomId);
-    if (trace != null) await discardFloorplanSource(trace.sourceId);
+    final trace = _traces[roomId];
     await _change(
       _capture.copyWith(
         rooms: [
@@ -415,7 +488,16 @@ class SpatialCaptureController extends ChangeNotifier {
               connection,
         ],
       ),
+      traces: {
+        for (final entry in _traces.entries)
+          if (entry.key != roomId) entry.key: entry.value,
+      },
     );
+    // The image is only removed once the room is gone for good, and only if no
+    // other local trace still points at it.
+    if (trace != null && !_referencesSource(trace.sourceId)) {
+      await discardFloorplanSource(trace.sourceId);
+    }
   }
 
   /// Places room B so its door meets room A's door and records the link.
@@ -505,6 +587,12 @@ class SpatialCaptureController extends ChangeNotifier {
   /// After a conflict, replaces the server scene with this capture.
   Future<void> overwriteRemote() async {
     if (_busy || _syncState != CaptureSyncState.conflict) return;
+    final problems = blockingProblems();
+    if (problems.isNotEmpty) {
+      _message = 'Corregí antes de enviar: ${problems.first}';
+      _notify();
+      return;
+    }
     var base = _conflictEtag;
     if (base == null) {
       final credentials = _credentials();
@@ -587,16 +675,49 @@ class SpatialCaptureController extends ChangeNotifier {
     return owner == null ? 0 : _store.sizeBytes(owner);
   }
 
-  Future<void> _change(PropertyCapture next) async {
+  /// Applies [next] plus, optionally, the local tracing aids, and only keeps
+  /// them in memory when they were persisted. A storage failure leaves the
+  /// previous rooms, traces and sync state exactly as they were.
+  Future<void> _change(
+    PropertyCapture next, {
+    Map<String, FloorplanTraceMetadata>? traces,
+  }) async {
+    final previousCapture = _capture;
+    final previousTraces = Map<String, FloorplanTraceMetadata>.of(_traces);
+    final previousSyncState = _syncState;
+    final previousMessage = _message;
+    final nextTraces = traces == null
+        ? null
+        : Map<String, FloorplanTraceMetadata>.of(traces);
     _capture = next.copyWith(updatedAt: _now());
+    if (nextTraces != null) {
+      _traces
+        ..clear()
+        ..addAll(nextTraces);
+    }
     _syncState = _capture.rooms.isEmpty && _baseEtag == null
         ? CaptureSyncState.empty
         : CaptureSyncState.pending;
     _message = null;
     _rebuild();
-    await _persist();
+    try {
+      await _persist();
+    } on Object {
+      _capture = previousCapture;
+      _traces
+        ..clear()
+        ..addAll(previousTraces);
+      _syncState = previousSyncState;
+      _message = previousMessage;
+      _rebuild();
+      rethrow;
+    }
     _notify();
   }
+
+  /// Whether any local tracing aid still points at [sourceId].
+  bool _referencesSource(String sourceId) =>
+      _traces.values.any((trace) => trace.sourceId == sourceId);
 
   void _rebuild() {
     _preview = _capture.rooms.isEmpty ? null : buildScene(_sceneCapture());
