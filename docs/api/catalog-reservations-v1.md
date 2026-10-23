@@ -1,10 +1,12 @@
-# Propuesta de contrato API v1: catálogo, cotizaciones y reservas
+# Contrato API v1: catálogo, cotizaciones y reservas
+
+**Estado vigente: APROBADO CON OBSERVACIONES (2026-10-23).** Decisión del usuario registrada tras la revisión contra el código de la sección siguiente. El contrato aprobado es el comportamiento implementado que describen la tabla de rutas y esa revisión; las observaciones quedan abiertas. Aprobar el contrato no acredita despliegue, testnet ni fondos reales. El párrafo de estado que sigue y las etiquetas **PROPUESTA** del cuerpo se conservan como historial de la redacción original.
 
 **Estado: PROPUESTA para revisión; no es un contrato final ni acredita despliegue.** El contrato de catálogo, cotizaciones y reservas sigue propuesto. Las rutas de cuenta/sesión de cliente (CC-03A) y wallet (CC-03B) están implementadas en esta rama, sin que eso apruebe el contrato general ni implique despliegue. CC-02 define la propuesta para el flujo restante; los nombres de rutas, campos, enums y errores siguen siendo propuestas salvo donde se los identifica expresamente como reglas confirmadas, hechos actuales o comportamiento implementado en esta rama.
 
 ## Revisión contra el código — 2026-10-23 (`main` en `5f0905d`)
 
-Revisión de este documento contra el OpenAPI generado por `create_app` (issue #28). **El estado sigue en PROPUESTA hasta que se registre la decisión de aprobación**; esta sección enumera lo que el código ya resolvió y prevalece sobre los pasajes del cuerpo que la contradicen, que se conservan como historial.
+Revisión de este documento contra el OpenAPI generado por `create_app` (issue #28). **Decisión registrada el 2026-10-23: aprobado con observaciones.** Esta sección enumera lo que el código ya resolvió y prevalece sobre los pasajes del cuerpo que la contradicen, que se conservan como historial.
 
 **Correcciones que prevalecen sobre el cuerpo:**
 
@@ -18,7 +20,7 @@ Revisión de este documento contra el OpenAPI generado por `create_app` (issue #
 
 **Rutas implementadas que este documento no listaba** (agregadas a la sección 4): los permisos EIP-712 de cliente y de personal, el depósito con tarjeta mediante Stripe (F09.8) y la escena pública del recorrido 3D (F06).
 
-**Observaciones para la decisión de aprobación:**
+**Observaciones abiertas de la aprobación:**
 
 1. Las rutas de Stripe responden errores con el `{"detail": …}` por defecto de FastAPI, no con el sobre común `{code, message, request_id, field_errors}` de la sección 10.
 2. Persisten como pendientes D-07 (roles para operaciones no decisorias), D-10 (schema de escena, que hoy define F06), D-12 y D-20 (aprobación global de nombres, schemas y sesión de cliente).
@@ -461,6 +463,8 @@ Los códigos indicados como implementados describen solamente esta rama; los dem
 | D-20 | Revisar y aprobar globalmente el contrato de cuenta/sesión implementado en esta rama por CC-03A (paths `/api/v1/customer/auth/*`, schemas, expiración/refresh y revocación). | Confundir el comportamiento implementado en esta rama con aprobación global o despliegue; cambiar `/api/v1/auth/*`, que sigue siendo staff-only. |
 
 ## 13. Criterio de salida de CC-02
+
+**Cumplido el 2026-10-23:** el contrato quedó aprobado con observaciones (ver la revisión al inicio). El párrafo siguiente describe el criterio original.
 
 Este artefacto conserva explícitamente el estado **PROPUESTA** para revisión y no afirma despliegue ni aprobación final. CC-03A/CC-03B/CC-04A/CC-04B, CC-05A/B y CC-05C1/C2/C3 están implementados en esta rama; el contrato global de rutas, schemas, respuestas y errores sigue sujeto a revisión. Para CC-04B se registran el acceso público sin autenticación/idempotencia, nuevo snapshot por POST, vigencia de 15 minutos, invalidación por `offer_version` y rate limit de 10 solicitudes por IP cada minuto. Para CC-05B se registra cuenta autenticada + wallet de cliente y agencia vinculadas, snapshot COP con depósito nullable, deadline de 24 horas, bloqueo por `listing_id`, idempotencia persistida y acceso propio. El vencimiento local sin depósito confirmado libera el bloqueo; si el depósito fue confirmado, el listing permanece bloqueado hasta una futura confirmación de reembolso on-chain. CC-05C3 agrega evidencia append-only, replay idempotente y transiciones atómicas después de validar eventos/recibos; CC-06 conserva el escrow local EIP-712. Las rutas no envían transacciones. Se preserva `/api/v1/auth/*` para personal y `/api/v1/customer/auth/*` para clientes. CC-06 y CC-08 deben mantener el límite de Hardhat local: sin testnet ni fondos reales sin aprobación posterior. Las decisiones marcadas **PENDIENTE** no deben convertirse en defaults silenciosos; las etiquetas **PROPUESTA** requieren resolución antes de tratarlas como contrato.
 
