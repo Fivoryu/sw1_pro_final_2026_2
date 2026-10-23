@@ -25,6 +25,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "eth-abi>=5.0",
   "httpx>=0.27",
   "httpx2>=1.0",
   "pyright>=1.1",
