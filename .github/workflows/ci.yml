@@ -90,6 +90,60 @@ jobs:
             exit 1
           fi
 
+  contracts:
+    name: Contracts and chain seam (Hardhat)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install contract dependencies
+        working-directory: contracts
+        run: npm ci
+      - name: Hardhat tests
+        working-directory: contracts
+        run: npx hardhat test
+      # The backend chain tests replace JSON-RPC with fakes, so only the steps below prove
+      # the API and ReservationEscrow.sol agree on calldata, events, nonces and where the
+      # deposit tokens end up.
+      - name: Start a local node and deploy the escrow
+        working-directory: contracts
+        run: |
+          npx hardhat compile
+          npx hardhat node --hostname 127.0.0.1 --port 8545 > "$RUNNER_TEMP/hardhat-node.log" 2>&1 &
+          node_ready() {
+            curl -sf -X POST -H 'Content-Type: application/json' \
+              --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
+              http://127.0.0.1:8545 > /dev/null
+          }
+          for _ in $(seq 1 30); do
+            node_ready && break
+            sleep 1
+          done
+          if ! node_ready; then
+            echo "::error::The Hardhat node did not answer on 127.0.0.1:8545 within 30 seconds."
+            tail -n 100 "$RUNNER_TEMP/hardhat-node.log"
+            exit 1
+          fi
+          npx hardhat run scripts/deploy-local.ts --network localhost > "$RUNNER_TEMP/hardhat-deployment.json"
+          cat "$RUNNER_TEMP/hardhat-deployment.json"
+      - name: Install backend
+        working-directory: backend
+        run: python -m pip install ".[dev]"
+      - name: Reservations against the real escrow
+        working-directory: backend
+        env:
+          ROOMFORGE_HARDHAT_DEPLOYMENT: ${{ runner.temp }}/hardhat-deployment.json
+        run: python -m pytest tests/test_reservation_hardhat_e2e.py -q -rs --timeout=120
+      - name: Hardhat node log
+        if: failure()
+        run: tail -n 100 "$RUNNER_TEMP/hardhat-node.log"
+
   panel:
     name: Staff panel (Node 22)
     runs-on: ubuntu-latest
