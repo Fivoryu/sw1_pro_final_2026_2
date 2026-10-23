@@ -830,7 +830,7 @@ El arranque anticipado se apoya en §1.5 regla 5 («F08 puede empezar con el pil
 
 **Estado (corte 2026-09-30):** 🟡 Parcial — F09.1 🟡, F09.2 ✅ en Hardhat local, F09.3 🟡, F09.4 🟡, F09.5 🟡, F09.6 🟡, F09.7 ⬜. Límite: sin testnet, sin fondos reales, sin UI de wallet/reserva y sin política de confirmaciones cerrada.
 **Actualización 2026-10-22 (PR #57 y #58):** sigue 🟡 Parcial. Integrados la base de reservas y wallet del cliente (UI de cotización, solicitud, seguimiento y ejecución WalletConnect) y el depósito con tarjeta de F09.8 🟡 (código y pruebas automatizadas; falta recorrido manual). Pendientes para el cierre: Project ID de Reown y depósito firmado desde el teléfono (issue #27), recorrido integrado de salidas on-chain y salida de PROPUESTA del contrato API (issue #28). F09.7 ⬜.
-**Actualización 2026-10-23 (PR #61):** sigue 🟡 Parcial. F09.5 y F09.6 tienen las salidas y los fallos de cadena observados contra un escrow Hardhat real en CI, y el contrato API quedó aprobado con observaciones (cumple ambos criterios de la issue #28). Quedan el depósito firmado desde la wallet del teléfono (F09.4, issue #27) y el recorrido manual de Stripe (F09.8).
+**Actualización 2026-10-23 (PR #61):** sigue 🟡 Parcial. F09.5 y F09.6 tienen las salidas y los fallos de cadena observados contra un escrow Hardhat real en CI, y el contrato API quedó aprobado con observaciones (cumple ambos criterios de la issue #28). Quedan el depósito firmado desde la wallet del teléfono (F09.4, issue #27) y el recorrido manual de Stripe (F09.8); la guía de traspaso para completarlos está en `docs/guias/f09-guia-cierre.md`.
 **Asignación:** ☐ Libre — escribir acá el responsable al tomar la fase.
 
 ### F09.1 — Dominio y máquina de estados de negocio
