@@ -6,6 +6,7 @@ import 'package:captura_mobile/domain/spatial/spatial.dart';
 import 'package:captura_mobile/domain/staff_session_controller.dart';
 import 'package:captura_mobile/ui/spatial/room_editor_screen.dart';
 import 'package:captura_mobile/ui/spatial/spatial_capture_screen.dart';
+import 'package:captura_mobile/ui/theme/andean_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -363,7 +364,7 @@ void main() {
     }
   });
 
-  testWidgets('room editor rejects an inherited primary scroll offset', (
+  testWidgets('room editor lays out and saves height with the app theme', (
     tester,
   ) async {
     final built = await _build(tester);
@@ -383,6 +384,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        theme: andeanTheme(),
         home: PrimaryScrollController(
           controller: inheritedScroll,
           child: RoomEditorScreen(
@@ -392,13 +394,106 @@ void main() {
         ),
       ),
     );
+    await tester.pump();
+    expect(tester.takeException(), isNull);
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
 
     expect(find.text('Dormitorio prueba').hitTestable(), findsOneWidget);
     expect(find.text('Altura').hitTestable(), findsOneWidget);
     expect(
       find.text('Altura: 2,60 m (ingresada a mano)').hitTestable(),
       findsOneWidget,
+    );
+    expect(find.text('Altura medida a mano (m)'), findsOneWidget);
+    expect(find.text('Lados'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('room-height-field')),
+      '2,65',
+    );
+    await tester.tap(find.byKey(const ValueKey('room-height-save')));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Altura: 2,65 m (ingresada a mano)'), findsOneWidget);
+    expect(built.controller.rooms.single.height.value, 2.65);
+    expect(built.controller.rooms.single.height.source, HeightSource.manual);
+
+    final openings = find.text('Puertas y ventanas');
+    await tester.ensureVisible(openings);
+    await tester.pump();
+    expect(openings.hitTestable(), findsOneWidget);
+    expect(find.byKey(const ValueKey('add-opening-button')), findsOneWidget);
+
+    final room = built.controller.rooms.single;
+    await tester.runAsync(
+      () => built.controller.updateRoom(
+        room.copyWith(
+          boxes: const [
+            OccupancyBox(
+              id: 'box-1',
+              centerX: 1,
+              centerZ: 1,
+              width: 0.8,
+              depth: 0.6,
+              height: null,
+              source: BoxSource.depth,
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final boxField = find.byKey(const ValueKey('box-height-field-box-1'));
+    await tester.ensureVisible(boxField);
+    await tester.enterText(boxField, '0,85');
+    final boxSave = find.byKey(const ValueKey('box-height-save-box-1'));
+    await tester.ensureVisible(boxSave);
+    await tester.tap(boxSave);
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(built.controller.rooms.single.boxes.single.height, 0.85);
+  });
+
+  testWidgets('reference action has finite constraints with the app theme', (
+    tester,
+  ) async {
+    final built = await _build(tester);
+    built.ar.results.add(rectangle(4.20, 3.70));
+    await tester.runAsync(
+      () => built.controller.captureRoom('Dormitorio prueba'),
+    );
+    tester.view.physicalSize = const Size(720, 1600);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: andeanTheme(),
+        home: RoomEditorScreen(controller: built.controller, roomId: 'room-1'),
+      ),
+    );
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Lados y tolerancia'), findsOneWidget);
+
+    final field = find.byKey(const ValueKey('reference-field-0'));
+    await tester.ensureVisible(field);
+    await tester.enterText(field, '4,15');
+    final save = find.byKey(const ValueKey('reference-save-0'));
+    await tester.ensureVisible(save);
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(built.controller.rooms.single.references.single.edgeIndex, 0);
+    expect(
+      built.controller.rooms.single.references.single.referenceMeters,
+      4.15,
     );
   });
 

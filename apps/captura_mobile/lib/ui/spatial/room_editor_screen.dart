@@ -4,6 +4,10 @@ import '../../domain/spatial/spatial.dart';
 import '../../domain/spatial_capture_controller.dart';
 import 'spatial_format.dart';
 
+/// Row actions need a finite width; the app theme's `Size.fromHeight(48)`
+/// deliberately expands standalone actions to the available width.
+const _rowActionMinSize = Size(0, 48);
+
 /// Manual corrections of one captured room: height, tape references,
 /// openings and unlabelled volumes. Every value typed here is marked as
 /// manual; nothing typed is presented as measured.
@@ -206,6 +210,7 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
                 const SizedBox(width: 8),
                 FilledButton(
                   key: const ValueKey('room-height-save'),
+                  style: FilledButton.styleFrom(minimumSize: _rowActionMinSize),
                   onPressed: () => _saveHeight(room),
                   child: const Text('Guardar'),
                 ),
@@ -298,6 +303,9 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
                           const SizedBox(width: 8),
                           OutlinedButton(
                             key: ValueKey('reference-save-$index'),
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: _rowActionMinSize,
+                            ),
                             onPressed: () => _saveReference(room, index),
                             child: const Text('Registrar'),
                           ),
@@ -372,6 +380,10 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
                         ),
                         const SizedBox(width: 8),
                         OutlinedButton(
+                          key: ValueKey('box-height-save-${box.id}'),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: _rowActionMinSize,
+                          ),
                           onPressed: () => _saveBoxHeight(room, box),
                           child: const Text('Guardar'),
                         ),
