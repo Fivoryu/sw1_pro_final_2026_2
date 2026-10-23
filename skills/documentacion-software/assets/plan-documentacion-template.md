@@ -14,7 +14,7 @@
 
 | Fuente | Ubicación/alcance | Hecho que respalda | Estado |
 | --- | --- | --- | --- |
-| `docs/propuesta-roomforge-original.md` | Propuesta inicial | Problema y origen del proyecto (parcialmente supersedida) | verified |
+| `docs/archivo/propuesta-roomforge-original.md` | Propuesta inicial | Problema y origen del proyecto (parcialmente supersedida) | verified |
 | `docs/sprint-0/auditoria-br.md` | Secciones A–I | 76 reglas de negocio con fuente por regla | derived |
 | `docs/sprint-0/ids-trazabilidad.md` | Secciones 1–10 | IDs canónicos OBJ/RF/RNF/BR/PB/HU/CU, plataformas y matriz | derived |
 | `docs/sprint-0/riesgos.md` | Registro R1–R10 | Riesgos, mitigación y seguimiento | derived |
