@@ -249,6 +249,58 @@ class SpatialCaptureController extends ChangeNotifier {
     return null;
   }
 
+  Future<String?> createManualLRoom({
+    required String name,
+    required double totalWidth,
+    required double totalDepth,
+    required double recessWidth,
+    required double recessDepth,
+    required double height,
+    required RecessCorner recess,
+  }) async {
+    if (ownerId == null) return _noSessionMessage;
+    try {
+      final room = buildManualLRoom(
+        id: _newRoomId(),
+        name: name,
+        totalWidth: totalWidth,
+        totalDepth: totalDepth,
+        recessWidth: recessWidth,
+        recessDepth: recessDepth,
+        height: height,
+        recess: recess,
+      );
+      await _change(_capture.copyWith(rooms: [..._capture.rooms, room]));
+      return null;
+    } on ArgumentError {
+      return 'Revisá las medidas y el recorte del ambiente en L.';
+    }
+  }
+
+  Future<String?> createCalibratedManualSketchRoom({
+    required String name,
+    required List<FloorPoint> sketch,
+    required int referenceEdge,
+    required double referenceMeters,
+    required double height,
+  }) async {
+    if (ownerId == null) return _noSessionMessage;
+    try {
+      final room = buildCalibratedManualSketchRoom(
+        id: _newRoomId(),
+        name: name,
+        sketch: sketch,
+        referenceEdge: referenceEdge,
+        referenceMeters: referenceMeters,
+        height: height,
+      );
+      await _change(_capture.copyWith(rooms: [..._capture.rooms, room]));
+      return null;
+    } on ArgumentError {
+      return 'Revisá el contorno y la medida real usada para calibrarlo.';
+    }
+  }
+
   /// Hands the capture package to the upload queue and says what happens
   /// next, or why there is no package. Null when there is nothing to say.
   Future<String?> _handlePackage(

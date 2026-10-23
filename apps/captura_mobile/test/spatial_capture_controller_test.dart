@@ -283,6 +283,58 @@ void main() {
         expect(reopened.controller.preview!.document['version'], '2.0');
       },
     );
+
+    test(
+      'persists L and calibrated sketch rooms across fresh controllers',
+      () async {
+        final h = await harness();
+        h.ar.available = ArAvailability.unsupported;
+        expect(
+          await h.controller.createManualLRoom(
+            name: 'Cocina en L',
+            totalWidth: 5,
+            totalDepth: 4,
+            recessWidth: 2,
+            recessDepth: 1.5,
+            height: 2.6,
+            recess: RecessCorner.upperRight,
+          ),
+          isNull,
+        );
+        expect(
+          await h.controller.createCalibratedManualSketchRoom(
+            name: 'Estudio irregular',
+            sketch: const [
+              FloorPoint(10, 10),
+              FloorPoint(210, 10),
+              FloorPoint(240, 120),
+              FloorPoint(120, 210),
+              FloorPoint(10, 140),
+            ],
+            referenceEdge: 0,
+            referenceMeters: 4,
+            height: 2.7,
+          ),
+          isNull,
+        );
+
+        final reopened = await harness(root: h.root, backend: h.backend);
+        final rooms = reopened.controller.rooms;
+        expect(rooms, hasLength(2));
+        expect(rooms.first.corners, hasLength(6));
+        expect(polygonArea(rooms.first.corners), closeTo(17, 1e-9));
+        expect(rooms.first.acquisition.method, RoomAcquisitionMethod.manual);
+        expect(
+          rooms.last.acquisition.method,
+          RoomAcquisitionMethod.manualSketch,
+        );
+        expect(edgeLengths(rooms.last.corners).first, closeTo(4, 1e-9));
+        expect(rooms.every((room) => room.metrics == null), isTrue);
+        expect(reopened.controller.preview!.document['version'], '2.0');
+        expect(h.ar.availabilityChecks, 0);
+        expect(h.ar.names, isEmpty);
+      },
+    );
   });
 
   group('editing', () {
@@ -301,6 +353,43 @@ void main() {
         reopened.controller.rooms.single.height,
         const RoomHeight(2.55, HeightSource.manual),
       );
+    });
+
+    test('preserves the physically verified manual room and door', () async {
+      final h = await harness();
+      await h.controller.createManualRectangularRoom(
+        name: 'Dormitorio prueba',
+        length: 4.2,
+        width: 3.7,
+        height: 2.65,
+      );
+      final room = h.controller.rooms.single;
+      await h.controller.updateRoom(
+        room.copyWith(
+          openings: const [
+            RoomOpening(
+              id: 'door-1',
+              edgeIndex: 0,
+              position: 0.5,
+              width: 0.9,
+              height: 2.1,
+              type: OpeningType.door,
+            ),
+          ],
+        ),
+      );
+
+      final reopened = await harness(root: h.root, backend: h.backend);
+      final restored = reopened.controller.rooms.single;
+      expect(restored.name, 'Dormitorio prueba');
+      expect(restored.height, const RoomHeight(2.65, HeightSource.manual));
+      expect(restored.acquisition.method, RoomAcquisitionMethod.manual);
+      expect(restored.metrics, isNull);
+      expect(restored.openings.single.width, 0.9);
+      expect(restored.openings.single.height, 2.1);
+      expect(restored.openings.single.position, 0.5);
+      expect(reopened.controller.preview, isNotNull);
+      expect(reopened.controller.preview!.document['version'], '2.0');
     });
 
     test('connecting two rooms by their doors shares one wall', () async {

@@ -147,6 +147,10 @@ void main() {
       tester,
       find.byKey(const ValueKey('manual-capture-method')),
     );
+    await _tapAndSettle(
+      tester,
+      find.byKey(const ValueKey('manual-shape-rectangle')),
+    );
     expect(find.text('Largo del ambiente (m)'), findsOneWidget);
     expect(find.text('Ancho del ambiente (m)'), findsOneWidget);
     expect(find.text('Altura del ambiente (m)'), findsOneWidget);
@@ -177,10 +181,199 @@ void main() {
     expect(find.text('Medidas ingresadas manualmente'), findsOneWidget);
     expect(find.bySemanticsLabel('Plano de la captura'), findsOneWidget);
 
-    await _tapAndSettle(tester, find.byKey(const ValueKey('edit-room-room-1')));
+    final edit = find.byKey(const ValueKey('edit-room-room-1'));
+    await tester.scrollUntilVisible(
+      edit,
+      300,
+      scrollable: find.descendant(
+        of: find.byKey(const ValueKey('spatial-capture-screen')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    await tester.tap(edit);
+    await tester.pumpAndSettle();
     expect(find.text('Lados'), findsOneWidget);
     expect(find.byKey(const ValueKey('add-opening-button')), findsOneWidget);
     expect(find.byKey(const ValueKey('reference-field-0')), findsNothing);
+  });
+
+  testWidgets('creates an L room from the guided manual selector', (
+    tester,
+  ) async {
+    final built = await _build(tester);
+    built.ar.available = ArAvailability.unsupported;
+    tester.view.physicalSize = const Size(720, 1600);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: andeanTheme(),
+        home: SpatialCaptureScreen(controller: built.controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _tapAndSettle(
+      tester,
+      find.byKey(const ValueKey('capture-room-button')),
+    );
+    await _tapAndSettle(
+      tester,
+      find.byKey(const ValueKey('manual-capture-method')),
+    );
+    expect(find.text('Rectangular'), findsOneWidget);
+    expect(find.text('En L'), findsOneWidget);
+    expect(find.text('Irregular'), findsOneWidget);
+    expect(find.textContaining('import'), findsNothing);
+    await _tapAndSettle(tester, find.byKey(const ValueKey('manual-shape-l')));
+
+    for (final entry in <ValueKey<String>, String>{
+      const ValueKey('l-room-name'): 'Cocina en L',
+      const ValueKey('l-total-width'): '5,00',
+      const ValueKey('l-total-depth'): '4.00',
+      const ValueKey('l-recess-width'): '2,00',
+      const ValueKey('l-recess-depth'): '1,50',
+      const ValueKey('l-room-height'): '2,60',
+    }.entries) {
+      await tester.enterText(find.byKey(entry.key), entry.value);
+      await tester.pump();
+    }
+    expect(find.byKey(const ValueKey('l-recess-corner')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('manual-contour-preview')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+    await tester.enterText(
+      find.byKey(const ValueKey('l-recess-width')),
+      '5,00',
+    );
+    await _tapAndSettle(tester, find.byKey(const ValueKey('l-room-confirm')));
+    expect(find.textContaining('El recorte debe ser menor'), findsOneWidget);
+    expect(built.controller.rooms, isEmpty);
+    expect(tester.takeException(), isNull);
+    await tester.enterText(
+      find.byKey(const ValueKey('l-recess-width')),
+      '2,00',
+    );
+    await _tapAndSettle(tester, find.byKey(const ValueKey('l-room-confirm')));
+
+    final room = built.controller.rooms.single;
+    expect(room.name, 'Cocina en L');
+    expect(room.corners, hasLength(6));
+    expect(polygonArea(room.corners), closeTo(17, 1e-9));
+    expect(room.acquisition.method, RoomAcquisitionMethod.manual);
+    expect(room.metrics, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('draws and calibrates an irregular room without ARCore', (
+    tester,
+  ) async {
+    final built = await _build(tester);
+    built.ar.available = ArAvailability.unsupported;
+    tester.view.physicalSize = const Size(720, 1600);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: andeanTheme(),
+        home: SpatialCaptureScreen(controller: built.controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _tapAndSettle(
+      tester,
+      find.byKey(const ValueKey('capture-room-button')),
+    );
+    await _tapAndSettle(
+      tester,
+      find.byKey(const ValueKey('manual-capture-method')),
+    );
+    await _tapAndSettle(
+      tester,
+      find.byKey(const ValueKey('manual-shape-irregular')),
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('sketch-room-name')),
+      'Estudio irregular',
+    );
+    final canvas = find.byKey(const ValueKey('sketch-canvas'));
+    await tester.ensureVisible(canvas);
+    await tester.pumpAndSettle();
+    final origin = tester.getTopLeft(canvas);
+    for (final offset in const [
+      Offset(25, 25),
+      Offset(190, 25),
+      Offset(200, 85),
+      Offset(110, 150),
+      Offset(25, 110),
+    ]) {
+      await tester.tapAt(origin + offset);
+      await tester.pump();
+    }
+    await tester.tapAt(origin + const Offset(70, 145));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('sketch-undo')));
+    await tester.pump();
+    final close = find.byKey(const ValueKey('sketch-close'));
+    await tester.ensureVisible(close);
+    await tester.tap(close);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('sketch-reference-metres')),
+      findsOneWidget,
+    );
+    await tester.ensureVisible(canvas);
+    final closedOrigin = tester.getTopLeft(canvas);
+    await tester.tapAt(closedOrigin + const Offset(25, 110));
+    await tester.pump();
+    final remove = find.byKey(const ValueKey('sketch-remove'));
+    expect(tester.widget<TextButton>(remove).onPressed, isNotNull);
+    await tester.ensureVisible(remove);
+    await tester.tap(remove);
+    await tester.pump();
+    await tester.enterText(
+      find.byKey(const ValueKey('sketch-reference-metres')),
+      '4,20',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('sketch-room-height')),
+      '2.70',
+    );
+    expect(find.byKey(const ValueKey('sketch-undo')), findsOneWidget);
+    expect(find.byKey(const ValueKey('sketch-reset')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await _tapAndSettle(tester, find.byKey(const ValueKey('sketch-confirm')));
+
+    expect(built.controller.rooms, hasLength(1));
+    final room = built.controller.rooms.single;
+    expect(room.name, 'Estudio irregular');
+    expect(room.corners, hasLength(4));
+    expect(edgeLengths(room.corners).first, closeTo(4.2, 1e-9));
+    expect(room.acquisition.method, RoomAcquisitionMethod.manualSketch);
+    expect(room.metrics, isNull);
+    expect(
+      find.text('Croquis manual calibrado con una medida real'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+
+    final edit = find.byKey(const ValueKey('edit-room-room-1'));
+    await tester.drag(
+      find.byKey(const ValueKey('spatial-capture-screen')),
+      const Offset(0, -700),
+    );
+    await tester.pumpAndSettle();
+    expect(edit.hitTestable(), findsOneWidget);
+    await tester.tap(edit);
+    await tester.pumpAndSettle();
+    expect(find.byType(RoomEditorScreen), findsOneWidget);
+    await tester.drag(
+      find.byKey(const ValueKey('room-editor-scroll')),
+      const Offset(0, -600),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Puertas y ventanas'), findsOneWidget);
   });
 
   testWidgets('restores a persisted manual room in a fresh screen lifecycle', (

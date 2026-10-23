@@ -11,7 +11,7 @@ void main() {
           name: 'Dormitorio',
           length: 4.20,
           width: 3.70,
-          height: 2.60,
+          height: 2.65,
         );
 
         expect(room.corners, const [
@@ -22,7 +22,11 @@ void main() {
         ]);
         expect(signedArea(room.corners), greaterThan(0));
         expect(polygonArea(room.corners), closeTo(15.54, 1e-9));
-        expect(room.height, const RoomHeight(2.6, HeightSource.manual));
+        expect(
+          edgeLengths(room.corners).reduce((a, b) => a + b),
+          closeTo(15.8, 1e-9),
+        );
+        expect(room.height, const RoomHeight(2.65, HeightSource.manual));
         expect(room.acquisition.method, RoomAcquisitionMethod.manual);
         expect(room.acquisition.arMetrics, isNull);
         expect(room.references, isEmpty);

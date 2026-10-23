@@ -182,6 +182,7 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
       appBar: AppBar(title: Text(room.name)),
       body: SafeArea(
         child: ListView(
+          key: const ValueKey('room-editor-scroll'),
           controller: _scrollController,
           padding: const EdgeInsets.all(20),
           children: [
