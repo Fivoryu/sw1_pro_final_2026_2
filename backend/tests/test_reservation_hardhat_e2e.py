@@ -88,6 +88,22 @@ class HardhatChain:
         assert receipt is not None and receipt["status"] == "0x1", receipt
         return tx_hash
 
+    def send_reverting(self, sender: str, to: str, data: bytes) -> str:
+        """Mine a transaction that reverts and return its hash.
+
+        An explicit gas limit skips estimation, which would refuse the call before mining.
+        Hardhat then mines the reverted transaction and reports the revert as an error.
+        """
+        transaction = {"from": sender, "to": to, "data": "0x" + data.hex(), "gas": hex(1_000_000)}
+        with pytest.raises(AssertionError, match="eth_sendTransaction failed"):
+            self.rpc("eth_sendTransaction", [transaction])
+        block = self.rpc("eth_getBlockByNumber", ["latest", False])
+        assert len(block["transactions"]) == 1
+        tx_hash = block["transactions"][0]
+        receipt = self.rpc("eth_getTransactionReceipt", [tx_hash])
+        assert receipt["status"] == "0x0" and receipt["from"] == sender.lower(), receipt
+        return tx_hash
+
     def balance(self, owner: str) -> int:
         data = keccak(text="balanceOf(address)")[:4] + encode(["address"], [owner])
         return int(self.rpc("eth_call", [{"to": self.contracts["rft"], "data": "0x" + data.hex()}, "latest"]), 16)
@@ -281,10 +297,56 @@ def test_a_transaction_without_the_deposit_event_never_confirms_the_reservation(
         auth=auth,
     )
 
-    assert rejected.status_code in {409, 422}, rejected.text
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["code"] == "chain_transaction_unverified"
     stored = _stored(ctx, reservation["reservation_id"])
     assert stored.status == "pending"
     assert stored.deposit_confirmed_at is None
+
+
+def test_a_reverted_deposit_never_confirms_the_reservation(chain_context: ChainContext) -> None:
+    ctx = chain_context
+    reservation, auth = _open_reservation(ctx, listing_id="hardhat-reverted")
+    permit = _permit(ctx, reservation["reservation_id"], "deposit", auth)
+    escrow_before = ctx.chain.balance(ctx.escrow)
+
+    # Without approve the escrow cannot pull the tokens, so the deposit is mined reverted.
+    tx_hash = ctx.chain.send_reverting(ctx.customer, ctx.escrow, _action_calldata("deposit", permit))
+    rejected = _reconcile(
+        ctx, reservation["reservation_id"], action="deposit", tx_hash=tx_hash, nonce=permit["nonce"], auth=auth
+    )
+
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["code"] == "chain_transaction_unverified"
+    assert _stored(ctx, reservation["reservation_id"]).deposit_confirmed_at is None
+    assert ctx.chain.balance(ctx.escrow) == escrow_before
+
+
+def test_an_unreachable_node_defers_confirmation_until_it_is_back(chain_context: ChainContext) -> None:
+    ctx = chain_context
+    reservation, auth = _open_reservation(ctx, listing_id="hardhat-rpc-down")
+    permit = _permit(ctx, reservation["reservation_id"], "deposit", auth)
+    _approve(ctx, permit["amount"])
+    tx_hash = ctx.chain.send(ctx.customer, ctx.escrow, _action_calldata("deposit", permit))
+    app = client_app(ctx.context.client)
+    reachable = app.state.settings
+
+    # Port 1 on loopback refuses connections, standing in for a node that went down.
+    app.state.settings = replace(reachable, escrow_rpc_url="http://127.0.0.1:1")
+    unavailable = _reconcile(
+        ctx, reservation["reservation_id"], action="deposit", tx_hash=tx_hash, nonce=permit["nonce"], auth=auth
+    )
+    assert unavailable.status_code == 422, unavailable.text
+    assert unavailable.json()["code"] == "chain_transaction_unverified"
+    assert _stored(ctx, reservation["reservation_id"]).deposit_confirmed_at is None
+
+    app.state.settings = reachable
+    recovered = _reconcile(
+        ctx, reservation["reservation_id"], action="deposit", tx_hash=tx_hash, nonce=permit["nonce"], auth=auth
+    )
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()["replayed"] is False
+    assert _stored(ctx, reservation["reservation_id"]).deposit_confirmed_at is not None
 
 
 def test_accept_releases_the_deposit_to_the_agency_wallet(chain_context: ChainContext) -> None:
