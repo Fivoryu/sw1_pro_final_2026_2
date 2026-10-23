@@ -34,6 +34,7 @@ class SpatialCaptureScreen extends StatefulWidget {
 }
 
 class _SpatialCaptureScreenState extends State<SpatialCaptureScreen> {
+  final ScrollController _scrollController = ScrollController();
   int? _storageBytes;
 
   SpatialCaptureController get _controller => widget.controller;
@@ -51,6 +52,7 @@ class _SpatialCaptureScreenState extends State<SpatialCaptureScreen> {
   @override
   void dispose() {
     _controller.removeListener(_onChanged);
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -165,6 +167,7 @@ class _SpatialCaptureScreenState extends State<SpatialCaptureScreen> {
             constraints: const BoxConstraints(maxWidth: 720),
             child: ListView(
               key: const ValueKey('spatial-capture-screen'),
+              controller: _scrollController,
               padding: const EdgeInsets.all(20),
               children: [
                 const Text(
@@ -526,7 +529,10 @@ class _RoomCard extends StatelessWidget {
                 ),
               ),
             const SizedBox(height: 8),
-            Row(
+            OverflowBar(
+              alignment: MainAxisAlignment.spaceBetween,
+              overflowAlignment: OverflowBarAlignment.end,
+              overflowSpacing: 8,
               children: [
                 TextButton.icon(
                   key: ValueKey('edit-room-${room.id}'),
@@ -534,7 +540,6 @@ class _RoomCard extends StatelessWidget {
                   icon: const Icon(Icons.edit_outlined),
                   label: const Text('Corregir'),
                 ),
-                const Spacer(),
                 TextButton.icon(
                   key: ValueKey('remove-room-${room.id}'),
                   onPressed: onRemove,

@@ -2,7 +2,9 @@ import 'package:captura_mobile/data/services/ar_capture_channel.dart';
 import 'package:captura_mobile/data/services/staff_auth_api.dart';
 import 'package:captura_mobile/data/services/staff_scene_api.dart';
 import 'package:captura_mobile/domain/spatial_capture_controller.dart';
+import 'package:captura_mobile/domain/spatial/spatial.dart';
 import 'package:captura_mobile/domain/staff_session_controller.dart';
+import 'package:captura_mobile/ui/spatial/room_editor_screen.dart';
 import 'package:captura_mobile/ui/spatial/spatial_capture_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -21,6 +23,22 @@ typedef _Built = ({
 Future<_Built> _build(WidgetTester tester) async {
   final backend = FakeSceneBackend();
   final ar = FakeArCapture();
+  final store = InMemoryCaptureDraftStore();
+  final controller = await _newController(
+    tester,
+    backend: backend,
+    ar: ar,
+    store: store,
+  );
+  return (controller: controller, backend: backend, ar: ar);
+}
+
+Future<SpatialCaptureController> _newController(
+  WidgetTester tester, {
+  required FakeSceneBackend backend,
+  required FakeArCapture ar,
+  required InMemoryCaptureDraftStore store,
+}) async {
   late SpatialCaptureController controller;
   await tester.runAsync(() async {
     final session = StaffSessionController(
@@ -40,12 +58,12 @@ Future<_Built> _build(WidgetTester tester) async {
         baseUrl: 'https://api.example.test',
         client: backend.client,
       ),
-      store: InMemoryCaptureDraftStore(),
+      store: store,
       ar: ar,
     );
     await controller.load();
   });
-  return (controller: controller, backend: backend, ar: ar);
+  return controller;
 }
 
 Future<void> _pump(
@@ -156,6 +174,135 @@ void main() {
     expect(find.text('Lados'), findsOneWidget);
     expect(find.byKey(const ValueKey('add-opening-button')), findsOneWidget);
     expect(find.byKey(const ValueKey('reference-field-0')), findsNothing);
+  });
+
+  testWidgets('restores a persisted manual room in a fresh screen lifecycle', (
+    tester,
+  ) async {
+    final backend = FakeSceneBackend();
+    final ar = FakeArCapture()..available = ArAvailability.unsupported;
+    final store = InMemoryCaptureDraftStore();
+    final original = await _newController(
+      tester,
+      backend: backend,
+      ar: ar,
+      store: store,
+    );
+    await tester.runAsync(
+      () => original.createManualRectangularRoom(
+        name: 'Dormitorio prueba',
+        length: 4.20,
+        width: 3.70,
+        height: 2.60,
+      ),
+    );
+    original.dispose();
+
+    final restored = await _newController(
+      tester,
+      backend: backend,
+      ar: ar,
+      store: store,
+    );
+    addTearDown(restored.dispose);
+    final room = restored.rooms.single;
+    expect(room.name, 'Dormitorio prueba');
+    expect(room.acquisition.method, RoomAcquisitionMethod.manual);
+    expect(room.acquisition.arMetrics, isNull);
+    expect(
+      edgeLengths(room.corners),
+      orderedEquals([
+        closeTo(4.20, 1e-9),
+        closeTo(3.70, 1e-9),
+        closeTo(4.20, 1e-9),
+        closeTo(3.70, 1e-9),
+      ]),
+    );
+    expect(polygonArea(room.corners), closeTo(15.54, 1e-9));
+    expect(room.height, const RoomHeight(2.60, HeightSource.manual));
+    expect(restored.syncState, CaptureSyncState.pending);
+    expect(restored.preview, isNotNull);
+    expect(restored.preview!.document['version'], '2.0');
+
+    tester.view.physicalSize = const Size(720, 1600);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(home: SpatialCaptureScreen(controller: restored)),
+    );
+    await tester.pump();
+
+    for (final text in [
+      'Captura espacial',
+      'Pendiente de enviar',
+      'Ambientes',
+      'Dormitorio prueba',
+      'Superficie estimada: 15,54 m²',
+      'Altura: 2,60 m (ingresada a mano)',
+      'Capturar ambiente',
+    ]) {
+      final finder = find.text(text);
+      await tester.ensureVisible(finder);
+      await tester.pump();
+      expect(finder.hitTestable(), findsOneWidget);
+    }
+
+    await _tapAndSettle(tester, find.byKey(const ValueKey('edit-room-room-1')));
+    expect(find.byType(RoomEditorScreen), findsOneWidget);
+    expect(find.text('Lados'), findsOneWidget);
+  });
+
+  testWidgets('isolates scroll state and remains reachable after re-entry', (
+    tester,
+  ) async {
+    final built = await _build(tester);
+    await tester.runAsync(
+      () => built.controller.createManualRectangularRoom(
+        name: 'Dormitorio prueba',
+        length: 4.20,
+        width: 3.70,
+        height: 2.60,
+      ),
+    );
+    final inheritedScroll = ScrollController(initialScrollOffset: 1200);
+    addTearDown(inheritedScroll.dispose);
+    tester.view.physicalSize = const Size(720, 1600);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PrimaryScrollController(
+          controller: inheritedScroll,
+          child: SpatialCaptureScreen(controller: built.controller),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Pendiente de enviar').hitTestable(), findsOneWidget);
+
+    await tester.drag(
+      find.byKey(const ValueKey('spatial-capture-screen')),
+      const Offset(0, -600),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Capturar ambiente').hitTestable(), findsOneWidget);
+
+    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PrimaryScrollController(
+          controller: inheritedScroll,
+          child: SpatialCaptureScreen(controller: built.controller),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final roomName = find.text('Dormitorio prueba');
+    await tester.ensureVisible(roomName);
+    await tester.pump();
+    expect(roomName.hitTestable(), findsOneWidget);
   });
 
   testWidgets('shows automatic capture unavailable on unsupported devices', (
