@@ -2,6 +2,27 @@
 
 **Estado: PROPUESTA para revisión; no es un contrato final ni acredita despliegue.** El contrato de catálogo, cotizaciones y reservas sigue propuesto. Las rutas de cuenta/sesión de cliente (CC-03A) y wallet (CC-03B) están implementadas en esta rama, sin que eso apruebe el contrato general ni implique despliegue. CC-02 define la propuesta para el flujo restante; los nombres de rutas, campos, enums y errores siguen siendo propuestas salvo donde se los identifica expresamente como reglas confirmadas, hechos actuales o comportamiento implementado en esta rama.
 
+## Revisión contra el código — 2026-10-23 (`main` en `5f0905d`)
+
+Revisión de este documento contra el OpenAPI generado por `create_app` (issue #28). **El estado sigue en PROPUESTA hasta que se registre la decisión de aprobación**; esta sección enumera lo que el código ya resolvió y prevalece sobre los pasajes del cuerpo que la contradicen, que se conservan como historial.
+
+**Correcciones que prevalecen sobre el cuerpo:**
+
+- **Moneda.** Las menciones a COP están superadas. Cada publicación tiene su moneda (`BOB`, `USD` o `USDT`, migración `0013_listing_currency`) y la cotización y la reserva usan esa moneda. El depósito en token se escala por moneda: `BOB` y `USD` ×100 sobre el token local RFT (2 decimales) y `USDT` ×10⁶ sobre MockUSDT (6 decimales). Los ejemplos con `"currency": "COP"` deben leerse con la moneda de la publicación.
+- **D-03 resuelta:** el depósito es un monto fijo por publicación, configurado por `agency_admin` con `PATCH …/listings/{listing_id}/deposit`.
+- **D-04 resuelta para el entorno local:** RFT y MockUSDT en Hardhat `31337`, desplegados por `contracts/scripts/deploy-local.ts`; RPC solo en loopback. Testnet sigue fuera (F09.7).
+- **D-05 resuelta en el SDK:** Reown AppKit/WalletConnect en la app cliente. El Project ID público del equipo sigue pendiente (issue #27) y no se versiona.
+- **D-08 resuelta:** cancelar una reserva pendiente puede hacerlo el cliente o la agencia, cada uno con su permiso `cancel` firmado y la conciliación posterior del hash. No existe `POST /api/v1/reservations/{reservation_id}/cancel`; la fila candidata de la sección 4 queda reemplazada.
+- **D-16 resuelta para el escrow local:** dominio EIP-712 `RoomForgeReservationEscrow`, versión `1`, `chainId` 31337 y `verifyingContract` igual al escrow de la moneda; identificadores `keccak256` de los ID de API; eventos `Deposited`, `Accepted`, `Rejected`, `Cancelled` y `Expired`; el gas lo paga la wallet que ejecuta la acción. La conciliación contra un nodo real está cubierta por `backend/tests/test_reservation_hardhat_e2e.py`.
+- **Rutas opcionales de publicación de personal (sección 4):** no se adoptaron con esos nombres; el flujo editorial vive en las rutas de personal de F04 y queda fuera de este contrato.
+
+**Rutas implementadas que este documento no listaba** (agregadas a la sección 4): los permisos EIP-712 de cliente y de personal, el depósito con tarjeta mediante Stripe (F09.8) y la escena pública del recorrido 3D (F06).
+
+**Observaciones para la decisión de aprobación:**
+
+1. Las rutas de Stripe responden errores con el `{"detail": …}` por defecto de FastAPI, no con el sobre común `{code, message, request_id, field_errors}` de la sección 10.
+2. Persisten como pendientes D-07 (roles para operaciones no decisorias), D-10 (schema de escena, que hoy define F06), D-12 y D-20 (aprobación global de nombres, schemas y sesión de cliente).
+
 ## Cómo leer esta propuesta
 
 | Etiqueta | Significado |
@@ -88,9 +109,19 @@ Los nombres y métodos de esta tabla son **PROPUESTA** como contrato general. La
 | `POST /api/v1/reservations` | Crear una solicitud pendiente y devolver el snapshot de la reserva. | **PROPUESTA de contrato; implementado en esta rama, CC-05B.** Requiere sesión de cliente, wallet de cliente vinculada y wallet vinculada a la misma agencia. El body referencia `listing_id`, `quote_id` y el ID opaco de wallet; `Idempotency-Key` es obligatorio. El servidor obtiene las direcciones verificadas, nunca confía en direcciones arbitrarias. |
 | `GET /api/v1/reservations` | Listar las reservas del cliente autenticado. | **PROPUESTA de ruta; implementada en esta rama, CC-05B.** Devuelve únicamente reservas de la cuenta autenticada. |
 | `GET /api/v1/reservations/{reservation_id}` | Consultar estado y snapshot de una reserva propia. | **PROPUESTA de contrato; implementada en esta rama, CC-05B.** Una reserva ajena se trata como no encontrada. |
-| `POST /api/v1/reservations/{reservation_id}/cancel` | Solicitar cancelación de una reserva aún pendiente. | Ruta candidata; actor autorizado para cancelar y autorización requerida **PENDIENTES**. |
+| `POST /api/v1/reservations/{reservation_id}/permit` | Obtener la autorización EIP-712 firmada por el servidor para `deposit` o `cancel` del cliente titular. | **IMPLEMENTADO** (revisión 2026-10-23). Reemplaza a la ruta candidata `…/cancel`: el cliente ejecuta la acción desde su wallet y luego informa el hash. |
+| `POST /api/v1/staff/reservations/{reservation_id}/permit` | Obtener la autorización EIP-712 para `accept`, `reject` o `cancel` de la agencia. | **IMPLEMENTADO** (revisión 2026-10-23). Solo `agency_admin` del mismo tenant. |
 | `POST /api/v1/staff/reservations/{reservation_id}/chain-transactions` | Informar un hash para reconciliar `accept`, `reject`, `cancel` o `expire` ejecutado por la wallet de la agencia. | **PROPUESTA; IMPLEMENTADO EN ESTA RAMA, CC-05C3**. Solo `agency_admin` del mismo tenant; `agent` no decide. Body candidato: `{action, transaction_hash, nonce}`; no sustituye la ejecución directa de la wallet. |
 | `POST /api/v1/reservations/{reservation_id}/chain-transactions` | Informar un hash para reconciliar `deposit`, `cancel` o `expire` del cliente titular. | **PROPUESTA; IMPLEMENTADO EN ESTA RAMA, CC-05C3**. Sesión de cliente separada; el servidor deriva wallets y contexto persistidos. Body candidato: `{action, transaction_hash, nonce}`. El hash no acredita por sí solo el resultado. |
+| `GET /api/v1/listings/{listing_id}/scene` | Leer la escena pública del recorrido 3D de una publicación. | **IMPLEMENTADO** (F06; revisión 2026-10-23). Público; el schema de escena corresponde a F06 (D-10). |
+| `POST /api/v1/reservations/{reservation_id}/card-payment-intent` | Crear el PaymentIntent de Stripe para el depósito de una reserva con `payment_method: "card"`. | **IMPLEMENTADO** (F09.8; revisión 2026-10-23). Cliente titular; el monto sale del depósito del servidor. Solo modo de prueba. |
+| `POST /api/v1/reservations/{reservation_id}/card-cancel` | Cancelar una reserva con tarjeta aún pendiente y antes del plazo; reembolsa si hubo pago. | **IMPLEMENTADO** (F09.8; revisión 2026-10-23). Cliente titular. |
+| `POST /api/v1/reservations/{reservation_id}/card-expire` | Cerrar como vencida una reserva con tarjeta pasado el plazo; reembolsa si hubo pago. | **IMPLEMENTADO** (F09.8; revisión 2026-10-23). Cliente titular. |
+| `POST /api/v1/stripe/webhook` | Recibir eventos de Stripe firmados (pago, reembolso, cuenta Connect). | **IMPLEMENTADO** (F09.8; revisión 2026-10-23). Sin sesión: autentica por firma del webhook; idempotente por ID de evento. |
+| `POST /api/v1/staff/agencies/{agency_id}/stripe/connect/onboarding-link` | Obtener el enlace de alta de la agencia en Stripe Connect. | **IMPLEMENTADO** (F09.8; revisión 2026-10-23). Solo `agency_admin` del mismo tenant. |
+| `GET /api/v1/staff/agencies/{agency_id}/stripe/connect` | Consultar el estado de la cuenta Connect de la agencia. | **IMPLEMENTADO** (F09.8; revisión 2026-10-23). Solo `agency_admin` del mismo tenant. |
+| `GET /api/v1/staff/agencies/{agency_id}/reservations/card` | Listar las reservas con tarjeta pendientes y pagadas de la agencia. | **IMPLEMENTADO** (F09.8; revisión 2026-10-23). Solo `agency_admin` del mismo tenant. |
+| `POST /api/v1/staff/reservations/{reservation_id}/card-decision` | Aceptar (transfiere a la cuenta Connect) o rechazar (reembolsa) una reserva con tarjeta pagada. | **IMPLEMENTADO** (F09.8; revisión 2026-10-23). Solo `agency_admin` del mismo tenant y antes del plazo. |
 
 En esta rama CC-04A implementa las dos rutas públicas de catálogo/listings y sus schemas, CC-04B implementa `POST /api/v1/quotes` con snapshot y rate limit, CC-05A implementa el challenge/vinculación de wallet de agencia y la configuración admin-only del depósito, CC-05B implementa creación, lectura y listado de reservas propias, y CC-05C3 implementa las rutas separadas de reconciliación customer/staff. Las rutas nuevas y sus schemas siguen siendo una propuesta de contrato global. Las rutas y schemas de cuenta/sesión de cliente y las tres rutas de wallet también están implementadas en esta rama; preservan `/api/v1/auth/*` para personal y usan `/api/v1/customer/*` para clientes. Su presencia no aprueba el contrato general ni cambia el router de staff. La configuración de depósito no crea, edita, aprueba ni publica listings. Las rutas de reservas no exponen direcciones de wallet ni datos de reservas ajenas.
 
