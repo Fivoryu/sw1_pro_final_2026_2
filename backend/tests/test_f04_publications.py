@@ -1247,3 +1247,63 @@ def test_quote_snapshot_stays_immutable_after_extras_authoring(
                 text("DELETE FROM quote_snapshot WHERE id = :id"),
                 {"id": quote_id},
             )
+
+
+def _extras_with_included_sofa() -> list[dict[str, Any]]:
+    return [
+        _F05M_EXTRAS_PAYLOAD[0],
+        {**_F05M_EXTRAS_PAYLOAD[1], "inclusion": "included"},
+    ]
+
+
+def test_authoring_creates_an_included_extra_and_echoes_the_mode(
+    f04_context: F04Context,
+) -> None:
+    created = _create_listing_with_extras(f04_context, extras=_extras_with_included_sofa())
+
+    assert _by_name(created["extras"], "Sofá tres cuerpos")["inclusion"] == "included"
+    assert _by_name(created["extras"], "Cama queen")["inclusion"] == "optional"
+
+
+def test_edit_that_omits_the_inclusion_keeps_the_stored_mode(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    created = _create_listing_with_extras(context, extras=_extras_with_included_sofa())
+    # An editor that predates the field sends the extras without it.
+    payload = _payload(extras=_with_stable_ids(_F05M_EXTRAS_PAYLOAD, created["extras"]))
+
+    edited = context.client.put(_url("agency-one", created["listing_id"]), json=payload)
+
+    assert edited.status_code == 200, edited.text
+    assert _by_name(edited.json()["extras"], "Sofá tres cuerpos")["inclusion"] == "included"
+    assert edited.json()["offer_version"] == created["offer_version"]
+
+
+def test_edit_can_switch_an_included_extra_back_to_optional(
+    f04_context: F04Context,
+) -> None:
+    context = f04_context
+    created = _create_listing_with_extras(context, extras=_extras_with_included_sofa())
+    back_to_optional = [
+        _F05M_EXTRAS_PAYLOAD[0],
+        {**_F05M_EXTRAS_PAYLOAD[1], "inclusion": "optional"},
+    ]
+    payload = _payload(extras=_with_stable_ids(back_to_optional, created["extras"]))
+
+    edited = context.client.put(_url("agency-one", created["listing_id"]), json=payload)
+
+    assert edited.status_code == 200, edited.text
+    assert _by_name(edited.json()["extras"], "Sofá tres cuerpos")["inclusion"] == "optional"
+
+
+def test_authoring_rejects_an_unknown_inclusion_mode(f04_context: F04Context) -> None:
+    context = f04_context
+    _staff(context)
+    extras = [{**_F05M_EXTRAS_PAYLOAD[1], "inclusion": "mandatory"}]
+
+    response = context.client.post(
+        _collection_url("agency-one"), json=_payload(extras=extras)
+    )
+
+    assert response.status_code == 422
