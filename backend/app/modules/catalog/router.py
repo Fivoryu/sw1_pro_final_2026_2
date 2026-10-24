@@ -198,6 +198,7 @@ def _public_extra_item(extra: ListingExtra, currency: str) -> CatalogExtraItem:
         origin=extra.origin,
         visual_reference=extra.visual_reference,
         quantity=extra.quantity,
+        inclusion=extra.inclusion,
     )
 
 
@@ -478,6 +479,7 @@ def _authoring_response(
                 origin=extra.origin,
                 visual_reference=extra.visual_reference,
                 quantity=extra.quantity,
+                inclusion=extra.inclusion,
             )
             for extra in extras
         ],

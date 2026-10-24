@@ -159,6 +159,7 @@ class CatalogExtraItem(BaseModel):
     origin: str | None
     visual_reference: str | None
     quantity: int
+    inclusion: str
 
 
 class CatalogListingDetail(CatalogListingItem):
@@ -280,6 +281,8 @@ class ExtraPayload(BaseModel):
     origin: Annotated[str, Field(min_length=1, max_length=120)] | None = None
     visual_reference: Annotated[str, Field(min_length=1, max_length=255)] | None = None
     quantity: Annotated[StrictInt, Field(ge=1)] = 1
+    # Omitted keeps the stored mode on update and defaults to "optional" on insert.
+    inclusion: Literal["optional", "included"] | None = None
 
 
 class ExtraAuthoringResponse(BaseModel):
@@ -296,6 +299,7 @@ class ExtraAuthoringResponse(BaseModel):
     origin: str | None
     visual_reference: str | None
     quantity: int
+    inclusion: str
 
 
 class ListingAuthoringRequest(BaseModel):

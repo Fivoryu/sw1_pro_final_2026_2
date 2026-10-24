@@ -947,6 +947,7 @@ _EXTRA_DETAIL_FIELDS = {
     "origin",
     "visual_reference",
     "quantity",
+    "inclusion",
 }
 
 

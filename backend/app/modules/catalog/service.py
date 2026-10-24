@@ -325,6 +325,15 @@ def configure_listing_deposit(
 
 
 def _extra_values(payload: ExtraPayload) -> dict[str, object]:
+    values = _extra_content_values(payload)
+    # Omitted means "keep the stored mode" on update and "optional" on insert, so editors that
+    # predate the inclusion mode never downgrade an included extra by saving the list.
+    if payload.inclusion is not None:
+        values["inclusion"] = payload.inclusion
+    return values
+
+
+def _extra_content_values(payload: ExtraPayload) -> dict[str, object]:
     return {
         "name": payload.name,
         "price": payload.price,
@@ -687,6 +696,16 @@ def create_quote_snapshot(
         )
         if len(extras) != len(sorted_extra_ids):
             raise InvalidQuoteExtrasError
+
+    # Included extras are part of every quote; selecting one explicitly is not an error.
+    chosen_ids = {extra.id for extra in extras}
+    included = (
+        session.query(ListingExtra)
+        .filter(ListingExtra.listing_id == listing.id, ListingExtra.inclusion == "included")
+        .all()
+    )
+    extras.extend(extra for extra in included if extra.id not in chosen_ids)
+    extras.sort(key=lambda extra: extra.id)
 
     period = "one_time" if listing.operation == "sale" else "monthly"
     lines: list[dict[str, str | None]] = [
