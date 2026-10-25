@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
+import re
 import time
 from collections.abc import Mapping
 from urllib.error import HTTPError, URLError
@@ -10,8 +12,57 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
+_logger = logging.getLogger(__name__)
+_MAX_DIAGNOSTIC_LENGTH = 300
+_SENSITIVE_PROVIDER_VALUE = re.compile(
+    r"\b(?:sk|pk|rk)_(?:test|live)_[A-Za-z0-9_-]+\b"
+    r"|\bwhsec_[A-Za-z0-9_-]+\b"
+    r"|\b(?:acct|cus|pi|pm|tok|cs|seti|btok|ba|ca|src|ch|tr|re|rf|dp|in|sub)_"
+    r"[A-Za-z0-9_-]+\b"
+    r"|https?://\S+"
+    r"|\b[A-Za-z0-9.+_-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
+)
+
+
+def _safe_provider_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    compact = " ".join(value.split())
+    redacted = _SENSITIVE_PROVIDER_VALUE.sub("[redacted]", compact)
+    return redacted[:_MAX_DIAGNOSTIC_LENGTH]
+
+
+def _provider_error_details(error: HTTPError) -> dict[str, object]:
+    try:
+        payload = json.loads(error.read())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        payload = None
+    provider_error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(provider_error, dict):
+        provider_error = {}
+    headers = error.headers
+    request_id = headers.get("Request-Id") if headers is not None else None
+    return {
+        "http_status": error.code,
+        "provider_error_type": _safe_provider_text(provider_error.get("type")),
+        "provider_error_code": _safe_provider_text(provider_error.get("code")),
+        "provider_error_param": _safe_provider_text(provider_error.get("param")),
+        "provider_request_id": _safe_provider_text(request_id),
+        "provider_error_message": _safe_provider_text(provider_error.get("message")),
+    }
+
+
 class StripeGatewayError(RuntimeError):
     """A provider operation failed or could not be reached."""
+
+    def __init__(self, message: str, **diagnostics: object) -> None:
+        super().__init__(message)
+        self.http_status = diagnostics.get("http_status")
+        self.provider_error_type = diagnostics.get("provider_error_type")
+        self.provider_error_code = diagnostics.get("provider_error_code")
+        self.provider_error_param = diagnostics.get("provider_error_param")
+        self.provider_request_id = diagnostics.get("provider_request_id")
+        self.provider_error_message = diagnostics.get("provider_error_message")
 
 
 class StripeGateway:
@@ -45,7 +96,22 @@ class StripeGateway:
         try:
             with urlopen(request, timeout=self._timeout_seconds) as response:
                 decoded = json.loads(response.read())
-        except (HTTPError, URLError, TimeoutError, OSError, ValueError) as error:
+        except HTTPError as error:
+            diagnostics = _provider_error_details(error)
+            _logger.warning(
+                "Stripe API rejected request: status=%s type=%s code=%s param=%s "
+                "request_id=%s message=%s",
+                diagnostics["http_status"],
+                diagnostics["provider_error_type"] or "-",
+                diagnostics["provider_error_code"] or "-",
+                diagnostics["provider_error_param"] or "-",
+                diagnostics["provider_request_id"] or "-",
+                diagnostics["provider_error_message"] or "-",
+            )
+            raise StripeGatewayError(
+                "Stripe is unavailable or rejected the request", **diagnostics
+            ) from None
+        except (URLError, TimeoutError, OSError, ValueError) as error:
             raise StripeGatewayError("Stripe is unavailable or rejected the request") from error
         if not isinstance(decoded, dict):
             raise StripeGatewayError("Stripe returned an invalid response")
