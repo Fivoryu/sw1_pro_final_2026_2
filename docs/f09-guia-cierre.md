@@ -1,13 +1,15 @@
 # F09 — Guía para completar la fase (traspaso)
 
-Esta guía permite que otra persona del equipo cierre la fase F09 (reservas y contrato inteligente). El código está integrado y verificado de forma automática; lo que falta son **dos recorridos manuales** que requieren cuentas y un teléfono, más el cierre documental. El registro de ejecución está en `odd/tasks/f09-reservations-completion.md` (§8 tiene la evidencia más reciente) y el contrato API en `docs/api/catalog-reservations-v1.md`.
+Esta guía permite que otra persona del equipo cierre la fase F09 (reservas y contrato inteligente). El código está integrado y verificado de forma automática; el depósito local ya fue observado con MetaMask y conciliado por la API, pero quedan negativos de wallet, el recorrido manual de Stripe y el cierre documental. El registro histórico de ejecución está en `odd/tasks/f09-reservations-completion.md` y el contrato API en `docs/api/catalog-reservations-v1.md`.
+
+> **Estado actual:** F09 sigue 🟡 parcial. El depósito observado no cierra la issue #27 ni toda la fase. El recorrido manual de Stripe está **pausado por decisión explícita del usuario** porque consume demasiado tiempo; no reanudarlo ni reintentarlo sin nueva solicitud.
 
 ## Qué falta
 
 | # | Tarea | Issue | Criterio de cierre |
 |---|---|---|---|
-| A | Depósito firmado desde la wallet real del teléfono | #27 | Depósito visible en el escrow local, con receipt y evento validados por la API; ningún reintento produce un segundo depósito. |
-| B | Recorrido manual de Stripe con cuenta de prueba | F09.8 (sin issue) | Pago con tarjeta confirmado por webhook; aceptar transfiere a la cuenta Connect y rechazar reembolsa. |
+| A | Negativos y cierre del depósito desde la wallet real del teléfono | #27 | El depósito ya fue observado: MetaMask confirmó aprobación RFT y depósito, la API reconcilió receipt/evento con HTTP 200, estableció `deposit_confirmed_at` y la UI ocultó el botón de repetir. Quedan rechazo, cuenta/red incorrecta, receipt perdido, replay y cancelación. |
+| B | Recorrido manual de Stripe con cuenta de prueba (**pausado**) | F09.8 (sin issue) | PaymentSheet, Connect, webhook, transferencia, reembolso y reenvío idempotente permanecen pendientes por decisión explícita del usuario. |
 | C | Cierre documental | — | Plan maestro, registro ODD e issues actualizados con la evidencia de A y B. |
 
 La issue #28 queda cumplida con el PR #61 (salidas observadas en el escrow local y contrato API aprobado con observaciones) y se cierra al hacer merge. Si el PR aún no está integrado, integrarlo antes de empezar.
@@ -19,8 +21,8 @@ La issue #28 queda cumplida con el PR #61 (salidas observadas en el escrow local
 | Backend de reservas | Estados, bloqueo por inmueble, snapshot, idempotencia, permisos EIP-712 y conciliación de receipts/eventos. |
 | Escrow (`contracts/`) | `ReservationEscrow.sol` con RFT y MockUSDT en Hardhat `31337`; 40 pruebas. |
 | Integración backend ↔ escrow | `backend/tests/test_reservation_hardhat_e2e.py`: depósito, aceptación (libera a la agencia), rechazo, cancelación y vencimiento (reembolsan), evento incorrecto, receipt revertido y nodo caído, contra un nodo real. Corre en CI en el job `Contracts and chain seam (Hardhat)`. |
-| App cliente | Cotización, solicitud y seguimiento de reservas; depósito, cancelación y vencimiento por WalletConnect (Reown AppKit); pago con tarjeta (`flutter_stripe`). |
-| Panel | Alta en Stripe Connect y decisiones de reservas **con tarjeta**. |
+| App cliente | Cotización, solicitud y seguimiento de reservas; depósito local por WalletConnect (Reown AppKit) observado con conciliación. El pago con tarjeta (`flutter_stripe`) está implementado, pero su recorrido manual permanece pendiente y pausado. |
+| Panel | Interfaz para iniciar el onboarding de Stripe Connect y decisiones de reservas **con tarjeta**; la habilitación real de Connect no se completó ni verificó. |
 | Contrato API | Aprobado con observaciones el 2026-10-23. |
 
 ## Requisitos
@@ -114,7 +116,9 @@ Para comprobar el escrow sin la app, consultar el saldo RFT del escrow con `eth_
 
 **Evidencia a registrar** en `odd/tasks/f09-reservations-completion.md`: modelo del teléfono y de la wallet, hashes de las transacciones, respuesta de la API (`event_name`, `status`, `replayed`), saldos antes y después, y el resultado de cada negativo.
 
-## 4. Tarea B — Stripe en modo de prueba (F09.8)
+## 4. Tarea B — Stripe en modo de prueba (F09.8) — **PAUSADA**
+
+El recorrido manual queda pendiente por decisión explícita del usuario. `stripe tools enable_connect` no tuvo éxito: aunque el proceso terminó con exit 0, el JSON indicó `request_failed` porque la clave no tenía acceso a la cuenta objetivo; no se creó una cuenta conectada ni un Account Link. El intento de sandbox claimable quedó sin verificar y abrió un fallback de login/autorización; se indicó no aprobarlo ni ingresar credenciales porque la ruta podía usar una cuenta live. No hay sandbox confirmado ni operación/dato real involucrado. No ejecutar ni reintentar esta tarea hasta que el usuario lo solicite explícitamente.
 
 1. En el archivo de entorno: `STRIPE_SECRET_KEY=sk_test_…` y `STRIPE_PUBLISHABLE_KEY=pk_test_…` (la API rechaza claves que no sean de prueba).
 2. Reenviar los webhooks a la API local y copiar el `whsec_…` que imprime en `STRIPE_WEBHOOK_SECRET`; recrear el contenedor `api`:
@@ -146,7 +150,8 @@ Registrar los IDs de PaymentIntent, transferencia y reembolso en el registro ODD
 
 ## 6. Cierre de la fase
 
-- [ ] Evidencia de A y B registrada en `odd/tasks/f09-reservations-completion.md`.
-- [ ] PR con `Closes #27` (y la evidencia de Stripe).
+- [ ] Negativos restantes de wallet y evidencia completa de A registrados en `odd/tasks/f09-reservations-completion.md`.
+- [ ] Recorrido Stripe de B y su evidencia: **pausados**, no completados.
+- [ ] PR con `Closes #27` (no corresponde declararlo hasta completar los criterios restantes).
 - [ ] Plan maestro: fila F09 de §1.4.1 en ✅ con la evidencia; F09.4 y F09.8 actualizadas en la sección F09; #27 y #28 movidas a «cerradas» en la tabla §1.4.5.
 - [ ] Suites en verde en el CI del PR, incluido el job `Contracts and chain seam (Hardhat)`.
