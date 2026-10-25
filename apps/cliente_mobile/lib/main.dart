@@ -119,7 +119,11 @@ class _CustomerShellState extends State<CustomerShell> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('RoomForge')),
+    appBar: AppBar(
+      title: const Text('RoomForge', style: AndeanTypography.headlineLg),
+      titleSpacing: 20,
+      toolbarHeight: 72,
+    ),
     body: IndexedStack(
       index: _selectedIndex,
       children: [
@@ -142,6 +146,8 @@ class _CustomerShellState extends State<CustomerShell> {
       ],
     ),
     bottomNavigationBar: NavigationBar(
+      height: 76,
+      elevation: 0,
       selectedIndex: _selectedIndex,
       onDestinationSelected: (index) => setState(() => _selectedIndex = index),
       destinations: const [

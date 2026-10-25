@@ -11,6 +11,8 @@ import 'catalog_format.dart';
 import 'listing_photo.dart';
 import '../../viewer/views/listing_viewer_screen.dart';
 import '../../viewer/views/object_hotspot_sheet.dart';
+import '../../../theme/andean_theme.dart';
+import '../../../theme/andean_widgets.dart';
 
 /// Public detail of one published listing.
 ///
@@ -119,7 +121,6 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
       );
     }
 
-    final theme = Theme.of(context);
     final listing = detail.listing;
     return ListView(
       key: const ValueKey('property-detail-content'),
@@ -127,17 +128,29 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
       children: [
         _gallery(context, detail),
         const SizedBox(height: 16),
-        Text(locationLabel(listing), style: theme.textTheme.headlineSmall),
-        const SizedBox(height: 4),
-        Text(operationLabel(listing.operation)),
-        const SizedBox(height: 4),
-        Text(roomsLabel(detail.bedrooms, detail.bathrooms)),
+        AndeanSectionHeading(locationLabel(listing)),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            AndeanPillChip(label: operationLabel(listing.operation)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                roomsLabel(detail.bedrooms, detail.bathrooms),
+                style: AndeanTypography.bodySm,
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: 24),
-        Text('Precio base', style: theme.textTheme.titleMedium),
+        Text('Precio base', style: AndeanTypography.headlineMd),
         const SizedBox(height: 8),
         Text(
           chargeLabel(listing.basePrice, listing.operation),
-          style: theme.textTheme.titleLarge,
+          style: AndeanTypography.headlineLg.copyWith(
+            color: AndeanColors.primaryContainer,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         const SizedBox(height: 4),
         Text(basePriceNote(listing.operation)),
@@ -147,7 +160,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
           Text(cotizableNote(widget.controller.displayCurrency.code)),
         ],
         const SizedBox(height: 24),
-        Text('Opcionales', style: theme.textTheme.titleMedium),
+        Text('Opcionales', style: AndeanTypography.headlineMd),
         const SizedBox(height: 8),
         if (detail.extras.isEmpty)
           const Text('Este inmueble no tiene opcionales.')
@@ -211,7 +224,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                 children: [
                   Text(
                     'Cotización del servidor',
-                    style: theme.textTheme.titleMedium,
+                    style: AndeanTypography.headlineMd,
                   ),
                   const SizedBox(height: 8),
                   for (final line in quote.lines)
@@ -256,11 +269,11 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
           Text(_bookingMessage!, key: const ValueKey('booking-message')),
         ],
         const SizedBox(height: 24),
-        Text('Recorrido 3D', style: theme.textTheme.titleMedium),
+        Text('Recorrido 3D', style: AndeanTypography.headlineMd),
         const SizedBox(height: 8),
         _sceneSection(context),
         const SizedBox(height: 24),
-        Text('Disponibilidad', style: theme.textTheme.titleMedium),
+        Text('Disponibilidad', style: AndeanTypography.headlineMd),
         const SizedBox(height: 8),
         const Text('Disponibilidad no consultada ni confirmada.'),
       ],

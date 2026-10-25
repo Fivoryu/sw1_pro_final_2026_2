@@ -11,6 +11,7 @@ import 'catalog_format.dart';
 import 'listing_detail_screen.dart';
 import 'listing_photo.dart';
 import '../../../theme/andean_theme.dart';
+import '../../../theme/andean_widgets.dart';
 
 /// The "Explorar" tab: published listings with filters, paging and honest
 /// loading, empty and error states.
@@ -83,11 +84,11 @@ class _CatalogScreenState extends State<CatalogScreen> {
         builder: (context, _) => ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            Text(
+            const AndeanSectionHeading(
               'Explorar inmuebles',
-              style: Theme.of(context).textTheme.headlineSmall,
+              subtitle: 'Encontrá un espacio que se sienta propio.',
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             DropdownButtonFormField<DisplayCurrency>(
               key: const ValueKey('catalog-currency-selector'),
               initialValue: _controller.displayCurrency,
@@ -207,7 +208,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
       margin: const EdgeInsets.only(bottom: 16),
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
         side: const BorderSide(color: AndeanColors.border, width: 1),
       ),
       color: AndeanColors.surfaceContainerLowest,
@@ -286,31 +287,18 @@ class _CatalogScreenState extends State<CatalogScreen> {
                           ),
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AndeanColors.surfaceContainerHigh,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          operationLabel(listing.operation),
-                          style: AndeanTypography.labelSm.copyWith(
-                            color: AndeanColors.onSurfaceVariant,
-                          ),
-                        ),
+                      AndeanPillChip(
+                        label: operationLabel(listing.operation),
+                        backgroundColor: AndeanColors.surfaceContainerHigh,
                       ),
                     ],
                   ),
                   const SizedBox(height: 8),
                   Text(
                     chargeLabel(listing.basePrice, listing.operation),
-                    style: AndeanTypography.headlineSm.copyWith(
+                    style: AndeanTypography.headlineMd.copyWith(
                       color: AndeanColors.primaryContainer,
                       fontWeight: FontWeight.bold,
-                      fontSize: 18,
                     ),
                   ),
                 ],

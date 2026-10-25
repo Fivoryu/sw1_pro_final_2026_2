@@ -8,6 +8,7 @@ import {
   type StaffUser,
 } from "../../application/staffAuthApi";
 import { getCurrentExchangeRates, getExchangeRateHistory } from "../../application/exchangeRatesApi";
+import { getAgencies } from "../../application/agencyAdminInvitationsApi";
 import { listAgencyListings } from "../../application/staffListingsApi";
 import { ProtectedStaffShell } from "./ProtectedStaffShell";
 
@@ -19,6 +20,12 @@ vi.mock("../../application/staffListingsApi", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../application/staffListingsApi")>();
   return { ...actual, listAgencyListings: vi.fn() };
+});
+
+vi.mock("../../application/agencyAdminInvitationsApi", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../application/agencyAdminInvitationsApi")>();
+  return { ...actual, getAgencies: vi.fn() };
 });
 
 vi.mock("../../application/exchangeRatesApi", async (importOriginal) => {
@@ -66,6 +73,9 @@ beforeEach(() => {
   vi.mocked(getStaffMe).mockReset();
   vi.mocked(logoutStaffSession).mockReset();
   vi.mocked(refreshStaffSession).mockReset();
+  vi.mocked(getAgencies)
+    .mockReset()
+    .mockResolvedValue({ agencies: [], pagination: { limit: 50, offset: 0, total: 0 } });
   vi.mocked(getCurrentExchangeRates)
     .mockReset()
     .mockResolvedValue({ rates: [] });
@@ -104,6 +114,10 @@ describe("ProtectedStaffShell", () => {
     expect(
       await screen.findByRole("heading", { name: "Tasas de cambio" }),
     ).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "Invitar administrador de inmobiliaria" }),
+    ).toBeVisible();
+    expect(getAgencies).toHaveBeenCalledWith("volatile-access");
     expect(listAgencyListings).not.toHaveBeenCalled();
   });
 
@@ -125,6 +139,7 @@ describe("ProtectedStaffShell", () => {
       ),
     ).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Tasas de cambio" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Invitar administrador de inmobiliaria" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /crear|editar|aprobar|publicar/i })).not.toBeInTheDocument();
     expect(listAgencyListings).not.toHaveBeenCalled();
   });
