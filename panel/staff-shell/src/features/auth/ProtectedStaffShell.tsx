@@ -10,6 +10,7 @@ import {
   type StaffSession,
 } from "../../application/staffSession";
 import { SceneEditor } from "../editor3d/SceneEditor";
+import { AgencyAdminInvitations } from "../agencies/AgencyAdminInvitations";
 import { AgencyReviewQueue } from "../listings/AgencyReviewQueue";
 import { ExchangeRatesAdmin } from "../rates/ExchangeRatesAdmin";
 import { StripeCardPaymentsAdmin } from "../reservations/StripeCardPaymentsAdmin";
@@ -284,7 +285,10 @@ export function ProtectedStaffShell() {
               <StripeCardPaymentsAdmin accessToken={session.accessToken} agencyId={agencyId} />
             </>
           ) : session.user.role === "platform_admin" ? (
-            <ExchangeRatesAdmin accessToken={session.accessToken} />
+            <>
+              <ExchangeRatesAdmin accessToken={session.accessToken} />
+              <AgencyAdminInvitations accessToken={session.accessToken} />
+            </>
           ) : session.user.role === "agent" ? (
             <section className="protected-staff-placeholder" aria-label="Vista inicial">
               <span className="protected-staff-placeholder__eyebrow">
