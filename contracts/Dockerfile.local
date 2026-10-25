@@ -6,5 +6,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 
 COPY . .
+# Git for Windows may check out the entrypoint with CRLF; normalize it before /bin/sh runs it.
+RUN sed -i 's/\r$//' docker-local-node.sh
 
 CMD ["sh", "./docker-local-node.sh"]
