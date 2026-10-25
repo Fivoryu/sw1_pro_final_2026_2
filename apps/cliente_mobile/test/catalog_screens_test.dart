@@ -35,12 +35,20 @@ class _MemoryCustomerTokenStore implements CustomerTokenStore {
   }
 }
 
-Map<String, Object?> _reservationForUi({required bool deposited}) => {
-  'reservation_id': deposited ? 'deposited-reservation' : 'unpaid-reservation',
+Map<String, Object?> _reservationForUi({
+  required bool deposited,
+  String paymentMethod = 'wallet',
+  String decisionDeadlineAt = '2020-10-06T12:00:00Z',
+  String? reservationId,
+}) => {
+  'reservation_id':
+      reservationId ??
+      (deposited ? 'deposited-reservation' : 'unpaid-reservation'),
   'listing_id': 'listing-1',
   'status': 'pending',
+  'payment_method': paymentMethod,
   'api_created_at': '2026-10-06T12:00:00Z',
-  'decision_deadline_at': '2020-10-06T12:00:00Z',
+  'decision_deadline_at': decisionDeadlineAt,
   'quote_snapshot': {
     'quote_id': 'quote-1',
     'offer_version': 2,
@@ -186,6 +194,138 @@ void main() {
         findsOneWidget,
       );
     });
+
+    testWidgets(
+      'shows confirmed wallet deposit status and hides its deposit action',
+      (tester) async {
+        final tokenStore = _MemoryCustomerTokenStore();
+        final session = CustomerSessionController(
+          api: CustomerAuthApi(
+            baseUrl: 'https://api.example.test',
+            client: MockClient((request) async {
+              if (request.url.path == '/api/v1/customer/auth/login') {
+                return http.Response(
+                  jsonEncode({
+                    'access_token': 'access-token',
+                    'refresh_token': 'refresh-token',
+                    'access_expires_in': 300,
+                  }),
+                  200,
+                );
+              }
+              if (request.url.path == '/api/v1/customer/auth/me') {
+                return http.Response(
+                  jsonEncode({
+                    'id': 'customer-1',
+                    'email': 'customer@example.test',
+                  }),
+                  200,
+                );
+              }
+              return http.Response('not found', 404);
+            }),
+          ),
+          tokenStore: tokenStore,
+        );
+        await session.signIn(
+          email: 'customer@example.test',
+          password: 'password',
+        );
+        final controller = CustomerReservationsController(
+          api: CustomerBookingApi(
+            baseUrl: 'https://api.example.test',
+            accessTokenProvider: session.obtainAccessToken,
+            client: MockClient((request) async {
+              expect(request.url.path, '/api/v1/reservations');
+              return http.Response(
+                jsonEncode([
+                  _reservationForUi(
+                    deposited: true,
+                    decisionDeadlineAt: '2099-10-06T12:00:00Z',
+                  ),
+                  _reservationForUi(
+                    deposited: false,
+                    decisionDeadlineAt: '2099-10-06T12:00:00Z',
+                  ),
+                  _reservationForUi(
+                    deposited: true,
+                    paymentMethod: 'card',
+                    reservationId: 'deposited-card-reservation',
+                    decisionDeadlineAt: '2099-10-06T12:00:00Z',
+                  ),
+                ]),
+                200,
+              );
+            }),
+          ),
+        );
+
+        await controller.loadReservations();
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: CustomerReservationsScreen(
+                controller: controller,
+                sessionController: session,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final confirmed = find.byKey(
+          const ValueKey('reservation-deposited-reservation'),
+        );
+        final unconfirmed = find.byKey(
+          const ValueKey('reservation-unpaid-reservation'),
+        );
+        expect(
+          find.descendant(
+            of: confirmed,
+            matching: find.text(
+              'Depósito local confirmado; aguardá la decisión de la inmobiliaria.',
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: confirmed,
+            matching: find.byKey(
+              const ValueKey('deposit-deposited-reservation'),
+            ),
+          ),
+          findsNothing,
+        );
+        expect(
+          find.descendant(
+            of: unconfirmed,
+            matching: find.byKey(const ValueKey('deposit-unpaid-reservation')),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: unconfirmed,
+            matching: find.text(
+              'Pendiente no significa depósito confirmado. La confirmación requiere verificar la transacción en la red local.',
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(
+              const ValueKey('reservation-deposited-card-reservation'),
+            ),
+            matching: find.byKey(
+              const ValueKey('deposit-deposited-card-reservation'),
+            ),
+          ),
+          findsNothing,
+        );
+      },
+    );
   });
 
   group('formatting', () {

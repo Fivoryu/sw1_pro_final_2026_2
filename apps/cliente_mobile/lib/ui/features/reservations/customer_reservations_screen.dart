@@ -311,7 +311,9 @@ class _CustomerReservationsScreenState
                               ? item.depositConfirmedAt == null
                                     ? 'Pago pendiente. Stripe confirmará el depósito cuando el servidor reciba y valide el webhook.'
                                     : 'Pago con tarjeta confirmado por Stripe; aguardá la decisión de la inmobiliaria.'
-                              : 'Pendiente no significa depósito confirmado. La confirmación requiere verificar la transacción en la red local.',
+                              : item.depositConfirmedAt == null
+                              ? 'Pendiente no significa depósito confirmado. La confirmación requiere verificar la transacción en la red local.'
+                              : 'Depósito local confirmado; aguardá la decisión de la inmobiliaria.',
                           style: AndeanTypography.bodySm,
                         ),
                       ),
@@ -343,7 +345,7 @@ class _CustomerReservationsScreenState
                 ),
               if (item.depositAmount != null &&
                   item.decisionDeadlineAt.isAfter(DateTime.now().toUtc()) &&
-                  (!isCardPayment || item.depositConfirmedAt == null))
+                  (item.depositConfirmedAt == null))
                 SizedBox(
                   width: double.infinity,
                   height: 48,
