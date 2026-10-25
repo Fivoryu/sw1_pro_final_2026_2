@@ -118,6 +118,67 @@ void _setNarrowViewport(WidgetTester tester) {
 
 void main() {
   group('customer reservations', () {
+    testWidgets('reservations heading establishes a display-level hierarchy', (
+      tester,
+    ) async {
+      final session = CustomerSessionController(
+        api: CustomerAuthApi(
+          baseUrl: 'https://api.example.test',
+          client: MockClient((request) async {
+            if (request.url.path == '/api/v1/customer/auth/login') {
+              return http.Response(
+                jsonEncode({
+                  'access_token': 'access-token',
+                  'refresh_token': 'refresh-token',
+                  'access_expires_in': 300,
+                }),
+                200,
+              );
+            }
+            if (request.url.path == '/api/v1/customer/auth/me') {
+              return http.Response(
+                jsonEncode({'id': 'customer-1', 'email': 'customer@example.test'}),
+                200,
+              );
+            }
+            return http.Response('not found', 404);
+          }),
+        ),
+        tokenStore: _MemoryCustomerTokenStore(),
+      );
+      await session.signIn(
+        email: 'customer@example.test',
+        password: 'password',
+      );
+      final controller = CustomerReservationsController(
+        api: CustomerBookingApi(
+          baseUrl: 'https://api.example.test',
+          accessTokenProvider: session.obtainAccessToken,
+          client: MockClient(
+            (_) async => http.Response(jsonEncode([]), 200),
+          ),
+        ),
+      );
+      await controller.loadReservations();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CustomerReservationsScreen(
+              controller: controller,
+              sessionController: session,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final heading = tester.widget<Text>(find.text('Mis reservas'));
+
+      expect(heading.style, isNotNull);
+      expect(heading.style!.fontSize, greaterThanOrEqualTo(28));
+      expect(heading.style!.fontWeight, isNot(FontWeight.w400));
+    });
+
     testWidgets('offers on-chain expiry only after a deposit was confirmed', (
       tester,
     ) async {
@@ -419,6 +480,18 @@ void main() {
       expect(find.textContaining('sintética'), findsNothing);
     });
 
+    testWidgets('catalog heading establishes a display-level hierarchy', (
+      tester,
+    ) async {
+      final harness = _build();
+      await _pumpCatalog(tester, harness.controller);
+      final heading = tester.widget<Text>(find.text('Explorar inmuebles'));
+
+      expect(heading.style, isNotNull);
+      expect(heading.style!.fontSize, greaterThanOrEqualTo(28));
+      expect(heading.style!.fontWeight, isNot(FontWeight.w400));
+    });
+
     testWidgets('says when nothing is published yet', (tester) async {
       final harness = _build();
 
@@ -658,7 +731,16 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('1 dormitorio · 2 baños'), findsOneWidget);
-      expect(find.text('Este inmueble no tiene opcionales.'), findsOneWidget);
+      final noExtrasMessage = find.text('Este inmueble no tiene opcionales.');
+      await tester.scrollUntilVisible(
+        noExtrasMessage,
+        100,
+        scrollable: find.descendant(
+          of: find.byKey(const ValueKey('property-detail-content')),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      expect(noExtrasMessage, findsOneWidget);
       expect(find.textContaining('por mes'), findsNothing);
     });
 

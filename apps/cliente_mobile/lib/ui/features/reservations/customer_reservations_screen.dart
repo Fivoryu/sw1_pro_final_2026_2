@@ -91,11 +91,8 @@ class _CustomerReservationsScreenState
     children: [
       Row(
         children: [
-          Expanded(
-            child: Text(
-              'Mis reservas',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
+          const Expanded(
+            child: AndeanSectionHeading('Mis reservas'),
           ),
           IconButton(
             key: const ValueKey('refresh-reservations'),
@@ -175,7 +172,7 @@ class _CustomerReservationsScreenState
       margin: const EdgeInsets.only(top: 14),
       color: AndeanColors.surfaceContainerLowest,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
         side: const BorderSide(color: AndeanColors.border, width: 1),
       ),
       child: Padding(
@@ -192,22 +189,10 @@ class _CustomerReservationsScreenState
                     style: AndeanTypography.headlineSm.copyWith(fontSize: 17),
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: statusBg,
-                    borderRadius: BorderRadius.circular(9999),
-                  ),
-                  child: Text(
-                    _statusLabel(item.status),
-                    style: AndeanTypography.labelSm.copyWith(
-                      color: statusFg,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                AndeanPillChip(
+                  label: _statusLabel(item.status),
+                  backgroundColor: statusBg,
+                  textColor: statusFg,
                 ),
               ],
             ),

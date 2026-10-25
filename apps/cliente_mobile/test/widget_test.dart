@@ -1,6 +1,7 @@
 import 'dart:ui' show SemanticsAction;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:cliente_mobile/data/services/catalog_api.dart';
 import 'package:cliente_mobile/data/services/customer_auth_api.dart';
@@ -60,6 +61,20 @@ void main() {
       find.descendant(of: nav, matching: find.byType(Text)),
       findsNWidgets(3),
     );
+  });
+
+  testWidgets('shell gives the product title an editorial display hierarchy', (
+    tester,
+  ) async {
+    await tester.pumpWidget(app());
+    final titleParagraph = tester.renderObject<RenderParagraph>(
+      find.text('RoomForge'),
+    );
+    final effectiveStyle = titleParagraph.text.style;
+
+    expect(effectiveStyle, isNotNull);
+    expect(effectiveStyle!.fontSize, greaterThanOrEqualTo(26));
+    expect(effectiveStyle.fontWeight, isNot(FontWeight.w400));
   });
 
   testWidgets('explores the published catalog without signing in', (
@@ -248,6 +263,33 @@ void main() {
       await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
     } finally {
       semantics.dispose();
+    }
+  });
+
+  testWidgets('primary customer surfaces stay overflow-free at phone widths', (
+    tester,
+  ) async {
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    for (final width in [320.0, 360.0]) {
+      tester.view.physicalSize = Size(width, 640);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(app(publishedCatalog()));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(tester.takeException(), isNull, reason: 'catalog at $width px');
+
+      final navigation = find.byType(NavigationBar);
+      for (final label in ['Reservas', 'Cuenta', 'Explorar']) {
+        await tester.tap(
+          find.descendant(of: navigation, matching: find.text(label)),
+        );
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: '$label at $width px',
+        );
+      }
     }
   });
 
