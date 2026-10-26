@@ -464,7 +464,7 @@ async function runBrowserFlow(backendOrigin) {
     }
   });
 
-  await page.goto(webOrigin, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await page.goto(`${webOrigin}/panel`, { waitUntil: "domcontentloaded", timeout: 30_000 });
   await assertVisible(
     page.getByRole("heading", { level: 1, name: "Acceso de personal" }),
     "The staff login screen should be visible before authentication.",
