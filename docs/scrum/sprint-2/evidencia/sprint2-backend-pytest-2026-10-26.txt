@@ -1,0 +1,22 @@
+........................................................................ [  9%]
+........................................................................ [ 18%]
+........................................................................ [ 27%]
+........................................................................ [ 36%]
+........................................................................ [ 45%]
+..............................ss..................ss.................... [ 54%]
+........................................................................ [ 63%]
+.......ss............................................................... [ 72%]
+........................................................................ [ 81%]
+........................................................................ [ 90%]
+.............................ss......................................... [ 99%]
+.....                                                                    [100%]
+=========================== short test summary info ===========================
+SKIPPED [1] tests\test_f04_publications_postgres.py:156: ROOMFORGE_POSTGRES_DATABASE_URL is unset
+SKIPPED [1] tests\test_f10_agency_customer_journey.py:150: ROOMFORGE_F10_DATABASE_URL is unset
+SKIPPED [1] tests\test_furniture_review_postgres.py:54: ROOMFORGE_F08_DATABASE_URL is unset
+SKIPPED [1] tests\test_furniture_review_postgres.py:76: ROOMFORGE_F08_DATABASE_URL is unset
+SKIPPED [2] tests\test_local_provisioning_lifecycle.py:259: Floci is unavailable through the local Compose service: failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine; check if the path is correct and if the daemon is running: open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified.
+SKIPPED [1] tests\test_staff_identity_migration.py:798: ROOMFORGE_R6_DATABASE_URL is unset
+SKIPPED [1] tests\test_staff_identity_postgres.py:104: ROOMFORGE_R6_DATABASE_URL is unset
+789 passed, 8 skipped in 76.76s (0:01:16)
+exit 0
