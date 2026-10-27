@@ -1,10 +1,15 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:captura_mobile/data/services/ar_capture_channel.dart';
+import 'package:captura_mobile/data/services/local_floorplan_analyzer.dart';
 import 'package:captura_mobile/data/services/photo_source.dart';
 import 'package:captura_mobile/data/services/staff_auth_api.dart';
 import 'package:captura_mobile/data/services/staff_scene_api.dart';
+import 'package:captura_mobile/data/services/staff_floorplan_interpretation_api.dart';
 import 'package:captura_mobile/domain/spatial_capture_controller.dart';
 import 'package:captura_mobile/domain/spatial/spatial.dart';
 import 'package:captura_mobile/domain/staff_session_controller.dart';
@@ -37,6 +42,214 @@ class _FloorplanPhotoSource implements PhotoSource {
       PickedPhoto(bytes: bytes, contentType: 'image/png');
 }
 
+class _FixedFloorplanAnalyzer extends LocalFloorplanAnalyzer {
+  const _FixedFloorplanAnalyzer({
+    this.contour = const [
+      FloorPoint(0.2, 0.2),
+      FloorPoint(0.8, 0.2),
+      FloorPoint(0.8, 0.8),
+      FloorPoint(0.2, 0.8),
+    ],
+  });
+
+  final List<FloorPoint> contour;
+
+  @override
+  Future<FloorplanAnalysisResult> analyze({
+    required List<int> rgba,
+    required int width,
+    required int height,
+  }) async => FloorplanAnalysisResult(
+    status: FloorplanAnalysisStatus.success,
+    message: 'Detectamos un contorno. Revisalo y confirmá cada medida.',
+    contour: contour,
+  );
+}
+
+class _SequencedFloorplanAnalyzer extends LocalFloorplanAnalyzer {
+  final first = Completer<FloorplanAnalysisResult>();
+  var calls = 0;
+
+  @override
+  Future<FloorplanAnalysisResult> analyze({
+    required List<int> rgba,
+    required int width,
+    required int height,
+  }) {
+    calls++;
+    if (calls == 1) return first.future;
+    return Future.value(
+      const FloorplanAnalysisResult(
+        status: FloorplanAnalysisStatus.success,
+        message: 'Resultado de la segunda imagen',
+        contour: [
+          FloorPoint(0.2, 0.2),
+          FloorPoint(0.8, 0.2),
+          FloorPoint(0.8, 0.8),
+          FloorPoint(0.2, 0.8),
+        ],
+      ),
+    );
+  }
+}
+
+class _CountingFloorplanAnalyzer extends LocalFloorplanAnalyzer {
+  var calls = 0;
+
+  @override
+  Future<FloorplanAnalysisResult> analyze({
+    required List<int> rgba,
+    required int width,
+    required int height,
+  }) async {
+    calls++;
+    return const FloorplanAnalysisResult(
+      status: FloorplanAnalysisStatus.success,
+      message: 'Resultado local no esperado',
+      contour: [
+        FloorPoint(0.2, 0.2),
+        FloorPoint(0.8, 0.2),
+        FloorPoint(0.8, 0.8),
+        FloorPoint(0.2, 0.8),
+      ],
+    );
+  }
+}
+
+class _FailingFloorplanInterpretationApi implements FloorplanInterpretationApi {
+  @override
+  Future<FloorplanInterpretationResult> interpret({
+    required String accessToken,
+    required String agencyId,
+    required String listingId,
+    required List<int> imageBytes,
+    required String contentType,
+  }) async => throw StateError('provider offline');
+}
+
+class _ProposedFloorplanInterpretationApi
+    implements FloorplanInterpretationApi {
+  @override
+  Future<FloorplanInterpretationResult> interpret({
+    required String accessToken,
+    required String agencyId,
+    required String listingId,
+    required List<int> imageBytes,
+    required String contentType,
+  }) async => const FloorplanInterpretationResult(
+    status: FloorplanInterpretationStatus.success,
+    rooms: [
+      InterpretedRoomCandidate(
+        id: 'groq-room',
+        contour: [
+          FloorPoint(0.2, 0.2),
+          FloorPoint(0.8, 0.2),
+          FloorPoint(0.8, 0.8),
+          FloorPoint(0.2, 0.8),
+        ],
+        measurements: [
+          WallMeasurementCandidate(
+            id: 'groq-0',
+            literalText: '4.00 m',
+            meters: 4,
+            edgeIndex: 0,
+            explicitUnit: true,
+            status: WallMeasurementCandidateStatus.proposed,
+          ),
+        ],
+        openings: [],
+      ),
+    ],
+  );
+}
+
+class _ConflictFloorplanInterpretationApi
+    implements FloorplanInterpretationApi {
+  @override
+  Future<FloorplanInterpretationResult> interpret({
+    required String accessToken,
+    required String agencyId,
+    required String listingId,
+    required List<int> imageBytes,
+    required String contentType,
+  }) async => const FloorplanInterpretationResult(
+    status: FloorplanInterpretationStatus.partial,
+    rooms: [
+      InterpretedRoomCandidate(
+        id: 'ai-room',
+        contour: [
+          FloorPoint(0.2, 0.2),
+          FloorPoint(0.8, 0.2),
+          FloorPoint(0.8, 0.8),
+          FloorPoint(0.2, 0.8),
+        ],
+        measurements: [
+          WallMeasurementCandidate(
+            id: 'ai-0',
+            literalText: '419',
+            meters: null,
+            rawValue: 419,
+            edgeIndex: 0,
+            explicitUnit: false,
+            ambiguityReason:
+                'La IA leyó una medida sin una unidad métrica confirmada; solo es evidencia textual.',
+            status: WallMeasurementCandidateStatus.unresolved,
+          ),
+        ],
+        openings: [],
+      ),
+    ],
+    informationStillNeeded: ['Confirmar la medida visible.'],
+  );
+}
+
+class _ResultFloorplanInterpretationApi implements FloorplanInterpretationApi {
+  const _ResultFloorplanInterpretationApi(this.result);
+
+  final FloorplanInterpretationResult result;
+
+  @override
+  Future<FloorplanInterpretationResult> interpret({
+    required String accessToken,
+    required String agencyId,
+    required String listingId,
+    required List<int> imageBytes,
+    required String contentType,
+  }) async => result;
+}
+
+class _IncompleteOpeningFloorplanInterpretationApi
+    implements FloorplanInterpretationApi {
+  @override
+  Future<FloorplanInterpretationResult> interpret({
+    required String accessToken,
+    required String agencyId,
+    required String listingId,
+    required List<int> imageBytes,
+    required String contentType,
+  }) async => const FloorplanInterpretationResult(
+    status: FloorplanInterpretationStatus.partial,
+    rooms: [
+      InterpretedRoomCandidate(
+        id: 'ai-room',
+        contour: [
+          FloorPoint(0.2, 0.2),
+          FloorPoint(0.8, 0.2),
+          FloorPoint(0.8, 0.8),
+          FloorPoint(0.2, 0.8),
+        ],
+        measurements: [],
+        openings: [
+          InterpretedOpeningProposal(
+            edgeIndex: 1,
+            type: FloorplanOpeningCandidateType.door,
+          ),
+        ],
+      ),
+    ],
+  );
+}
+
 Future<Uint8List> _testPng() async {
   final recorder = ui.PictureRecorder();
   final canvas = Canvas(recorder);
@@ -50,7 +263,43 @@ Future<Uint8List> _testPng() async {
   return data!.buffer.asUint8List();
 }
 
-Future<_Built> _build(WidgetTester tester, {PhotoSource? traceSource}) async {
+Future<void> _pumpRemoteFloorplan(
+  WidgetTester tester,
+  FloorplanInterpretationApi interpreter,
+) async {
+  final source = _FloorplanPhotoSource(
+    await tester.runAsync(_testPng) ?? Uint8List(0),
+  );
+  final analyzer = _CountingFloorplanAnalyzer();
+  final built = await _build(
+    tester,
+    traceSource: source,
+    floorplanInterpreter: interpreter,
+  );
+  tester.view.physicalSize = const Size(720, 1600);
+  tester.view.devicePixelRatio = 2;
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(
+    MaterialApp(
+      theme: andeanTheme(),
+      home: FloorplanTraceScreen(
+        controller: built.controller,
+        analyzer: analyzer,
+      ),
+    ),
+  );
+  await tester.tap(find.byKey(const ValueKey('floorplan-pick-source')));
+  await tester.runAsync(
+    () => Future<void>.delayed(const Duration(milliseconds: 100)),
+  );
+  await tester.pumpAndSettle();
+}
+
+Future<_Built> _build(
+  WidgetTester tester, {
+  PhotoSource? traceSource,
+  FloorplanInterpretationApi? floorplanInterpreter,
+}) async {
   final backend = FakeSceneBackend();
   final ar = FakeArCapture();
   final store = InMemoryCaptureDraftStore();
@@ -60,6 +309,7 @@ Future<_Built> _build(WidgetTester tester, {PhotoSource? traceSource}) async {
     ar: ar,
     store: store,
     traceSource: traceSource,
+    floorplanInterpreter: floorplanInterpreter,
   );
   return (controller: controller, backend: backend, ar: ar, store: store);
 }
@@ -70,6 +320,7 @@ Future<SpatialCaptureController> _newController(
   required FakeArCapture ar,
   required InMemoryCaptureDraftStore store,
   PhotoSource? traceSource,
+  FloorplanInterpretationApi? floorplanInterpreter,
 }) async {
   late SpatialCaptureController controller;
   await tester.runAsync(() async {
@@ -93,6 +344,7 @@ Future<SpatialCaptureController> _newController(
       store: store,
       ar: ar,
       traceSource: traceSource,
+      floorplanInterpreter: floorplanInterpreter,
     );
     await controller.load();
   });
@@ -173,8 +425,8 @@ void main() {
       find.byKey(const ValueKey('capture-room-button')),
     );
     expect(find.text('Captura automática'), findsOneWidget);
-    expect(find.text('Medidas manuales'), findsOneWidget);
-    expect(find.textContaining('importar'), findsNothing);
+    expect(find.text('Dibujar ambiente'), findsOneWidget);
+    expect(find.textContaining('imagen'), findsOneWidget);
     await _tapAndSettle(
       tester,
       find.byKey(const ValueKey('manual-capture-method')),
@@ -183,34 +435,34 @@ void main() {
       tester,
       find.byKey(const ValueKey('manual-shape-rectangle')),
     );
-    expect(find.text('Largo del ambiente (m)'), findsOneWidget);
-    expect(find.text('Ancho del ambiente (m)'), findsOneWidget);
+    expect(find.text('Largo del ambiente (m)'), findsNothing);
+    expect(find.text('Ancho del ambiente (m)'), findsNothing);
     expect(find.text('Altura del ambiente (m)'), findsOneWidget);
     await tester.enterText(
-      find.byKey(const ValueKey('manual-room-name')),
+      find.byKey(const ValueKey('sketch-room-name')),
       'Dormitorio',
     );
+    for (final entry in const ['4,20', '3,70', '4,20', '3,70'].indexed) {
+      await tester.enterText(
+        find.byKey(ValueKey('sketch-wall-${entry.$1}')),
+        entry.$2,
+      );
+    }
     await tester.enterText(
-      find.byKey(const ValueKey('manual-room-length')),
-      '4,20',
-    );
-    await tester.enterText(
-      find.byKey(const ValueKey('manual-room-width')),
-      '3,70',
-    );
-    await tester.enterText(
-      find.byKey(const ValueKey('manual-room-height')),
+      find.byKey(const ValueKey('sketch-room-height')),
       '2,60',
     );
-    await _tapAndSettle(
-      tester,
-      find.byKey(const ValueKey('manual-room-confirm')),
+    await tester.pump();
+    expect(
+      find.bySemanticsLabel('Geometría resuelta y ajustada de 4 paredes'),
+      findsOneWidget,
     );
+    await _tapAndSettle(tester, find.byKey(const ValueKey('sketch-confirm')));
 
     expect(built.ar.availabilityChecks, 0);
     expect(find.text('Dormitorio'), findsOneWidget);
     expect(find.text('Superficie estimada: 15,54 m²'), findsOneWidget);
-    expect(find.text('Medidas ingresadas manualmente'), findsOneWidget);
+    expect(find.text('Croquis manual con medidas por pared'), findsOneWidget);
     expect(find.bySemanticsLabel('Plano de la captura'), findsOneWidget);
 
     final edit = find.byKey(const ValueKey('edit-room-room-1'));
@@ -224,9 +476,65 @@ void main() {
     );
     await tester.tap(edit);
     await tester.pumpAndSettle();
-    expect(find.text('Lados'), findsOneWidget);
+    expect(find.text('Paredes'), findsOneWidget);
     expect(find.byKey(const ValueKey('add-opening-button')), findsOneWidget);
-    expect(find.byKey(const ValueKey('reference-field-0')), findsNothing);
+    expect(find.byKey(const ValueKey('reference-field-0')), findsOneWidget);
+  });
+
+  testWidgets('manual templates stay stable until every wall is measured', (
+    tester,
+  ) async {
+    final built = await _build(tester);
+    tester.view.physicalSize = const Size(720, 1600);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+    await _pump(tester, built.controller);
+
+    Future<void> openTemplate(String key) async {
+      await _tapAndSettle(
+        tester,
+        find.byKey(const ValueKey('capture-room-button')),
+      );
+      await _tapAndSettle(
+        tester,
+        find.byKey(const ValueKey('manual-capture-method')),
+      );
+      await _tapAndSettle(tester, find.byKey(ValueKey(key)));
+    }
+
+    await openTemplate('manual-shape-rectangle');
+    expect(
+      find.bySemanticsLabel('Plantilla estable de 4 paredes'),
+      findsOneWidget,
+    );
+    await tester.enterText(find.byKey(const ValueKey('sketch-wall-0')), '3,50');
+    await tester.pump();
+    expect(
+      find.bySemanticsLabel('Plantilla estable de 4 paredes'),
+      findsOneWidget,
+    );
+    expect(find.text('Estado: Confirmada'), findsOneWidget);
+    expect(find.text('Estado: Pendiente'), findsNWidgets(3));
+    await tester.enterText(find.byKey(const ValueKey('sketch-wall-1')), '3,00');
+    await tester.pump();
+    expect(
+      find.bySemanticsLabel('Plantilla estable de 4 paredes'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('Cancelar'));
+    await tester.pumpAndSettle();
+
+    await openTemplate('manual-shape-l');
+    await tester.enterText(find.byKey(const ValueKey('sketch-wall-0')), '4,00');
+    await tester.pump();
+    expect(
+      find.bySemanticsLabel('Plantilla estable de 6 paredes'),
+      findsOneWidget,
+    );
+    expect(find.text('Estado: Confirmada'), findsOneWidget);
+    expect(find.text('Estado: Pendiente'), findsNWidgets(5));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('creates an L room from the guided manual selector', (
@@ -252,48 +560,57 @@ void main() {
       tester,
       find.byKey(const ValueKey('manual-capture-method')),
     );
-    expect(find.text('Rectangular'), findsOneWidget);
-    expect(find.text('En L'), findsOneWidget);
-    expect(find.text('Irregular'), findsOneWidget);
+    expect(find.text('Plantilla rectangular'), findsOneWidget);
+    expect(find.text('Plantilla en L'), findsOneWidget);
+    expect(find.text('Dibujo libre'), findsOneWidget);
     expect(find.textContaining('import'), findsNothing);
     await _tapAndSettle(tester, find.byKey(const ValueKey('manual-shape-l')));
 
-    for (final entry in <ValueKey<String>, String>{
-      const ValueKey('l-room-name'): 'Cocina en L',
-      const ValueKey('l-total-width'): '5,00',
-      const ValueKey('l-total-depth'): '4.00',
-      const ValueKey('l-recess-width'): '2,00',
-      const ValueKey('l-recess-depth'): '1,50',
-      const ValueKey('l-room-height'): '2,60',
-    }.entries) {
-      await tester.enterText(find.byKey(entry.key), entry.value);
-      await tester.pump();
+    await tester.enterText(
+      find.byKey(const ValueKey('sketch-room-name')),
+      'Cocina en L',
+    );
+    expect(find.byKey(const ValueKey('sketch-wall-0')), findsOneWidget);
+    expect(find.byKey(const ValueKey('sketch-wall-5')), findsOneWidget);
+    const confirmed = [
+      '4,000000',
+      '1,333333',
+      '1,619048',
+      '1,333333',
+      '2,380952',
+      '2,666667',
+    ];
+    for (final entry in confirmed.indexed) {
+      await tester.enterText(
+        find.byKey(ValueKey('sketch-wall-${entry.$1}')),
+        entry.$2,
+      );
     }
-    expect(find.byKey(const ValueKey('l-recess-corner')), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('sketch-room-height')),
+      '2,60',
+    );
+    await tester.pump();
     expect(
-      find.byKey(const ValueKey('manual-contour-preview')),
+      find.bySemanticsLabel('Geometría resuelta y ajustada de 6 paredes'),
       findsOneWidget,
     );
+    expect(find.textContaining('recorte'), findsNothing);
     expect(tester.takeException(), isNull);
-    await tester.enterText(
-      find.byKey(const ValueKey('l-recess-width')),
-      '5,00',
-    );
-    await _tapAndSettle(tester, find.byKey(const ValueKey('l-room-confirm')));
-    expect(find.textContaining('El recorte debe ser menor'), findsOneWidget);
-    expect(built.controller.rooms, isEmpty);
-    expect(tester.takeException(), isNull);
-    await tester.enterText(
-      find.byKey(const ValueKey('l-recess-width')),
-      '2,00',
-    );
-    await _tapAndSettle(tester, find.byKey(const ValueKey('l-room-confirm')));
+    await _tapAndSettle(tester, find.byKey(const ValueKey('sketch-confirm')));
 
     final room = built.controller.rooms.single;
     expect(room.name, 'Cocina en L');
     expect(room.corners, hasLength(6));
-    expect(polygonArea(room.corners), closeTo(17, 1e-9));
-    expect(room.acquisition.method, RoomAcquisitionMethod.manual);
+    expect(
+      room.references.map((value) => value.edgeIndex).toSet(),
+      hasLength(6),
+    );
+    expect(room.measurementMode, RoomMeasurementMode.wallConstraints);
+    expect(fitConfirmedWallLengths(room).isCoherent, isTrue);
+    expect(validateContour(room.corners), isEmpty);
+    expect(polygonArea(room.corners), greaterThan(0));
+    expect(room.acquisition.method, RoomAcquisitionMethod.manualSketch);
     expect(room.metrics, isNull);
     expect(tester.takeException(), isNull);
   });
@@ -320,7 +637,7 @@ void main() {
         find.byKey(const ValueKey('capture-room-button')),
       );
       expect(find.text('Captura automática'), findsOneWidget);
-      expect(find.text('Medidas manuales'), findsOneWidget);
+      expect(find.text('Dibujar ambiente'), findsOneWidget);
       expect(find.text('Plano o croquis'), findsOneWidget);
       expect(find.textContaining('PDF'), findsNothing);
       await _tapAndSettle(
@@ -369,17 +686,30 @@ void main() {
       expect(close.hitTestable(), findsOneWidget);
       await tester.tap(close);
       await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const ValueKey('trace-reference-metres')),
-        '4,20',
-      );
+      for (var index = 0; index < 4; index++) {
+        await tester.tap(find.byKey(ValueKey('wall-chip-$index')));
+        await tester.pump();
+        final field = find.byKey(ValueKey('trace-wall-$index'));
+        await tester.scrollUntilVisible(
+          field,
+          150,
+          scrollable: find
+              .descendant(
+                of: find.byKey(const ValueKey('floorplan-trace-scroll')),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await tester.enterText(field, '4,20');
+      }
+      expect(find.text('Pared de referencia'), findsNothing);
       await tester.enterText(
         find.byKey(const ValueKey('trace-room-height')),
         '2.65',
       );
       await tester.pumpAndSettle();
       expect(find.text('Vista previa métrica'), findsOneWidget);
-      final provenance = find.text('Plano o croquis trazado y calibrado');
+      final provenance = find.text('Plano o croquis con medidas por pared');
       await tester.scrollUntilVisible(
         provenance,
         200,
@@ -411,7 +741,10 @@ void main() {
       expect(room.acquisition.method, RoomAcquisitionMethod.floorplanTrace);
       expect(room.metrics, isNull);
       expect(edgeLengths(room.corners).first, closeTo(4.2, 1e-9));
-      expect(find.text('Plano o croquis trazado y calibrado'), findsOneWidget);
+      expect(
+        find.text('Plano o croquis con medidas por pared'),
+        findsOneWidget,
+      );
       expect(find.byKey(const ValueKey('edit-trace-room-1')), findsOneWidget);
       expect(tester.takeException(), isNull);
 
@@ -427,7 +760,18 @@ void main() {
       await tester.tap(editRoom);
       await tester.pumpAndSettle();
       expect(find.byType(RoomEditorScreen), findsOneWidget);
-      expect(find.byKey(const ValueKey('add-opening-button')), findsOneWidget);
+      final addOpening = find.byKey(const ValueKey('add-opening-button'));
+      await tester.scrollUntilVisible(
+        addOpening,
+        300,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const ValueKey('room-editor-scroll')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      expect(addOpening, findsOneWidget);
       expect(tester.takeException(), isNull);
       Navigator.of(tester.element(find.byType(RoomEditorScreen))).pop();
       await tester.pumpAndSettle();
@@ -576,6 +920,530 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('Groq proposal seeds scale without local analyzer', (
+    tester,
+  ) async {
+    final source = _FloorplanPhotoSource(
+      await tester.runAsync(_testPng) ?? Uint8List(0),
+    );
+    final analyzer = _CountingFloorplanAnalyzer();
+    final built = await _build(
+      tester,
+      traceSource: source,
+      floorplanInterpreter: _ProposedFloorplanInterpretationApi(),
+    );
+    tester.view.physicalSize = const Size(720, 1600);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: andeanTheme(),
+        home: FloorplanTraceScreen(
+          controller: built.controller,
+          analyzer: analyzer,
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('floorplan-pick-source')));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byKey(const ValueKey('floorplan-trace-scroll')),
+      const Offset(0, -700),
+    );
+    await tester.pumpAndSettle();
+    expect(built.controller.rooms, isEmpty);
+
+    // An unambiguous Groq metric seeds the scale without becoming a
+    // user-authored value. The room is still only persisted on confirmation.
+    expect(built.controller.rooms, isEmpty);
+    final height = find.byKey(const ValueKey('trace-room-height'));
+    await tester.scrollUntilVisible(
+      height,
+      180,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('floorplan-trace-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.enterText(height, '2,60');
+    final save = find.byKey(const ValueKey('floorplan-trace-save'));
+    expect(save.hitTestable(), findsOneWidget);
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    expect(built.controller.rooms.single.references, hasLength(4));
+    expect(
+      built.controller.rooms.single.references.first.provenance,
+      WallMeasurementProvenance.aiDetected,
+    );
+    expect(analyzer.calls, 0);
+    await built.controller.sync();
+    expect(built.controller.syncState, CaptureSyncState.synced);
+    final scenePayload = jsonEncode(built.backend.document);
+    for (final acquisitionOnlyValue in [
+      'groq',
+      'ocr',
+      source.bytes.toString(),
+      'sourceId',
+      'imagePath',
+      'imageBytes',
+      'base64',
+      'providerResponse',
+      'debugPayload',
+      'literalText',
+      'candidateStatus',
+    ]) {
+      expect(scenePayload, isNot(contains(acquisitionOnlyValue)));
+    }
+
+    final room = built.controller.rooms.single;
+    expect(
+      scenePayload,
+      isNot(contains(built.controller.traceForRoom(room.id)!.sourceId)),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: andeanTheme(),
+        home: FloorplanTraceScreen(
+          controller: built.controller,
+          roomId: room.id,
+          analyzer: analyzer,
+        ),
+      ),
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pumpAndSettle();
+    final finalSave = find.byKey(const ValueKey('floorplan-trace-save'));
+    expect(finalSave.hitTestable(), findsOneWidget);
+    await tester.tap(finalSave);
+    await tester.pumpAndSettle();
+    expect(built.controller.rooms.single.references, hasLength(4));
+    await built.controller.sync();
+    expect(built.controller.syncState, CaptureSyncState.synced);
+    expect(built.backend.document.toString(), isNot(contains('ocr')));
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final wallCount in [12, 26])
+    testWidgets('$wallCount-wall review keeps one editor and visible plan', (
+      tester,
+    ) async {
+      final source = _FloorplanPhotoSource(
+        await tester.runAsync(_testPng) ?? Uint8List(0),
+      );
+      final built = await _build(tester, traceSource: source);
+      tester.view.physicalSize = const Size(720, 1600);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.reset);
+      final contour = [
+        for (var index = 0; index < wallCount; index++)
+          FloorPoint(
+            0.5 + 0.32 * math.cos(index * 2 * math.pi / wallCount),
+            0.5 + 0.32 * math.sin(index * 2 * math.pi / wallCount),
+          ),
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: andeanTheme(),
+          home: FloorplanTraceScreen(
+            controller: built.controller,
+            analyzer: _FixedFloorplanAnalyzer(contour: contour),
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('floorplan-pick-source')));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('floorplan-persistent-review')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('floorplan-wall-selector')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('floorplan-correct-geometry')).hitTestable(),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('floorplan-trace-save')).hitTestable(),
+        findsOneWidget,
+      );
+      if (wallCount == 12) {
+        await tester.showKeyboard(
+          find.byKey(const ValueKey('floorplan-room-name')),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('floorplan-trace-save')).hitTestable(),
+          findsOneWidget,
+        );
+      }
+      expect(find.byType(TextField).evaluate().length, lessThanOrEqualTo(3));
+      expect(tester.takeException(), isNull);
+    });
+
+  testWidgets('a stale analysis cannot replace a newer floorplan image', (
+    tester,
+  ) async {
+    final bytes = await tester.runAsync(_testPng) ?? Uint8List(0);
+    final built = await _build(
+      tester,
+      traceSource: _FloorplanPhotoSource(bytes),
+    );
+    final analyzer = _SequencedFloorplanAnalyzer();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: andeanTheme(),
+        home: FloorplanTraceScreen(
+          controller: built.controller,
+          analyzer: analyzer,
+        ),
+      ),
+    );
+    final pick = find.byKey(const ValueKey('floorplan-pick-source'));
+    await tester.tap(pick);
+    for (var attempt = 0; attempt < 20 && analyzer.calls == 0; attempt++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+    }
+    expect(analyzer.calls, 1);
+    await tester.pump();
+    await tester.tap(pick);
+    for (var attempt = 0; attempt < 20 && analyzer.calls < 2; attempt++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+    }
+    expect(analyzer.calls, 2);
+    await tester.pumpAndSettle();
+    expect(find.text('Resultado de la segunda imagen'), findsOneWidget);
+
+    analyzer.first.complete(
+      const FloorplanAnalysisResult(
+        status: FloorplanAnalysisStatus.success,
+        message: 'Resultado obsoleto',
+        contour: [
+          FloorPoint(0.1, 0.1),
+          FloorPoint(0.9, 0.1),
+          FloorPoint(0.9, 0.9),
+          FloorPoint(0.1, 0.9),
+        ],
+      ),
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Resultado de la segunda imagen'), findsOneWidget);
+    expect(find.text('Resultado obsoleto'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'a remote interpretation failure keeps the image and manual path',
+    (tester) async {
+      final source = _FloorplanPhotoSource(
+        await tester.runAsync(_testPng) ?? Uint8List(0),
+      );
+      final analyzer = _CountingFloorplanAnalyzer();
+      final built = await _build(
+        tester,
+        traceSource: source,
+        floorplanInterpreter: _FailingFloorplanInterpretationApi(),
+      );
+      tester.view.physicalSize = const Size(720, 1600);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: andeanTheme(),
+          home: FloorplanTraceScreen(
+            controller: built.controller,
+            analyzer: analyzer,
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('floorplan-pick-source')));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'La interpretación automática no está disponible temporalmente. '
+          'Podés reintentar o corregir el ambiente manualmente.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('floorplan-trace-paint')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('floorplan-manual-fallback')),
+        findsOneWidget,
+      );
+      expect(find.text('No se pudo abrir la imagen.'), findsNothing);
+      expect(analyzer.calls, 0);
+
+      await tester.tap(find.byKey(const ValueKey('floorplan-manual-fallback')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('provider unavailable result uses temporary message', (
+    tester,
+  ) async {
+    await _pumpRemoteFloorplan(
+      tester,
+      const _ResultFloorplanInterpretationApi(
+        FloorplanInterpretationResult(
+          status: FloorplanInterpretationStatus.providerUnavailable,
+        ),
+      ),
+    );
+
+    expect(
+      find.text(
+        'La interpretación automática no está disponible temporalmente. '
+        'Podés reintentar o corregir el ambiente manualmente.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('floorplan-manual-fallback')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('model low confidence uses confidence message', (tester) async {
+    await _pumpRemoteFloorplan(
+      tester,
+      const _ResultFloorplanInterpretationApi(
+        FloorplanInterpretationResult(
+          status: FloorplanInterpretationStatus.lowConfidence,
+        ),
+      ),
+    );
+
+    expect(
+      find.text(
+        'No pudimos interpretar este plano con suficiente confianza. '
+        'Podés corregir o trazar el ambiente manualmente.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('floorplan-manual-fallback')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('low-quality review proposal uses correction message', (
+    tester,
+  ) async {
+    await _pumpRemoteFloorplan(
+      tester,
+      const _ResultFloorplanInterpretationApi(
+        FloorplanInterpretationResult(
+          status: FloorplanInterpretationStatus.needsReview,
+          rooms: [
+            InterpretedRoomCandidate(
+              id: 'review-room',
+              contour: [
+                FloorPoint(0.2, 0.2),
+                FloorPoint(0.8, 0.2),
+                FloorPoint(0.8, 0.8),
+                FloorPoint(0.2, 0.8),
+              ],
+              measurements: [],
+              openings: [],
+            ),
+          ],
+        ),
+      ),
+    );
+
+    expect(
+      find.text(
+        'La propuesta automática necesita demasiadas correcciones. '
+        'Podés reintentar o corregir la geometría.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('floorplan-result-summary')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('invalid provider response uses correction message', (
+    tester,
+  ) async {
+    await _pumpRemoteFloorplan(
+      tester,
+      const _ResultFloorplanInterpretationApi(
+        FloorplanInterpretationResult(
+          status: FloorplanInterpretationStatus.needsReview,
+        ),
+      ),
+    );
+
+    expect(
+      find.text(
+        'La propuesta automática necesita demasiadas correcciones. '
+        'Podés reintentar o corregir la geometría.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('floorplan-manual-fallback')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('valid AI proposal uses normal review message', (tester) async {
+    await _pumpRemoteFloorplan(tester, _ProposedFloorplanInterpretationApi());
+
+    expect(
+      find.text('Interpretación automática lista para revisión humana.'),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('floorplan-manual-fallback')),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('unresolved Groq evidence stays review-only', (tester) async {
+    final source = _FloorplanPhotoSource(
+      await tester.runAsync(_testPng) ?? Uint8List(0),
+    );
+    final analyzer = _CountingFloorplanAnalyzer();
+    final built = await _build(
+      tester,
+      traceSource: source,
+      floorplanInterpreter: _ConflictFloorplanInterpretationApi(),
+    );
+    tester.view.physicalSize = const Size(720, 2400);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: andeanTheme(),
+        home: FloorplanTraceScreen(
+          controller: built.controller,
+          analyzer: analyzer,
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('floorplan-pick-source')));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.drag(
+      find.byKey(const ValueKey('floorplan-trace-scroll')),
+      const Offset(0, -400),
+    );
+    await tester.pumpAndSettle();
+    final toggle = find.byKey(const ValueKey('measurement-review-toggle'));
+    expect(toggle.hitTestable(), findsOneWidget);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byKey(const ValueKey('floorplan-trace-scroll')),
+      const Offset(0, -400),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('measurement-unassigned-ai-0')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('419'), findsWidgets);
+    expect(find.textContaining('410'), findsNothing);
+    expect(find.textContaining('unidad sin confirmar'), findsOneWidget);
+    expect(
+      find.textContaining('escala resuelta automáticamente'),
+      findsNothing,
+    );
+    expect(analyzer.calls, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'an incomplete AI opening stays reviewable without fabricated geometry',
+    (tester) async {
+      final source = _FloorplanPhotoSource(
+        await tester.runAsync(_testPng) ?? Uint8List(0),
+      );
+      final analyzer = _CountingFloorplanAnalyzer();
+      final built = await _build(
+        tester,
+        traceSource: source,
+        floorplanInterpreter: _IncompleteOpeningFloorplanInterpretationApi(),
+      );
+      tester.view.physicalSize = const Size(720, 2400);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: andeanTheme(),
+          home: FloorplanTraceScreen(
+            controller: built.controller,
+            analyzer: analyzer,
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('floorplan-pick-source')));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('floorplan-opening-review')),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Aperturas detectadas que necesitan geometría'),
+        findsOneWidget,
+      );
+      expect(find.text('P2 · Puerta · falta posición y ancho'), findsOneWidget);
+      expect(find.textContaining('posición 50%'), findsNothing);
+      expect(find.textContaining('ancho 15%'), findsNothing);
+      expect(find.text('4 paredes · 1 aperturas por revisar'), findsOneWidget);
+      expect(analyzer.calls, 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('retracing a traced room keeps its exact height and provenance', (
     tester,
   ) async {
@@ -602,8 +1470,12 @@ void main() {
           FloorPoint(0.5, 0.5),
           FloorPoint(0.1, 0.5),
         ],
-        referenceEdge: 0,
-        referenceMeters: 4.234,
+        measurements: const [
+          ReferenceMeasurement(edgeIndex: 0, referenceMeters: 4.234),
+          ReferenceMeasurement(edgeIndex: 1, referenceMeters: 3.25),
+          ReferenceMeasurement(edgeIndex: 2, referenceMeters: 4.234),
+          ReferenceMeasurement(edgeIndex: 3, referenceMeters: 3.25),
+        ],
         height: 2.655,
       );
       room = built.controller.rooms.single;
@@ -635,36 +1507,7 @@ void main() {
     await tester.pumpAndSettle();
 
     final save = find.byKey(const ValueKey('floorplan-trace-save'));
-    await tester.scrollUntilVisible(
-      save,
-      200,
-      scrollable: find
-          .descendant(
-            of: find.byKey(const ValueKey('floorplan-trace-scroll')),
-            matching: find.byType(Scrollable),
-          )
-          .first,
-    );
-
-    // The retrace starts from what the agent already recorded, without
-    // rounding it to centimetres.
-    expect(
-      tester
-          .widget<TextField>(find.byKey(const ValueKey('trace-room-height')))
-          .controller!
-          .text,
-      '2.655',
-    );
-    expect(
-      tester
-          .widget<TextField>(
-            find.byKey(const ValueKey('trace-reference-metres')),
-          )
-          .controller!
-          .text,
-      '4.234',
-    );
-
+    expect(save.hitTestable(), findsOneWidget);
     await tester.tap(save);
     await tester.pumpAndSettle();
 
@@ -674,7 +1517,8 @@ void main() {
     expect(after.height.value, 2.655);
     expect(after.openings, isEmpty);
     expect(after.acquisition.method, RoomAcquisitionMethod.floorplanTrace);
-    expect(built.controller.traceForRoom(room.id)!.referenceMeters, 4.234);
+    expect(after.references.first.referenceMeters, 4.234);
+    expect(built.controller.traceForRoom(room.id)!.referenceMeters, isNull);
     expect(tester.takeException(), isNull);
   });
 
@@ -712,6 +1556,40 @@ void main() {
     final canvas = find.byKey(const ValueKey('sketch-canvas'));
     await tester.ensureVisible(canvas);
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Mover / zoom'));
+    await tester.pump();
+    final viewerFinder = find.byKey(
+      const ValueKey('sketch-interactive-viewer'),
+    );
+    final viewer = tester.widget<InteractiveViewer>(viewerFinder);
+    final transform = viewer.transformationController!;
+    final center = tester.getCenter(viewerFinder);
+    final first = await tester.startGesture(
+      center + const Offset(-25, 0),
+      pointer: 21,
+    );
+    final second = await tester.startGesture(
+      center + const Offset(25, 0),
+      pointer: 22,
+    );
+    await tester.pump();
+    await first.moveTo(center + const Offset(-40, 0));
+    await second.moveTo(center + const Offset(40, 0));
+    await tester.pump();
+    await first.moveTo(center + const Offset(-60, 0));
+    await second.moveTo(center + const Offset(60, 0));
+    await tester.pump();
+    await first.up();
+    await second.up();
+    expect(transform.value.getMaxScaleOnAxis(), greaterThan(1));
+    expect(
+      tester
+          .widget<TextButton>(find.byKey(const ValueKey('sketch-undo')))
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(find.text('Dibujar / editar'));
+    await tester.pump();
     final origin = tester.getTopLeft(canvas);
     for (final offset in const [
       Offset(25, 25),
@@ -725,16 +1603,17 @@ void main() {
     }
     await tester.tapAt(origin + const Offset(70, 145));
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('sketch-undo')));
+    final undo = find.byKey(const ValueKey('sketch-undo'));
+    await tester.ensureVisible(undo);
+    await tester.tap(undo);
     await tester.pump();
     final close = find.byKey(const ValueKey('sketch-close'));
     await tester.ensureVisible(close);
+    await tester.pumpAndSettle();
     await tester.tap(close);
     await tester.pumpAndSettle();
-    expect(
-      find.byKey(const ValueKey('sketch-reference-metres')),
-      findsOneWidget,
-    );
+    expect(find.text('Pared de referencia'), findsNothing);
+    expect(find.byKey(const ValueKey('sketch-wall-0')), findsOneWidget);
     await tester.ensureVisible(canvas);
     final closedOrigin = tester.getTopLeft(canvas);
     await tester.tapAt(closedOrigin + const Offset(25, 110));
@@ -744,10 +1623,7 @@ void main() {
     await tester.ensureVisible(remove);
     await tester.tap(remove);
     await tester.pump();
-    await tester.enterText(
-      find.byKey(const ValueKey('sketch-reference-metres')),
-      '4,20',
-    );
+    await tester.enterText(find.byKey(const ValueKey('sketch-wall-0')), '4,20');
     await tester.enterText(
       find.byKey(const ValueKey('sketch-room-height')),
       '2.70',
@@ -764,10 +1640,7 @@ void main() {
     expect(edgeLengths(room.corners).first, closeTo(4.2, 1e-9));
     expect(room.acquisition.method, RoomAcquisitionMethod.manualSketch);
     expect(room.metrics, isNull);
-    expect(
-      find.text('Croquis manual calibrado con una medida real'),
-      findsOneWidget,
-    );
+    expect(find.text('Croquis manual con medidas por pared'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     final edit = find.byKey(const ValueKey('edit-room-room-1'));
@@ -861,7 +1734,7 @@ void main() {
 
     await _tapAndSettle(tester, find.byKey(const ValueKey('edit-room-room-1')));
     expect(find.byType(RoomEditorScreen), findsOneWidget);
-    expect(find.text('Lados'), findsOneWidget);
+    expect(find.text('Paredes'), findsOneWidget);
   });
 
   testWidgets('isolates scroll state and remains reachable after re-entry', (
@@ -971,7 +1844,7 @@ void main() {
       'Dormitorio prueba',
       'Altura',
       'Altura: 2,60 m (ingresada a mano)',
-      'Lados',
+      'Paredes',
       'Puertas y ventanas',
       'Agregar puerta o ventana',
     ]) {
@@ -1024,7 +1897,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Altura medida a mano (m)'), findsOneWidget);
-    expect(find.text('Lados'), findsOneWidget);
+    expect(find.text('Paredes'), findsOneWidget);
 
     await tester.enterText(
       find.byKey(const ValueKey('room-height-field')),
@@ -1039,7 +1912,16 @@ void main() {
     expect(built.controller.rooms.single.height.source, HeightSource.manual);
 
     final openings = find.text('Puertas y ventanas');
-    await tester.ensureVisible(openings);
+    await tester.scrollUntilVisible(
+      openings,
+      300,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('room-editor-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     await tester.pump();
     expect(openings.hitTestable(), findsOneWidget);
     expect(find.byKey(const ValueKey('add-opening-button')), findsOneWidget);
@@ -1097,7 +1979,7 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(find.text('Lados y tolerancia'), findsOneWidget);
+    expect(find.text('Paredes y tolerancia'), findsOneWidget);
 
     final field = find.byKey(const ValueKey('reference-field-0'));
     await tester.ensureVisible(field);
@@ -1122,7 +2004,7 @@ void main() {
     await tester.runAsync(
       () => built.controller.createManualRectangularRoom(
         name: 'Dormitorio prueba',
-        length: 4.20,
+        length: 4.00,
         width: 3.70,
         height: 2.65,
       ),
@@ -1140,33 +2022,49 @@ void main() {
     expect(tester.takeException(), isNull);
 
     final add = find.byKey(const ValueKey('add-opening-button'));
-    await tester.ensureVisible(add);
+    await tester.scrollUntilVisible(
+      add,
+      300,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('room-editor-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     await tester.tap(add);
     await tester.pumpAndSettle();
     final position = find.byKey(const ValueKey('opening-position-metres'));
-    expect(tester.widget<TextField>(position).controller!.text, '2,10');
-    await tester.enterText(position, '2.10');
+    expect(tester.widget<TextField>(position).controller!.text, '2,00');
+    final gesture = find.byKey(const ValueKey('opening-position-gesture'));
+    final rect = tester.getRect(gesture);
+    await tester.tapAt(Offset(rect.left + rect.width * 0.70, rect.center.dy));
+    await tester.pump();
+    expect(tester.widget<TextField>(position).controller!.text, '2,80');
+    expect(find.text('Posición desde el inicio: 2,80 m'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('opening-confirm')));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(built.controller.rooms.single.openings.single.position, 0.5);
+    expect(
+      built.controller.rooms.single.openings.single.position,
+      closeTo(0.7, 0.01),
+    );
 
     final openingTile = find.textContaining('Puerta 1');
     await tester.ensureVisible(openingTile);
     await tester.tap(openingTile);
     await tester.pumpAndSettle();
-    expect(tester.widget<TextField>(position).controller!.text, '2,10');
-    await tester.enterText(position, '0,10');
+    expect(tester.widget<TextField>(position).controller!.text, '2,80');
+    await tester.enterText(position, '1,20');
+    await tester.pump();
+    expect(find.text('Posición desde el inicio: 1,20 m'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('opening-confirm')));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(
-      find.text(
-        'La abertura se sale de la pared. Mové su posición hacia el centro.',
-      ),
-      findsOneWidget,
+      built.controller.rooms.single.openings.single.position,
+      closeTo(0.3, 1e-9),
     );
-    expect(built.controller.rooms.single.openings.single.position, 0.5);
   });
 
   testWidgets(
@@ -1210,12 +2108,30 @@ void main() {
       );
       await tester.pumpAndSettle();
       final warning = find.byKey(const ValueKey('invalid-openings-warning'));
-      await tester.ensureVisible(warning);
+      await tester.scrollUntilVisible(
+        warning,
+        300,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const ValueKey('room-editor-scroll')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       expect(warning, findsOneWidget);
       expect(built.controller.rooms.single.openings.single.edgeIndex, 9);
 
       final tile = find.textContaining('Puerta 1');
-      await tester.ensureVisible(tile);
+      await tester.scrollUntilVisible(
+        tile,
+        250,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const ValueKey('room-editor-scroll')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       await tester.tap(tile);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
@@ -1231,7 +2147,7 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('opening-edge')));
       await tester.pumpAndSettle();
-      await tester.tap(find.textContaining('Lado 1 (').last);
+      await tester.tap(find.textContaining('Pared 1 (').last);
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const ValueKey('opening-position-metres')),
@@ -1369,7 +2285,7 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.text('Lado 2: 3,00 m capturado → 3,15 m corregido'),
+      find.text('Pared 2: 3,00 m capturado → 3,15 m corregido'),
       findsOneWidget,
     );
 

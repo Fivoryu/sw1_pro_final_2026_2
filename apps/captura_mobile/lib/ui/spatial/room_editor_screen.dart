@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../domain/spatial/spatial.dart';
@@ -67,6 +69,18 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
+  TextEditingController _referenceController(
+    CapturedRoom room,
+    int edgeIndex,
+  ) => _references.putIfAbsent(edgeIndex, () {
+    for (final reference in room.references) {
+      if (reference.edgeIndex == edgeIndex) {
+        return TextEditingController(text: '${reference.referenceMeters}');
+      }
+    }
+    return TextEditingController();
+  });
+
   Future<void> _saveHeight(CapturedRoom room) async {
     final value = parseMetres(_height.text);
     if (value == null || value < 1.8 || value > 4.5) {
@@ -86,16 +100,27 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
       _show('Ingresá la medida de la cinta en metros.');
       return;
     }
-    field.clear();
-    await _controller.updateRoom(
-      room.copyWith(
-        references: [
-          for (final reference in room.references)
-            if (reference.edgeIndex != edgeIndex) reference,
-          ReferenceMeasurement(edgeIndex: edgeIndex, referenceMeters: value),
-        ],
-      ),
+    final candidate = room.copyWith(
+      references: [
+        for (final reference in room.references)
+          if (reference.edgeIndex != edgeIndex) reference,
+        ReferenceMeasurement(edgeIndex: edgeIndex, referenceMeters: value),
+      ],
     );
+    final wallMeasured =
+        room.measurementMode == RoomMeasurementMode.wallConstraints;
+    if (!wallMeasured) {
+      field.clear();
+      await _controller.updateRoom(candidate);
+      return;
+    }
+    final fitted = fitConfirmedWallLengths(candidate);
+    if (!fitted.isCoherent) {
+      _show(fitted.message!);
+      return;
+    }
+    field.clear();
+    await _controller.updateRoom(candidate.copyWith(corners: fitted.corners));
   }
 
   Future<void> _saveBoxHeight(CapturedRoom room, OccupancyBox box) async {
@@ -171,14 +196,14 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
       );
     }
     final lengths = edgeLengths(room.corners);
-    final correction = scaleCorrection(room);
-    final manuallyCalibrated = const {
-      RoomAcquisitionMethod.manual,
-      RoomAcquisitionMethod.manualSketch,
-      RoomAcquisitionMethod.floorplanTrace,
-    }.contains(room.acquisition.method);
-    final correctedLengths = correction != null && correction.applied
-        ? edgeLengths(correctedRoom(room).corners)
+    final manuallyCalibrated =
+        room.measurementMode == RoomMeasurementMode.wallConstraints;
+    final correction = manuallyCalibrated ? null : scaleCorrection(room);
+    final corrected = correctedRoom(room);
+    final correctedLengths =
+        room.references.isNotEmpty &&
+            (manuallyCalibrated || correction?.applied == true)
+        ? edgeLengths(corrected.corners)
         : null;
     final tolerances = {
       for (final record in toleranceRecords(room)) record.edgeIndex: record,
@@ -224,7 +249,7 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
             ),
             const SizedBox(height: 24),
             Text(
-              manuallyCalibrated ? 'Lados' : 'Lados y tolerancia',
+              manuallyCalibrated ? 'Paredes' : 'Paredes y tolerancia',
               style: theme.textTheme.titleLarge,
             ),
             const SizedBox(height: 4),
@@ -270,8 +295,8 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
                   children: [
                     Text(
                       correctedLengths == null
-                          ? 'Lado ${index + 1}: ${metres(lengths[index])}'
-                          : 'Lado ${index + 1}: ${metres(lengths[index])} '
+                          ? '${wallLabel(index)}: ${metres(lengths[index])}'
+                          : '${wallLabel(index)}: ${metres(lengths[index])} '
                                 'capturado → ${metres(correctedLengths[index])} '
                                 'corregido',
                     ),
@@ -284,37 +309,41 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
                           '(${record.relativeErrorPercent.abs().toStringAsFixed(1).replaceAll('.', ',')} %)',
                         ),
                     const SizedBox(height: 4),
-                    if (!manuallyCalibrated)
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              key: ValueKey('reference-field-$index'),
-                              controller: _references.putIfAbsent(
-                                index,
-                                TextEditingController.new,
-                              ),
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
-                              decoration: const InputDecoration(
-                                labelText: 'Medida con cinta (m)',
-                                isDense: true,
-                              ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            key: ValueKey('reference-field-$index'),
+                            controller: _referenceController(room, index),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: InputDecoration(
+                              labelText: 'Largo real de la pared (m)',
+                              isDense: true,
+                              helperText: manuallyCalibrated
+                                  ? room.references.any(
+                                          (value) => value.edgeIndex == index,
+                                        )
+                                        ? 'Estado: Confirmada'
+                                        : 'Estado: Pendiente'
+                                  : null,
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          OutlinedButton(
-                            key: ValueKey('reference-save-$index'),
-                            style: OutlinedButton.styleFrom(
-                              minimumSize: _rowActionMinSize,
-                            ),
-                            onPressed: () => _saveReference(room, index),
-                            child: const Text('Registrar'),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton(
+                          key: ValueKey('reference-save-$index'),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: _rowActionMinSize,
                           ),
-                        ],
-                      ),
+                          onPressed: () => _saveReference(room, index),
+                          child: Text(
+                            manuallyCalibrated ? 'Confirmar' : 'Registrar',
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -336,7 +365,7 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
                 contentPadding: EdgeInsets.zero,
                 title: Text(
                   '${openingTypeLabel(opening.type)} ${index + 1} · '
-                  'lado ${opening.edgeIndex + 1}',
+                  '${wallLabel(opening.edgeIndex)}',
                 ),
                 subtitle: Text(
                   '${metres(opening.width)} × ${metres(opening.height)}',
@@ -464,6 +493,7 @@ class _OpeningDialogState extends State<_OpeningDialog> {
     text: _decimal(widget.opening?.sillHeight ?? 0.9),
   );
   String? _positionError;
+  late double _normalizedPosition = widget.opening?.position ?? 0.5;
 
   static String _decimal(double value) =>
       value.toStringAsFixed(2).replaceAll('.', ',');
@@ -484,6 +514,34 @@ class _OpeningDialogState extends State<_OpeningDialog> {
       index++;
     }
     return '${widget.room.id}-opening-$index';
+  }
+
+  void _setPosition(double normalized, List<double> lengths) {
+    final edge = _edge;
+    if (edge == null) return;
+    final width = parseMetres(_width.text) ?? 0.9;
+    final wallLength = lengths[edge];
+    final half = width <= wallLength ? width / 2 / wallLength : 0.5;
+    setState(() {
+      _normalizedPosition = normalized.clamp(half, 1 - half);
+      _position.text = _decimal(_normalizedPosition * wallLength);
+      _positionError = null;
+    });
+  }
+
+  void _positionChanged(String text, List<double> lengths) {
+    final edge = _edge;
+    final metres = parseMetres(text);
+    final width = parseMetres(_width.text);
+    if (edge == null || metres == null || width == null) return;
+    setState(() {
+      _normalizedPosition = normalizedOpeningPosition(
+        wallLength: lengths[edge],
+        openingWidth: width,
+        positionMetres: metres,
+      );
+      _positionError = null;
+    });
   }
 
   void _submit() {
@@ -510,7 +568,11 @@ class _OpeningDialogState extends State<_OpeningDialog> {
     final opening = RoomOpening(
       id: widget.opening?.id ?? _newId(),
       edgeIndex: edge,
-      position: positionMetres / edgeLengths(widget.room.corners)[edge],
+      position: normalizedOpeningPosition(
+        wallLength: edgeLengths(widget.room.corners)[edge],
+        openingWidth: width,
+        positionMetres: positionMetres,
+      ),
       width: width,
       height: height,
       type: _type,
@@ -551,13 +613,13 @@ class _OpeningDialogState extends State<_OpeningDialog> {
               key: const ValueKey('opening-edge'),
               isExpanded: true,
               initialValue: _edge,
-              decoration: const InputDecoration(labelText: 'Lado'),
+              decoration: const InputDecoration(labelText: 'Pared'),
               items: [
                 for (var index = 0; index < lengths.length; index++)
                   DropdownMenuItem(
                     value: index,
                     child: Text(
-                      'Lado ${index + 1} (${metres(lengths[index])})',
+                      '${wallLabel(index)} (${metres(lengths[index])})',
                     ),
                   ),
               ],
@@ -565,6 +627,7 @@ class _OpeningDialogState extends State<_OpeningDialog> {
                 if (value == null) return;
                 setState(() {
                   _edge = value;
+                  _normalizedPosition = 0.5;
                   _positionError = null;
                   if (widget.opening == null || _initialEdge == null) {
                     _position.text = _decimal(lengths[value] / 2);
@@ -581,14 +644,50 @@ class _OpeningDialogState extends State<_OpeningDialog> {
                 ),
               ),
             const SizedBox(height: 12),
+            if (_edge != null) ...[
+              const Text('Ubicá la abertura sobre la pared'),
+              const SizedBox(height: 6),
+              SizedBox(
+                key: const ValueKey('opening-position-preview'),
+                height: 88,
+                child: LayoutBuilder(
+                  builder: (context, constraints) => GestureDetector(
+                    key: const ValueKey('opening-position-gesture'),
+                    behavior: HitTestBehavior.opaque,
+                    onTapDown: (details) => _setPosition(
+                      details.localPosition.dx / constraints.maxWidth,
+                      lengths,
+                    ),
+                    onHorizontalDragUpdate: (details) => _setPosition(
+                      details.localPosition.dx / constraints.maxWidth,
+                      lengths,
+                    ),
+                    child: CustomPaint(
+                      painter: _OpeningPositionPainter(
+                        type: _type,
+                        normalizedPosition: _normalizedPosition,
+                        normalizedWidth:
+                            (parseMetres(_width.text) ?? 0.9) / lengths[_edge!],
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Text(
+                'Posición desde el inicio: ${_decimal(_normalizedPosition * lengths[_edge!])} m',
+                key: const ValueKey('opening-position-label'),
+              ),
+            ],
             TextField(
               key: const ValueKey('opening-position-metres'),
               controller: _position,
+              onChanged: (value) => _positionChanged(value, lengths),
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
               decoration: InputDecoration(
-                labelText: 'Posición desde el inicio del lado (m)',
+                labelText: 'Posición desde el inicio (m)',
                 helperText:
                     'Distancia desde la esquina inicial del lado hasta el centro de la abertura.',
                 errorText: _positionError,
@@ -597,6 +696,7 @@ class _OpeningDialogState extends State<_OpeningDialog> {
             TextField(
               key: const ValueKey('opening-width'),
               controller: _width,
+              onChanged: (_) => _setPosition(_normalizedPosition, lengths),
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
@@ -637,4 +737,60 @@ class _OpeningDialogState extends State<_OpeningDialog> {
       ],
     );
   }
+}
+
+class _OpeningPositionPainter extends CustomPainter {
+  const _OpeningPositionPainter({
+    required this.type,
+    required this.normalizedPosition,
+    required this.normalizedWidth,
+    required this.color,
+  });
+
+  final OpeningType type;
+  final double normalizedPosition;
+  final double normalizedWidth;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final start =
+        ((normalizedPosition - normalizedWidth / 2).clamp(0, 1)) * size.width;
+    final end =
+        ((normalizedPosition + normalizedWidth / 2).clamp(0, 1)) * size.width;
+    final y = size.height * 0.58;
+    final wall = Paint()
+      ..color = Colors.black87
+      ..strokeWidth = 4
+      ..strokeCap = StrokeCap.square;
+    canvas.drawLine(Offset.zero.translate(0, y), Offset(start, y), wall);
+    canvas.drawLine(Offset(end, y), Offset(size.width, y), wall);
+    final symbol = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke;
+    if (type == OpeningType.door) {
+      final radius = end - start;
+      canvas.drawLine(Offset(start, y), Offset(start, y - radius), symbol);
+      canvas.drawArc(
+        Rect.fromCircle(center: Offset(start, y), radius: radius),
+        -math.pi / 2,
+        math.pi / 2,
+        false,
+        symbol,
+      );
+    } else {
+      canvas.drawLine(Offset(start, y - 4), Offset(end, y - 4), symbol);
+      canvas.drawLine(Offset(start, y + 4), Offset(end, y + 4), symbol);
+      canvas.drawLine(Offset(start, y - 7), Offset(start, y + 7), symbol);
+      canvas.drawLine(Offset(end, y - 7), Offset(end, y + 7), symbol);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _OpeningPositionPainter oldDelegate) =>
+      type != oldDelegate.type ||
+      normalizedPosition != oldDelegate.normalizedPosition ||
+      normalizedWidth != oldDelegate.normalizedWidth ||
+      color != oldDelegate.color;
 }

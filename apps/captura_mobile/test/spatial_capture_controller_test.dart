@@ -409,6 +409,40 @@ void main() {
       },
     );
 
+    test('new wall sketch starts pending and confirms independently', () async {
+      final h = await harness();
+      const sketch = [
+        FloorPoint(0, 0),
+        FloorPoint(4, 0),
+        FloorPoint(4, 3),
+        FloorPoint(0, 3),
+      ];
+
+      expect(
+        await h.controller.createWallBasedManualSketchRoom(
+          name: 'Croquis por paredes',
+          sketch: sketch,
+          height: 2.6,
+        ),
+        isNull,
+      );
+      final pending = h.controller.rooms.single;
+      expect(pending.measurementMode, RoomMeasurementMode.wallConstraints);
+      expect(pending.references, isEmpty);
+
+      await h.controller.updateRoom(
+        pending.copyWith(
+          references: const [
+            ReferenceMeasurement(edgeIndex: 0, referenceMeters: 4.1),
+          ],
+        ),
+      );
+      final partial = h.controller.rooms.single;
+      expect(partial.references, hasLength(1));
+      expect(partial.references.single.edgeIndex, 0);
+      expect(hasCompleteWallMeasurements(partial), isFalse);
+    });
+
     test('persists a local-only floorplan trace across restart', () async {
       final source = FakePhotoSource();
       final h = await harness(traceSource: source);
@@ -427,8 +461,6 @@ void main() {
             FloorPoint(0.5, 0.6),
             FloorPoint(0.1, 0.6),
           ],
-          referenceEdge: 0,
-          referenceMeters: 4.2,
           height: 2.65,
         ),
         isNull,
@@ -440,7 +472,9 @@ void main() {
       expect(room.acquisition.method, RoomAcquisitionMethod.floorplanTrace);
       expect(room.metrics, isNull);
       expect(trace.vertices.first, const FloorPoint(0.1, 0.2));
-      expect(trace.referenceMeters, 4.2);
+      expect(trace.referenceMeters, isNull);
+      expect(room.references, isEmpty);
+      expect(room.measurementMode, RoomMeasurementMode.wallConstraints);
       expect(
         await reopened.controller.floorplanSourceBytes(trace.sourceId),
         isNotNull,
@@ -481,8 +515,6 @@ void main() {
             FloorPoint(0.55, 0.6),
             FloorPoint(0.1, 0.6),
           ],
-          referenceEdge: 0,
-          referenceMeters: 4.2,
           height: 2.65,
         ),
         contains('datos espaciales vinculados'),
@@ -1148,6 +1180,123 @@ void main() {
   });
 
   group('sync', () {
+    test('blocks incomplete wall drafts but preserves local work', () async {
+      final h = await harness();
+      await h.controller.createWallBasedManualSketchRoom(
+        name: 'Croquis',
+        sketch: const [
+          FloorPoint(0, 0),
+          FloorPoint(4, 0),
+          FloorPoint(4, 3),
+          FloorPoint(0, 3),
+        ],
+        height: 2.6,
+        measurements: const [
+          ReferenceMeasurement(edgeIndex: 0, referenceMeters: 4),
+        ],
+      );
+
+      await h.controller.sync();
+
+      expect(h.controller.syncState, CaptureSyncState.pending);
+      expect(h.controller.message, contains('faltan medidas'));
+      expect(h.backend.requests.where((r) => r.method == 'PUT'), isEmpty);
+      expect(await h.store.read(h.controller.ownerId!, 'listing-1'), isNotNull);
+      expect(h.controller.rooms.single.references, hasLength(1));
+    });
+
+    test('shortening a wall keeps its door and blocks invalid sync', () async {
+      final h = await harness();
+      await h.controller.createManualRectangularRoom(
+        name: 'Estar',
+        length: 4,
+        width: 3,
+        height: 2.6,
+      );
+      final room = h.controller.rooms.single.copyWith(
+        references: const [
+          ReferenceMeasurement(edgeIndex: 0, referenceMeters: 2),
+          ReferenceMeasurement(edgeIndex: 1, referenceMeters: 3),
+          ReferenceMeasurement(edgeIndex: 2, referenceMeters: 2),
+          ReferenceMeasurement(edgeIndex: 3, referenceMeters: 3),
+        ],
+        openings: const [
+          RoomOpening(
+            id: 'wide-door',
+            edgeIndex: 0,
+            position: 0.5,
+            width: 1.95,
+            height: 2.1,
+            type: OpeningType.door,
+          ),
+        ],
+      );
+      final fitted = fitConfirmedWallLengths(room);
+      expect(fitted.isCoherent, isTrue);
+      expect(edgeLengths(fitted.corners!).first, closeTo(2, 1e-6));
+      await h.controller.updateRoom(room.copyWith(corners: fitted.corners));
+      expect(
+        validateOpening(
+          h.controller.rooms.single,
+          h.controller.rooms.single.openings.single,
+        ),
+        isNotEmpty,
+      );
+
+      await h.controller.sync();
+
+      final after = h.controller.rooms.single;
+      expect(after.openings.single.id, 'wide-door');
+      expect(after.openings.single.edgeIndex, 0);
+      expect(after.openings.single.width, 1.95);
+      expect(h.controller.syncState, CaptureSyncState.pending);
+      expect(
+        h.backend.requests.where((request) => request.method == 'PUT'),
+        isEmpty,
+      );
+      expect(h.controller.message, isNotNull);
+    });
+
+    test(
+      'overwrite also blocks a wall draft that becomes incomplete',
+      () async {
+        final h = await harness();
+        await h.controller.createManualRectangularRoom(
+          name: 'Estar',
+          length: 4,
+          width: 3,
+          height: 2.6,
+        );
+        await h.controller.sync();
+        h.backend.editRemotely({
+          ...h.backend.document!,
+          'objects': <Object?>[],
+        });
+        final mutableReferences = [...h.controller.rooms.single.references];
+        await h.controller.updateRoom(
+          h.controller.rooms.single.copyWith(
+            name: 'Cambio local',
+            references: mutableReferences,
+          ),
+        );
+        await h.controller.sync();
+        expect(h.controller.syncState, CaptureSyncState.conflict);
+        final putsBefore = h.backend.requests
+            .where((request) => request.method == 'PUT')
+            .length;
+        mutableReferences.removeLast();
+
+        await h.controller.overwriteRemote();
+
+        expect(h.controller.syncState, CaptureSyncState.conflict);
+        expect(h.controller.message, contains('faltan medidas'));
+        expect(
+          h.backend.requests.where((request) => request.method == 'PUT').length,
+          putsBefore,
+        );
+      },
+    );
+
     test('floorplan trace sends only canonical Scene v2 geometry', () async {
       final h = await harness(traceSource: FakePhotoSource());
       final source = await h.controller.pickFloorplanSource();
@@ -1167,6 +1316,19 @@ void main() {
         referenceMeters: 4,
         height: 2.6,
       );
+      final room = h.controller.rooms.single;
+      final lengths = edgeLengths(room.corners);
+      await h.controller.updateRoom(
+        room.copyWith(
+          references: [
+            for (var index = 0; index < lengths.length; index++)
+              ReferenceMeasurement(
+                edgeIndex: index,
+                referenceMeters: lengths[index],
+              ),
+          ],
+        ),
+      );
       await h.controller.sync();
 
       final payload = jsonEncode(h.backend.document);
@@ -1183,6 +1345,18 @@ void main() {
         'normalizedTrace',
         '_traces',
         'FloorplanTraceMetadata',
+        'measurementMode',
+        'legacyUniform',
+        'wallConstraints',
+        'ocr',
+        'ocrText',
+        'detectedText',
+        'measurementCandidate',
+        'candidateStatus',
+        'confidence',
+        'imagePath',
+        'imageBytes',
+        'base64',
       ]) {
         expect(payload, isNot(contains(localDetail)));
       }

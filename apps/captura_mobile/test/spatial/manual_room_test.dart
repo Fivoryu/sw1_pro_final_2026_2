@@ -29,7 +29,11 @@ void main() {
         expect(room.height, const RoomHeight(2.65, HeightSource.manual));
         expect(room.acquisition.method, RoomAcquisitionMethod.manual);
         expect(room.acquisition.arMetrics, isNull);
-        expect(room.references, isEmpty);
+        expect(room.references, hasLength(4));
+        expect(
+          room.references.map((value) => value.referenceMeters),
+          orderedEquals([4.2, 3.7, 4.2, 3.7]),
+        );
       },
     );
 
@@ -103,6 +107,68 @@ void main() {
       expect(document['version'], '2.0');
       expect((document['rooms']! as List), hasLength(1));
       expect((document['walls']! as List), hasLength(4));
+    });
+
+    test('legacy manual sketch keeps uniform calibration semantics', () {
+      final original = buildCalibratedManualSketchRoom(
+        id: 'legacy-sketch',
+        name: 'Croquis anterior',
+        sketch: const [
+          FloorPoint(0, 0),
+          FloorPoint(2, 0),
+          FloorPoint(2, 1),
+          FloorPoint(0, 1),
+        ],
+        referenceEdge: 0,
+        referenceMeters: 4,
+        height: 2.6,
+      );
+      final json = original.toJson()..remove('measurementMode');
+      final restored = CapturedRoom.fromJson(json);
+      final corrected = correctedRoom(restored);
+
+      expect(restored.measurementMode, RoomMeasurementMode.legacyUniform);
+      expect(edgeLengths(corrected.corners), [4, 2, 4, 2]);
+      expect(polygonArea(corrected.corners), 8);
+    });
+
+    test('legacy floorplan keeps prior scene geometry after reload', () {
+      final original = buildCalibratedFloorplanTraceRoom(
+        id: 'legacy-plan',
+        name: 'Plano anterior',
+        normalizedTrace: const [
+          FloorPoint(0.1, 0.1),
+          FloorPoint(0.6, 0.1),
+          FloorPoint(0.6, 0.4),
+          FloorPoint(0.1, 0.4),
+        ],
+        imageWidth: 1000,
+        imageHeight: 800,
+        referenceEdge: 0,
+        referenceMeters: 5,
+        height: 2.7,
+      );
+      final before = buildSceneDocument(
+        PropertyCapture(
+          listingId: 'listing',
+          rooms: [original],
+          connections: const [],
+          updatedAt: DateTime.utc(2026),
+        ),
+      );
+      final json = original.toJson()..remove('measurementMode');
+      final restored = CapturedRoom.fromJson(json);
+      final after = buildSceneDocument(
+        PropertyCapture(
+          listingId: 'listing',
+          rooms: [restored],
+          connections: const [],
+          updatedAt: DateTime.utc(2026),
+        ),
+      );
+
+      expect(restored.measurementMode, RoomMeasurementMode.legacyUniform);
+      expect(after, before);
     });
   });
 }

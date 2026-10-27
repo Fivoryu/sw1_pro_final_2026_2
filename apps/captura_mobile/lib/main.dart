@@ -10,6 +10,7 @@ import 'data/services/staff_credential_store.dart';
 import 'data/services/staff_listing_photos_api.dart';
 import 'data/services/staff_listings_api.dart';
 import 'data/services/staff_scene_api.dart';
+import 'data/services/staff_floorplan_interpretation_api.dart';
 import 'domain/listing_drafts_controller.dart';
 import 'domain/staff_session_controller.dart';
 import 'ui/listings/listings_screen.dart';
@@ -50,6 +51,7 @@ void main() => runApp(
     captureStore: FileCaptureDraftStore(root: getApplicationSupportDirectory),
     arCapture: MethodChannelArCapture(),
     captureApi: StaffCaptureApi(baseUrl: _apiBaseUrl),
+    floorplanInterpreter: StaffFloorplanInterpretationApi(baseUrl: _apiBaseUrl),
     uploadStore: FilePendingUploadStore(root: getApplicationSupportDirectory),
   ),
 );
@@ -66,6 +68,7 @@ class CaptureApp extends StatelessWidget {
     this.arCapture,
     this.captureApi,
     this.uploadStore,
+    this.floorplanInterpreter,
   });
 
   final StaffSessionController controller;
@@ -77,6 +80,7 @@ class CaptureApp extends StatelessWidget {
   final ArCapture? arCapture;
   final StaffCaptureApi? captureApi;
   final PendingUploadStore? uploadStore;
+  final FloorplanInterpretationApi? floorplanInterpreter;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -92,6 +96,7 @@ class CaptureApp extends StatelessWidget {
       arCapture: arCapture,
       captureApi: captureApi,
       uploadStore: uploadStore,
+      floorplanInterpreter: floorplanInterpreter,
     ),
   );
 }
@@ -109,6 +114,7 @@ class AgentAccessScreen extends StatefulWidget {
     this.arCapture,
     this.captureApi,
     this.uploadStore,
+    this.floorplanInterpreter,
   });
 
   final StaffSessionController controller;
@@ -120,6 +126,7 @@ class AgentAccessScreen extends StatefulWidget {
   final ArCapture? arCapture;
   final StaffCaptureApi? captureApi;
   final PendingUploadStore? uploadStore;
+  final FloorplanInterpretationApi? floorplanInterpreter;
 
   @override
   State<AgentAccessScreen> createState() => _AgentAccessScreenState();
@@ -345,6 +352,7 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
                 arCapture: widget.arCapture,
                 captureApi: widget.captureApi,
                 uploadStore: widget.uploadStore,
+                floorplanInterpreter: widget.floorplanInterpreter,
               ),
             ),
           ),

@@ -57,6 +57,45 @@ int? nearestTraceVertex({
   return selected;
 }
 
+int? nearestTraceEdge({
+  required FloorPoint point,
+  required List<FloorPoint> vertices,
+  required double renderedImageWidth,
+  required double renderedImageHeight,
+  double tolerancePixels = 28,
+}) {
+  if (vertices.length < 2) return null;
+  var best = tolerancePixels;
+  int? selected;
+  final scaled = FloorPoint(
+    point.x * renderedImageWidth,
+    point.z * renderedImageHeight,
+  );
+  for (var index = 0; index < vertices.length; index++) {
+    final start = FloorPoint(
+      vertices[index].x * renderedImageWidth,
+      vertices[index].z * renderedImageHeight,
+    );
+    final end = FloorPoint(
+      vertices[(index + 1) % vertices.length].x * renderedImageWidth,
+      vertices[(index + 1) % vertices.length].z * renderedImageHeight,
+    );
+    final delta = end - start;
+    final squared = delta.x * delta.x + delta.z * delta.z;
+    if (squared == 0) continue;
+    final projection =
+        (((scaled.x - start.x) * delta.x + (scaled.z - start.z) * delta.z) /
+                squared)
+            .clamp(0.0, 1.0);
+    final distance = scaled.distanceTo(start + delta.scale(projection));
+    if (distance < best) {
+      best = distance;
+      selected = index;
+    }
+  }
+  return selected;
+}
+
 class FloorplanTraceMetadata {
   const FloorplanTraceMetadata({
     required this.roomId,
@@ -65,8 +104,8 @@ class FloorplanTraceMetadata {
     required this.imageWidth,
     required this.imageHeight,
     required this.vertices,
-    required this.referenceEdge,
-    required this.referenceMeters,
+    this.referenceEdge,
+    this.referenceMeters,
   });
 
   factory FloorplanTraceMetadata.fromJson(Map<String, Object?> json) =>
@@ -80,8 +119,8 @@ class FloorplanTraceMetadata {
           for (final point in json['vertices']! as List)
             FloorPoint.fromJson((point as Map).cast<String, Object?>()),
         ],
-        referenceEdge: (json['referenceEdge']! as num).toInt(),
-        referenceMeters: (json['referenceMeters']! as num).toDouble(),
+        referenceEdge: (json['referenceEdge'] as num?)?.toInt(),
+        referenceMeters: (json['referenceMeters'] as num?)?.toDouble(),
       );
 
   final String roomId;
@@ -90,8 +129,8 @@ class FloorplanTraceMetadata {
   final int imageWidth;
   final int imageHeight;
   final List<FloorPoint> vertices;
-  final int referenceEdge;
-  final double referenceMeters;
+  final int? referenceEdge;
+  final double? referenceMeters;
 
   Map<String, Object?> toJson() => {
     'roomId': roomId,
@@ -100,8 +139,8 @@ class FloorplanTraceMetadata {
     'imageWidth': imageWidth,
     'imageHeight': imageHeight,
     'vertices': [for (final point in vertices) point.toJson()],
-    'referenceEdge': referenceEdge,
-    'referenceMeters': referenceMeters,
+    if (referenceEdge != null) 'referenceEdge': referenceEdge,
+    if (referenceMeters != null) 'referenceMeters': referenceMeters,
   };
 }
 

@@ -9,6 +9,7 @@ import '../data/services/staff_capture_api.dart';
 import '../data/services/staff_listing_photos_api.dart';
 import '../data/services/staff_listings_api.dart';
 import '../data/services/staff_scene_api.dart';
+import '../data/services/staff_floorplan_interpretation_api.dart';
 import 'listing_photos_controller.dart';
 import 'spatial/capture_upload.dart';
 import 'spatial/capture_upload_controller.dart';
@@ -34,6 +35,7 @@ class ListingDraftsController extends ChangeNotifier {
     ArCapture? arCapture,
     StaffCaptureApi? captureApi,
     PendingUploadStore? uploadStore,
+    FloorplanInterpretationApi? floorplanInterpreter,
     CapturePackageFiles packageFiles = const IoCapturePackageFiles(),
   }) : _api = api,
        _session = session,
@@ -44,6 +46,7 @@ class ListingDraftsController extends ChangeNotifier {
        _arCapture = arCapture,
        _captureApi = captureApi,
        _uploadStore = uploadStore,
+       _floorplanInterpreter = floorplanInterpreter,
        _packageFiles = packageFiles;
 
   static const String _noAgencyMessage =
@@ -59,6 +62,7 @@ class ListingDraftsController extends ChangeNotifier {
   final ArCapture? _arCapture;
   final StaffCaptureApi? _captureApi;
   final PendingUploadStore? _uploadStore;
+  final FloorplanInterpretationApi? _floorplanInterpreter;
   final CapturePackageFiles _packageFiles;
 
   ListingStatus _tab = ListingStatus.draft;
@@ -166,6 +170,7 @@ class ListingDraftsController extends ChangeNotifier {
       store: store,
       ar: ar,
       traceSource: _photoSource,
+      floorplanInterpreter: _floorplanInterpreter,
       uploads: captureApi == null || uploadStore == null
           ? null
           : CaptureUploadController(

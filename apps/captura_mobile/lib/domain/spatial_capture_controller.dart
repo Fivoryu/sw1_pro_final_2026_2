@@ -5,6 +5,7 @@ import '../data/services/capture_draft_store.dart';
 import '../data/services/photo_source.dart';
 import '../data/services/staff_auth_failure.dart';
 import '../data/services/staff_scene_api.dart';
+import '../data/services/staff_floorplan_interpretation_api.dart';
 import 'spatial/capture_upload_controller.dart';
 import 'spatial/spatial.dart';
 import 'staff_session_controller.dart';
@@ -40,6 +41,7 @@ class SpatialCaptureController extends ChangeNotifier {
     required CaptureDraftStore store,
     required ArCapture ar,
     PhotoSource? traceSource,
+    FloorplanInterpretationApi? floorplanInterpreter,
     this.uploads,
     DateTime Function()? now,
   }) : _session = session,
@@ -47,6 +49,7 @@ class SpatialCaptureController extends ChangeNotifier {
        _store = store,
        _ar = ar,
        _traceSource = traceSource,
+       _floorplanInterpreter = floorplanInterpreter,
        _now = now ?? DateTime.now {
     uploads?.addListener(_notify);
   }
@@ -65,6 +68,7 @@ class SpatialCaptureController extends ChangeNotifier {
   final CaptureDraftStore _store;
   final ArCapture _ar;
   final PhotoSource? _traceSource;
+  final FloorplanInterpretationApi? _floorplanInterpreter;
   final DateTime Function() _now;
 
   late PropertyCapture _capture = PropertyCapture(
@@ -95,10 +99,27 @@ class SpatialCaptureController extends ChangeNotifier {
   SceneBuildResult? get preview => _preview;
 
   String? get ownerId => _session.account?.id;
+  bool get supportsFloorplanInterpretation => _floorplanInterpreter != null;
   FloorplanTraceMetadata? traceForRoom(String roomId) => _traces[roomId];
 
   /// Checks ARCore only when the agent explicitly chooses automatic capture.
   Future<ArAvailability> arAvailability() => _ar.availability();
+
+  Future<FloorplanInterpretationResult?> interpretFloorplan({
+    required List<int> imageBytes,
+    required String contentType,
+  }) async {
+    final api = _floorplanInterpreter;
+    final credentials = _credentials();
+    if (api == null || credentials == null) return null;
+    return api.interpret(
+      accessToken: credentials.token,
+      agencyId: credentials.agencyId,
+      listingId: listingId,
+      imageBytes: imageBytes,
+      contentType: contentType,
+    );
+  }
 
   @override
   void dispose() {
@@ -320,6 +341,31 @@ class SpatialCaptureController extends ChangeNotifier {
     }
   }
 
+  Future<String?> createWallBasedManualSketchRoom({
+    required String name,
+    required List<FloorPoint> sketch,
+    required double height,
+    List<ReferenceMeasurement> measurements = const [],
+  }) async {
+    if (ownerId == null) return _noSessionMessage;
+    try {
+      var room = buildWallBasedManualSketchRoom(
+        id: _newRoomId(),
+        name: name,
+        sketch: sketch,
+        height: height,
+      );
+      room = room.copyWith(references: measurements);
+      final fitted = fitConfirmedWallLengths(room);
+      if (!fitted.isCoherent) return fitted.message;
+      room = room.copyWith(corners: fitted.corners);
+      await _change(_capture.copyWith(rooms: [..._capture.rooms, room]));
+      return null;
+    } on ArgumentError {
+      return 'Revisá el contorno y la altura del ambiente.';
+    }
+  }
+
   Future<LocalTraceSource?> pickFloorplanSource() async {
     final owner = ownerId;
     final picker = _traceSource;
@@ -368,8 +414,9 @@ class SpatialCaptureController extends ChangeNotifier {
     required int imageWidth,
     required int imageHeight,
     required List<FloorPoint> normalizedTrace,
-    required int referenceEdge,
-    required double referenceMeters,
+    int? referenceEdge,
+    double? referenceMeters,
+    List<ReferenceMeasurement> measurements = const [],
     required double height,
   }) async {
     if (ownerId == null) return _noSessionMessage;
@@ -377,9 +424,13 @@ class SpatialCaptureController extends ChangeNotifier {
       return 'La imagen original ya no está disponible.';
     }
     final previous = roomId == null ? null : _room(roomId);
+    final previousTrace = roomId == null ? null : _traces[roomId];
     if (previous != null &&
         (previous.openings.isNotEmpty ||
             previous.boxes.isNotEmpty ||
+            (previous.references.isNotEmpty &&
+                previousTrace != null &&
+                previousTrace.vertices.length != normalizedTrace.length) ||
             previous.placement != RoomPlacement.identity)) {
       return 'Este ambiente contiene datos espaciales vinculados a la '
           'geometría actual. Corregí o eliminá esos elementos antes de volver '
@@ -387,16 +438,38 @@ class SpatialCaptureController extends ChangeNotifier {
     }
     final id = previous?.id ?? _newRoomId();
     try {
-      var room = buildCalibratedFloorplanTraceRoom(
-        id: id,
-        name: name,
-        normalizedTrace: normalizedTrace,
-        imageWidth: imageWidth,
-        imageHeight: imageHeight,
-        referenceEdge: referenceEdge,
-        referenceMeters: referenceMeters,
-        height: height,
-      );
+      final legacy =
+          previous?.measurementMode == RoomMeasurementMode.legacyUniform;
+      var room = legacy
+          ? buildCalibratedFloorplanTraceRoom(
+              id: id,
+              name: name,
+              normalizedTrace: normalizedTrace,
+              imageWidth: imageWidth,
+              imageHeight: imageHeight,
+              referenceEdge: referenceEdge ?? previousTrace!.referenceEdge!,
+              referenceMeters:
+                  referenceMeters ?? previousTrace!.referenceMeters!,
+              height: height,
+            )
+          : buildWallBasedFloorplanRoom(
+              id: id,
+              name: name,
+              normalizedTrace: normalizedTrace,
+              imageWidth: imageWidth,
+              imageHeight: imageHeight,
+              height: height,
+            );
+      if (previous?.measurementMode == RoomMeasurementMode.wallConstraints) {
+        room = room.copyWith(references: measurements);
+      } else if (!legacy) {
+        room = room.copyWith(references: measurements);
+      }
+      if (room.measurementMode == RoomMeasurementMode.wallConstraints) {
+        final fitted = fitConfirmedWallLengths(room);
+        if (!fitted.isCoherent) return fitted.message;
+        room = room.copyWith(corners: fitted.corners);
+      }
       final replacedSourceId = _traces[id]?.sourceId;
       await _change(
         _capture.copyWith(
@@ -563,6 +636,16 @@ class SpatialCaptureController extends ChangeNotifier {
   /// Problems that block sending, phrased for the agent; empty when sendable.
   List<String> blockingProblems() => [
     for (final room in _capture.rooms) ...[
+      if (const {
+            RoomAcquisitionMethod.manual,
+            RoomAcquisitionMethod.manualSketch,
+            RoomAcquisitionMethod.floorplanTrace,
+          }.contains(room.acquisition.method) &&
+          room.measurementMode == RoomMeasurementMode.wallConstraints &&
+          !fitConfirmedWallLengths(room).isCoherent)
+        '${room.name}: ${fitConfirmedWallLengths(room).message}',
+      if (!hasCompleteWallMeasurements(room))
+        '${room.name}: faltan medidas por confirmar en una o más paredes.',
       for (final issue in validateContour(room.corners))
         if (issue.blocking) '${room.name}: ${contourIssueMessage(issue)}',
       for (final opening in room.openings)

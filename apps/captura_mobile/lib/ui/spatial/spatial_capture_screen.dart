@@ -100,52 +100,18 @@ class _SpatialCaptureScreenState extends State<SpatialCaptureScreen> {
       );
       if (shape == null || !mounted) return;
       final suggestedName = 'Ambiente ${_controller.rooms.length + 1}';
-      final String? message;
-      switch (shape) {
-        case _ManualShape.rectangular:
-          final dimensions = await showDialog<_ManualRoomDimensions>(
-            context: context,
-            builder: (context) =>
-                _ManualRoomDialog(suggestedName: suggestedName),
-          );
-          if (dimensions == null || !mounted) return;
-          message = await _controller.createManualRectangularRoom(
-            name: dimensions.name,
-            length: dimensions.length,
-            width: dimensions.width,
-            height: dimensions.height,
-          );
-        case _ManualShape.lShape:
-          final dimensions = await showDialog<_ManualLDimensions>(
-            context: context,
-            builder: (context) =>
-                _ManualLRoomDialog(suggestedName: suggestedName),
-          );
-          if (dimensions == null || !mounted) return;
-          message = await _controller.createManualLRoom(
-            name: dimensions.name,
-            totalWidth: dimensions.totalWidth,
-            totalDepth: dimensions.totalDepth,
-            recessWidth: dimensions.recessWidth,
-            recessDepth: dimensions.recessDepth,
-            height: dimensions.height,
-            recess: dimensions.recess,
-          );
-        case _ManualShape.irregular:
-          final sketch = await showDialog<_ManualSketchResult>(
-            context: context,
-            builder: (context) =>
-                _ManualSketchDialog(suggestedName: suggestedName),
-          );
-          if (sketch == null || !mounted) return;
-          message = await _controller.createCalibratedManualSketchRoom(
-            name: sketch.name,
-            sketch: sketch.points,
-            referenceEdge: sketch.referenceEdge,
-            referenceMeters: sketch.referenceMeters,
-            height: sketch.height,
-          );
-      }
+      final sketch = await showDialog<_ManualSketchResult>(
+        context: context,
+        builder: (context) =>
+            _ManualSketchDialog(suggestedName: suggestedName, template: shape),
+      );
+      if (sketch == null || !mounted) return;
+      final message = await _controller.createWallBasedManualSketchRoom(
+        name: sketch.name,
+        sketch: sketch.points,
+        height: sketch.height,
+        measurements: sketch.measurements,
+      );
       if (message != null && mounted) _show(message);
       return;
     }
@@ -548,8 +514,13 @@ class _RoomCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final issues = validateContour(room.corners);
-    final correction = scaleCorrection(room);
+    final wallBased =
+        room.measurementMode == RoomMeasurementMode.wallConstraints;
+    final correction = wallBased ? null : scaleCorrection(room);
     final shape = correctedRoom(room);
+    final confirmed = {
+      for (final measurement in room.references) measurement.edgeIndex,
+    }.length;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -558,20 +529,33 @@ class _RoomCard extends StatelessWidget {
           children: [
             Text(room.name, style: theme.textTheme.titleMedium),
             const SizedBox(height: 4),
-            Text(
-              'Lados: ${edgeLengths(shape.corners).map(metres).join(' · ')}',
-            ),
-            Text(
-              'Superficie estimada: ${squareMetres(polygonArea(shape.corners))}',
-            ),
+            if (!wallBased || confirmed == room.corners.length) ...[
+              Text(
+                'Paredes: ${edgeLengths(shape.corners).map(metres).join(' · ')}',
+              ),
+              Text(
+                'Superficie estimada: ${squareMetres(polygonArea(shape.corners))}',
+              ),
+            ] else
+              Text('Paredes confirmadas: $confirmed/${room.corners.length}'),
             if (room.acquisition.method == RoomAcquisitionMethod.manual)
               const Text('Medidas ingresadas manualmente')
             else if (room.acquisition.method ==
                 RoomAcquisitionMethod.manualSketch)
-              const Text('Croquis manual calibrado con una medida real')
+              Text(
+                wallBased
+                    ? 'Croquis manual con medidas por pared'
+                    : 'Croquis manual calibrado con una medida real',
+              )
             else if (room.acquisition.method ==
                 RoomAcquisitionMethod.floorplanTrace)
-              const Text('Plano o croquis trazado y calibrado')
+              Text(
+                wallBased
+                    ? confirmed == room.corners.length
+                          ? 'Plano o croquis con medidas por pared'
+                          : 'Plano o croquis pendiente de revisión métrica'
+                    : 'Plano o croquis trazado y calibrado',
+              )
             else if (correction != null && correction.applied)
               Text(
                 'Escala corregida con ${correction.referenceCount} '
@@ -639,35 +623,34 @@ class _ManualShapeDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Medidas manuales'),
+    title: const Text('Dibujar ambiente'),
     content: SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           _option(
             context,
+            key: 'manual-shape-irregular',
+            icon: Icons.gesture,
+            title: 'Dibujo libre',
+            subtitle: 'Marcá las paredes y completá sus medidas.',
+            value: _ManualShape.irregular,
+          ),
+          _option(
+            context,
             key: 'manual-shape-rectangle',
             icon: Icons.crop_square,
-            title: 'Rectangular',
-            subtitle: 'Ingresá largo, ancho y altura.',
+            title: 'Plantilla rectangular',
+            subtitle: 'Partí de cuatro paredes y medí cada una.',
             value: _ManualShape.rectangular,
           ),
           _option(
             context,
             key: 'manual-shape-l',
             icon: Icons.polyline_outlined,
-            title: 'En L',
-            subtitle:
-                'Definí las dimensiones generales y el recorte del ambiente.',
+            title: 'Plantilla en L',
+            subtitle: 'Partí de seis paredes y medí cada una.',
             value: _ManualShape.lShape,
-          ),
-          _option(
-            context,
-            key: 'manual-shape-irregular',
-            icon: Icons.gesture,
-            title: 'Irregular',
-            subtitle: 'Dibujá el contorno y calibralo con una medida real.',
-            value: _ManualShape.irregular,
           ),
         ],
       ),
@@ -753,9 +736,9 @@ class _RoomCreationMethodDialogState extends State<_RoomCreationMethodDialog> {
           ListTile(
             key: const ValueKey('manual-capture-method'),
             leading: const Icon(Icons.straighten),
-            title: const Text('Medidas manuales'),
+            title: const Text('Dibujar ambiente'),
             subtitle: const Text(
-              'Ingresá las dimensiones del ambiente sin usar ARCore.',
+              'Marcá las paredes y completá sus medidas sin usar ARCore.',
             ),
             onTap: () => Navigator.of(context).pop(_RoomCreationMethod.manual),
           ),
@@ -764,7 +747,7 @@ class _RoomCreationMethodDialogState extends State<_RoomCreationMethodDialog> {
             leading: const Icon(Icons.architecture_outlined),
             title: const Text('Plano o croquis'),
             subtitle: const Text(
-              'Importá una imagen y trazá el contorno del ambiente sobre ella.',
+              'RoomForge intentará crear el ambiente desde una imagen.',
             ),
             onTap: () =>
                 Navigator.of(context).pop(_RoomCreationMethod.floorplanTrace),
@@ -781,208 +764,22 @@ class _RoomCreationMethodDialogState extends State<_RoomCreationMethodDialog> {
   );
 }
 
-typedef _ManualRoomDimensions = ({
-  String name,
-  double length,
-  double width,
-  double height,
-});
-
-typedef _ManualLDimensions = ({
-  String name,
-  double totalWidth,
-  double totalDepth,
-  double recessWidth,
-  double recessDepth,
-  double height,
-  RecessCorner recess,
-});
-
-class _ManualLRoomDialog extends StatefulWidget {
-  const _ManualLRoomDialog({required this.suggestedName});
-  final String suggestedName;
-
-  @override
-  State<_ManualLRoomDialog> createState() => _ManualLRoomDialogState();
-}
-
-class _ManualLRoomDialogState extends State<_ManualLRoomDialog> {
-  final _formKey = GlobalKey<FormState>();
-  late final _name = TextEditingController(text: widget.suggestedName);
-  final _totalWidth = TextEditingController();
-  final _totalDepth = TextEditingController();
-  final _recessWidth = TextEditingController();
-  final _recessDepth = TextEditingController();
-  final _height = TextEditingController();
-  RecessCorner _recess = RecessCorner.upperRight;
-
-  @override
-  void dispose() {
-    for (final controller in [
-      _name,
-      _totalWidth,
-      _totalDepth,
-      _recessWidth,
-      _recessDepth,
-      _height,
-    ]) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
-
-  String? _positive(String? text) => parseMetres(text ?? '') == null
-      ? 'Ingresá una medida mayor que cero.'
-      : null;
-
-  List<FloorPoint>? get _preview {
-    try {
-      return buildManualLRoom(
-        id: 'preview',
-        name: 'preview',
-        totalWidth: parseMetres(_totalWidth.text)!,
-        totalDepth: parseMetres(_totalDepth.text)!,
-        recessWidth: parseMetres(_recessWidth.text)!,
-        recessDepth: parseMetres(_recessDepth.text)!,
-        height: parseMetres(_height.text) ?? 2.5,
-        recess: _recess,
-      ).corners;
-    } on Object {
-      return null;
-    }
-  }
-
-  void _submit() {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
-    final result = (
-      name: _name.text.trim(),
-      totalWidth: parseMetres(_totalWidth.text)!,
-      totalDepth: parseMetres(_totalDepth.text)!,
-      recessWidth: parseMetres(_recessWidth.text)!,
-      recessDepth: parseMetres(_recessDepth.text)!,
-      height: parseMetres(_height.text)!,
-      recess: _recess,
-    );
-    try {
-      buildManualLRoom(
-        id: 'check',
-        name: result.name,
-        totalWidth: result.totalWidth,
-        totalDepth: result.totalDepth,
-        recessWidth: result.recessWidth,
-        recessDepth: result.recessDepth,
-        height: result.height,
-        recess: result.recess,
-      );
-    } on ArgumentError {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'El recorte debe ser menor que las dimensiones totales y cada pared debe medir al menos 30 cm.',
-          ),
-        ),
-      );
-      return;
-    }
-    Navigator.of(context).pop(result);
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Ambiente en L'),
-    content: SingleChildScrollView(
-      child: Form(
-        key: _formKey,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextFormField(
-              key: const ValueKey('l-room-name'),
-              controller: _name,
-              decoration: const InputDecoration(
-                labelText: 'Nombre del ambiente',
-              ),
-              validator: (value) => value == null || value.trim().isEmpty
-                  ? 'Escribí un nombre.'
-                  : null,
-            ),
-            for (final field in [
-              (_totalWidth, 'l-total-width', 'Ancho total (m)'),
-              (_totalDepth, 'l-total-depth', 'Fondo total (m)'),
-              (_recessWidth, 'l-recess-width', 'Ancho del recorte (m)'),
-              (_recessDepth, 'l-recess-depth', 'Fondo del recorte (m)'),
-              (_height, 'l-room-height', 'Altura del ambiente (m)'),
-            ])
-              TextFormField(
-                key: ValueKey(field.$2),
-                controller: field.$1,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: InputDecoration(labelText: field.$3),
-                validator: _positive,
-                onChanged: (_) => setState(() {}),
-              ),
-            DropdownButtonFormField<RecessCorner>(
-              key: const ValueKey('l-recess-corner'),
-              isExpanded: true,
-              initialValue: _recess,
-              decoration: const InputDecoration(
-                labelText: 'Esquina del recorte',
-              ),
-              items: const [
-                DropdownMenuItem(
-                  value: RecessCorner.upperLeft,
-                  child: Text('Superior izquierda'),
-                ),
-                DropdownMenuItem(
-                  value: RecessCorner.upperRight,
-                  child: Text('Superior derecha'),
-                ),
-                DropdownMenuItem(
-                  value: RecessCorner.lowerLeft,
-                  child: Text('Inferior izquierda'),
-                ),
-                DropdownMenuItem(
-                  value: RecessCorner.lowerRight,
-                  child: Text('Inferior derecha'),
-                ),
-              ],
-              onChanged: (value) => setState(() => _recess = value ?? _recess),
-            ),
-            if (_preview case final points?) ...[
-              const SizedBox(height: 12),
-              _ContourPreview(points: points),
-            ],
-          ],
-        ),
-      ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('Cancelar'),
-      ),
-      FilledButton(
-        key: const ValueKey('l-room-confirm'),
-        onPressed: _submit,
-        child: const Text('Guardar ambiente'),
-      ),
-    ],
-  );
-}
-
 typedef _ManualSketchResult = ({
   String name,
   List<FloorPoint> points,
-  int referenceEdge,
-  double referenceMeters,
+  List<ReferenceMeasurement> measurements,
   double height,
 });
 
+enum _SketchMode { navigate, draw }
+
 class _ManualSketchDialog extends StatefulWidget {
-  const _ManualSketchDialog({required this.suggestedName});
+  const _ManualSketchDialog({
+    required this.suggestedName,
+    this.template = _ManualShape.irregular,
+  });
   final String suggestedName;
+  final _ManualShape template;
 
   @override
   State<_ManualSketchDialog> createState() => _ManualSketchDialogState();
@@ -991,17 +788,73 @@ class _ManualSketchDialog extends StatefulWidget {
 class _ManualSketchDialogState extends State<_ManualSketchDialog> {
   late final _name = TextEditingController(text: widget.suggestedName);
   final _height = TextEditingController();
-  final _reference = TextEditingController();
+  final _wallLengths = <int, TextEditingController>{};
   final List<FloorPoint> _points = [];
+  final _transform = TransformationController();
   bool _closed = false;
-  int _edge = 0;
+  _SketchMode _mode = _SketchMode.draw;
   int? _selectedVertex;
+
+  List<ReferenceMeasurement> get _measurements => [
+    for (var index = 0; index < _points.length; index++)
+      if (parseMetres(_wallLengths[index]?.text ?? '') case final value?)
+        ReferenceMeasurement(edgeIndex: index, referenceMeters: value),
+  ];
+
+  WallGeometryResult? get _fittedGeometry {
+    if (!_closed || _points.length < 3 || _measurements.isEmpty) return null;
+    if (widget.template != _ManualShape.irregular &&
+        _measurements.length != _points.length) {
+      return null;
+    }
+    try {
+      final room = buildWallBasedManualSketchRoom(
+        id: 'preview',
+        name: 'preview',
+        sketch: _points,
+        height: 2.5,
+      ).copyWith(references: _measurements);
+      return fitConfirmedWallLengths(room);
+    } on ArgumentError {
+      return null;
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    switch (widget.template) {
+      case _ManualShape.rectangular:
+        _points.addAll(const [
+          FloorPoint(30, 25),
+          FloorPoint(230, 25),
+          FloorPoint(230, 155),
+          FloorPoint(30, 155),
+        ]);
+        _closed = true;
+      case _ManualShape.lShape:
+        _points.addAll(const [
+          FloorPoint(25, 20),
+          FloorPoint(235, 20),
+          FloorPoint(235, 90),
+          FloorPoint(150, 90),
+          FloorPoint(150, 160),
+          FloorPoint(25, 160),
+        ]);
+        _closed = true;
+      case _ManualShape.irregular:
+        break;
+    }
+  }
 
   @override
   void dispose() {
     _name.dispose();
     _height.dispose();
-    _reference.dispose();
+    for (final controller in _wallLengths.values) {
+      controller.dispose();
+    }
+    _transform.dispose();
     super.dispose();
   }
 
@@ -1051,30 +904,31 @@ class _ManualSketchDialogState extends State<_ManualSketchDialog> {
 
   void _submit() {
     final height = parseMetres(_height.text);
-    final reference = parseMetres(_reference.text);
     if (!_closed ||
         _points.length < 3 ||
         height == null ||
-        reference == null ||
         _name.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Cerrá un contorno válido e ingresá altura y medida real.',
-          ),
+          content: Text('Cerrá un contorno válido e ingresá la altura.'),
         ),
       );
       return;
     }
     try {
-      buildCalibratedManualSketchRoom(
+      final room = buildWallBasedManualSketchRoom(
         id: 'check',
         name: _name.text,
         sketch: _points,
-        referenceEdge: _edge,
-        referenceMeters: reference,
         height: height,
-      );
+      ).copyWith(references: _measurements);
+      final fitted = fitConfirmedWallLengths(room);
+      if (!fitted.isCoherent) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(fitted.message!)));
+        return;
+      }
     } on ArgumentError {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1088,150 +942,197 @@ class _ManualSketchDialogState extends State<_ManualSketchDialog> {
     Navigator.of(context).pop((
       name: _name.text.trim(),
       points: [..._points],
-      referenceEdge: _edge,
-      referenceMeters: reference,
+      measurements: _measurements,
       height: height,
     ));
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Ambiente irregular'),
-    content: SingleChildScrollView(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            key: const ValueKey('sketch-room-name'),
-            controller: _name,
-            decoration: const InputDecoration(labelText: 'Nombre del ambiente'),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'El dibujo define la forma del ambiente. La medida ingresada ajusta la escala del croquis. Revisá el resultado antes de guardarlo.',
-          ),
-          const SizedBox(height: 8),
-          GestureDetector(
-            key: const ValueKey('sketch-canvas'),
-            behavior: HitTestBehavior.opaque,
-            onTapDown: _tap,
-            onPanStart: _panStart,
-            onPanUpdate: _panUpdate,
-            child: SizedBox(
+  Widget build(BuildContext context) {
+    final fitted = _fittedGeometry;
+    final previewPoints = fitted?.corners ?? _points;
+    return AlertDialog(
+      title: Text(switch (widget.template) {
+        _ManualShape.rectangular => 'Plantilla rectangular',
+        _ManualShape.lShape => 'Plantilla en L',
+        _ManualShape.irregular => 'Dibujo libre',
+      }),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              key: const ValueKey('sketch-room-name'),
+              controller: _name,
+              decoration: const InputDecoration(
+                labelText: 'Nombre del ambiente',
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'La forma es una guía. Cada Pared N se mide y confirma de manera independiente.',
+            ),
+            const SizedBox(height: 8),
+            SegmentedButton<_SketchMode>(
+              key: const ValueKey('sketch-mode'),
+              segments: const [
+                ButtonSegment(
+                  value: _SketchMode.navigate,
+                  label: Text('Mover / zoom'),
+                ),
+                ButtonSegment(
+                  value: _SketchMode.draw,
+                  label: Text('Dibujar / editar'),
+                ),
+              ],
+              selected: {_mode},
+              onSelectionChanged: (value) =>
+                  setState(() => _mode = value.first),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              key: const ValueKey('sketch-canvas'),
               height: 180,
               width: 260,
-              child: CustomPaint(
-                painter: _SketchPainter(
-                  _points,
-                  closed: _closed,
-                  selectedVertex: _selectedVertex,
+              child: InteractiveViewer(
+                key: const ValueKey('sketch-interactive-viewer'),
+                transformationController: _transform,
+                panEnabled: _mode == _SketchMode.navigate,
+                scaleEnabled: _mode == _SketchMode.navigate,
+                minScale: 1,
+                maxScale: 5,
+                child: Builder(
+                  builder: (context) {
+                    final canvas = SizedBox(
+                      height: 180,
+                      width: 260,
+                      child: Semantics(
+                        label: fitted == null
+                            ? 'Plantilla estable de ${_points.length} paredes'
+                            : 'Geometría resuelta y ajustada de ${_points.length} paredes',
+                        child: CustomPaint(
+                          painter: _SketchPainter(
+                            previewPoints,
+                            closed: _closed,
+                            selectedVertex: _selectedVertex,
+                            selectedEdge: null,
+                            fitToBounds: fitted != null,
+                          ),
+                        ),
+                      ),
+                    );
+                    if (_mode == _SketchMode.navigate) return canvas;
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTapDown: _tap,
+                      onPanStart: _panStart,
+                      onPanUpdate: _panUpdate,
+                      child: canvas,
+                    );
+                  },
                 ),
               ),
             ),
-          ),
-          Wrap(
-            spacing: 8,
-            children: [
-              TextButton(
-                key: const ValueKey('sketch-undo'),
-                style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
-                onPressed: _points.isEmpty || _closed
-                    ? null
-                    : () => setState(() => _points.removeLast()),
-                child: const Text('Deshacer'),
-              ),
-              TextButton(
-                key: const ValueKey('sketch-remove'),
-                style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
-                onPressed: _selectedVertex == null || _points.length <= 3
-                    ? null
-                    : () => setState(() {
-                        _points.removeAt(_selectedVertex!);
-                        _selectedVertex = null;
-                        _edge = 0;
-                      }),
-                child: const Text('Quitar vértice'),
-              ),
-              TextButton(
-                key: const ValueKey('sketch-reset'),
-                style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
-                onPressed: () => setState(() {
-                  _points.clear();
-                  _closed = false;
-                  _edge = 0;
-                }),
-                child: const Text('Reiniciar'),
-              ),
-              TextButton(
-                key: const ValueKey('sketch-close'),
-                style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
-                onPressed: _points.length < 3 || _closed
-                    ? null
-                    : () => setState(() => _closed = true),
-                child: const Text('Cerrar contorno'),
-              ),
-            ],
-          ),
-          if (_closed) ...[
-            DropdownButtonFormField<int>(
-              key: const ValueKey('sketch-reference-edge'),
-              initialValue: _edge,
-              decoration: const InputDecoration(
-                labelText: 'Lado de referencia',
-              ),
-              items: [
-                for (var i = 0; i < _points.length; i++)
-                  DropdownMenuItem(value: i, child: Text('Lado ${i + 1}')),
+            Wrap(
+              spacing: 8,
+              children: [
+                TextButton(
+                  key: const ValueKey('sketch-undo'),
+                  style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
+                  onPressed: _points.isEmpty || _closed
+                      ? null
+                      : () => setState(() => _points.removeLast()),
+                  child: const Text('Deshacer'),
+                ),
+                TextButton(
+                  key: const ValueKey('sketch-remove'),
+                  style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
+                  onPressed: _selectedVertex == null || _points.length <= 3
+                      ? null
+                      : () => setState(() {
+                          _points.removeAt(_selectedVertex!);
+                          _selectedVertex = null;
+                        }),
+                  child: const Text('Quitar vértice'),
+                ),
+                TextButton(
+                  key: const ValueKey('sketch-reset'),
+                  style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
+                  onPressed: () => setState(() {
+                    _points.clear();
+                    _closed = false;
+                    for (final controller in _wallLengths.values) {
+                      controller.clear();
+                    }
+                  }),
+                  child: const Text('Reiniciar'),
+                ),
+                TextButton(
+                  key: const ValueKey('sketch-close'),
+                  style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
+                  onPressed: _points.length < 3 || _closed
+                      ? null
+                      : () => setState(() => _closed = true),
+                  child: const Text('Cerrar contorno'),
+                ),
               ],
-              onChanged: (value) => setState(() => _edge = value ?? 0),
             ),
+            if (_closed) ...[
+              if (fitted != null && !fitted.isCoherent)
+                Text(
+                  fitted.message!,
+                  key: const ValueKey('sketch-geometry-error'),
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              const Text(
+                'Completá cada pared medida. Podés guardar pendientes y continuar luego.',
+              ),
+              for (var index = 0; index < _points.length; index++)
+                TextField(
+                  key: ValueKey('sketch-wall-$index'),
+                  controller: _wallLengths.putIfAbsent(
+                    index,
+                    TextEditingController.new,
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    labelText: '${wallLabel(index)} · Largo real (m)',
+                    helperText:
+                        parseMetres(_wallLengths[index]?.text ?? '') == null
+                        ? 'Estado: Pendiente'
+                        : 'Estado: Confirmada',
+                  ),
+                ),
+            ],
             TextField(
-              key: const ValueKey('sketch-reference-metres'),
-              controller: _reference,
+              key: const ValueKey('sketch-room-height'),
+              controller: _height,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
               decoration: const InputDecoration(
-                labelText: 'Medida real de este lado (m)',
+                labelText: 'Altura del ambiente (m)',
               ),
             ),
           ],
-          TextField(
-            key: const ValueKey('sketch-room-height'),
-            controller: _height,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'Altura del ambiente (m)',
-            ),
-          ),
-        ],
+        ),
       ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('Cancelar'),
-      ),
-      FilledButton(
-        key: const ValueKey('sketch-confirm'),
-        onPressed: _submit,
-        child: const Text('Guardar ambiente'),
-      ),
-    ],
-  );
-}
-
-class _ContourPreview extends StatelessWidget {
-  const _ContourPreview({required this.points});
-  final List<FloorPoint> points;
-
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    key: const ValueKey('manual-contour-preview'),
-    height: 150,
-    width: double.infinity,
-    child: CustomPaint(painter: _SketchPainter(points, closed: true)),
-  );
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          key: const ValueKey('sketch-confirm'),
+          onPressed: _submit,
+          child: const Text('Guardar ambiente'),
+        ),
+      ],
+    );
+  }
 }
 
 class _SketchPainter extends CustomPainter {
@@ -1239,10 +1140,14 @@ class _SketchPainter extends CustomPainter {
     this.points, {
     required this.closed,
     this.selectedVertex,
+    this.selectedEdge,
+    this.fitToBounds = true,
   });
   final List<FloorPoint> points;
   final bool closed;
   final int? selectedVertex;
+  final int? selectedEdge;
+  final bool fitToBounds;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1255,12 +1160,15 @@ class _SketchPainter extends CustomPainter {
     final maxX = points.map((p) => p.x).reduce(math.max);
     final minZ = points.map((p) => p.z).reduce(math.min);
     final maxZ = points.map((p) => p.z).reduce(math.max);
-    final scale = math.min(
-      (size.width - 24) / math.max(maxX - minX, 1),
-      (size.height - 24) / math.max(maxZ - minZ, 1),
-    );
-    Offset map(FloorPoint p) =>
-        Offset(12 + (p.x - minX) * scale, 12 + (p.z - minZ) * scale);
+    final scale = fitToBounds
+        ? math.min(
+            (size.width - 24) / math.max(maxX - minX, 1),
+            (size.height - 24) / math.max(maxZ - minZ, 1),
+          )
+        : 1.0;
+    Offset map(FloorPoint p) => fitToBounds
+        ? Offset(12 + (p.x - minX) * scale, 12 + (p.z - minZ) * scale)
+        : Offset(p.x, p.z);
     final path = Path()..moveTo(map(points.first).dx, map(points.first).dy);
     for (final point in points.skip(1)) {
       path.lineTo(map(point).dx, map(point).dy);
@@ -1273,6 +1181,17 @@ class _SketchPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3,
     );
+    if (closed && selectedEdge != null) {
+      final edge = selectedEdge!;
+      canvas.drawLine(
+        map(points[edge]),
+        map(points[(edge + 1) % points.length]),
+        Paint()
+          ..color = const Color(0xffc96b31)
+          ..strokeWidth = 6
+          ..strokeCap = StrokeCap.round,
+      );
+    }
     for (var i = 0; i < points.length; i++) {
       canvas.drawCircle(
         map(points[i]),
@@ -1280,131 +1199,36 @@ class _SketchPainter extends CustomPainter {
         Paint()..color = const Color(0xffc96b31),
       );
     }
+    if (closed) {
+      for (var i = 0; i < points.length; i++) {
+        final start = map(points[i]);
+        final end = map(points[(i + 1) % points.length]);
+        final label = TextPainter(
+          text: TextSpan(
+            text: 'PARED ${i + 1}',
+            style: const TextStyle(
+              color: Color(0xff16443c),
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              backgroundColor: Color(0xddffffff),
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        final midpoint = Offset(
+          (start.dx + end.dx) / 2,
+          (start.dy + end.dy) / 2,
+        );
+        label.paint(
+          canvas,
+          midpoint - Offset(label.width / 2, label.height + 4),
+        );
+      }
+    }
   }
 
   @override
   bool shouldRepaint(_SketchPainter old) => true;
-}
-
-class _ManualRoomDialog extends StatefulWidget {
-  const _ManualRoomDialog({required this.suggestedName});
-
-  final String suggestedName;
-
-  @override
-  State<_ManualRoomDialog> createState() => _ManualRoomDialogState();
-}
-
-class _ManualRoomDialogState extends State<_ManualRoomDialog> {
-  final _formKey = GlobalKey<FormState>();
-  late final _name = TextEditingController(text: widget.suggestedName);
-  final _length = TextEditingController();
-  final _width = TextEditingController();
-  final _height = TextEditingController();
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _length.dispose();
-    _width.dispose();
-    _height.dispose();
-    super.dispose();
-  }
-
-  String? _requiredName(String? value) => value == null || value.trim().isEmpty
-      ? 'Escribí un nombre para el ambiente.'
-      : null;
-
-  String? _dimension(String? value) {
-    final metres = parseMetres(value ?? '');
-    return metres == null || metres <= 0
-        ? 'Ingresá una medida mayor que cero.'
-        : null;
-  }
-
-  List<FloorPoint>? get _preview {
-    final length = parseMetres(_length.text);
-    final width = parseMetres(_width.text);
-    if (length == null || width == null) return null;
-    try {
-      return buildManualRectangularRoom(
-        id: 'preview',
-        name: 'preview',
-        length: length,
-        width: width,
-        height: parseMetres(_height.text) ?? 2.5,
-      ).corners;
-    } on ArgumentError {
-      return null;
-    }
-  }
-
-  void _submit() {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
-    Navigator.of(context).pop((
-      name: _name.text.trim(),
-      length: parseMetres(_length.text)!,
-      width: parseMetres(_width.text)!,
-      height: parseMetres(_height.text)!,
-    ));
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Medidas manuales'),
-    content: SingleChildScrollView(
-      child: Form(
-        key: _formKey,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextFormField(
-              key: const ValueKey('manual-room-name'),
-              controller: _name,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Nombre del ambiente',
-              ),
-              validator: _requiredName,
-            ),
-            const Text(
-              'Largo y ancho corresponden a dos paredes perpendiculares.',
-            ),
-            for (final field in [
-              (_length, 'manual-room-length', 'Largo del ambiente (m)'),
-              (_width, 'manual-room-width', 'Ancho del ambiente (m)'),
-              (_height, 'manual-room-height', 'Altura del ambiente (m)'),
-            ])
-              TextFormField(
-                key: ValueKey(field.$2),
-                controller: field.$1,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: InputDecoration(labelText: field.$3),
-                validator: _dimension,
-                onChanged: (_) => setState(() {}),
-              ),
-            if (_preview case final points?) ...[
-              const SizedBox(height: 12),
-              _ContourPreview(points: points),
-            ],
-          ],
-        ),
-      ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('Cancelar'),
-      ),
-      FilledButton(
-        key: const ValueKey('manual-room-confirm'),
-        onPressed: _submit,
-        child: const Text('Guardar ambiente'),
-      ),
-    ],
-  );
 }
 
 class _ArRoomDialog extends StatefulWidget {

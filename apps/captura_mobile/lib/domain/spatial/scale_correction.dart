@@ -1,5 +1,6 @@
 import 'capture_models.dart';
 import 'validation.dart';
+import 'wall_geometry.dart';
 
 /// Hybrid capture (F07): the phone gives the room's shape, an independent
 /// reference (tape or laser) gives its scale. A single factor is fitted to
@@ -66,6 +67,11 @@ ScaleCorrection? scaleCorrection(CapturedRoom room) {
 
 /// [room] rescaled by its applied correction; the same instance otherwise.
 CapturedRoom correctedRoom(CapturedRoom room) {
+  if (room.measurementMode == RoomMeasurementMode.wallConstraints) {
+    final fitted = fitConfirmedWallLengths(room);
+    if (!fitted.isCoherent || fitted.corners == room.corners) return room;
+    return room.copyWith(corners: fitted.corners);
+  }
   final correction = scaleCorrection(room);
   if (correction == null || !correction.applied) return room;
   final factor = correction.factor;

@@ -63,6 +63,7 @@ CapturedRoom buildManualLRoom({
     height: height,
     corners: corners,
     method: RoomAcquisitionMethod.manual,
+    authoritativeLengths: true,
   );
 }
 
@@ -79,6 +80,21 @@ CapturedRoom buildCalibratedManualSketchRoom({
   sketch: sketch,
   referenceEdge: referenceEdge,
   referenceMeters: referenceMeters,
+  height: height,
+  method: RoomAcquisitionMethod.manualSketch,
+);
+
+/// New PR4 wall-based sketch. Drawing coordinates are only a shape prior; no
+/// metric wall is inferred or confirmed until the agent enters it explicitly.
+CapturedRoom buildWallBasedManualSketchRoom({
+  required String id,
+  required String name,
+  required List<FloorPoint> sketch,
+  required double height,
+}) => _buildShapePriorRoom(
+  id: id,
+  name: name,
+  shape: sketch,
   height: height,
   method: RoomAcquisitionMethod.manualSketch,
 );
@@ -113,6 +129,65 @@ CapturedRoom buildCalibratedFloorplanTraceRoom({
     referenceMeters: referenceMeters,
     height: height,
     method: RoomAcquisitionMethod.floorplanTrace,
+  );
+}
+
+/// New PR4 floorplan candidate. Image coordinates define topology and relative
+/// shape only. All metric walls begin pending.
+CapturedRoom buildWallBasedFloorplanRoom({
+  required String id,
+  required String name,
+  required List<FloorPoint> normalizedTrace,
+  required int imageWidth,
+  required int imageHeight,
+  required double height,
+}) {
+  if (imageWidth <= 0 || imageHeight <= 0) {
+    throw ArgumentError('Trace source image size must be positive');
+  }
+  return _buildShapePriorRoom(
+    id: id,
+    name: name,
+    shape: [
+      for (final point in normalizedTrace)
+        FloorPoint(point.x * imageWidth, point.z * imageHeight),
+    ],
+    height: height,
+    method: RoomAcquisitionMethod.floorplanTrace,
+  );
+}
+
+CapturedRoom _buildShapePriorRoom({
+  required String id,
+  required String name,
+  required List<FloorPoint> shape,
+  required double height,
+  required RoomAcquisitionMethod method,
+}) {
+  _validateIdentity(id, name, height);
+  final raw = [...shape];
+  if (raw.length > 1 && raw.first.distanceTo(raw.last) < 1e-9) raw.removeLast();
+  if (raw.length < 3) throw ArgumentError('Invalid shape prior');
+  var ordered = signedArea(raw) < 0
+      ? [raw.first, ...raw.skip(1).toList().reversed]
+      : raw;
+  final origin = ordered.first;
+  final first = ordered[1] - origin;
+  final rotation = -math.atan2(first.z, first.x);
+  ordered = [for (final point in ordered) (point - origin).rotate(rotation)];
+  final lengths = edgeLengths(ordered);
+  final longest = lengths.reduce(math.max);
+  if (!longest.isFinite || longest <= 1e-9) {
+    throw ArgumentError('Invalid shape prior');
+  }
+  ordered = [for (final point in ordered) point.scale(4 / longest)];
+  return _manualRoom(
+    id: id,
+    name: name,
+    height: height,
+    corners: ordered,
+    method: method,
+    measurementMode: RoomMeasurementMode.wallConstraints,
   );
 }
 
@@ -156,6 +231,11 @@ CapturedRoom _buildCalibratedRoom({
     height: height,
     corners: ordered,
     method: method,
+    initialReference: ReferenceMeasurement(
+      edgeIndex: referenceEdge,
+      referenceMeters: referenceMeters,
+    ),
+    measurementMode: RoomMeasurementMode.legacyUniform,
   );
 }
 
@@ -165,6 +245,9 @@ CapturedRoom _manualRoom({
   required double height,
   required List<FloorPoint> corners,
   required RoomAcquisitionMethod method,
+  bool authoritativeLengths = false,
+  ReferenceMeasurement? initialReference,
+  RoomMeasurementMode measurementMode = RoomMeasurementMode.legacyUniform,
 }) {
   final blocking = validateContour(corners).where((issue) => issue.blocking);
   if (blocking.isNotEmpty) {
@@ -177,7 +260,18 @@ CapturedRoom _manualRoom({
     height: RoomHeight(height, HeightSource.manual),
     openings: const [],
     boxes: const [],
-    references: const [],
+    references: authoritativeLengths
+        ? [
+            for (var index = 0; index < corners.length; index++)
+              ReferenceMeasurement(
+                edgeIndex: index,
+                referenceMeters: edgeLengths(corners)[index],
+              ),
+          ]
+        : [if (initialReference != null) initialReference],
+    measurementMode: authoritativeLengths
+        ? RoomMeasurementMode.wallConstraints
+        : measurementMode,
     acquisition: RoomAcquisition(method: method),
   );
 }

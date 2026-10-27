@@ -224,26 +224,70 @@ class OccupancyBox {
   };
 }
 
-/// Independent tape-measure length of one contour edge typed by the agent.
+enum WallMeasurementProvenance {
+  aiDetected('ai_detected'),
+  derivedScale('derived_scale'),
+  derivedGeometry('derived_geometry'),
+  user('user'),
+  unresolved('unresolved');
+
+  const WallMeasurementProvenance(this.wire);
+  final String wire;
+
+  static WallMeasurementProvenance fromWire(Object? value) {
+    // PR4 drafts used "ocr" for any automatic interpretation. Preserve their
+    // meaning while writing the provider-neutral provenance from now on.
+    if (value == 'ocr') return WallMeasurementProvenance.aiDetected;
+    return values.firstWhere(
+      (item) => item.wire == value,
+      // Historical references without provenance were entered by the agent.
+      orElse: () => WallMeasurementProvenance.user,
+    );
+  }
+}
+
+/// Metric length of one semantic contour edge and its local provenance.
 class ReferenceMeasurement {
   const ReferenceMeasurement({
     required this.edgeIndex,
     required this.referenceMeters,
+    this.provenance = WallMeasurementProvenance.user,
   });
 
   factory ReferenceMeasurement.fromJson(Map<String, Object?> json) =>
       ReferenceMeasurement(
         edgeIndex: (json['edgeIndex']! as num).toInt(),
         referenceMeters: readDouble(json, 'referenceMeters'),
+        provenance: WallMeasurementProvenance.fromWire(json['provenance']),
       );
 
   final int edgeIndex;
   final double referenceMeters;
+  final WallMeasurementProvenance provenance;
 
   Map<String, Object?> toJson() => {
     'edgeIndex': edgeIndex,
     'referenceMeters': referenceMeters,
+    if (provenance != WallMeasurementProvenance.user)
+      'provenance': provenance.wire,
   };
+}
+
+/// Meaning of [CapturedRoom.references]. Missing persisted values deliberately
+/// retain the PR2/PR3 behavior: one or more references calibrate the complete
+/// contour with a uniform scale factor.
+enum RoomMeasurementMode {
+  legacyUniform('legacy_uniform'),
+  wallConstraints('wall_constraints');
+
+  const RoomMeasurementMode(this.wire);
+  final String wire;
+
+  static RoomMeasurementMode fromWire(Object? value) => values.firstWhere(
+    (mode) => mode.wire == value,
+    orElse: () =>
+        throw FormatException('Unknown room measurement mode: $value'),
+  );
 }
 
 /// Session metrics reported by the native capture.
@@ -422,6 +466,7 @@ class CapturedRoom {
     required this.boxes,
     required this.references,
     required this.acquisition,
+    this.measurementMode = RoomMeasurementMode.legacyUniform,
     this.placement = RoomPlacement.identity,
   });
 
@@ -554,6 +599,9 @@ class CapturedRoom {
         : RoomAcquisition.fromJson(
             asJsonMap(json['acquisition'], 'acquisition'),
           ),
+    measurementMode: json['measurementMode'] == null
+        ? RoomMeasurementMode.legacyUniform
+        : RoomMeasurementMode.fromWire(json['measurementMode']),
     placement: RoomPlacement.fromJson(
       asJsonMap(json['placement'], 'placement'),
     ),
@@ -567,6 +615,7 @@ class CapturedRoom {
   final List<OccupancyBox> boxes;
   final List<ReferenceMeasurement> references;
   final RoomAcquisition acquisition;
+  final RoomMeasurementMode measurementMode;
 
   /// Native metrics for an ARCore room, absent for technology-neutral rooms.
   CaptureMetrics? get metrics => acquisition.arMetrics;
@@ -585,6 +634,7 @@ class CapturedRoom {
     List<OccupancyBox>? boxes,
     List<ReferenceMeasurement>? references,
     RoomAcquisition? acquisition,
+    RoomMeasurementMode? measurementMode,
     RoomPlacement? placement,
   }) => CapturedRoom(
     id: id,
@@ -595,6 +645,7 @@ class CapturedRoom {
     boxes: boxes ?? this.boxes,
     references: references ?? this.references,
     acquisition: acquisition ?? this.acquisition,
+    measurementMode: measurementMode ?? this.measurementMode,
     placement: placement ?? this.placement,
   );
 
@@ -607,6 +658,7 @@ class CapturedRoom {
     'boxes': [for (final box in boxes) box.toJson()],
     'references': [for (final reference in references) reference.toJson()],
     'acquisition': acquisition.toJson(),
+    'measurementMode': measurementMode.wire,
     'placement': placement.toJson(),
   };
 }

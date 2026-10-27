@@ -45,7 +45,13 @@ CapturedRoom buildManualRectangularRoom({
     height: RoomHeight(height, HeightSource.manual),
     openings: const [],
     boxes: const [],
-    references: const [],
+    references: [
+      ReferenceMeasurement(edgeIndex: 0, referenceMeters: length),
+      ReferenceMeasurement(edgeIndex: 1, referenceMeters: width),
+      ReferenceMeasurement(edgeIndex: 2, referenceMeters: length),
+      ReferenceMeasurement(edgeIndex: 3, referenceMeters: width),
+    ],
+    measurementMode: RoomMeasurementMode.wallConstraints,
     acquisition: const RoomAcquisition(method: RoomAcquisitionMethod.manual),
   );
 }
