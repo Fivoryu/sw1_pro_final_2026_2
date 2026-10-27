@@ -46,6 +46,8 @@ from app.modules.exchange_rates.router import (
 )
 from app.modules.exchange_rates.service import refresh_official_rates
 from app.modules.identity.router import router as identity_router
+from app.modules.floorplan_interpretation.router import router as floorplan_interpretation_router
+from app.modules.floorplan_interpretation.service import FloorplanInterpreter, GroqFloorplanInterpreter
 from app.modules.reconstruction.job_queue import (
     ReconstructionQueue,
     create_reconstruction_queue,
@@ -386,6 +388,7 @@ def create_app(
     photo_storage: PhotoStorage | None = None,
     job_queue: JobQueue | None = None,
     reconstruction_queue: ReconstructionQueue | None = None,
+    floorplan_interpreter: FloorplanInterpreter | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_env()
     resolved_settings.validate()
@@ -431,6 +434,11 @@ def create_app(
     )
     app.state.job_queue = resolved_job_queue
     app.state.reconstruction_queue = resolved_reconstruction_queue
+    app.state.floorplan_interpreter = floorplan_interpreter or GroqFloorplanInterpreter(
+        api_key=resolved_settings.groq_api_key,
+        model=resolved_settings.groq_floorplan_model,
+        timeout_seconds=resolved_settings.groq_floorplan_timeout_seconds,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[resolved_settings.web_origin.rstrip("/")],
@@ -461,6 +469,7 @@ def create_app(
     app.include_router(detection_worker_router)
     app.include_router(reconstruction_router)
     app.include_router(reconstruction_worker_router)
+    app.include_router(floorplan_interpretation_router)
     app.include_router(reservations_router)
     app.include_router(staff_reservations_router)
     app.include_router(stripe_payments_router)

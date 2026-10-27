@@ -15,6 +15,12 @@ export 'geometry.dart'
         signedArea,
         pointInPolygon,
         segmentsIntersect;
+export 'manual_room.dart';
+export 'manual_geometry.dart';
+export 'floorplan_trace.dart';
+export 'floorplan_metric_solver.dart';
 export 'scale_correction.dart';
 export 'scene_builder.dart';
 export 'validation.dart';
+export 'wall_geometry.dart';
+export 'wall_measurement_candidate.dart';

@@ -43,8 +43,9 @@ void main() {
       expect(signedArea(room.corners), greaterThan(0));
       expect(room.height, const RoomHeight(2.5, HeightSource.ceilingPlane));
       expect(room.placement, RoomPlacement.identity);
-      expect(room.metrics.trackingLossCount, 0);
-      expect(room.metrics.cornerHitDistances, [1.0, 1.5, 2.0, 2.5]);
+      expect(room.metrics!.trackingLossCount, 0);
+      expect(room.metrics!.cornerHitDistances, [1.0, 1.5, 2.0, 2.5]);
+      expect(room.acquisition.method, RoomAcquisitionMethod.arcoreWalls);
     });
 
     test('reorders a clockwise capture counter-clockwise keeping corner 0', () {
