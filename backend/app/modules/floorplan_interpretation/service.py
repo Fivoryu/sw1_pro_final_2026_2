@@ -23,13 +23,24 @@ First identify closed architectural spaces. Return one RoomCandidate per defensi
 rooms and must not become one mega-room contour. A semantic wall is one continuous room-perimeter segment ending only at
 a material direction or topology change. Doors, windows, gaps, wall thickness, furniture, labels, hatching, and
 dimension/extension lines do not split or create walls. Double wall bands are one wall.
+Contour points represent semantic architectural walls and room boundary segments for the selected room perimeter, rather
+than all visible linework. Doors and windows are openings in walls and must not create additional semantic walls; report
+them in openings, not as contour edges. Collinear or nearly-collinear boundary fragments separated by an opening or
+drawing gap, including a door, window, or wall-detail interruption, are one semantic wall when architecturally
+continuous and visually supported. Do not create contour walls from furniture, dimensions, text, labels, door swing arcs,
+window detail strokes, decorative lines, auxiliary/construction lines, or similar non-boundary graphical artifacts.
+Internal details or unrelated partitions belong in the contour only when they define the selected room boundary.
 Preserve L-shaped, concave, angled, pentagonal, and other irregular geometry; never force rectangles or orthogonality.
 Hand sketches may yield partial or needs_review candidates when closed topology is defensible. Otherwise return
 low_confidence with no rooms. Geometry recognition must not depend on the plan language.
-After topology, report openings only when their wall association is reliable. Report dimensions only as visible evidence:
-every item requires literalText exactly as read and status proposed | unresolved | conflict. proposed requires a finite
-positive value and visible metric unit m/cm/mm. Bare numbers use unit unknown and unresolved. Assign edgeIndex only when
-dimension orientation, line/endpoints, and wall alignment support it; proximity alone is insufficient.
+After topology, report openings only when their wall association is reliable. For each opening, position is the normalized
+center along the associated wall and position is in [0,1]. normalizedWidth is the opening width as a fraction of the
+associated wall length and normalizedWidth is in (0,1]. Report position and normalizedWidth only when visually defensible
+from the image. If position or normalizedWidth cannot be supported by the image, return null rather than guessing. Never
+fabricate opening position or width or substitute typical/default door or window dimensions. Report dimensions only as
+visible evidence: every item requires literalText exactly as read and status proposed | unresolved | conflict. proposed
+requires a finite positive value and visible metric unit m/cm/mm. Bare numbers use unit unknown and unresolved. Assign
+edgeIndex only when dimension orientation, line/endpoints, and wall alignment support it; proximity alone is insufficient.
 Coordinates are normalized [0,1]. wallCount equals contour length and every edgeIndex is in range or null. Opening status
 is proposed; types are door/window/unknown. All output remains a proposal for human review with provenance ai_proposal /
 ai_detected. Never fabricate geometry, text, units, dimensions, openings, scale, area, or confidence.
@@ -267,7 +278,11 @@ def _normalize_openings(openings: object, *, wall_count: int, stats: _Normalizat
             stats.dropped_openings += 1
             stats.record("opening_dropped_invalid_contract")
             continue
+        has_canonical_edge_index = "edgeIndex" in opening
         edge_index = opening.get("edgeIndex")
+        uses_wall_index_alias = not has_canonical_edge_index and "wallIndex" in opening
+        if uses_wall_index_alias:
+            edge_index = opening.get("wallIndex")
         invalid_edge = (
             not isinstance(edge_index, int)
             or isinstance(edge_index, bool)
@@ -290,6 +305,10 @@ def _normalize_openings(openings: object, *, wall_count: int, stats: _Normalizat
             )
             continue
         candidate: dict[str, Any] = dict(opening)
+        candidate.pop("wallIndex", None)
+        if uses_wall_index_alias:
+            candidate["edgeIndex"] = edge_index
+            stats.record("opening_wall_index_alias_normalized")
         for key, lower, lower_inclusive in (
             ("position", 0.0, True),
             ("normalizedWidth", 0.0, False),
@@ -375,8 +394,11 @@ def _apply_quality_gate(
         mostly_unusable_openings = bool(room.openings) and (
             openings_without_geometry / len(room.openings) >= 0.75
         )
-        no_useful_evidence = not room.dimensions and (not room.openings or mostly_unusable_openings)
-        if room.wall_count >= 20 and no_useful_evidence:
+        weak_dimension_evidence = len(room.dimensions) <= 3
+        insufficient_corroboration = weak_dimension_evidence and (
+            not room.openings or mostly_unusable_openings
+        )
+        if room.wall_count >= 20 and insufficient_corroboration:
             low_quality = True
             break
     if not low_quality or result.status not in {"success", "partial"}:

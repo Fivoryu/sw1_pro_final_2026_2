@@ -417,6 +417,7 @@ class SpatialCaptureController extends ChangeNotifier {
     int? referenceEdge,
     double? referenceMeters,
     List<ReferenceMeasurement> measurements = const [],
+    List<FloorplanTraceOpening> openings = const [],
     required double height,
   }) async {
     if (ownerId == null) return _noSessionMessage;
@@ -491,6 +492,7 @@ class SpatialCaptureController extends ChangeNotifier {
             vertices: [...normalizedTrace],
             referenceEdge: referenceEdge,
             referenceMeters: referenceMeters,
+            openings: [...openings],
           ),
         },
       );

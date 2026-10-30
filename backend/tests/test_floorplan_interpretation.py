@@ -148,6 +148,38 @@ def test_system_prompt_documents_semantic_room_interpretation_rules() -> None:
     assert "return json only" in prompt
 
 
+def test_system_prompt_documents_semantic_wall_fragment_contract() -> None:
+    prompt = " ".join(SYSTEM_PROMPT.split()).lower()
+
+    assert "contour points represent semantic architectural walls" in prompt
+    assert "room boundary segments" in prompt
+    assert "doors and windows are openings in walls" in prompt
+    assert "must not create additional semantic walls" in prompt
+    assert "collinear or nearly-collinear" in prompt
+    assert "separated by an opening or drawing gap" in prompt
+    assert "one semantic wall when architecturally continuous" in prompt
+    assert "furniture, dimensions, text, labels" in prompt
+    assert "door swing arcs" in prompt
+    assert "window detail strokes" in prompt
+    assert "selected room perimeter" in prompt
+    assert "rather than all visible linework" in prompt
+
+
+def test_system_prompt_documents_opening_geometry_contract() -> None:
+    prompt = " ".join(SYSTEM_PROMPT.split()).lower()
+
+    assert "position" in prompt
+    assert "normalizedwidth" in prompt
+    assert "normalized center" in prompt
+    assert "associated wall" in prompt
+    assert "fraction of the associated wall" in prompt
+    assert "position is in [0,1]" in prompt
+    assert "normalizedwidth is in (0,1]" in prompt
+    assert "only when visually defensible" in prompt
+    assert "return null rather than guessing" in prompt
+    assert "never fabricate opening position or width" in prompt
+
+
 def _l_room_with_list_contour() -> dict[str, Any]:
     return {
         "status": "success",
@@ -388,6 +420,57 @@ def test_invalid_opening_edge_is_omitted_without_retry() -> None:
     assert calls == [1]
 
 
+def test_provider_wall_index_alias_preserves_incomplete_openings(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="roomforge.floorplan_interpretation")
+    document = _pentagon()
+    document["status"] = "success"
+    room = cast(list[dict[str, Any]], document["rooms"])[0]
+    room["openings"] = [
+        {
+            "wallIndex": 0,
+            "type": "window",
+            "position": 0.5,
+            "normalizedWidth": None,
+            "status": "proposed",
+        },
+        {
+            "wallIndex": 1,
+            "type": "window",
+            "position": 0.5,
+            "normalizedWidth": None,
+            "status": "proposed",
+        },
+        {
+            "wallIndex": 3,
+            "type": "door",
+            "position": 0.5,
+            "normalizedWidth": None,
+            "status": "proposed",
+        },
+    ]
+
+    async def run() -> FloorplanInterpretation:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: _provider_response(document))
+        ) as client:
+            return await GroqFloorplanInterpreter(
+                api_key="test-key", model="model", timeout_seconds=2, client=client
+            ).interpret(image=b"image", content_type="image/png")
+
+    result = asyncio.run(run())
+    assert len(result.rooms) == 1
+    room = result.rooms[0]
+    assert room.wall_count == 5
+    assert len(room.openings) == 3
+    assert [opening.type for opening in room.openings] == ["window", "window", "door"]
+    assert [opening.edge_index for opening in room.openings] == [0, 1, 3]
+    assert [opening.position for opening in room.openings] == [0.5, 0.5, 0.5]
+    assert all(opening.normalized_width is None for opening in room.openings)
+    assert "opening_wall_index_alias_normalized" in caplog.text
+
+
 def _many_wall_room(*, wall_count: int, with_dimension: bool) -> dict[str, object]:
     contour = [
         {
@@ -447,8 +530,122 @@ def test_extreme_oversegmentation_is_downgraded_to_needs_review(
     assert "low_quality_oversegmentation" in caplog.text
 
 
+def test_oversegmented_room_with_dimension_is_still_downgraded_to_needs_review(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="roomforge.floorplan_interpretation")
+    document = _many_wall_room(wall_count=23, with_dimension=True)
+
+    async def run() -> FloorplanInterpretation:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: _provider_response(document))
+        ) as client:
+            return await GroqFloorplanInterpreter(
+                api_key="test-key", model="model", timeout_seconds=2, client=client
+            ).interpret(image=b"image", content_type="image/png")
+
+    result = asyncio.run(run())
+    assert result.status == "needs_review"
+    assert len(result.rooms) == 1
+    assert result.rooms[0].wall_count == 23
+    assert len(result.rooms[0].dimensions) == 1
+    complete_openings = [
+        opening
+        for opening in result.rooms[0].openings
+        if opening.position is not None and opening.normalized_width is not None
+    ]
+    assert complete_openings == []
+    assert "low_quality_oversegmentation" in caplog.text
+
+
+def test_oversegmented_room_with_sparse_dimensions_is_downgraded_to_needs_review(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="roomforge.floorplan_interpretation")
+    document = _many_wall_room(wall_count=22, with_dimension=True)
+    room = cast(list[dict[str, Any]], document["rooms"])[0]
+    room["dimensions"] = [
+        {
+            "edgeIndex": 2,
+            "literalText": "2.0 m",
+            "value": 2.0,
+            "unit": "m",
+            "status": "proposed",
+            "provenance": "ai_detected",
+        },
+        {
+            "edgeIndex": 3,
+            "literalText": "1.8 m",
+            "value": 1.8,
+            "unit": "m",
+            "status": "proposed",
+            "provenance": "ai_detected",
+        },
+        {
+            "edgeIndex": 7,
+            "literalText": "3.1 m",
+            "value": 3.1,
+            "unit": "m",
+            "status": "proposed",
+            "provenance": "ai_detected",
+        },
+    ]
+
+    async def run() -> FloorplanInterpretation:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: _provider_response(document))
+        ) as client:
+            return await GroqFloorplanInterpreter(
+                api_key="test-key", model="model", timeout_seconds=2, client=client
+            ).interpret(image=b"image", content_type="image/png")
+
+    result = asyncio.run(run())
+    assert result.status == "needs_review"
+    assert len(result.rooms) == 1
+    assert result.rooms[0].wall_count == 22
+    assert len(result.rooms[0].contour) == 22
+    assert len(result.rooms[0].dimensions) == 3
+    complete_openings = [
+        opening
+        for opening in result.rooms[0].openings
+        if opening.position is not None and opening.normalized_width is not None
+    ]
+    assert complete_openings == []
+    assert (
+        "La propuesta automática presenta sobresegmentación y requiere corrección humana." in result.warnings
+    )
+    assert (
+        "Reintentar la interpretación o corregir la geometría manualmente." in result.information_still_needed
+    )
+    assert "low_quality_oversegmentation" in caplog.text
+
+
 def test_many_wall_irregular_room_is_not_rejected_by_wall_count_alone() -> None:
     document = _many_wall_room(wall_count=21, with_dimension=True)
+    room = cast(list[dict[str, Any]], document["rooms"])[0]
+    room["openings"] = [
+        {
+            "edgeIndex": 0,
+            "type": "window",
+            "position": 0.35,
+            "normalizedWidth": 0.18,
+            "status": "proposed",
+        },
+        {
+            "edgeIndex": 5,
+            "type": "door",
+            "position": 0.50,
+            "normalizedWidth": 0.16,
+            "status": "proposed",
+        },
+        {
+            "edgeIndex": 11,
+            "type": "window",
+            "position": 0.65,
+            "normalizedWidth": 0.20,
+            "status": "proposed",
+        },
+    ]
 
     async def run() -> FloorplanInterpretation:
         async with httpx.AsyncClient(
@@ -461,6 +658,12 @@ def test_many_wall_irregular_room_is_not_rejected_by_wall_count_alone() -> None:
     result = asyncio.run(run())
     assert result.status == "success"
     assert result.rooms[0].wall_count == 21
+    complete_openings = [
+        opening
+        for opening in result.rooms[0].openings
+        if opening.position is not None and opening.normalized_width is not None
+    ]
+    assert len(complete_openings) >= 3
 
 
 def test_multi_room_candidates_and_semantic_opening_are_preserved() -> None:
@@ -512,6 +715,25 @@ def _invalid_contour_document() -> dict[str, Any]:
     return document
 
 
+def _live_e_duplicate_closure_document() -> dict[str, Any]:
+    document = _l_room_with_list_contour()
+    room = cast(dict[str, Any], document["rooms"][0])
+    room["contour"] = [
+        {"x": 0.15, "y": 0.15},
+        {"x": 0.49, "y": 0.15},
+        {"x": 0.49, "y": 0.75},
+        {"x": 0.65, "y": 0.75},
+        {"x": 0.65, "y": 0.77},
+        {"x": 0.75, "y": 0.77},
+        {"x": 0.75, "y": 0.15},
+        {"x": 0.15, "y": 0.15},
+    ]
+    room["wallCount"] = 8
+    room["dimensions"] = []
+    room["openings"] = []
+    return document
+
+
 def test_invalid_geometry_gets_one_sanitized_corrective_attempt() -> None:
     invalid = _invalid_contour_document()
     instruction_fragment = "simple, non-degenerate, non-self-intersecting"
@@ -529,6 +751,33 @@ def test_invalid_geometry_gets_one_sanitized_corrective_attempt() -> None:
     result = asyncio.run(run())
     assert len(result.rooms) == 1
     assert calls == [1, 2]
+    assert instruction_fragment not in prompts[0]
+    assert instruction_fragment in prompts[1]
+    assert json.dumps(invalid) not in prompts[1]
+
+
+def test_duplicate_closing_vertex_and_collinear_overlap_get_invalid_contour_retry(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="roomforge.floorplan_interpretation")
+    invalid = _live_e_duplicate_closure_document()
+    instruction_fragment = "simple, non-degenerate, non-self-intersecting"
+    prompts: list[str] = []
+    transport, calls = _sequential_transport(
+        [_provider_response(invalid), _provider_response(_l_room_with_list_contour())], prompts
+    )
+
+    async def run() -> FloorplanInterpretation:
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await GroqFloorplanInterpreter(
+                api_key="test-key", model="model", timeout_seconds=2, client=client
+            ).interpret(image=b"original-image", content_type="image/png")
+
+    result = asyncio.run(run())
+    assert len(result.rooms) == 1
+    assert result.rooms[0].wall_count == 6
+    assert calls == [1, 2]
+    assert "reason=invalid_contour" in caplog.text
     assert instruction_fragment not in prompts[0]
     assert instruction_fragment in prompts[1]
     assert json.dumps(invalid) not in prompts[1]

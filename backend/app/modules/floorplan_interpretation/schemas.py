@@ -86,7 +86,11 @@ class RoomCandidate(BaseModel):
             for item in self.dimensions
         ):
             raise PydanticCustomError("invalid_dimension_edge", "Dimension references an invalid wall")
-        if abs(_signed_area(self.contour)) < 1e-6 or _self_intersects(self.contour):
+        if (
+            _has_zero_length_edge(self.contour)
+            or abs(_signed_area(self.contour)) < 1e-6
+            or _self_intersects(self.contour)
+        ):
             raise PydanticCustomError("invalid_contour", "Contour is degenerate or self-intersecting")
         _unit_interval(self.confidence, "Room confidence")
         return self
@@ -129,17 +133,64 @@ def _signed_area(points: list[Point]) -> float:
     return sum(a.x * b.y - b.x * a.y for a, b in zip(points, points[1:] + points[:1])) / 2
 
 
+_GEOMETRY_EPSILON = 1e-9
+
+
+def _has_zero_length_edge(points: list[Point]) -> bool:
+    return any(
+        math.hypot(a.x - b.x, a.y - b.y) <= _GEOMETRY_EPSILON for a, b in zip(points, points[1:] + points[:1])
+    )
+
+
 def _self_intersects(points: list[Point]) -> bool:
     def cross(a: Point, b: Point, c: Point) -> float:
         return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+
+    def on_segment(a: Point, b: Point, point: Point) -> bool:
+        return (
+            abs(cross(a, b, point)) <= _GEOMETRY_EPSILON
+            and min(a.x, b.x) - _GEOMETRY_EPSILON <= point.x <= max(a.x, b.x) + _GEOMETRY_EPSILON
+            and min(a.y, b.y) - _GEOMETRY_EPSILON <= point.y <= max(a.y, b.y) + _GEOMETRY_EPSILON
+        )
+
+    def segments_intersect(a: Point, b: Point, c: Point, d: Point) -> bool:
+        ab_c = cross(a, b, c)
+        ab_d = cross(a, b, d)
+        cd_a = cross(c, d, a)
+        cd_b = cross(c, d, b)
+        if (
+            ab_c > _GEOMETRY_EPSILON
+            and ab_d < -_GEOMETRY_EPSILON
+            or ab_c < -_GEOMETRY_EPSILON
+            and ab_d > _GEOMETRY_EPSILON
+        ) and (
+            cd_a > _GEOMETRY_EPSILON
+            and cd_b < -_GEOMETRY_EPSILON
+            or cd_a < -_GEOMETRY_EPSILON
+            and cd_b > _GEOMETRY_EPSILON
+        ):
+            return True
+        return on_segment(a, b, c) or on_segment(a, b, d) or on_segment(c, d, a) or on_segment(c, d, b)
+
+    def collinear_overlap(a: Point, b: Point, c: Point, d: Point) -> bool:
+        if abs(cross(a, b, c)) > _GEOMETRY_EPSILON or abs(cross(a, b, d)) > _GEOMETRY_EPSILON:
+            return False
+        if abs(a.x - b.x) >= abs(a.y - b.y):
+            first = sorted((a.x, b.x))
+            second = sorted((c.x, d.x))
+        else:
+            first = sorted((a.y, b.y))
+            second = sorted((c.y, d.y))
+        return min(first[1], second[1]) - max(first[0], second[0]) > _GEOMETRY_EPSILON
 
     size = len(points)
     for i in range(size):
         a, b = points[i], points[(i + 1) % size]
         for j in range(i + 1, size):
-            if j in {i, (i + 1) % size} or (j + 1) % size in {i, (i + 1) % size}:
-                continue
             c, d = points[j], points[(j + 1) % size]
-            if cross(a, b, c) * cross(a, b, d) < 0 and cross(c, d, a) * cross(c, d, b) < 0:
+            adjacent = (i + 1) % size == j or (j + 1) % size == i
+            if not segments_intersect(a, b, c, d):
+                continue
+            if not adjacent or collinear_overlap(a, b, c, d):
                 return True
     return False

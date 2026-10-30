@@ -443,6 +443,97 @@ void main() {
       expect(hasCompleteWallMeasurements(partial), isFalse);
     });
 
+    test('persists floorplan opening proposals across controller restart', () async {
+      final source = FakePhotoSource();
+      final h = await harness(traceSource: source);
+      final picked = await h.controller.pickFloorplanSource();
+
+      expect(picked, isNotNull);
+      expect(
+        await h.controller.saveFloorplanTrace(
+          name: 'Dormitorio plano',
+          sourceId: picked!.sourceId,
+          contentType: picked.contentType,
+          imageWidth: 1000,
+          imageHeight: 800,
+          normalizedTrace: const [
+            FloorPoint(0.1, 0.2),
+            FloorPoint(0.5, 0.2),
+            FloorPoint(0.5, 0.6),
+            FloorPoint(0.1, 0.6),
+          ],
+          openings: const [
+            FloorplanTraceOpening(
+              edgeIndex: 0,
+              type: FloorplanTraceOpeningType.window,
+              position: 0.40,
+              normalizedWidth: 0.20,
+              confidence: 0.90,
+            ),
+            FloorplanTraceOpening(
+              edgeIndex: 1,
+              type: FloorplanTraceOpeningType.window,
+              position: 0.55,
+              normalizedWidth: 0.18,
+              confidence: 0.88,
+            ),
+            FloorplanTraceOpening(
+              edgeIndex: 2,
+              type: FloorplanTraceOpeningType.door,
+              position: 0.50,
+              normalizedWidth: 0.22,
+              confidence: 0.95,
+            ),
+          ],
+          height: 2.65,
+        ),
+        isNull,
+      );
+
+      final room = h.controller.rooms.single;
+      final trace = h.controller.traceForRoom(room.id);
+      expect(trace, isNotNull);
+      expect(trace!.openings, hasLength(3));
+      expect(room.openings, isEmpty);
+
+      final reopened = await harness(root: h.root, backend: h.backend);
+      final reopenedRoom = reopened.controller.rooms.single;
+      final reopenedTrace = reopened.controller.traceForRoom(reopenedRoom.id);
+      expect(reopenedTrace, isNotNull);
+      expect(reopenedTrace!.openings, hasLength(3));
+      expect(
+        reopenedTrace.openings.where(
+          (opening) => opening.type == FloorplanTraceOpeningType.window,
+        ),
+        hasLength(2),
+      );
+      expect(
+        reopenedTrace.openings.where(
+          (opening) => opening.type == FloorplanTraceOpeningType.door,
+        ),
+        hasLength(1),
+      );
+
+      final firstWindow = reopenedTrace.openings.firstWhere(
+        (opening) =>
+            opening.type == FloorplanTraceOpeningType.window &&
+            opening.edgeIndex == 0,
+      );
+      expect(firstWindow.position, 0.40);
+      expect(firstWindow.normalizedWidth, 0.20);
+      expect(firstWindow.confidence, 0.90);
+
+      final door = reopenedTrace.openings.singleWhere(
+        (opening) => opening.type == FloorplanTraceOpeningType.door,
+      );
+      expect(door.edgeIndex, 2);
+      expect(door.position, 0.50);
+      expect(door.normalizedWidth, 0.22);
+      expect(door.confidence, 0.95);
+      expect(reopenedRoom.openings, isEmpty);
+      expect(reopened.controller.preview!.document['openings'], isEmpty);
+    });
+
     test('persists a local-only floorplan trace across restart', () async {
       final source = FakePhotoSource();
       final h = await harness(traceSource: source);

@@ -96,6 +96,57 @@ int? nearestTraceEdge({
   return selected;
 }
 
+enum FloorplanTraceOpeningType {
+  unknown,
+  door,
+  window;
+
+  String get wire => name;
+
+  static FloorplanTraceOpeningType fromWire(Object? value) => switch (value) {
+    'door' => FloorplanTraceOpeningType.door,
+    'window' => FloorplanTraceOpeningType.window,
+    _ => FloorplanTraceOpeningType.unknown,
+  };
+}
+
+/// A door/window proposal detected from a 2D floor plan, not a canonical
+/// RoomOpening.
+class FloorplanTraceOpening {
+  const FloorplanTraceOpening({
+    required this.edgeIndex,
+    required this.type,
+    this.position,
+    this.normalizedWidth,
+    this.confidence,
+  });
+
+  factory FloorplanTraceOpening.fromJson(Map<String, Object?> json) =>
+      FloorplanTraceOpening(
+        edgeIndex: (json['edgeIndex']! as num).toInt(),
+        type: FloorplanTraceOpeningType.fromWire(json['type']),
+        position: (json['position'] as num?)?.toDouble(),
+        normalizedWidth: (json['normalizedWidth'] as num?)?.toDouble(),
+        confidence: (json['confidence'] as num?)?.toDouble(),
+      );
+
+  final int edgeIndex;
+  final FloorplanTraceOpeningType type;
+  final double? position;
+  final double? normalizedWidth;
+  final double? confidence;
+
+  bool get hasGeometry => position != null && normalizedWidth != null;
+
+  Map<String, Object?> toJson() => {
+    'edgeIndex': edgeIndex,
+    'type': type.wire,
+    if (position != null) 'position': position,
+    if (normalizedWidth != null) 'normalizedWidth': normalizedWidth,
+    if (confidence != null) 'confidence': confidence,
+  };
+}
+
 class FloorplanTraceMetadata {
   const FloorplanTraceMetadata({
     required this.roomId,
@@ -106,6 +157,7 @@ class FloorplanTraceMetadata {
     required this.vertices,
     this.referenceEdge,
     this.referenceMeters,
+    this.openings = const [],
   });
 
   factory FloorplanTraceMetadata.fromJson(Map<String, Object?> json) =>
@@ -121,6 +173,12 @@ class FloorplanTraceMetadata {
         ],
         referenceEdge: (json['referenceEdge'] as num?)?.toInt(),
         referenceMeters: (json['referenceMeters'] as num?)?.toDouble(),
+        openings: [
+          for (final opening in (json['openings'] as List? ?? const []))
+            FloorplanTraceOpening.fromJson(
+              (opening as Map).cast<String, Object?>(),
+            ),
+        ],
       );
 
   final String roomId;
@@ -131,6 +189,7 @@ class FloorplanTraceMetadata {
   final List<FloorPoint> vertices;
   final int? referenceEdge;
   final double? referenceMeters;
+  final List<FloorplanTraceOpening> openings;
 
   Map<String, Object?> toJson() => {
     'roomId': roomId,
@@ -141,6 +200,7 @@ class FloorplanTraceMetadata {
     'vertices': [for (final point in vertices) point.toJson()],
     if (referenceEdge != null) 'referenceEdge': referenceEdge,
     if (referenceMeters != null) 'referenceMeters': referenceMeters,
+    'openings': [for (final opening in openings) opening.toJson()],
   };
 }
 

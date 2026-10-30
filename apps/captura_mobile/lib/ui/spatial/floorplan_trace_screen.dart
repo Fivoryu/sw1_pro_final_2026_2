@@ -76,6 +76,42 @@ class _FloorplanTraceScreenState extends State<FloorplanTraceScreen> {
       ? _openingProposals.length
       : _analysis?.openingCandidates.length ?? 0;
 
+  List<FloorplanTraceOpening> get _traceOpenings => [
+    for (final opening in _openingProposals)
+      FloorplanTraceOpening(
+        edgeIndex: opening.edgeIndex,
+        type: switch (opening.type) {
+          FloorplanOpeningCandidateType.door => FloorplanTraceOpeningType.door,
+          FloorplanOpeningCandidateType.window =>
+            FloorplanTraceOpeningType.window,
+          FloorplanOpeningCandidateType.unknown =>
+            FloorplanTraceOpeningType.unknown,
+        },
+        position: opening.position,
+        normalizedWidth: opening.normalizedWidth,
+        confidence: opening.confidence,
+      ),
+  ];
+
+  List<InterpretedOpeningProposal> _interpretationOpenings(
+    List<FloorplanTraceOpening> openings,
+  ) => [
+    for (final opening in openings)
+      InterpretedOpeningProposal(
+        edgeIndex: opening.edgeIndex,
+        type: switch (opening.type) {
+          FloorplanTraceOpeningType.door => FloorplanOpeningCandidateType.door,
+          FloorplanTraceOpeningType.window =>
+            FloorplanOpeningCandidateType.window,
+          FloorplanTraceOpeningType.unknown =>
+            FloorplanOpeningCandidateType.unknown,
+        },
+        position: opening.position,
+        normalizedWidth: opening.normalizedWidth,
+        confidence: opening.confidence,
+      ),
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -113,6 +149,7 @@ class _FloorplanTraceScreenState extends State<FloorplanTraceScreen> {
       _imageWidth = trace.imageWidth;
       _imageHeight = trace.imageHeight;
       _points.addAll(trace.vertices);
+      _openingProposals = _interpretationOpenings(trace.openings);
       _referenceEdge = trace.referenceEdge ?? 0;
       // The calibration measurement is kept exactly as recorded: rounding it
       // to centimetres here would rescale an untouched retrace.
@@ -313,6 +350,7 @@ class _FloorplanTraceScreenState extends State<FloorplanTraceScreen> {
         for (final controller in _wallLengths.values) {
           controller.clear();
         }
+        _selectedEdge = 0;
         _selectedVertex = null;
         _transform.value = Matrix4.identity();
       });
@@ -562,6 +600,7 @@ class _FloorplanTraceScreenState extends State<FloorplanTraceScreen> {
       referenceEdge: _legacy ? _referenceEdge : null,
       referenceMeters: reference,
       measurements: _measurements,
+      openings: _traceOpenings,
       height: height,
     );
     if (!mounted) return;
@@ -643,6 +682,7 @@ class _FloorplanTraceScreenState extends State<FloorplanTraceScreen> {
                       closed: _closed,
                       selected: null,
                       selectedEdge: _closed ? _selectedEdge : null,
+                      openings: _openingProposals,
                     ),
                   ),
                 ],
@@ -862,6 +902,7 @@ class _FloorplanTraceScreenState extends State<FloorplanTraceScreen> {
                               closed: _closed,
                               selected: _selectedVertex,
                               selectedEdge: _closed ? _selectedEdge : null,
+                              openings: _openingProposals,
                             ),
                           ),
                         ],
@@ -1244,6 +1285,7 @@ class _NormalizedTracePainter extends CustomPainter {
     required this.closed,
     required this.selected,
     required this.selectedEdge,
+    required this.openings,
   });
 
   final List<FloorPoint> points;
@@ -1252,6 +1294,7 @@ class _NormalizedTracePainter extends CustomPainter {
   final bool closed;
   final int? selected;
   final int? selectedEdge;
+  final List<InterpretedOpeningProposal> openings;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1278,7 +1321,11 @@ class _NormalizedTracePainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3,
     );
-    if (closed && selectedEdge != null) {
+    if (closed &&
+        points.isNotEmpty &&
+        selectedEdge != null &&
+        selectedEdge! >= 0 &&
+        selectedEdge! < points.length) {
       final edge = selectedEdge!;
       canvas.drawLine(
         map(points[edge]),
@@ -1288,6 +1335,67 @@ class _NormalizedTracePainter extends CustomPainter {
           ..strokeWidth = 6
           ..strokeCap = StrokeCap.round,
       );
+    }
+    if (closed && points.length >= 2) {
+      for (final opening in openings) {
+        if (!opening.hasGeometry ||
+            opening.edgeIndex < 0 ||
+            opening.edgeIndex >= points.length) {
+          continue;
+        }
+        final position = opening.position!;
+        final normalizedWidth = opening.normalizedWidth!;
+        if (!position.isFinite || !normalizedWidth.isFinite) continue;
+        final start = map(points[opening.edgeIndex]);
+        final end = map(points[(opening.edgeIndex + 1) % points.length]);
+        final startT = position - normalizedWidth / 2;
+        final endT = position + normalizedWidth / 2;
+        final openingStart = Offset.lerp(start, end, startT)!;
+        final openingEnd = Offset.lerp(start, end, endT)!;
+        final color = switch (opening.type) {
+          FloorplanOpeningCandidateType.window => const Color(0xff1976a2),
+          FloorplanOpeningCandidateType.door => const Color(0xffb85224),
+          FloorplanOpeningCandidateType.unknown => const Color(0xff6b7280),
+        };
+        canvas.drawLine(
+          openingStart,
+          openingEnd,
+          Paint()
+            ..color = color
+            ..strokeWidth = 5
+            ..strokeCap = StrokeCap.round,
+        );
+        final span = openingEnd - openingStart;
+        final length = span.distance;
+        if (opening.type == FloorplanOpeningCandidateType.window &&
+            length > 0) {
+          final parallelOffset = Offset(
+            -span.dy / length * 4,
+            span.dx / length * 4,
+          );
+          canvas.drawLine(
+            openingStart + parallelOffset,
+            openingEnd + parallelOffset,
+            Paint()
+              ..color = color
+              ..strokeWidth = 2
+              ..strokeCap = StrokeCap.round,
+          );
+        } else if (opening.type == FloorplanOpeningCandidateType.door &&
+            length > 0) {
+          // Generic review marker; it does not encode an inferred swing.
+          final leaf = Offset(-span.dy / length, span.dx / length) *
+              math.min(length, 32);
+          canvas.drawLine(
+            openingStart,
+            openingStart + leaf,
+            Paint()
+              ..color = color
+              ..strokeWidth = 2
+              ..strokeCap = StrokeCap.round,
+          );
+        }
+      }
     }
     for (var i = 0; i < points.length; i++) {
       canvas.drawCircle(
