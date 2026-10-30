@@ -1,6 +1,6 @@
 // panel/staff-shell/src/features/agencies/AgencyDashboard.tsx
 
-import React, { useEffect, useState } from "react"; // <-- Agregamos 'React' aquí
+import { useEffect, useState } from "react"; // <-- Agregamos 'React' aquí
 import { fetchAgencyMetrics, AgencyMetricsResponse } from "../../application/agencyMetricsApi";
 
 interface AgencyDashboardProps {
