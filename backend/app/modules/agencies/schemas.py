@@ -98,3 +98,23 @@ class AgentListItem(BaseModel):
 class AgentListResponse(BaseModel):
     agents: list[AgentListItem]
     pagination: AgencyPagination
+
+# --- Nuevos esquemas para el Dashboard de Métricas (F14.4) ---
+
+class ListingMetrics(BaseModel):
+    draft: int = 0
+    in_review: int = 0
+    published: int = 0
+
+class ReservationMetrics(BaseModel):
+    pending: int = 0
+    accepted: int = 0
+    rejected: int = 0
+    cancelled: int = 0
+    expired: int = 0
+
+class AgencyMetricsResponse(BaseModel):
+    listings: ListingMetrics
+    active_quotes: int = 0
+    reservations: ReservationMetrics
+
