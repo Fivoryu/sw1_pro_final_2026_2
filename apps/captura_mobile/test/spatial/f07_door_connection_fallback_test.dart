@@ -31,23 +31,26 @@ const _externalDoor = RoomOpening(
 
 void main() {
   group('canonical wall opening resolution', () {
-    test('uses projected edge when canonical measurements are still pending', () {
-      final fixed = _room('visual', _visualDoor);
-      final moving = _room('external', _externalDoor);
-      expect(fixed.wallDimensions, isEmpty);
-      expect(fixed.edgeIndexForOpening(_visualDoor), 0);
+    test(
+      'uses projected edge when canonical measurements are still pending',
+      () {
+        final fixed = _room('visual', _visualDoor);
+        final moving = _room('external', _externalDoor);
+        expect(fixed.wallDimensions, isEmpty);
+        expect(fixed.edgeIndexForOpening(_visualDoor), 0);
 
-      final placement = placementForConnection(
-        fixed: fixed,
-        fixedOpeningId: 'door-a2',
-        moving: moving,
-        movingOpeningId: 'door-external',
-        wallThickness: 0.12,
-      );
-      expect(placement.x.isFinite, isTrue);
-      expect(placement.z.isFinite, isTrue);
-      expect(placement.rotationDegrees.isFinite, isTrue);
-    });
+        final placement = placementForConnection(
+          fixed: fixed,
+          fixedOpeningId: 'door-a2',
+          moving: moving,
+          movingOpeningId: 'door-external',
+          wallThickness: 0.12,
+        );
+        expect(placement.x.isFinite, isTrue);
+        expect(placement.z.isFinite, isTrue);
+        expect(placement.rotationDegrees.isFinite, isTrue);
+      },
+    );
 
     test('canonical wall id overrides an outdated projected edge', () {
       final room = _room('measured', _visualDoor).copyWith(

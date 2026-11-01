@@ -662,10 +662,7 @@ class SpatialCaptureController extends ChangeNotifier {
         wall.start.x * imageWidth,
         wall.start.z * imageHeight,
       );
-      final end = FloorPoint(
-        wall.end.x * imageWidth,
-        wall.end.z * imageHeight,
-      );
+      final end = FloorPoint(wall.end.x * imageWidth, wall.end.z * imageHeight);
       longest = math.max(longest, start.distanceTo(end));
     }
     if (!longest.isFinite || longest <= 1e-9) {
@@ -699,8 +696,7 @@ class SpatialCaptureController extends ChangeNotifier {
     }
     final angle = math.atan2(first.z, first.x);
     final local = [
-      for (final point in ordered)
-        (point - origin).rotate(-angle).scale(scale),
+      for (final point in ordered) (point - origin).rotate(-angle).scale(scale),
     ];
     return (
       corners: local,
@@ -801,7 +797,8 @@ class SpatialCaptureController extends ChangeNotifier {
     final projectionIds = <String, String>{};
     for (final (index, region) in document.rooms.indexed) {
       final existing = existingByRegion[region.id]?.roomId;
-      final projectionId = existing ??
+      final projectionId =
+          existing ??
           (index == 0 && !usedRoomIds.contains(ownerId)
               ? ownerId
               : allocateRoomId());
@@ -861,26 +858,27 @@ class SpatialCaptureController extends ChangeNotifier {
               previousRoom.placement != RoomPlacement.identity
           ? previousRoom.placement
           : frame.placement;
-      var room = buildWallBasedFloorplanRoom(
-        id: projectionId,
-        name: roomName,
-        normalizedTrace: contour,
-        imageWidth: imageWidth,
-        imageHeight: imageHeight,
-        height: complete ? null : height,
-        wallDimensions: complete ? wallDimensions : const [],
-      ).copyWith(
-        corners: frame.corners,
-        references: _measurementsFromDocument(
-          document,
-          roomId: region.id,
-          contour: contour,
-          imageWidth: imageWidth,
-          imageHeight: imageHeight,
-        ),
-        placement: preservedPlacement,
-        boxes: previousRoom?.boxes,
-      );
+      var room =
+          buildWallBasedFloorplanRoom(
+            id: projectionId,
+            name: roomName,
+            normalizedTrace: contour,
+            imageWidth: imageWidth,
+            imageHeight: imageHeight,
+            height: complete ? null : height,
+            wallDimensions: complete ? wallDimensions : const [],
+          ).copyWith(
+            corners: frame.corners,
+            references: _measurementsFromDocument(
+              document,
+              roomId: region.id,
+              contour: contour,
+              imageWidth: imageWidth,
+              imageHeight: imageHeight,
+            ),
+            placement: preservedPlacement,
+            boxes: previousRoom?.boxes,
+          );
       room = room.copyWith(
         openings: _canonicalOpeningsForRoom(document, region.id),
       );
@@ -933,7 +931,8 @@ class SpatialCaptureController extends ChangeNotifier {
       'projectedRooms=${projectedRooms.length} owner=$canonicalOwnerId',
     );
     for (final previousSourceId in previousSourceIds) {
-      if (previousSourceId != sourceId && !_referencesSource(previousSourceId)) {
+      if (previousSourceId != sourceId &&
+          !_referencesSource(previousSourceId)) {
         await discardFloorplanSource(previousSourceId);
       }
     }

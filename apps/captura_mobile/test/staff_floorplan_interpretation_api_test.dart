@@ -357,27 +357,42 @@ void main() {
     },
   );
 
-  test('unassociated opening evidence is preserved but not canonical', () async {
-    for (final opening in <Map<String, Object?>>[
-      {'edgeIndex': null, 'type': 'window', 'position': 0.5},
-      {'type': 'door'},
-    ]) {
-      final result = await _interpret(_api({
-        'status': 'partial',
-        'rooms': [_room(openings: [opening])],
-      }));
-      final proposal = result.rooms.single.openings.single;
-      expect(proposal.edgeIndex, isNull);
-      expect(proposal.toCanonicalCandidate(), isNull);
-    }
-  });
+  test(
+    'unassociated opening evidence is preserved but not canonical',
+    () async {
+      for (final opening in <Map<String, Object?>>[
+        {'edgeIndex': null, 'type': 'window', 'position': 0.5},
+        {'type': 'door'},
+      ]) {
+        final result = await _interpret(
+          _api({
+            'status': 'partial',
+            'rooms': [
+              _room(openings: [opening]),
+            ],
+          }),
+        );
+        final proposal = result.rooms.single.openings.single;
+        expect(proposal.edgeIndex, isNull);
+        expect(proposal.toCanonicalCandidate(), isNull);
+      }
+    },
+  );
 
   test('malformed non-null opening edge remains malformed', () async {
     await expectLater(
-      _interpret(_api({
-        'status': 'partial',
-        'rooms': [_room(openings: [{'edgeIndex': '1', 'type': 'door'}])],
-      })),
+      _interpret(
+        _api({
+          'status': 'partial',
+          'rooms': [
+            _room(
+              openings: [
+                {'edgeIndex': '1', 'type': 'door'},
+              ],
+            ),
+          ],
+        }),
+      ),
       throwsA(isA<StaffAuthFailure>()),
     );
   });

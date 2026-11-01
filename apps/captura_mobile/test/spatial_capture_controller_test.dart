@@ -19,7 +19,6 @@ import 'support/fake_staff_backend.dart';
 import 'support/fake_photo_source.dart';
 import 'support/in_memory_capture_draft_store.dart';
 
-
 const FloorplanVisualDraft _threeRoomVisualDraft = FloorplanVisualDraft(
   walls: [
     VisualWallSegment(
@@ -762,10 +761,7 @@ void main() {
             ),
           ],
           rooms: [
-            VisualRoomRegion(
-              id: 'temporary',
-              wallIds: ['a', 'b', 'c', 'd'],
-            ),
+            VisualRoomRegion(id: 'temporary', wallIds: ['a', 'b', 'c', 'd']),
           ],
         );
         final partitioned = FloorplanVisualDraftEditor.addInternalWall(
@@ -817,10 +813,9 @@ void main() {
 
         final reopened = await harness(root: h.root, backend: h.backend);
         expect(reopened.controller.rooms, hasLength(2));
-        expect(
-          {for (final room in reopened.controller.rooms) room.id},
-          firstProjectionIds,
-        );
+        expect({
+          for (final room in reopened.controller.rooms) room.id,
+        }, firstProjectionIds);
         final restored = reopened.controller
             .traceForRoom(reopened.controller.rooms.first.id)!
             .visualDraft!;
@@ -835,7 +830,10 @@ void main() {
           displayWallOrder,
           reason: 'La numeración visual P conserva el orden físico persistido.',
         );
-        expect(restored.walls.where((wall) => wall.id == sharedId), hasLength(1));
+        expect(
+          restored.walls.where((wall) => wall.id == sharedId),
+          hasLength(1),
+        );
         expect(
           restored.walls.singleWhere((wall) => wall.id == sharedId).roomIds,
           hasLength(2),
@@ -847,7 +845,6 @@ void main() {
         expect(restored.validate(), isEmpty);
       },
     );
-
 
     test(
       'projects three visual rooms once, preserves preview topology and stable ids',
@@ -883,7 +880,10 @@ void main() {
 
         final raw = (await h.store.read(h.controller.ownerId!, 'listing-1'))!;
         final traces = (raw['traces']! as List).cast<Map>();
-        expect(traces.where((trace) => trace['visualDraft'] != null), hasLength(1));
+        expect(
+          traces.where((trace) => trace['visualDraft'] != null),
+          hasLength(1),
+        );
 
         final preview = h.controller.preview!;
         final sceneRooms = (preview.document['rooms']! as List).cast<Map>();
@@ -901,9 +901,13 @@ void main() {
           }
           return points.reduce((a, b) => a + b) / points.length;
         }
+
         final centers = [for (final room in sceneRooms) roomCenterX(room)];
         expect(centers.toSet(), hasLength(3));
-        expect(centers.reduce((a, b) => a < b ? a : b), lessThan(centers.reduce((a, b) => a > b ? a : b)));
+        expect(
+          centers.reduce((a, b) => a < b ? a : b),
+          lessThan(centers.reduce((a, b) => a > b ? a : b)),
+        );
         final second = h.controller.rooms[1];
         final secondTrace = h.controller.traceForRoom(second.id)!;
         expect(
@@ -925,7 +929,9 @@ void main() {
 
         final reopened = await harness(root: h.root, backend: h.backend);
         expect(reopened.controller.rooms, hasLength(3));
-        expect([for (final room in reopened.controller.rooms) room.id], firstIds);
+        expect([
+          for (final room in reopened.controller.rooms) room.id,
+        ], firstIds);
         for (final room in reopened.controller.rooms) {
           expect(
             reopened.controller.traceForRoom(room.id)!.visualDraft!.rooms,
@@ -958,7 +964,10 @@ void main() {
         final middle = h.controller.rooms.singleWhere(
           (room) => h.controller.traceForRoom(room.id)!.visualRoomId == 'A2',
         );
-        expect(middle.openings.map((opening) => opening.id), contains('door-a2'));
+        expect(
+          middle.openings.map((opening) => opening.id),
+          contains('door-a2'),
+        );
 
         await h.controller.createManualRectangularRoom(
           name: 'Exterior',
@@ -1037,7 +1046,10 @@ void main() {
           isNull,
         );
 
-        final before = (await h.store.read(h.controller.ownerId!, 'listing-1'))!;
+        final before = (await h.store.read(
+          h.controller.ownerId!,
+          'listing-1',
+        ))!;
         final beforeTraces = (before['traces']! as List).cast<Map>();
         final ownerRaw = beforeTraces.singleWhere(
           (trace) => trace['visualDraft'] != null,
@@ -1056,12 +1068,16 @@ void main() {
         expect(
           await h.controller.floorplanSourceBytes(sourceId),
           isNotNull,
-          reason: 'La imagen sigue referenciada por las proyecciones restantes.',
+          reason:
+              'La imagen sigue referenciada por las proyecciones restantes.',
         );
 
         final after = (await h.store.read(h.controller.ownerId!, 'listing-1'))!;
         final afterTraces = (after['traces']! as List).cast<Map>();
-        expect(afterTraces.where((trace) => trace['visualDraft'] != null), hasLength(1));
+        expect(
+          afterTraces.where((trace) => trace['visualDraft'] != null),
+          hasLength(1),
+        );
         final survivingIds = {
           for (final trace in afterTraces) trace['roomId']! as String,
         };
@@ -2661,7 +2677,6 @@ void main() {
         );
       },
     );
-
 
     test('422 scene validation never exposes raw backend detail', () async {
       final h = await harness(

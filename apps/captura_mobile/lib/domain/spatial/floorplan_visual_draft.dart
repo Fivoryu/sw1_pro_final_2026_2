@@ -1050,11 +1050,14 @@ class FloorplanVisualDraftEditor {
     final intersections = <(double, FloorPoint)>[];
     final total = attachedStart.distanceTo(attachedEnd);
     void addIntersection(FloorPoint point) {
-      if (intersections.any((entry) => entry.$2.distanceTo(point) <= _epsilon)) {
+      if (intersections.any(
+        (entry) => entry.$2.distanceTo(point) <= _epsilon,
+      )) {
         return;
       }
       intersections.add((attachedStart.distanceTo(point) / total, point));
     }
+
     for (final existing in candidate.walls) {
       final intersection = _properIntersectionPoint(
         attachedStart,

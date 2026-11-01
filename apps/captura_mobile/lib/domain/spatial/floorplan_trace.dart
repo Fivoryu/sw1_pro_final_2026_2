@@ -282,6 +282,7 @@ class FloorplanTraceMetadata {
   }
 
   final String roomId;
+
   /// Stable room-region identity inside the canonical visual document.
   final String? visualRoomId;
 
@@ -314,8 +315,7 @@ class FloorplanTraceMetadata {
   Map<String, Object?> toJson() => {
     'roomId': roomId,
     if (visualRoomId != null) 'visualRoomId': visualRoomId,
-    if (documentOwnerRoomId != null)
-      'documentOwnerRoomId': documentOwnerRoomId,
+    if (documentOwnerRoomId != null) 'documentOwnerRoomId': documentOwnerRoomId,
     'sourceId': sourceId,
     'contentType': contentType,
     'imageWidth': imageWidth,

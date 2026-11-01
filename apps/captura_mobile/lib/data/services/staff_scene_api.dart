@@ -18,6 +18,7 @@ Map<String, Object?> sceneUploadDocument(Map<String, Object?> document) {
     final source = map(value);
     return {'x': source['x'], 'z': source['z']};
   }
+
   Map<String, Object?> wall(Object? value) {
     final source = map(value);
     return {
@@ -31,6 +32,7 @@ Map<String, Object?> sceneUploadDocument(Map<String, Object?> document) {
         'heightSource': source['heightSource'],
     };
   }
+
   Map<String, Object?> opening(Object? value) {
     final source = map(value);
     return {
@@ -43,6 +45,7 @@ Map<String, Object?> sceneUploadDocument(Map<String, Object?> document) {
       if (source['sillHeight'] != null) 'sillHeight': source['sillHeight'],
     };
   }
+
   Map<String, Object?> room(Object? value) {
     final source = map(value);
     return {
@@ -52,6 +55,7 @@ Map<String, Object?> sceneUploadDocument(Map<String, Object?> document) {
       if (source['color'] != null) 'color': source['color'],
     };
   }
+
   Map<String, Object?> position(Object? value) {
     final source = map(value);
     return {'x': source['x'], 'y': source['y'], 'z': source['z']};

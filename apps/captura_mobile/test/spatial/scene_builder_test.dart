@@ -127,7 +127,6 @@ void main() {
     },
   );
 
-
   test('canonical opening shared by room projections is emitted only once', () {
     const opening = RoomOpening(
       id: 'shared-door',
@@ -139,11 +138,7 @@ void main() {
       sillHeight: 0,
     );
     const dimensions = [
-      CapturedWallDimension(
-        wallId: 'shared-wall',
-        lengthM: 4,
-        heightM: 2.6,
-      ),
+      CapturedWallDimension(wallId: 'shared-wall', lengthM: 4, heightM: 2.6),
       CapturedWallDimension(wallId: 'wall-b', lengthM: 3, heightM: 2.6),
       CapturedWallDimension(wallId: 'wall-c', lengthM: 4, heightM: 2.6),
       CapturedWallDimension(wallId: 'wall-d', lengthM: 3, heightM: 2.6),
@@ -161,7 +156,9 @@ void main() {
       openings: [opening],
       boxes: [],
       references: [],
-      acquisition: RoomAcquisition(method: RoomAcquisitionMethod.floorplanTrace),
+      acquisition: RoomAcquisition(
+        method: RoomAcquisitionMethod.floorplanTrace,
+      ),
       wallDimensions: dimensions,
       measurementMode: RoomMeasurementMode.wallConstraints,
     );
@@ -172,7 +169,9 @@ void main() {
       openings: [opening],
       boxes: [],
       references: [],
-      acquisition: RoomAcquisition(method: RoomAcquisitionMethod.floorplanTrace),
+      acquisition: RoomAcquisition(
+        method: RoomAcquisitionMethod.floorplanTrace,
+      ),
       wallDimensions: dimensions,
       measurementMode: RoomMeasurementMode.wallConstraints,
     );

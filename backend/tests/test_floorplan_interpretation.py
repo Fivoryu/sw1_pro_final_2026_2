@@ -1316,7 +1316,7 @@ def test_simplification_does_not_replace_supported_right_angle_with_diagonal_cho
     macro_corner = contour[16]
     assert macro_corner in simplified
     assert all(_point_to_contour_distance(point, simplified) <= 0.03 * scale for point in contour)
-    assert all(0 <= edge < len(simplified) for edge in edge_mapping)
+    assert all(isinstance(edge, int) and 0 <= edge < len(simplified) for edge in edge_mapping)
 
 
 def test_simplify_semantic_contour_preserves_real_pentagon_corners() -> None:

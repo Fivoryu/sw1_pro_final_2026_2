@@ -47,7 +47,8 @@ void main() {
     final visualRoomId = draft.room('temporary')?.id ?? draft.rooms.first.id;
     final projected = harness.controller.rooms.singleWhere(
       (room) =>
-          harness.controller.traceForRoom(room.id)?.visualRoomId == visualRoomId,
+          harness.controller.traceForRoom(room.id)?.visualRoomId ==
+          visualRoomId,
     );
     return (harness, projected.id);
   }

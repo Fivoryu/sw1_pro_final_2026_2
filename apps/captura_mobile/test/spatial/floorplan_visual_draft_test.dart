@@ -1799,47 +1799,50 @@ void main() {
     expect(protected.toJson(), before);
   });
 
-  test('moving a degree-three junction changes only captured incident walls', () {
-    final partitioned = FloorplanVisualDraftEditor.addInternalWall(
-      draft: rectangle(),
-      roomId: 'room',
-      start: const FloorPoint(.5, 0),
-      end: const FloorPoint(.5, 1),
-    ).draft!;
-    const original = FloorPoint(.5, 0);
-    const replacement = FloorPoint(.55, .1);
-    final incidentIds = {
-      for (final wall in partitioned.walls)
-        if (wall.start == original || wall.end == original) wall.id,
-    };
-    final unrelated = {
-      for (final wall in partitioned.walls)
-        if (!incidentIds.contains(wall.id)) wall.id: wall.toJson(),
-    };
-    expect(incidentIds, hasLength(3));
+  test(
+    'moving a degree-three junction changes only captured incident walls',
+    () {
+      final partitioned = FloorplanVisualDraftEditor.addInternalWall(
+        draft: rectangle(),
+        roomId: 'room',
+        start: const FloorPoint(.5, 0),
+        end: const FloorPoint(.5, 1),
+      ).draft!;
+      const original = FloorPoint(.5, 0);
+      const replacement = FloorPoint(.55, .1);
+      final incidentIds = {
+        for (final wall in partitioned.walls)
+          if (wall.start == original || wall.end == original) wall.id,
+      };
+      final unrelated = {
+        for (final wall in partitioned.walls)
+          if (!incidentIds.contains(wall.id)) wall.id: wall.toJson(),
+      };
+      expect(incidentIds, hasLength(3));
 
-    final moved = FloorplanVisualDraftEditor.moveJunction(
-      draft: partitioned,
-      originalPoint: original,
-      incidentWallIds: incidentIds,
-      point: replacement,
-    );
-
-    expect(moved.isSuccess, isTrue);
-    final draft = moved.draft!;
-    for (final wallId in incidentIds) {
-      final wall = draft.walls.singleWhere((wall) => wall.id == wallId);
-      expect(wall.start == replacement || wall.end == replacement, isTrue);
-    }
-    for (final entry in unrelated.entries) {
-      expect(
-        draft.walls.singleWhere((wall) => wall.id == entry.key).toJson(),
-        entry.value,
+      final moved = FloorplanVisualDraftEditor.moveJunction(
+        draft: partitioned,
+        originalPoint: original,
+        incidentWallIds: incidentIds,
+        point: replacement,
       );
-    }
-    expect(draft.rooms, hasLength(2));
-    expect(draft.validate(), isEmpty);
-  });
+
+      expect(moved.isSuccess, isTrue);
+      final draft = moved.draft!;
+      for (final wallId in incidentIds) {
+        final wall = draft.walls.singleWhere((wall) => wall.id == wallId);
+        expect(wall.start == replacement || wall.end == replacement, isTrue);
+      }
+      for (final entry in unrelated.entries) {
+        expect(
+          draft.walls.singleWhere((wall) => wall.id == entry.key).toJson(),
+          entry.value,
+        );
+      }
+      expect(draft.rooms, hasLength(2));
+      expect(draft.validate(), isEmpty);
+    },
+  );
 
   test('invalid junction move is rejected without mutating its source', () {
     final partitioned = FloorplanVisualDraftEditor.addInternalWall(

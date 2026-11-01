@@ -85,11 +85,7 @@ class _WallRecord {
     this.sourceWallId,
     this.lengthM,
   }) : dimensionalEvidence = [
-         (
-           sourceWallId: sourceWallId,
-           lengthM: lengthM,
-           height: height,
-         ),
+         (sourceWallId: sourceWallId, lengthM: lengthM, height: height),
        ];
 
   final String id;

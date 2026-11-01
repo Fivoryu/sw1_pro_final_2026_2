@@ -131,7 +131,10 @@ void main() {
             as Map<String, Object?>;
     expect(result.document, fixture);
     expectEveryRoomCloses(result.document);
-    expect(result.warnings.map((warning) => warning.code), [SceneWarningCode.wallDimensionConflict, SceneWarningCode.assumedHeight]);
+    expect(result.warnings.map((warning) => warning.code), [
+      SceneWarningCode.wallDimensionConflict,
+      SceneWarningCode.assumedHeight,
+    ]);
   });
 
   test('the fixture file is the pretty-printed document', () {
