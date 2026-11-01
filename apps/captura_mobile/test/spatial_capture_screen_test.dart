@@ -458,6 +458,35 @@ Future<void> _chooseAutomaticCapture(WidgetTester tester) => _tapAndSettle(
   find.byKey(const ValueKey('automatic-capture-method')),
 );
 
+Future<void> _enterWallDimensions(
+  WidgetTester tester,
+  int wallCount, {
+  Set<int> keepExistingLengths = const {},
+}) async {
+  final scroll = find
+      .descendant(
+        of: find.byKey(const ValueKey('floorplan-trace-scroll')),
+        matching: find.byType(Scrollable),
+      )
+      .first;
+  for (var index = 0; index < wallCount; index++) {
+    final chip = find.byKey(ValueKey('wall-chip-$index'));
+    await tester.scrollUntilVisible(chip, -120, scrollable: scroll);
+    await tester.tap(chip);
+    await tester.pumpAndSettle();
+    if (!keepExistingLengths.contains(index)) {
+      final length = find.byKey(ValueKey('trace-wall-$index'));
+      await tester.scrollUntilVisible(length, 120, scrollable: scroll);
+      await tester.enterText(length, index.isEven ? '4,00' : '3,00');
+      await tester.pumpAndSettle();
+    }
+    final height = find.byKey(ValueKey('trace-wall-height-$index'));
+    await tester.scrollUntilVisible(height, 120, scrollable: scroll);
+    await tester.enterText(height, '2,60');
+    await tester.pumpAndSettle();
+  }
+}
+
 void main() {
   testWidgets('captures a room and shows its estimated dimensions', (
     tester,
@@ -762,27 +791,8 @@ void main() {
       expect(close.hitTestable(), findsOneWidget);
       await tester.tap(close);
       await tester.pumpAndSettle();
-      for (var index = 0; index < 4; index++) {
-        await tester.tap(find.byKey(ValueKey('wall-chip-$index')));
-        await tester.pump();
-        final field = find.byKey(ValueKey('trace-wall-$index'));
-        await tester.scrollUntilVisible(
-          field,
-          150,
-          scrollable: find
-              .descendant(
-                of: find.byKey(const ValueKey('floorplan-trace-scroll')),
-                matching: find.byType(Scrollable),
-              )
-              .first,
-        );
-        await tester.enterText(field, '4,20');
-      }
+      await _enterWallDimensions(tester, 4);
       expect(find.text('Pared de referencia'), findsNothing);
-      await tester.enterText(
-        find.byKey(const ValueKey('trace-room-height')),
-        '2.65',
-      );
       await tester.pumpAndSettle();
       expect(find.text('Vista previa métrica'), findsOneWidget);
       final provenance = find.text('Plano o croquis con medidas por pared');
@@ -816,7 +826,7 @@ void main() {
       expect(room.name, 'Dormitorio plano');
       expect(room.acquisition.method, RoomAcquisitionMethod.floorplanTrace);
       expect(room.metrics, isNull);
-      expect(edgeLengths(room.corners).first, closeTo(4.2, 1e-9));
+      expect(edgeLengths(room.corners).first, closeTo(4, 1e-9));
       expect(
         find.text('Plano o croquis con medidas por pared'),
         findsOneWidget,
@@ -913,10 +923,13 @@ void main() {
     expect(tester.takeException(), isNull);
 
     final canvas = find.byKey(const ValueKey('floorplan-trace-canvas'));
+    final editMode = find.byKey(const ValueKey('trace-mode-edit'));
+    await tester.ensureVisible(editMode);
+    await tester.pumpAndSettle();
+    await tester.tap(editMode);
+    await tester.pumpAndSettle();
     final canvasOrigin = tester.getTopLeft(canvas);
     final canvasSize = tester.getSize(canvas);
-    await tester.tap(find.text('Trazar'));
-    await tester.pump();
     await tester.tapAt(canvasOrigin + canvasSize.center(Offset.zero));
     await tester.pump();
     List<FloorPoint> paintedPoints() => List<FloorPoint>.of(
@@ -932,8 +945,10 @@ void main() {
     final originalPoints = paintedPoints();
     expect(originalPoints, hasLength(1));
 
-    await tester.tap(find.text('Mover / zoom'));
-    await tester.pump();
+    final navigateMode = find.byKey(const ValueKey('trace-mode-navigate'));
+    await tester.ensureVisible(navigateMode);
+    await tester.tap(navigateMode);
+    await tester.pumpAndSettle();
     final viewerFinder = find.byKey(
       const ValueKey('floorplan-interactive-viewer'),
     );
@@ -982,10 +997,11 @@ void main() {
       imageHeight: 80,
     );
     expect(expected, isNotNull);
-    await tester.tap(find.text('Trazar'));
-    await tester.pump();
+    await tester.ensureVisible(editMode);
+    await tester.tap(editMode);
+    await tester.pumpAndSettle();
     final preservedTransform = transform.value.clone();
-    await tester.tapAt(canvasOrigin + viewportTap);
+    await tester.tapAt(tester.getTopLeft(canvas) + viewportTap);
     await tester.pump();
     final afterTrace = paintedPoints();
     expect(afterTrace, hasLength(2));
@@ -1036,10 +1052,14 @@ void main() {
     // An unambiguous Groq metric seeds the scale without becoming a
     // user-authored value. The room is still only persisted on confirmation.
     expect(built.controller.rooms, isEmpty);
-    final height = find.byKey(const ValueKey('trace-room-height'));
+    // The provider proposal only becomes eligible once the agent accepts it:
+    // the value keeps its detected provenance instead of becoming user input.
+    final confirmMeasurement = find.byKey(
+      const ValueKey('measurement-confirm-groq-0'),
+    );
     await tester.scrollUntilVisible(
-      height,
-      180,
+      confirmMeasurement,
+      150,
       scrollable: find
           .descendant(
             of: find.byKey(const ValueKey('floorplan-trace-scroll')),
@@ -1047,12 +1067,22 @@ void main() {
           )
           .first,
     );
-    await tester.enterText(height, '2,60');
+    await tester.pumpAndSettle();
+    await tester.tap(confirmMeasurement);
+    await tester.pumpAndSettle();
+    await _enterWallDimensions(tester, 4, keepExistingLengths: const {0});
     final save = find.byKey(const ValueKey('floorplan-trace-save'));
     expect(save.hitTestable(), findsOneWidget);
     await tester.tap(save);
     await tester.pumpAndSettle();
     expect(built.controller.rooms.single.references, hasLength(4));
+    final accepted = built.controller
+        .traceForRoom(built.controller.rooms.single.id)!
+        .visualDraft!
+        .measurements
+        .singleWhere((measurement) => measurement.provenance == 'ai_detected');
+    expect(accepted.provenance, 'ai_detected');
+    expect(accepted.requiresReview, isFalse);
     expect(
       built.controller.rooms.single.references.first.provenance,
       WallMeasurementProvenance.aiDetected,
@@ -1242,9 +1272,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('22 paredes'), findsWidgets);
 
-    final wallSelector = find.byKey(
-      const ValueKey('floorplan-wall-selector'),
-    );
+    final wallSelector = find.byKey(const ValueKey('floorplan-wall-selector'));
     final edge21 = find.byKey(const ValueKey('wall-chip-21'));
     await tester.scrollUntilVisible(
       edge21,
@@ -1267,9 +1295,7 @@ void main() {
       matching: find.byType(FilledButton),
     );
     expect(confirm, findsOneWidget);
-    await tester.tap(
-      confirm,
-    );
+    await tester.tap(confirm);
     await tester.pump();
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 100)),
@@ -1283,9 +1309,7 @@ void main() {
     expect(find.byKey(const ValueKey('wall-chip-21')), findsNothing);
     expect(
       tester
-          .widget<ChoiceChip>(
-            find.byKey(const ValueKey('wall-chip-0')),
-          )
+          .widget<ChoiceChip>(find.byKey(const ValueKey('wall-chip-0')))
           .selected,
       isTrue,
     );
@@ -1445,7 +1469,7 @@ void main() {
     expect(
       find.text(
         'No pudimos interpretar este plano con suficiente confianza. '
-        'Podés corregir o trazar el ambiente manualmente.',
+        'Podés reintentar con otra imagen o trazar el ambiente manualmente.',
       ),
       findsOneWidget,
     );
@@ -1799,24 +1823,15 @@ void main() {
 
     expect(find.textContaining('5 paredes'), findsWidgets);
 
-    final height = find.byKey(const ValueKey('trace-room-height'));
-    await tester.scrollUntilVisible(
-      height,
-      180,
-      scrollable: find
-          .descendant(
-            of: find.byKey(const ValueKey('floorplan-trace-scroll')),
-            matching: find.byType(Scrollable),
-          )
-          .first,
-    );
+    await tester.tap(find.byTooltip('Herramientas de edición'));
+    await tester.pumpAndSettle();
 
-    await tester.enterText(height, '2,60');
+    await _enterWallDimensions(tester, 5);
 
     final save = find.byKey(const ValueKey('floorplan-trace-save'));
     expect(save.hitTestable(), findsOneWidget);
 
-    await tester.tap(save);
+    await tester.tap(save.hitTestable());
     await tester.pumpAndSettle();
 
     final room = built.controller.rooms.single;
@@ -1905,21 +1920,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('5 paredes'), findsWidgets);
-    final height = find.byKey(const ValueKey('trace-room-height'));
-    await tester.scrollUntilVisible(
-      height,
-      180,
-      scrollable: find
-          .descendant(
-            of: find.byKey(const ValueKey('floorplan-trace-scroll')),
-            matching: find.byType(Scrollable),
-          )
-          .first,
-    );
-    await tester.enterText(height, '2,60');
+    await tester.tap(find.byTooltip('Herramientas de edición'));
+    await tester.pumpAndSettle();
+    await _enterWallDimensions(tester, 5);
     final save = find.byKey(const ValueKey('floorplan-trace-save'));
     expect(save.hitTestable(), findsOneWidget);
-    await tester.tap(save);
+    await tester.tap(save.hitTestable());
     await tester.pumpAndSettle();
 
     final room = built.controller.rooms.single;
@@ -2065,7 +2071,7 @@ void main() {
     final after = built.controller.rooms.single;
     expect(after.id, room.id);
     expect(after.name, 'Dormitorio plano');
-    expect(after.height.value, 2.655);
+    expect(after.height!.value, 2.655);
     expect(after.openings, isEmpty);
     expect(after.acquisition.method, RoomAcquisitionMethod.floorplanTrace);
     expect(after.references.first.referenceMeters, 4.234);
@@ -2459,8 +2465,8 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('Altura: 2,65 m (ingresada a mano)'), findsOneWidget);
-    expect(built.controller.rooms.single.height.value, 2.65);
-    expect(built.controller.rooms.single.height.source, HeightSource.manual);
+    expect(built.controller.rooms.single.height!.value, 2.65);
+    expect(built.controller.rooms.single.height!.source, HeightSource.manual);
 
     final openings = find.text('Puertas y ventanas');
     await tester.scrollUntilVisible(

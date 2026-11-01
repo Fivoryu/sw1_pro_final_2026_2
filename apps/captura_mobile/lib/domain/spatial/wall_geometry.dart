@@ -21,6 +21,34 @@ const _inconsistent = WallGeometryResult.inconsistent(
   'Las medidas ingresadas no permiten cerrar el ambiente. Revisá las paredes marcadas.',
 );
 
+/// True only when confirmed physical lengths prove that no closed polygon can
+/// exist. Partial evidence, derived scale and pending/unresolved measurements
+/// cannot establish a contradiction by themselves.
+bool hasContradictoryConfirmedWallLengths(CapturedRoom room) {
+  if (room.measurementMode != RoomMeasurementMode.wallConstraints) return false;
+  final confirmed = <int, double>{};
+  for (final reference in room.references) {
+    if (reference.provenance != WallMeasurementProvenance.user &&
+        reference.provenance != WallMeasurementProvenance.aiDetected) {
+      continue;
+    }
+    if (reference.edgeIndex < 0 ||
+        reference.edgeIndex >= room.corners.length ||
+        !reference.referenceMeters.isFinite ||
+        reference.referenceMeters < minEdgeLength) {
+      return true;
+    }
+    confirmed[reference.edgeIndex] = reference.referenceMeters;
+  }
+  if (confirmed.length < room.corners.length) return false;
+  final lengths = confirmed.values.toList(growable: false);
+  final longest = lengths.reduce(
+    (first, second) => first > second ? first : second,
+  );
+  final total = lengths.fold<double>(0, (sum, value) => sum + value);
+  return longest >= total - longest - wallConstraintTolerance;
+}
+
 /// Reconciles a simple polygon with independent confirmed wall lengths.
 ///
 /// The original vertices seed this small position-based solver, preserving the
@@ -171,8 +199,15 @@ bool hasCompleteWallMeasurements(CapturedRoom room) =>
     ({for (final value in room.references) value.edgeIndex}.length ==
         room.corners.length);
 
-double openingPositionMetres(CapturedRoom room, RoomOpening opening) =>
-    opening.position * edgeLengths(room.corners)[opening.edgeIndex];
+double openingPositionMetres(CapturedRoom room, RoomOpening opening) {
+  final offset = opening.offsetFromWallStartM;
+  if (offset != null) return offset + opening.width / 2;
+  final edgeIndex = room.edgeIndexForOpening(opening);
+  if (edgeIndex == null || opening.position == null) {
+    throw ArgumentError('Opening has no valid wall association');
+  }
+  return opening.position! * edgeLengths(room.corners)[edgeIndex];
+}
 
 double normalizedOpeningPosition({
   required double wallLength,

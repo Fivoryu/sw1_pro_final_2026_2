@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:captura_mobile/domain/spatial/spatial.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -36,6 +38,232 @@ PropertyCapture _single(CapturedRoom room) => PropertyCapture(
 );
 
 void main() {
+  test(
+    'wall-based F07 scene preserves independent walls and physical openings',
+    () {
+      const room = CapturedRoom(
+        id: 'f07',
+        name: 'F07',
+        corners: [
+          FloorPoint(0, 0),
+          FloorPoint(4, 0),
+          FloorPoint(4, 3),
+          FloorPoint(0, 3),
+        ],
+        openings: [
+          RoomOpening(
+            id: 'door-a',
+            wallId: 'wall-a',
+            width: .9,
+            height: 2.1,
+            offsetFromWallStartM: .5,
+            type: OpeningType.door,
+            sillHeight: 0,
+          ),
+          RoomOpening(
+            id: 'window-b',
+            wallId: 'wall-b',
+            width: 1.2,
+            height: 1.1,
+            offsetFromWallStartM: .4,
+            type: OpeningType.window,
+            sillHeight: .8,
+          ),
+        ],
+        boxes: [],
+        references: [],
+        acquisition: RoomAcquisition(
+          method: RoomAcquisitionMethod.floorplanTrace,
+        ),
+        wallDimensions: [
+          CapturedWallDimension(wallId: 'wall-a', lengthM: 4, heightM: 2.4),
+          CapturedWallDimension(wallId: 'wall-b', lengthM: 3, heightM: 2.8),
+          CapturedWallDimension(wallId: 'wall-c', lengthM: 4, heightM: 2.5),
+          CapturedWallDimension(wallId: 'wall-d', lengthM: 3, heightM: 2.6),
+        ],
+        measurementMode: RoomMeasurementMode.wallConstraints,
+      );
+
+      final document = buildSceneDocument(_single(room));
+      final walls = _list(document, 'walls');
+      expect(walls.map((wall) => wall['id']), [
+        'wall-a',
+        'wall-b',
+        'wall-c',
+        'wall-d',
+      ]);
+      expect(walls.map((wall) => wall['height']), [2.4, 2.8, 2.5, 2.6]);
+      expect(walls.map((wall) => wall['lengthM']), [4.0, 3.0, 4.0, 3.0]);
+
+      final openings = _list(document, 'openings');
+      expect(openings, hasLength(2));
+      expect(
+        openings.firstWhere((opening) => opening['id'] == 'door-a'),
+        allOf(
+          containsPair('wallId', 'wall-a'),
+          containsPair('sourceWallId', 'wall-a'),
+          containsPair('offsetFromWallStartM', .5),
+          containsPair('width', .9),
+          containsPair('height', 2.1),
+          containsPair('type', 'door'),
+        ),
+      );
+      expect(
+        openings.firstWhere((opening) => opening['id'] == 'window-b'),
+        allOf(
+          containsPair('wallId', 'wall-b'),
+          containsPair('sourceWallId', 'wall-b'),
+          containsPair('offsetFromWallStartM', .4),
+          containsPair('width', 1.2),
+          containsPair('height', 1.1),
+          containsPair('sillHeight', .8),
+          containsPair('type', 'window'),
+        ),
+      );
+
+      final roundTrip =
+          jsonDecode(jsonEncode(document)) as Map<String, Object?>;
+      expect(roundTrip, document);
+    },
+  );
+
+
+  test('canonical opening shared by room projections is emitted only once', () {
+    const opening = RoomOpening(
+      id: 'shared-door',
+      wallId: 'shared-wall',
+      width: .9,
+      height: 2.1,
+      offsetFromWallStartM: .5,
+      type: OpeningType.door,
+      sillHeight: 0,
+    );
+    const dimensions = [
+      CapturedWallDimension(
+        wallId: 'shared-wall',
+        lengthM: 4,
+        heightM: 2.6,
+      ),
+      CapturedWallDimension(wallId: 'wall-b', lengthM: 3, heightM: 2.6),
+      CapturedWallDimension(wallId: 'wall-c', lengthM: 4, heightM: 2.6),
+      CapturedWallDimension(wallId: 'wall-d', lengthM: 3, heightM: 2.6),
+    ];
+    const corners = [
+      FloorPoint(0, 0),
+      FloorPoint(4, 0),
+      FloorPoint(4, 3),
+      FloorPoint(0, 3),
+    ];
+    const first = CapturedRoom(
+      id: 'a',
+      name: 'A',
+      corners: corners,
+      openings: [opening],
+      boxes: [],
+      references: [],
+      acquisition: RoomAcquisition(method: RoomAcquisitionMethod.floorplanTrace),
+      wallDimensions: dimensions,
+      measurementMode: RoomMeasurementMode.wallConstraints,
+    );
+    const second = CapturedRoom(
+      id: 'b',
+      name: 'B',
+      corners: corners,
+      openings: [opening],
+      boxes: [],
+      references: [],
+      acquisition: RoomAcquisition(method: RoomAcquisitionMethod.floorplanTrace),
+      wallDimensions: dimensions,
+      measurementMode: RoomMeasurementMode.wallConstraints,
+    );
+    final capture = PropertyCapture(
+      listingId: 'listing-1',
+      rooms: const [first, second],
+      connections: const [],
+      updatedAt: DateTime.utc(2026, 10, 21),
+    );
+
+    final document = buildSceneDocument(capture);
+
+    final openings = _list(document, 'openings');
+    expect(openings, hasLength(1));
+    expect(openings.single['id'], 'shared-door');
+  });
+
+  test('legacy window default is materialized before scene generation', () {
+    const historical = CapturedRoom(
+      id: 'legacy',
+      name: 'Legacy',
+      corners: [
+        FloorPoint(0, 0),
+        FloorPoint(4, 0),
+        FloorPoint(4, 3),
+        FloorPoint(0, 3),
+      ],
+      height: RoomHeight(2.5, HeightSource.manual),
+      openings: [
+        RoomOpening(
+          id: 'legacy-window',
+          edgeIndex: 0,
+          position: .5,
+          width: 1.2,
+          height: 1.1,
+          type: OpeningType.window,
+        ),
+      ],
+      boxes: [],
+      references: [],
+      acquisition: RoomAcquisition(method: RoomAcquisitionMethod.manual),
+    );
+
+    final restored = CapturedRoom.fromJson(historical.toJson());
+    expect(restored.openings.single.explicitSillHeight, .9);
+    final result = buildScene(_single(restored));
+    final opening = _list(result.document, 'openings').single;
+    expect(opening['id'], 'window-1');
+    expect(opening['sillHeight'], .9);
+    expect(_codes(result), isNot(contains(SceneWarningCode.openingIncomplete)));
+  });
+
+  test('new wall-based window without sill stays incomplete', () {
+    const room = CapturedRoom(
+      id: 'new',
+      name: 'New',
+      corners: [
+        FloorPoint(0, 0),
+        FloorPoint(4, 0),
+        FloorPoint(4, 3),
+        FloorPoint(0, 3),
+      ],
+      openings: [
+        RoomOpening(
+          id: 'new-window',
+          wallId: 'a',
+          offsetFromWallStartM: .5,
+          width: 1.2,
+          height: 1.1,
+          type: OpeningType.window,
+        ),
+      ],
+      boxes: [],
+      references: [],
+      acquisition: RoomAcquisition(
+        method: RoomAcquisitionMethod.floorplanTrace,
+      ),
+      wallDimensions: [
+        CapturedWallDimension(wallId: 'a', lengthM: 4, heightM: 2.4),
+        CapturedWallDimension(wallId: 'b', lengthM: 3, heightM: 2.4),
+        CapturedWallDimension(wallId: 'c', lengthM: 4, heightM: 2.4),
+        CapturedWallDimension(wallId: 'd', lengthM: 3, heightM: 2.4),
+      ],
+      measurementMode: RoomMeasurementMode.wallConstraints,
+    );
+
+    final result = buildScene(_single(room));
+    expect(_codes(result), contains(SceneWarningCode.openingIncomplete));
+    expect(_list(result.document, 'openings'), isEmpty);
+  });
+
   test(
     'a single room becomes four centreline walls offset by half thickness',
     () {
@@ -103,7 +331,12 @@ void main() {
       },
     ]);
     expectEveryRoomCloses(document);
-    expect(_codes(result), {SceneWarningCode.assumedHeight});
+    // The joined wall has two different physical height values. The scene
+    // keeps its first height, but the conflict must be reported for review.
+    expect(_codes(result), {
+      SceneWarningCode.assumedHeight,
+      SceneWarningCode.wallDimensionConflict,
+    });
   });
 
   test('a T-junction splits the longer wall so both rooms close', () {

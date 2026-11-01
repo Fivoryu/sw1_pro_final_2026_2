@@ -93,9 +93,9 @@ void main() {
         },
       );
 
-      expect(room.height.value, 2.4);
-      expect(room.height.source, HeightSource.assumed);
-      expect(room.height.isMeasured, isFalse);
+      expect(room.height!.value, 2.4);
+      expect(room.height!.source, HeightSource.assumed);
+      expect(room.height!.isMeasured, isFalse);
     });
 
     test('boxes move into the room-local frame as axis-aligned volumes', () {

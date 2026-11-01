@@ -21,14 +21,15 @@ enum FloorplanInterpretationStatus {
 
 class InterpretedOpeningProposal {
   const InterpretedOpeningProposal({
-    required this.edgeIndex,
+    this.edgeIndex,
     required this.type,
     this.position,
     this.normalizedWidth,
     this.confidence,
+    this.manuallyPlaced = false,
   });
 
-  final int edgeIndex;
+  final int? edgeIndex;
   final FloorplanOpeningCandidateType type;
 
   /// Normalized opening geometry. Null means the provider did not supply it
@@ -37,13 +38,38 @@ class InterpretedOpeningProposal {
   final double? normalizedWidth;
   final double? confidence;
 
+  /// Local trace interaction only; never makes this a canonical RoomOpening.
+  final bool manuallyPlaced;
+
   bool get hasGeometry => position != null && normalizedWidth != null;
+
+  InterpretedOpeningProposal copyWith({
+    int? edgeIndex,
+    bool clearEdgeIndex = false,
+    FloorplanOpeningCandidateType? type,
+    double? position,
+    bool clearPosition = false,
+    double? normalizedWidth,
+    bool clearNormalizedWidth = false,
+  }) => InterpretedOpeningProposal(
+    edgeIndex: clearEdgeIndex ? null : edgeIndex ?? this.edgeIndex,
+    type: type ?? this.type,
+    position: clearPosition ? null : position ?? this.position,
+    normalizedWidth: clearNormalizedWidth
+        ? null
+        : normalizedWidth ?? this.normalizedWidth,
+    confidence: confidence,
+    manuallyPlaced: true,
+  );
 
   /// Canonical geometry is only produced when both spatial facts are known.
   FloorplanOpeningCandidate? toCanonicalCandidate() {
     final position = this.position;
     final normalizedWidth = this.normalizedWidth;
-    if (position == null || normalizedWidth == null) return null;
+    final edgeIndex = this.edgeIndex;
+    if (edgeIndex == null || position == null || normalizedWidth == null) {
+      return null;
+    }
     return FloorplanOpeningCandidate(
       edgeIndex: edgeIndex,
       position: position,
@@ -135,9 +161,10 @@ class StaffFloorplanInterpretationApi implements FloorplanInterpretationApi {
       );
     final http.Response response;
     try {
-      response = await http.Response.fromStream(
-        await _client.send(request).timeout(timeout),
-      ).timeout(timeout);
+      response = await (() async {
+        final streamed = await _client.send(request);
+        return http.Response.fromStream(streamed);
+      })().timeout(timeout);
     } on TimeoutException {
       throw networkFailure();
     } on SocketException {
@@ -190,11 +217,6 @@ FloorplanInterpretationResult _parse(Map<String, Object?> json) {
         final item = value as Map<String, Object?>;
         final numeric = item['value'];
         final edge = item['edgeIndex'];
-        if (numeric is! num || numeric <= 0) continue;
-        final literalValue = numeric.toDouble();
-        if (!literalValue.isFinite) {
-          throw const FormatException('Invalid dimension value');
-        }
         // Provider status is authoritative for review state; never infer
         // "proposed" from a metric value alone.
         final providerStatus = switch (item['status']) {
@@ -203,22 +225,31 @@ FloorplanInterpretationResult _parse(Map<String, Object?> json) {
           'conflict' => 'conflict',
           _ => throw const FormatException('Unknown dimension status'),
         };
+        final numericValue = numeric is num ? numeric.toDouble() : null;
+        final rawValue = numericValue != null && numericValue.isFinite
+            ? numericValue
+            : null;
+        final metricInput = rawValue != null && rawValue > 0 ? rawValue : null;
+        final unit = item['unit'] as String?;
         // An unknown unit is textual evidence only: it never becomes metres.
-        final meters = _metres(literalValue, item['unit']);
+        final meters = metricInput == null ? null : _metres(metricInput, unit);
         final associated = edge is int && edge >= 0 && edge < points.length;
         final status = switch (providerStatus) {
           'conflict' => WallMeasurementCandidateStatus.ambiguous,
           'unresolved' => WallMeasurementCandidateStatus.unresolved,
           _ when !associated => WallMeasurementCandidateStatus.ambiguous,
-          _ when meters == null => WallMeasurementCandidateStatus.unresolved,
+          _ when metricInput == null || meters == null =>
+            WallMeasurementCandidateStatus.unresolved,
           _ => WallMeasurementCandidateStatus.proposed,
         };
         dimensions.add(
           WallMeasurementCandidate(
             id: 'ai-$roomIndex-$index',
-            literalText: item['literalText'] as String? ?? numeric.toString(),
+            literalText:
+                item['literalText'] as String? ?? numeric?.toString() ?? '',
             meters: meters,
-            rawValue: literalValue,
+            rawValue: rawValue,
+            unit: unit,
             edgeIndex: associated ? edge : null,
             explicitUnit: meters != null,
             ambiguityReason: switch (providerStatus) {
@@ -228,6 +259,8 @@ FloorplanInterpretationResult _parse(Map<String, Object?> json) {
                 'El proveedor marcó esta medida como no resuelta; solo es evidencia.',
               _ when !associated =>
                 'La IA no pudo asociar esta medida con una pared.',
+              _ when metricInput == null =>
+                'La IA detectó evidencia dimensional sin un valor numérico válido.',
               _ when meters == null =>
                 'La IA leyó una medida sin una unidad métrica confirmada; solo es evidencia textual.',
               _ => null,
@@ -240,12 +273,13 @@ FloorplanInterpretationResult _parse(Map<String, Object?> json) {
       for (final value in ((raw['openings'] as List?) ?? const [])) {
         final item = value as Map<String, Object?>;
         final edge = item['edgeIndex'];
-        if (edge is! int || edge < 0 || edge >= points.length) {
+        if (edge != null &&
+            (edge is! int || edge < 0 || edge >= points.length)) {
           throw const FormatException('Opening references an invalid wall');
         }
         openings.add(
           InterpretedOpeningProposal(
-            edgeIndex: edge,
+            edgeIndex: edge as int?,
             position: _optionalNormalizedValue(
               item['position'],
               field: 'opening position',

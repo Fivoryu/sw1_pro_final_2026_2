@@ -218,35 +218,41 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
           children: [
             Text('Altura', style: theme.textTheme.titleLarge),
             const SizedBox(height: 4),
-            Text(
-              'Altura: ${metres(room.height.value)} '
-              '(${heightSourceLabel(room.height.source)})',
-            ),
+            if (room.height case final height?)
+              Text(
+                'Altura: ${metres(height.value)} '
+                '(${heightSourceLabel(height.source)})',
+              )
+            else
+              const Text('Alturas independientes por pared'),
             const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    key: const ValueKey('room-height-field'),
-                    controller: _height,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: 'Altura medida a mano (m)',
-                      border: OutlineInputBorder(),
+            if (room.height != null)
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      key: const ValueKey('room-height-field'),
+                      controller: _height,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Altura medida a mano (m)',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                FilledButton(
-                  key: const ValueKey('room-height-save'),
-                  style: FilledButton.styleFrom(minimumSize: _rowActionMinSize),
-                  onPressed: () => _saveHeight(room),
-                  child: const Text('Guardar'),
-                ),
-              ],
-            ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    key: const ValueKey('room-height-save'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: _rowActionMinSize,
+                    ),
+                    onPressed: () => _saveHeight(room),
+                    child: const Text('Guardar'),
+                  ),
+                ],
+              ),
             const SizedBox(height: 24),
             Text(
               manuallyCalibrated ? 'Paredes' : 'Paredes y tolerancia',
@@ -365,7 +371,7 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
                 contentPadding: EdgeInsets.zero,
                 title: Text(
                   '${openingTypeLabel(opening.type)} ${index + 1} · '
-                  '${wallLabel(opening.edgeIndex)}',
+                  '${room.edgeIndexForOpening(opening) == null ? 'Pared sin asociar' : wallLabel(room.edgeIndexForOpening(opening)!)}',
                 ),
                 subtitle: Text(
                   '${metres(opening.width)} × ${metres(opening.height)}',

@@ -563,10 +563,13 @@ class _RoomCard extends StatelessWidget {
               )
             else
               const Text('Sin medida de referencia: escala sin comprobar'),
-            Text(
-              'Altura: ${metres(room.height.value)} '
-              '(${heightSourceLabel(room.height.source)})',
-            ),
+            if (room.height case final height?)
+              Text(
+                'Altura: ${metres(height.value)} '
+                '(${heightSourceLabel(height.source)})',
+              )
+            else
+              const Text('Alturas independientes por pared'),
             if (room.openings.isNotEmpty)
               Text('Aberturas: ${room.openings.length}'),
             if (room.boxes.isNotEmpty)

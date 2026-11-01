@@ -12,15 +12,15 @@ import 'support/spatial_fixtures.dart';
 ) {
   final opening = room.openings.firstWhere((o) => o.id == openingId);
   final world = room.worldCorners();
-  final start = world[opening.edgeIndex];
-  final end = world[(opening.edgeIndex + 1) % world.length];
+  final start = world[opening.edgeIndex!];
+  final end = world[(opening.edgeIndex! + 1) % world.length];
   final dx = end.x - start.x;
   final dz = end.z - start.z;
   final length = math.sqrt(dx * dx + dz * dz);
   return (
     center: FloorPoint(
-      start.x + dx * opening.position,
-      start.z + dz * opening.position,
+      start.x + dx * opening.position!,
+      start.z + dz * opening.position!,
     ),
     direction: FloorPoint(dx / length, dz / length),
   );

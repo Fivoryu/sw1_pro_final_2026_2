@@ -26,13 +26,17 @@ class DimensionProposal(BaseModel):
     edge_index: int | None = Field(default=None, alias="edgeIndex")
     literal_text: str = Field(alias="literalText", min_length=1)
     value: float | None = None
-    unit: Literal["m", "cm", "mm", "unknown"] = "unknown"
+    # Preserve provider evidence verbatim. Only the explicitly supported
+    # metric identifiers may make a proposal authoritative below.
+    unit: str = Field(default="unknown", min_length=1, max_length=32)
     provenance: Literal["ai_detected"] = "ai_detected"
     status: Literal["proposed", "unresolved", "conflict"]
     model_config = ConfigDict(populate_by_name=True)
 
     @model_validator(mode="after")
     def coherent_metric_meaning(self) -> "DimensionProposal":
+        if not self.unit.strip():
+            raise ValueError("Dimension unit must not be blank")
         if self.value is not None and not math.isfinite(self.value):
             raise ValueError("Dimension value must be finite")
         if self.status == "proposed":
@@ -46,7 +50,7 @@ class DimensionProposal(BaseModel):
 
 
 class OpeningProposal(BaseModel):
-    edge_index: int = Field(alias="edgeIndex")
+    edge_index: int | None = Field(default=None, alias="edgeIndex")
     type: Literal["door", "window", "unknown"] = "unknown"
     position: float | None = None
     normalized_width: float | None = Field(default=None, alias="normalizedWidth")
@@ -79,7 +83,10 @@ class RoomCandidate(BaseModel):
             raise PydanticCustomError("wall_count_mismatch", "wallCount must match a usable contour")
         if len(self.contour) < 3:
             raise PydanticCustomError("invalid_contour", "Contour must contain at least three vertices")
-        if any(item.edge_index < 0 or item.edge_index >= self.wall_count for item in self.openings):
+        if any(
+            item.edge_index is not None and (item.edge_index < 0 or item.edge_index >= self.wall_count)
+            for item in self.openings
+        ):
             raise PydanticCustomError("invalid_opening_edge", "Opening references an invalid wall")
         if any(
             item.edge_index is not None and not (0 <= item.edge_index < self.wall_count)

@@ -140,7 +140,8 @@ CapturedRoom buildWallBasedFloorplanRoom({
   required List<FloorPoint> normalizedTrace,
   required int imageWidth,
   required int imageHeight,
-  required double height,
+  double? height,
+  List<CapturedWallDimension> wallDimensions = const [],
 }) {
   if (imageWidth <= 0 || imageHeight <= 0) {
     throw ArgumentError('Trace source image size must be positive');
@@ -153,6 +154,7 @@ CapturedRoom buildWallBasedFloorplanRoom({
         FloorPoint(point.x * imageWidth, point.z * imageHeight),
     ],
     height: height,
+    wallDimensions: wallDimensions,
     method: RoomAcquisitionMethod.floorplanTrace,
   );
 }
@@ -161,10 +163,14 @@ CapturedRoom _buildShapePriorRoom({
   required String id,
   required String name,
   required List<FloorPoint> shape,
-  required double height,
+  required double? height,
+  List<CapturedWallDimension> wallDimensions = const [],
   required RoomAcquisitionMethod method,
 }) {
   _validateIdentity(id, name, height);
+  if (height == null && wallDimensions.isEmpty) {
+    throw ArgumentError('Independent wall dimensions are required');
+  }
   final raw = [...shape];
   if (raw.length > 1 && raw.first.distanceTo(raw.last) < 1e-9) raw.removeLast();
   if (raw.length < 3) throw ArgumentError('Invalid shape prior');
@@ -185,6 +191,7 @@ CapturedRoom _buildShapePriorRoom({
     id: id,
     name: name,
     height: height,
+    wallDimensions: wallDimensions,
     corners: ordered,
     method: method,
     measurementMode: RoomMeasurementMode.wallConstraints,
@@ -242,7 +249,8 @@ CapturedRoom _buildCalibratedRoom({
 CapturedRoom _manualRoom({
   required String id,
   required String name,
-  required double height,
+  required double? height,
+  List<CapturedWallDimension> wallDimensions = const [],
   required List<FloorPoint> corners,
   required RoomAcquisitionMethod method,
   bool authoritativeLengths = false,
@@ -257,7 +265,8 @@ CapturedRoom _manualRoom({
     id: id,
     name: name.trim(),
     corners: corners,
-    height: RoomHeight(height, HeightSource.manual),
+    height: height == null ? null : RoomHeight(height, HeightSource.manual),
+    wallDimensions: wallDimensions,
     openings: const [],
     boxes: const [],
     references: authoritativeLengths
@@ -276,11 +285,11 @@ CapturedRoom _manualRoom({
   );
 }
 
-void _validateIdentity(String id, String name, double height) {
+void _validateIdentity(String id, String name, double? height) {
   if (id.trim().isEmpty || name.trim().isEmpty) {
     throw ArgumentError('Room id and name are required');
   }
-  if (!height.isFinite || height <= 0) {
+  if (height != null && (!height.isFinite || height <= 0)) {
     throw ArgumentError('Room height must be positive');
   }
 }
