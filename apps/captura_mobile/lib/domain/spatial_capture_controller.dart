@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 
 import '../data/services/ar_capture_channel.dart';
@@ -100,7 +102,13 @@ class SpatialCaptureController extends ChangeNotifier {
 
   String? get ownerId => _session.account?.id;
   bool get supportsFloorplanInterpretation => _floorplanInterpreter != null;
-  FloorplanTraceMetadata? traceForRoom(String roomId) => _traces[roomId];
+  FloorplanTraceMetadata? traceForRoom(String roomId) {
+    final trace = _traces[roomId];
+    if (trace == null || trace.visualDraft != null) return trace;
+    final ownerId = trace.documentOwnerRoomId;
+    final document = ownerId == null ? null : _traces[ownerId]?.visualDraft;
+    return document == null ? trace : trace.withResolvedVisualDraft(document);
+  }
 
   /// Checks ARCore only when the agent explicitly chooses automatic capture.
   Future<ArAvailability> arAvailability() => _ar.availability();
@@ -417,7 +425,9 @@ class SpatialCaptureController extends ChangeNotifier {
     int? referenceEdge,
     double? referenceMeters,
     List<ReferenceMeasurement> measurements = const [],
-    required double height,
+    List<FloorplanTraceOpening> openings = const [],
+    FloorplanVisualDraft? visualDraft,
+    double? height,
   }) async {
     if (ownerId == null) return _noSessionMessage;
     if (await floorplanSourceBytes(sourceId) == null) {
@@ -425,7 +435,16 @@ class SpatialCaptureController extends ChangeNotifier {
     }
     final previous = roomId == null ? null : _room(roomId);
     final previousTrace = roomId == null ? null : _traces[roomId];
+    final geometryChanged =
+        previousTrace == null ||
+        previousTrace.vertices.length != normalizedTrace.length ||
+        Iterable<int>.generate(normalizedTrace.length).any(
+          (index) =>
+              previousTrace.vertices[index].distanceTo(normalizedTrace[index]) >
+              1e-9,
+        );
     if (previous != null &&
+        geometryChanged &&
         (previous.openings.isNotEmpty ||
             previous.boxes.isNotEmpty ||
             (previous.references.isNotEmpty &&
@@ -440,35 +459,155 @@ class SpatialCaptureController extends ChangeNotifier {
     try {
       final legacy =
           previous?.measurementMode == RoomMeasurementMode.legacyUniform;
+      if (visualDraft != null && visualDraft.rooms.length > 1) {
+        return _saveMultiroomFloorplan(
+          editedRoomId: roomId,
+          fallbackRoomId: id,
+          fallbackName: name,
+          sourceId: sourceId,
+          contentType: contentType,
+          imageWidth: imageWidth,
+          imageHeight: imageHeight,
+          document: visualDraft,
+          height: height,
+        );
+      }
+      if (previousTrace?.draftProblem != null && visualDraft == null) {
+        return 'El documento visual guardado no se pudo leer. Volvé a '
+            'trazar el ambiente para reemplazarlo.';
+      }
+      // The visual document is the authority whenever the caller supplies it.
+      // Legacy parameters are only imported for evidence the document does not
+      // already own, so neither collection can compete with the other.
+      var document = visualDraft?.rekeySingleRoom(id);
+      if (document != null) {
+        document = _importLegacyEvidence(
+          document,
+          roomId: id,
+          measurements: measurements,
+          openings: openings,
+        );
+        if (document.validate().isNotEmpty) {
+          return 'El documento visual contiene relaciones o geometría inválidas.';
+        }
+      }
+      final editorTrace = document?.contourForRoom(id);
+      if (document != null && editorTrace == null) {
+        return 'No pudimos derivar el perímetro del documento visual.';
+      }
+      final traceForRoom = editorTrace ?? normalizedTrace;
+      final projectedWallDimensions = document == null
+          ? const <CapturedWallDimension>[]
+          : [
+              for (final wallId in document.wallIdsForRoom(id))
+                if (document.authoritativeWallLength(wallId) case final length?)
+                  if (document.authoritativeWallHeight(wallId)
+                      case final wallHeight?)
+                    CapturedWallDimension(
+                      wallId: wallId,
+                      lengthM: length.meters,
+                      heightM: wallHeight.meters,
+                    ),
+            ];
+      final hasCompleteWallDimensions =
+          document != null &&
+          projectedWallDimensions.length == document.wallIdsForRoom(id).length;
+      if (legacy && height == null) {
+        return 'La captura heredada requiere una altura general válida.';
+      }
+      if (!legacy && !hasCompleteWallDimensions && height == null) {
+        return 'Completá el largo y alto de cada pared antes de continuar.';
+      }
+      final traceOpenings = document == null
+          ? openings
+          : _openingsFromDocument(document, id);
       var room = legacy
           ? buildCalibratedFloorplanTraceRoom(
               id: id,
               name: name,
-              normalizedTrace: normalizedTrace,
+              normalizedTrace: traceForRoom,
               imageWidth: imageWidth,
               imageHeight: imageHeight,
               referenceEdge: referenceEdge ?? previousTrace!.referenceEdge!,
               referenceMeters:
                   referenceMeters ?? previousTrace!.referenceMeters!,
-              height: height,
+              height: height!,
             )
           : buildWallBasedFloorplanRoom(
               id: id,
               name: name,
-              normalizedTrace: normalizedTrace,
+              normalizedTrace: traceForRoom,
               imageWidth: imageWidth,
               imageHeight: imageHeight,
-              height: height,
+              height: hasCompleteWallDimensions ? null : height,
+              wallDimensions: hasCompleteWallDimensions
+                  ? projectedWallDimensions
+                  : const [],
             );
-      if (previous?.measurementMode == RoomMeasurementMode.wallConstraints) {
-        room = room.copyWith(references: measurements);
-      } else if (!legacy) {
-        room = room.copyWith(references: measurements);
-      }
-      if (room.measurementMode == RoomMeasurementMode.wallConstraints) {
-        final fitted = fitConfirmedWallLengths(room);
-        if (!fitted.isCoherent) return fitted.message;
-        room = room.copyWith(corners: fitted.corners);
+      if (!legacy) {
+        // Compatibility projection: the canonical room keeps receiving one
+        // reference per edge, but they are derived from the document.
+        room = room.copyWith(
+          wallDimensions: hasCompleteWallDimensions
+              ? projectedWallDimensions
+              : const [],
+          clearHeight: hasCompleteWallDimensions,
+          references: document == null
+              ? measurements
+              : _measurementsFromDocument(
+                  document,
+                  roomId: id,
+                  contour: traceForRoom,
+                  imageWidth: imageWidth,
+                  imageHeight: imageHeight,
+                ),
+        );
+        if (document != null) {
+          final canonicalOpenings = <RoomOpening>[];
+          for (final opening in document.openings) {
+            final wallId = opening.wallId;
+            final length = wallId == null
+                ? null
+                : document.authoritativeWallLength(wallId);
+            final width = opening.widthM;
+            final openingHeight = opening.heightM;
+            final offset = opening.offsetFromWallStartM;
+            final edge = wallId == null
+                ? null
+                : document.edgeIndexForWall(id, wallId);
+            if (length == null ||
+                width == null ||
+                openingHeight == null ||
+                offset == null ||
+                edge == null ||
+                opening.type == VisualOpeningType.unknown ||
+                (opening.type == VisualOpeningType.window &&
+                    opening.sillHeightM == null)) {
+              continue;
+            }
+            canonicalOpenings.add(
+              RoomOpening(
+                id: opening.id,
+                edgeIndex: edge,
+                wallId: wallId,
+                offsetFromWallStartM: offset,
+                position: (offset + width / 2) / length.meters,
+                width: width,
+                height: openingHeight,
+                type: opening.type == VisualOpeningType.door
+                    ? OpeningType.door
+                    : OpeningType.window,
+                sillHeight: opening.type == VisualOpeningType.door
+                    ? 0
+                    : opening.sillHeightM,
+              ),
+            );
+          }
+          room = room.copyWith(openings: canonicalOpenings);
+        }
+        if (hasContradictoryConfirmedWallLengths(room)) {
+          return 'Las medidas ingresadas no permiten cerrar el ambiente. Revisá las paredes marcadas.';
+        }
       }
       final replacedSourceId = _traces[id]?.sourceId;
       await _change(
@@ -488,9 +627,11 @@ class SpatialCaptureController extends ChangeNotifier {
             contentType: contentType,
             imageWidth: imageWidth,
             imageHeight: imageHeight,
-            vertices: [...normalizedTrace],
+            vertices: [...traceForRoom],
             referenceEdge: referenceEdge,
             referenceMeters: referenceMeters,
+            openings: [...traceOpenings],
+            visualDraft: document,
           ),
         },
       );
@@ -505,6 +646,447 @@ class SpatialCaptureController extends ChangeNotifier {
     } on ArgumentError {
       return 'Revisá el trazado, la medida real y la altura del ambiente.';
     }
+  }
+
+  String _documentOwnerOf(FloorplanTraceMetadata trace) =>
+      trace.documentOwnerRoomId ?? trace.roomId;
+
+  double _floorplanDocumentScale(
+    FloorplanVisualDraft document,
+    int imageWidth,
+    int imageHeight,
+  ) {
+    var longest = 0.0;
+    for (final wall in document.walls) {
+      final start = FloorPoint(
+        wall.start.x * imageWidth,
+        wall.start.z * imageHeight,
+      );
+      final end = FloorPoint(wall.end.x * imageWidth, wall.end.z * imageHeight);
+      longest = math.max(longest, start.distanceTo(end));
+    }
+    if (!longest.isFinite || longest <= 1e-9) {
+      throw ArgumentError('Invalid floorplan document scale');
+    }
+    // Shape-prior previews intentionally remain approximate. A single scale
+    // for the whole document preserves relative room placement without
+    // promoting image geometry to authoritative metric evidence.
+    return 4 / longest;
+  }
+
+  ({List<FloorPoint> corners, RoomPlacement placement})
+  _floorplanProjectionFrame({
+    required List<FloorPoint> contour,
+    required int imageWidth,
+    required int imageHeight,
+    required double scale,
+  }) {
+    final raw = [
+      for (final point in contour)
+        FloorPoint(point.x * imageWidth, point.z * imageHeight),
+    ];
+    if (raw.length < 3) throw ArgumentError('Invalid floorplan room contour');
+    final ordered = signedArea(raw) < 0
+        ? [raw.first, ...raw.skip(1).toList().reversed]
+        : raw;
+    final origin = ordered.first;
+    final first = ordered[1] - origin;
+    if (first.length <= 1e-9) {
+      throw ArgumentError('Invalid floorplan room first edge');
+    }
+    final angle = math.atan2(first.z, first.x);
+    final local = [
+      for (final point in ordered) (point - origin).rotate(-angle).scale(scale),
+    ];
+    return (
+      corners: local,
+      placement: RoomPlacement(
+        x: origin.x * scale,
+        z: origin.z * scale,
+        rotationDegrees: angle * 180 / math.pi,
+      ),
+    );
+  }
+
+  FloorplanVisualDraft _withoutVisualRoom(
+    FloorplanVisualDraft document,
+    String visualRoomId,
+  ) {
+    final rooms = [
+      for (final room in document.rooms)
+        if (room.id != visualRoomId) room,
+    ];
+    final roomIds = {for (final room in rooms) room.id};
+    final walls = <VisualWallSegment>[];
+    final keptWallIds = <String>{};
+    for (final wall in document.walls) {
+      final memberships = [
+        for (final roomId in wall.roomIds)
+          if (roomIds.contains(roomId)) roomId,
+      ];
+      if (memberships.isEmpty) continue;
+      walls.add(
+        VisualWallSegment(
+          id: wall.id,
+          start: wall.start,
+          end: wall.end,
+          roomIds: memberships,
+          manuallyEdited: wall.manuallyEdited,
+        ),
+      );
+      keptWallIds.add(wall.id);
+    }
+    return document.copyWith(
+      walls: walls,
+      rooms: rooms,
+      openings: [
+        for (final opening in document.openings)
+          if (opening.wallId == null || keptWallIds.contains(opening.wallId))
+            opening,
+      ],
+      measurements: [
+        for (final measurement in document.measurements)
+          if (measurement.wallId == null ||
+              keptWallIds.contains(measurement.wallId))
+            measurement,
+      ],
+    );
+  }
+
+  Future<String?> _saveMultiroomFloorplan({
+    required String? editedRoomId,
+    required String fallbackRoomId,
+    required String fallbackName,
+    required String sourceId,
+    required String contentType,
+    required int imageWidth,
+    required int imageHeight,
+    required FloorplanVisualDraft document,
+    required double? height,
+  }) async {
+    final errors = document.validate();
+    if (errors.isNotEmpty) {
+      return 'El documento visual contiene relaciones o geometrÃ­a invÃ¡lidas.';
+    }
+
+    final editedTrace = editedRoomId == null ? null : _traces[editedRoomId];
+    final ownerId = editedTrace == null
+        ? fallbackRoomId
+        : _documentOwnerOf(editedTrace);
+    final groupTraces = <FloorplanTraceMetadata>[
+      for (final trace in _traces.values)
+        if (_documentOwnerOf(trace) == ownerId) trace,
+    ];
+    final existingByRegion = {
+      for (final trace in groupTraces)
+        if (trace.visualRoomId != null) trace.visualRoomId!: trace,
+    };
+    final usedRoomIds = {for (final room in _capture.rooms) room.id};
+    for (final trace in groupTraces) {
+      usedRoomIds.remove(trace.roomId);
+    }
+
+    String allocateRoomId() {
+      var index = _capture.rooms.length + 1;
+      while (usedRoomIds.contains('room-$index')) index++;
+      final value = 'room-$index';
+      usedRoomIds.add(value);
+      return value;
+    }
+
+    final projectionIds = <String, String>{};
+    for (final (index, region) in document.rooms.indexed) {
+      final existing = existingByRegion[region.id]?.roomId;
+      final projectionId =
+          existing ??
+          (index == 0 && !usedRoomIds.contains(ownerId)
+              ? ownerId
+              : allocateRoomId());
+      projectionIds[region.id] = projectionId;
+      usedRoomIds.add(projectionId);
+    }
+
+    final resultingProjectionIds = projectionIds.values.toSet();
+    final canonicalOwnerId = resultingProjectionIds.contains(ownerId)
+        ? ownerId
+        : resultingProjectionIds.first;
+    final documentScale = _floorplanDocumentScale(
+      document,
+      imageWidth,
+      imageHeight,
+    );
+
+    final projectedRooms = <CapturedRoom>[];
+    final projectedTraces = <String, FloorplanTraceMetadata>{};
+    for (final (index, region) in document.rooms.indexed) {
+      final projectionId = projectionIds[region.id]!;
+      final contour = document.contourForRoom(region.id);
+      if (contour == null) {
+        return 'No pudimos derivar el perÃ­metro de uno de los ambientes.';
+      }
+      final wallIds = document.wallIdsForRoom(region.id);
+      final wallDimensions = <CapturedWallDimension>[
+        for (final wallId in wallIds)
+          if (document.authoritativeWallLength(wallId) case final length?)
+            if (document.authoritativeWallHeight(wallId) case final wallHeight?)
+              CapturedWallDimension(
+                wallId: wallId,
+                lengthM: length.meters,
+                heightM: wallHeight.meters,
+              ),
+      ];
+      final complete = wallDimensions.length == wallIds.length;
+      if (!complete && height == null) {
+        return 'CompletÃ¡ el largo y alto de cada pared antes de continuar.';
+      }
+      final previousRoom = _room(projectionId);
+      final regionName = region.name?.trim();
+      final roomName = regionName != null && regionName.isNotEmpty
+          ? regionName
+          : previousRoom?.name ??
+                (index == 0 && fallbackName.trim().isNotEmpty
+                    ? fallbackName.trim()
+                    : 'Ambiente ${index + 1}');
+      final frame = _floorplanProjectionFrame(
+        contour: contour,
+        imageWidth: imageWidth,
+        imageHeight: imageHeight,
+        scale: documentScale,
+      );
+      final preservedPlacement =
+          previousRoom != null &&
+              previousRoom.placement != RoomPlacement.identity
+          ? previousRoom.placement
+          : frame.placement;
+      var room =
+          buildWallBasedFloorplanRoom(
+            id: projectionId,
+            name: roomName,
+            normalizedTrace: contour,
+            imageWidth: imageWidth,
+            imageHeight: imageHeight,
+            height: complete ? null : height,
+            wallDimensions: complete ? wallDimensions : const [],
+          ).copyWith(
+            corners: frame.corners,
+            references: _measurementsFromDocument(
+              document,
+              roomId: region.id,
+              contour: contour,
+              imageWidth: imageWidth,
+              imageHeight: imageHeight,
+            ),
+            placement: preservedPlacement,
+            boxes: previousRoom?.boxes,
+          );
+      room = room.copyWith(
+        openings: _canonicalOpeningsForRoom(document, region.id),
+      );
+      if (hasContradictoryConfirmedWallLengths(room)) {
+        return 'Las medidas ingresadas no permiten cerrar el ambiente. RevisÃ¡ las paredes marcadas.';
+      }
+      projectedRooms.add(room);
+      projectedTraces[projectionId] = FloorplanTraceMetadata(
+        roomId: projectionId,
+        visualRoomId: region.id,
+        documentOwnerRoomId: canonicalOwnerId,
+        sourceId: sourceId,
+        contentType: contentType,
+        imageWidth: imageWidth,
+        imageHeight: imageHeight,
+        vertices: contour,
+        openings: _openingsFromDocument(document, region.id),
+        visualDraft: projectionId == canonicalOwnerId ? document : null,
+      );
+    }
+
+    final previousSourceIds = {for (final trace in groupTraces) trace.sourceId};
+    final groupRoomIds = {for (final trace in groupTraces) trace.roomId};
+    final removedProjectionIds = groupRoomIds.difference(
+      resultingProjectionIds,
+    );
+    await _change(
+      _capture.copyWith(
+        rooms: [
+          for (final room in _capture.rooms)
+            if (!groupRoomIds.contains(room.id)) room,
+          ...projectedRooms,
+        ],
+        connections: [
+          for (final connection in _capture.connections)
+            if (!removedProjectionIds.contains(connection.roomA) &&
+                !removedProjectionIds.contains(connection.roomB))
+              connection,
+        ],
+      ),
+      traces: {
+        for (final entry in _traces.entries)
+          if (!groupRoomIds.contains(entry.key)) entry.key: entry.value,
+        ...projectedTraces,
+      },
+    );
+    debugPrint(
+      '[RoomForge][MultiroomConfirm] canonicalRooms=${document.rooms.length} '
+      'physicalWalls=${document.walls.length} openings=${document.openings.length} '
+      'projectedRooms=${projectedRooms.length} owner=$canonicalOwnerId',
+    );
+    for (final previousSourceId in previousSourceIds) {
+      if (previousSourceId != sourceId &&
+          !_referencesSource(previousSourceId)) {
+        await discardFloorplanSource(previousSourceId);
+      }
+    }
+    return null;
+  }
+
+  List<RoomOpening> _canonicalOpeningsForRoom(
+    FloorplanVisualDraft document,
+    String visualRoomId,
+  ) {
+    final wallIds = document.wallIdsForRoom(visualRoomId).toSet();
+    return [
+      for (final opening in document.openings)
+        if (opening.wallId case final wallId? when wallIds.contains(wallId))
+          if (document.authoritativeWallLength(wallId) case final length?)
+            if (opening.widthM case final width?)
+              if (opening.heightM case final openingHeight?)
+                if (opening.offsetFromWallStartM case final offset?)
+                  if (document.edgeIndexForWall(visualRoomId, wallId)
+                      case final edge?)
+                    if (opening.type != VisualOpeningType.unknown &&
+                        (opening.type != VisualOpeningType.window ||
+                            opening.sillHeightM != null))
+                      RoomOpening(
+                        id: opening.id,
+                        edgeIndex: edge,
+                        wallId: wallId,
+                        offsetFromWallStartM: offset,
+                        position: (offset + width / 2) / length.meters,
+                        width: width,
+                        height: openingHeight,
+                        type: opening.type == VisualOpeningType.door
+                            ? OpeningType.door
+                            : OpeningType.window,
+                        sillHeight: opening.type == VisualOpeningType.door
+                            ? 0
+                            : opening.sillHeightM,
+                      ),
+    ];
+  }
+
+  /// Imports legacy parameters only where the document owns no evidence yet.
+  /// Derived measurements stay derived and are never persisted as evidence.
+  FloorplanVisualDraft _importLegacyEvidence(
+    FloorplanVisualDraft document, {
+    required String roomId,
+    required List<ReferenceMeasurement> measurements,
+    required List<FloorplanTraceOpening> openings,
+  }) {
+    final wallIds = document.wallIdsForRoom(roomId);
+    var imported = document;
+    if (imported.openings.isEmpty) {
+      for (final (index, opening) in openings.indexed) {
+        final edge = opening.edgeIndex;
+        imported = imported.withOpening(
+          VisualOpeningDraft(
+            id: '$roomId:opening:$index',
+            type: switch (opening.type) {
+              FloorplanTraceOpeningType.door => VisualOpeningType.door,
+              FloorplanTraceOpeningType.window => VisualOpeningType.window,
+              FloorplanTraceOpeningType.unknown => VisualOpeningType.unknown,
+            },
+            wallId: edge == null || edge < 0 || edge >= wallIds.length
+                ? null
+                : wallIds[edge],
+            position: opening.position,
+            normalizedWidth: opening.normalizedWidth,
+            manuallyPlaced: opening.manuallyPlaced,
+            confidence: opening.confidence,
+          ),
+        );
+      }
+    }
+    for (final (index, measurement) in measurements.indexed) {
+      if (measurement.provenance == WallMeasurementProvenance.derivedScale ||
+          measurement.provenance == WallMeasurementProvenance.derivedGeometry ||
+          !measurement.referenceMeters.isFinite ||
+          measurement.referenceMeters <= 0) {
+        continue;
+      }
+      final edge = measurement.edgeIndex;
+      final wallId = edge >= 0 && edge < wallIds.length ? wallIds[edge] : null;
+      if (wallId != null && imported.hasMeasurementForWall(wallId)) continue;
+      imported = imported.withMeasurement(
+        VisualWallMeasurementEvidence(
+          id: '$roomId:measurement:$index',
+          wallId: wallId,
+          meters: measurement.referenceMeters,
+          provenance: measurement.provenance.wire,
+          requiresReview:
+              wallId == null ||
+              measurement.provenance != WallMeasurementProvenance.user,
+        ),
+      );
+    }
+    return imported;
+  }
+
+  /// Compatibility projection: persisted openings remain keyed by [wallId],
+  /// the legacy edge index is derived from the room traversal.
+  List<FloorplanTraceOpening> _openingsFromDocument(
+    FloorplanVisualDraft document,
+    String roomId,
+  ) => [
+    for (final opening in document.openings)
+      FloorplanTraceOpening(
+        edgeIndex: opening.wallId == null
+            ? null
+            : document.edgeIndexForWall(roomId, opening.wallId!),
+        type: switch (opening.type) {
+          VisualOpeningType.door => FloorplanTraceOpeningType.door,
+          VisualOpeningType.window => FloorplanTraceOpeningType.window,
+          VisualOpeningType.unknown => FloorplanTraceOpeningType.unknown,
+        },
+        position: opening.position,
+        normalizedWidth: opening.normalizedWidth,
+        confidence: opening.confidence,
+        manuallyPlaced: opening.manuallyPlaced,
+      ),
+  ];
+
+  /// Compatibility projection: adapts the document's stable wall IDs to the
+  /// edge-indexed solver API. Only evidence the user explicitly accepted is
+  /// eligible to establish authoritative scale; pending provider detections
+  /// stay in the document as reviewable evidence. Derived values only live in
+  /// this projection.
+  List<ReferenceMeasurement> _measurementsFromDocument(
+    FloorplanVisualDraft document, {
+    required String roomId,
+    required List<FloorPoint> contour,
+    required int imageWidth,
+    required int imageHeight,
+  }) {
+    final evidence = <ReferenceMeasurement>[
+      // Heights are physical evidence for a wall, but never horizontal
+      // references. The legacy metric solver only accepts wall lengths.
+      for (final measurement in document.authoritativeLengthMeasurements)
+        if (document.edgeIndexForWall(roomId, measurement.wallId!)
+            case final edge?)
+          ReferenceMeasurement(
+            edgeIndex: edge,
+            referenceMeters: measurement.meters,
+            provenance: WallMeasurementProvenance.fromWire(
+              measurement.provenance,
+            ),
+          ),
+    ];
+    return solveFloorplanMetrics(
+      semanticContour: [
+        for (final point in contour)
+          FloorPoint(point.x * imageWidth, point.z * imageHeight),
+      ],
+      existingMeasurements: evidence,
+    ).measurements;
   }
 
   /// Hands the capture package to the upload queue and says what happens
@@ -549,6 +1131,48 @@ class SpatialCaptureController extends ChangeNotifier {
 
   Future<void> removeRoom(String roomId) async {
     final trace = _traces[roomId];
+    final resolved = traceForRoom(roomId);
+    final visualRoomId = trace?.visualRoomId;
+    final document = resolved?.visualDraft;
+
+    // A floorplan room card is a projection of one canonical room region.
+    // Removing one card therefore removes only that region from the shared
+    // visual document, then reconciles every surviving projection atomically.
+    if (trace != null &&
+        visualRoomId != null &&
+        document != null &&
+        document.rooms.length > 1) {
+      final nextDocument = _withoutVisualRoom(document, visualRoomId);
+      FloorplanTraceMetadata? survivorTrace;
+      for (final candidate in _traces.values) {
+        final candidateRoomId = candidate.visualRoomId;
+        if (_documentOwnerOf(candidate) == _documentOwnerOf(trace) &&
+            candidateRoomId != null &&
+            candidateRoomId != visualRoomId &&
+            nextDocument.room(candidateRoomId) != null) {
+          survivorTrace = candidate;
+          break;
+        }
+      }
+      final survivor = survivorTrace;
+      if (survivor != null) {
+        final survivorRoom = _room(survivor.roomId);
+        final message = await _saveMultiroomFloorplan(
+          editedRoomId: survivor.roomId,
+          fallbackRoomId: survivor.roomId,
+          fallbackName: survivorRoom?.name ?? 'Ambiente',
+          sourceId: survivor.sourceId,
+          contentType: survivor.contentType,
+          imageWidth: survivor.imageWidth,
+          imageHeight: survivor.imageHeight,
+          document: nextDocument,
+          height: survivorRoom?.height?.value,
+        );
+        if (message != null) _fail(message);
+        return;
+      }
+    }
+
     await _change(
       _capture.copyWith(
         rooms: [
@@ -642,8 +1266,8 @@ class SpatialCaptureController extends ChangeNotifier {
             RoomAcquisitionMethod.floorplanTrace,
           }.contains(room.acquisition.method) &&
           room.measurementMode == RoomMeasurementMode.wallConstraints &&
-          !fitConfirmedWallLengths(room).isCoherent)
-        '${room.name}: ${fitConfirmedWallLengths(room).message}',
+          hasContradictoryConfirmedWallLengths(room))
+        '${room.name}: Las medidas ingresadas no permiten cerrar el ambiente. Revisá las paredes marcadas.',
       if (!hasCompleteWallMeasurements(room))
         '${room.name}: faltan medidas por confirmar en una o más paredes.',
       for (final issue in validateContour(room.corners))
@@ -702,6 +1326,12 @@ class SpatialCaptureController extends ChangeNotifier {
     _message = null;
     _notify();
     try {
+      final uploadDocument = sceneUploadDocument(_preview!.document);
+      debugPrint(
+        '[RoomForge][SceneUpload] rooms=${(uploadDocument['rooms']! as List).length} '
+        'walls=${(uploadDocument['walls']! as List).length} '
+        'openings=${(uploadDocument['openings']! as List).length}',
+      );
       final result = await _sceneApi.save(
         accessToken: credentials.token,
         agencyId: credentials.agencyId,
@@ -723,10 +1353,20 @@ class SpatialCaptureController extends ChangeNotifier {
               'desde el panel). Tu captura sigue guardada en el teléfono.';
       }
     } on StaffAuthFailure catch (failure) {
+      debugPrint(
+        '[RoomForge][SceneUpload] result=rejected status=${failure.statusCode} '
+        'code=${failure.code}',
+      );
       _syncState = CaptureSyncState.failed;
+      final validationFailure =
+          failure.statusCode == 400 ||
+          failure.statusCode == 422 ||
+          const {'scene_invalid', kValidationError}.contains(failure.code);
       _message = failure.isNetworkFailure
           ? 'Sin conexión. Tu captura quedó guardada en el teléfono; '
                 'reintentá cuando tengas red.'
+          : validationFailure
+          ? 'No se pudo enviar la escena. Revisá los ambientes e intentá nuevamente.'
           : failure.detail;
     } finally {
       _busy = false;

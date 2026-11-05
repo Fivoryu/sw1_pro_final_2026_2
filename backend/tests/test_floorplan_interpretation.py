@@ -12,6 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings
+from app.modules.floorplan_interpretation import service as floorplan_service
 from app.modules.floorplan_interpretation.schemas import FloorplanInterpretation
 from app.modules.floorplan_interpretation.service import (
     LOGGER,
@@ -148,6 +149,142 @@ def test_system_prompt_documents_semantic_room_interpretation_rules() -> None:
     assert "return json only" in prompt
 
 
+def test_system_prompt_documents_semantic_wall_fragment_contract() -> None:
+    prompt = " ".join(SYSTEM_PROMPT.split()).lower()
+
+    assert "contour points represent semantic architectural walls" in prompt
+    assert "room boundary segments" in prompt
+    assert "doors and windows are openings in walls" in prompt
+    assert "must not create additional semantic walls" in prompt
+    assert "collinear or nearly-collinear" in prompt
+    assert "separated by an opening or drawing gap" in prompt
+    assert "one semantic wall when architecturally continuous" in prompt
+    assert "furniture, dimensions, text, labels" in prompt
+    assert "door swing arcs" in prompt
+    assert "window detail strokes" in prompt
+    assert "selected room perimeter" in prompt
+    assert "rather than all visible linework" in prompt
+
+
+def test_system_prompt_documents_first_attempt_semantic_topology_contract() -> None:
+    prompt = " ".join(SYSTEM_PROMPT.split()).lower()
+
+    assert "dominant room" in prompt
+    assert "semantic perimeter" in prompt
+    assert "one contour vertex per real architectural corner" in prompt
+    assert "closed by implication" in prompt
+    assert "do not repeat the first contour point" in prompt
+    assert "simple, non-degenerate, non-self-intersecting" in prompt
+
+
+def test_system_prompt_excludes_drawing_noise_from_first_attempt_contours() -> None:
+    prompt = " ".join(SYSTEM_PROMPT.split()).lower()
+
+    assert "do not create contour vertices or walls" in prompt
+    assert "door swing arcs" in prompt
+    assert "window detail strokes" in prompt
+    assert "wall thickness bands" in prompt
+    assert "furniture" in prompt
+    assert "text" in prompt
+    assert "dimension lines" in prompt
+    assert "construction lines" in prompt
+    assert "auxiliary lines" in prompt
+
+
+def test_system_prompt_protects_irregular_geometry_without_target_wall_count() -> None:
+    prompt = " ".join(SYSTEM_PROMPT.split()).lower()
+
+    assert "l-shaped" in prompt
+    assert "concave" in prompt
+    assert "angled" in prompt
+    assert "pentagonal" in prompt
+    assert "irregular geometry" in prompt
+    assert "do not force a rectangle" in prompt
+    assert "do not add or remove architectural walls" in prompt
+    assert "target wall count" in prompt
+
+
+def test_system_prompt_prioritizes_topology_before_opening_and_dimension_evidence() -> None:
+    prompt = " ".join(SYSTEM_PROMPT.split()).lower()
+
+    assert "establish semantic topology before interpreting openings or dimensions" in prompt
+
+
+def test_system_prompt_documents_opening_geometry_contract() -> None:
+    prompt = " ".join(SYSTEM_PROMPT.split()).lower()
+
+    assert "position" in prompt
+    assert "normalizedwidth" in prompt
+    assert "normalized center" in prompt
+    assert "associated wall" in prompt
+    assert "fraction of the associated wall" in prompt
+    assert "position is in [0,1]" in prompt
+    assert "normalizedwidth is in (0,1]" in prompt
+    assert "only when visually defensible" in prompt
+    assert "return null rather than guessing" in prompt
+    assert "never fabricate opening position or width" in prompt
+
+
+def test_system_prompt_unambiguously_defines_opening_center_geometry() -> None:
+    prompt = " ".join(SYSTEM_PROMPT.split()).lower()
+
+    assert "position is the normalized center" in prompt
+    assert "from contour[edgeindex] toward contour[(edgeindex + 1) % wallcount]" in prompt
+    assert "position=0 is its start, position=0.5 is its midpoint, and position=1 is its end" in prompt
+    assert "never the opening start, opening end, nearest jamb" in prompt
+    assert "physical opening span along that semantic wall divided by the semantic wall length" in prompt
+    assert "if the exact center is not defensible, return position=null" in prompt
+    assert "if the width is not defensible, return normalizedwidth=null" in prompt
+    assert "never fabricate precise opening geometry" in prompt
+
+
+def test_system_prompt_requires_exhaustive_semantic_wall_opening_inspection() -> None:
+    prompt = " ".join(SYSTEM_PROMPT.split()).lower()
+
+    assert "after establishing semantic topology" in prompt
+    assert "inspect every semantic perimeter wall for openings" in prompt
+    assert "report every visually supported door or window" in prompt
+
+
+def test_system_prompt_classifies_doors_and_windows_from_independent_evidence() -> None:
+    prompt = " ".join(SYSTEM_PROMPT.split()).lower()
+
+    assert "classify each opening from its own visible architectural evidence" in prompt
+    assert "do not classify every wall gap as a door" in prompt
+    assert "window-specific visual evidence" in prompt
+    assert "remain window" in prompt
+    assert "nearby dimension label" in prompt
+
+
+def test_system_prompt_preserves_separate_physical_openings_as_separate_proposals() -> None:
+    prompt = " ".join(SYSTEM_PROMPT.split()).lower()
+
+    assert "one physical opening per opening proposal" in prompt
+    assert "do not merge separate physical openings" in prompt
+
+
+def test_system_prompt_prioritizes_opening_scan_after_topology_before_dimensions() -> None:
+    prompt = " ".join(SYSTEM_PROMPT.split()).lower()
+
+    topology_index = prompt.index("after establishing semantic topology")
+    opening_scan_index = prompt.index("inspect every semantic perimeter wall for openings")
+    dimensions_index = prompt.index("report dimensions")
+
+    assert topology_index < opening_scan_index < dimensions_index
+    assert "opening edgeindex only when wall association is visually defensible" in prompt
+
+
+def test_system_prompt_preserves_unknown_openings_and_rejects_opening_noise() -> None:
+    prompt = " ".join(SYSTEM_PROMPT.split()).lower()
+
+    assert "report every visually supported door or window" in prompt
+    assert 'if an opening is visible but its type is genuinely ambiguous, use type="unknown"' in prompt
+    assert (
+        "do not create openings from furniture, annotations, dimension lines, wall thickness, door swing arcs alone"
+        in prompt
+    )
+
+
 def _l_room_with_list_contour() -> dict[str, Any]:
     return {
         "status": "success",
@@ -211,7 +348,7 @@ def test_groq_normalizes_list_contour_to_canonical_points() -> None:
 )
 def test_groq_normalizes_strict_json_string_points(point: str) -> None:
     document = _l_room_with_list_contour()
-    room = cast(dict[str, Any], document["rooms"][0])
+    room = cast(dict[str, Any], cast(list[dict[str, Any]], document["rooms"])[0])
     cast(list[object], room["contour"])[0] = point
 
     async def run() -> FloorplanInterpretation:
@@ -388,6 +525,57 @@ def test_invalid_opening_edge_is_omitted_without_retry() -> None:
     assert calls == [1]
 
 
+def test_provider_wall_index_alias_preserves_incomplete_openings(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="roomforge.floorplan_interpretation")
+    document = _pentagon()
+    document["status"] = "success"
+    room = cast(list[dict[str, Any]], document["rooms"])[0]
+    room["openings"] = [
+        {
+            "wallIndex": 0,
+            "type": "window",
+            "position": 0.5,
+            "normalizedWidth": None,
+            "status": "proposed",
+        },
+        {
+            "wallIndex": 1,
+            "type": "window",
+            "position": 0.5,
+            "normalizedWidth": None,
+            "status": "proposed",
+        },
+        {
+            "wallIndex": 3,
+            "type": "door",
+            "position": 0.5,
+            "normalizedWidth": None,
+            "status": "proposed",
+        },
+    ]
+
+    async def run() -> FloorplanInterpretation:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: _provider_response(document))
+        ) as client:
+            return await GroqFloorplanInterpreter(
+                api_key="test-key", model="model", timeout_seconds=2, client=client
+            ).interpret(image=b"image", content_type="image/png")
+
+    result = asyncio.run(run())
+    assert len(result.rooms) == 1
+    room = result.rooms[0]
+    assert room.wall_count == 5
+    assert len(room.openings) == 3
+    assert [opening.type for opening in room.openings] == ["window", "window", "door"]
+    assert [opening.edge_index for opening in room.openings] == [0, 1, 3]
+    assert [opening.position for opening in room.openings] == [0.5, 0.5, 0.5]
+    assert all(opening.normalized_width is None for opening in room.openings)
+    assert "opening_wall_index_alias_normalized" in caplog.text
+
+
 def _many_wall_room(*, wall_count: int, with_dimension: bool) -> dict[str, object]:
     contour = [
         {
@@ -447,8 +635,122 @@ def test_extreme_oversegmentation_is_downgraded_to_needs_review(
     assert "low_quality_oversegmentation" in caplog.text
 
 
+def test_oversegmented_room_with_dimension_is_still_downgraded_to_needs_review(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="roomforge.floorplan_interpretation")
+    document = _many_wall_room(wall_count=23, with_dimension=True)
+
+    async def run() -> FloorplanInterpretation:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: _provider_response(document))
+        ) as client:
+            return await GroqFloorplanInterpreter(
+                api_key="test-key", model="model", timeout_seconds=2, client=client
+            ).interpret(image=b"image", content_type="image/png")
+
+    result = asyncio.run(run())
+    assert result.status == "needs_review"
+    assert len(result.rooms) == 1
+    assert result.rooms[0].wall_count == 23
+    assert len(result.rooms[0].dimensions) == 1
+    complete_openings = [
+        opening
+        for opening in result.rooms[0].openings
+        if opening.position is not None and opening.normalized_width is not None
+    ]
+    assert complete_openings == []
+    assert "low_quality_oversegmentation" in caplog.text
+
+
+def test_oversegmented_room_with_sparse_dimensions_is_downgraded_to_needs_review(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="roomforge.floorplan_interpretation")
+    document = _many_wall_room(wall_count=22, with_dimension=True)
+    room = cast(list[dict[str, Any]], document["rooms"])[0]
+    room["dimensions"] = [
+        {
+            "edgeIndex": 2,
+            "literalText": "2.0 m",
+            "value": 2.0,
+            "unit": "m",
+            "status": "proposed",
+            "provenance": "ai_detected",
+        },
+        {
+            "edgeIndex": 3,
+            "literalText": "1.8 m",
+            "value": 1.8,
+            "unit": "m",
+            "status": "proposed",
+            "provenance": "ai_detected",
+        },
+        {
+            "edgeIndex": 7,
+            "literalText": "3.1 m",
+            "value": 3.1,
+            "unit": "m",
+            "status": "proposed",
+            "provenance": "ai_detected",
+        },
+    ]
+
+    async def run() -> FloorplanInterpretation:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: _provider_response(document))
+        ) as client:
+            return await GroqFloorplanInterpreter(
+                api_key="test-key", model="model", timeout_seconds=2, client=client
+            ).interpret(image=b"image", content_type="image/png")
+
+    result = asyncio.run(run())
+    assert result.status == "needs_review"
+    assert len(result.rooms) == 1
+    assert result.rooms[0].wall_count == 22
+    assert len(result.rooms[0].contour) == 22
+    assert len(result.rooms[0].dimensions) == 3
+    complete_openings = [
+        opening
+        for opening in result.rooms[0].openings
+        if opening.position is not None and opening.normalized_width is not None
+    ]
+    assert complete_openings == []
+    assert (
+        "La propuesta automática presenta sobresegmentación y requiere corrección humana." in result.warnings
+    )
+    assert (
+        "Reintentar la interpretación o corregir la geometría manualmente." in result.information_still_needed
+    )
+    assert "low_quality_oversegmentation" in caplog.text
+
+
 def test_many_wall_irregular_room_is_not_rejected_by_wall_count_alone() -> None:
     document = _many_wall_room(wall_count=21, with_dimension=True)
+    room = cast(list[dict[str, Any]], document["rooms"])[0]
+    room["openings"] = [
+        {
+            "edgeIndex": 0,
+            "type": "window",
+            "position": 0.35,
+            "normalizedWidth": 0.18,
+            "status": "proposed",
+        },
+        {
+            "edgeIndex": 5,
+            "type": "door",
+            "position": 0.50,
+            "normalizedWidth": 0.16,
+            "status": "proposed",
+        },
+        {
+            "edgeIndex": 11,
+            "type": "window",
+            "position": 0.65,
+            "normalizedWidth": 0.20,
+            "status": "proposed",
+        },
+    ]
 
     async def run() -> FloorplanInterpretation:
         async with httpx.AsyncClient(
@@ -461,6 +763,138 @@ def test_many_wall_irregular_room_is_not_rejected_by_wall_count_alone() -> None:
     result = asyncio.run(run())
     assert result.status == "success"
     assert result.rooms[0].wall_count == 21
+    complete_openings = [
+        opening
+        for opening in result.rooms[0].openings
+        if opening.position is not None and opening.normalized_width is not None
+    ]
+    assert len(complete_openings) >= 3
+
+
+def _dense_turn_room(*, corroborated: bool) -> dict[str, object]:
+    """A scale-neutral, valid decagon with material turns but no micro-noise."""
+    wall_count = 10
+    contour = [
+        {
+            "x": 0.5 + 0.36 * math.cos(2 * math.pi * index / wall_count),
+            "y": 0.5 + 0.36 * math.sin(2 * math.pi * index / wall_count),
+        }
+        for index in range(wall_count)
+    ]
+    dimensions: list[dict[str, object]] = [
+        {
+            "edgeIndex": 0,
+            "literalText": "2.4 m",
+            "value": 2.4,
+            "unit": "m",
+            "status": "proposed",
+            "provenance": "ai_detected",
+        }
+    ]
+    openings: list[dict[str, object]] = [
+        {
+            "edgeIndex": 1,
+            "type": "window",
+            "position": 0.5,
+            "normalizedWidth": 0.2,
+            "status": "proposed",
+        }
+    ]
+    if corroborated:
+        dimensions.extend(
+            [
+                {
+                    "edgeIndex": 3,
+                    "literalText": "1.8 m",
+                    "value": 1.8,
+                    "unit": "m",
+                    "status": "proposed",
+                    "provenance": "ai_detected",
+                },
+                {
+                    "edgeIndex": 6,
+                    "literalText": "2.1 m",
+                    "value": 2.1,
+                    "unit": "m",
+                    "status": "proposed",
+                    "provenance": "ai_detected",
+                },
+            ]
+        )
+    return {
+        "status": "success",
+        "confidence": 0.88,
+        "rooms": [
+            {
+                "id": "dense-turn-room",
+                "label": "Irregular room",
+                "contour": contour,
+                "wallCount": wall_count,
+                "dimensions": dimensions,
+                "openings": openings,
+                "confidence": 0.88,
+            }
+        ],
+        "provenance": "ai_proposal",
+    }
+
+
+def test_dense_uncorroborated_structural_transitions_are_downgraded_non_destructively(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="roomforge.floorplan_interpretation")
+    document = _dense_turn_room(corroborated=False)
+    source_room = cast(dict[str, Any], cast(list[dict[str, Any]], document["rooms"])[0])
+    source_contour = cast(list[dict[str, float]], source_room["contour"])
+    source_dimensions = cast(list[dict[str, Any]], source_room["dimensions"])
+    source_openings = cast(list[dict[str, Any]], source_room["openings"])
+
+    async def run() -> FloorplanInterpretation:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: _provider_response(document))
+        ) as client:
+            return await GroqFloorplanInterpreter(
+                api_key="test-key", model="model", timeout_seconds=2, client=client
+            ).interpret(image=b"image", content_type="image/png")
+
+    result = asyncio.run(run())
+    room = result.rooms[0]
+    assert result.status == "needs_review"
+    assert [point.model_dump() for point in room.contour] == source_contour
+    assert [dimension.model_dump(by_alias=True) for dimension in room.dimensions] == source_dimensions
+    assert [opening.edge_index for opening in room.openings] == [source_openings[0]["edgeIndex"]]
+    assert [opening.type for opening in room.openings] == [source_openings[0]["type"]]
+    assert [opening.position for opening in room.openings] == [source_openings[0]["position"]]
+    assert [opening.normalized_width for opening in room.openings] == [source_openings[0]["normalizedWidth"]]
+    assert room.label == source_room["label"]
+    assert room.confidence == source_room["confidence"]
+    assert (
+        "La topología de la habitación contiene transiciones estructurales inusualmente densas y debe revisarse."
+        in result.warnings
+    )
+    assert (
+        "Confirmar si las transiciones del contorno representan muros arquitectónicos reales."
+        in result.information_still_needed
+    )
+    assert "low_quality_structural_complexity" in caplog.text
+    assert "semantic_contour_simplified" not in caplog.text
+
+
+def test_dense_irregular_room_with_multiple_independent_dimensions_remains_success() -> None:
+    document = _dense_turn_room(corroborated=True)
+
+    async def run() -> FloorplanInterpretation:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: _provider_response(document))
+        ) as client:
+            return await GroqFloorplanInterpreter(
+                api_key="test-key", model="model", timeout_seconds=2, client=client
+            ).interpret(image=b"image", content_type="image/png")
+
+    result = asyncio.run(run())
+    assert result.status == "success"
+    assert result.rooms[0].wall_count == 10
+    assert len(result.rooms[0].dimensions) == 3
 
 
 def test_multi_room_candidates_and_semantic_opening_are_preserved() -> None:
@@ -512,9 +946,476 @@ def _invalid_contour_document() -> dict[str, Any]:
     return document
 
 
+def _live_e_duplicate_closure_document() -> dict[str, Any]:
+    document = _l_room_with_list_contour()
+    room = cast(dict[str, Any], document["rooms"][0])
+    room["contour"] = [
+        {"x": 0.15, "y": 0.15},
+        {"x": 0.49, "y": 0.15},
+        {"x": 0.49, "y": 0.75},
+        {"x": 0.65, "y": 0.75},
+        {"x": 0.65, "y": 0.77},
+        {"x": 0.75, "y": 0.77},
+        {"x": 0.75, "y": 0.15},
+        {"x": 0.15, "y": 0.15},
+    ]
+    room["wallCount"] = 8
+    room["dimensions"] = []
+    room["openings"] = []
+    return document
+
+
+def _live_e_topology_failure_document() -> dict[str, object]:
+    document = _pentagon()
+    rooms = cast(list[dict[str, Any]], document["rooms"])
+    room = rooms[0]
+    room["contour"] = [
+        [0.15, 0.15],
+        [0.49, 0.15],
+        [0.49, 0.75],
+        [0.65, 0.75],
+        [0.65, 0.77],
+        [0.75, 0.77],
+        [0.75, 0.15],
+        [0.15, 0.15],
+    ]
+    room["wallCount"] = 7
+    room["dimensions"] = []
+    room["openings"] = []
+    return document
+
+
+def _topology_rescue_document() -> dict[str, object]:
+    document = _pentagon()
+    document["status"] = "success"
+    rooms = cast(list[dict[str, Any]], document["rooms"])
+    room = rooms[0]
+    room["contour"] = [
+        {"x": 0.15, "y": 0.15},
+        {"x": 0.75, "y": 0.15},
+        {"x": 0.75, "y": 0.75},
+        {"x": 0.15, "y": 0.75},
+    ]
+    room["wallCount"] = 4
+    room["dimensions"] = []
+    room["openings"] = []
+    return document
+
+
+def _topology_rescue_transport(
+    prompts: list[str], payloads: list[dict[str, Any]]
+) -> tuple[httpx.MockTransport, list[int]]:
+    outcomes = [
+        _provider_response(_live_e_topology_failure_document()),
+        _provider_response(_topology_rescue_document()),
+    ]
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(len(calls) + 1)
+        payload = cast(dict[str, Any], json.loads(request.content))
+        payloads.append(payload)
+        prompts.append(cast(str, payload["messages"][0]["content"][0]["text"]))
+        return outcomes[len(calls) - 1]
+
+    return httpx.MockTransport(handler), calls
+
+
+def _live_e_staircase_contour() -> list[dict[str, float]]:
+    return [
+        {"x": 0.14, "y": 0.15},
+        {"x": 0.50, "y": 0.15},
+        {"x": 0.50, "y": 0.16},
+        {"x": 0.75, "y": 0.16},
+        {"x": 0.75, "y": 0.75},
+        {"x": 0.65, "y": 0.75},
+        {"x": 0.65, "y": 0.77},
+        {"x": 0.49, "y": 0.77},
+        {"x": 0.49, "y": 0.75},
+        {"x": 0.14, "y": 0.75},
+        {"x": 0.14, "y": 0.15},
+    ]
+
+
+def _live_e_shallow_notch_contour() -> list[dict[str, float]]:
+    return [
+        {"x": 0.15, "y": 0.15},
+        {"x": 0.75, "y": 0.15},
+        {"x": 0.75, "y": 0.75},
+        {"x": 0.65, "y": 0.75},
+        {"x": 0.65, "y": 0.70},
+        {"x": 0.50, "y": 0.70},
+        {"x": 0.50, "y": 0.75},
+        {"x": 0.15, "y": 0.75},
+    ]
+
+
+def _noisy_orthogonal_l_contour() -> list[dict[str, float]]:
+    return [
+        {"x": 0.15, "y": 0.86},
+        {"x": 0.15, "y": 0.30},
+        {"x": 0.14, "y": 0.28},
+        {"x": 0.15, "y": 0.26},
+        {"x": 0.15, "y": 0.24},
+        {"x": 0.14, "y": 0.22},
+        {"x": 0.15, "y": 0.20},
+        {"x": 0.15, "y": 0.18},
+        {"x": 0.14, "y": 0.16},
+        {"x": 0.15, "y": 0.14},
+        {"x": 0.15, "y": 0.12},
+        {"x": 0.14, "y": 0.10},
+        {"x": 0.15, "y": 0.08},
+        {"x": 0.15, "y": 0.06},
+        {"x": 0.14, "y": 0.04},
+        {"x": 0.15, "y": 0.02},
+        {"x": 0.15, "y": 0.00},
+        {"x": 0.30, "y": 0.00},
+        {"x": 0.30, "y": 0.02},
+        {"x": 0.32, "y": 0.02},
+        {"x": 0.32, "y": 0.00},
+        {"x": 0.50, "y": 0.00},
+        {"x": 0.50, "y": 0.02},
+        {"x": 0.52, "y": 0.02},
+        {"x": 0.52, "y": 0.00},
+        {"x": 0.70, "y": 0.00},
+        {"x": 0.70, "y": 0.02},
+        {"x": 0.72, "y": 0.02},
+        {"x": 0.72, "y": 0.00},
+        {"x": 0.85, "y": 0.00},
+        {"x": 0.85, "y": 0.55},
+        {"x": 0.83, "y": 0.55},
+        {"x": 0.83, "y": 0.53},
+        {"x": 0.81, "y": 0.53},
+        {"x": 0.81, "y": 0.55},
+        {"x": 0.55, "y": 0.55},
+        {"x": 0.55, "y": 0.57},
+        {"x": 0.53, "y": 0.57},
+        {"x": 0.53, "y": 0.55},
+        {"x": 0.50, "y": 0.55},
+        {"x": 0.50, "y": 0.86},
+    ]
+
+
+def _transform_contour(
+    contour: list[dict[str, float]], *, scale: float, offset_x: float, offset_y: float
+) -> list[dict[str, float]]:
+    return [{"x": point["x"] * scale + offset_x, "y": point["y"] * scale + offset_y} for point in contour]
+
+
+def _point_to_contour_distance(point: dict[str, float], contour: list[dict[str, float]]) -> float:
+    def distance_to_segment(start: dict[str, float], end: dict[str, float]) -> float:
+        delta_x = end["x"] - start["x"]
+        delta_y = end["y"] - start["y"]
+        length_squared = delta_x * delta_x + delta_y * delta_y
+        projection = (
+            (point["x"] - start["x"]) * delta_x + (point["y"] - start["y"]) * delta_y
+        ) / length_squared
+        projection = min(1.0, max(0.0, projection))
+        nearest_x = start["x"] + projection * delta_x
+        nearest_y = start["y"] + projection * delta_y
+        return math.hypot(point["x"] - nearest_x, point["y"] - nearest_y)
+
+    return min(
+        distance_to_segment(contour[index], contour[(index + 1) % len(contour)])
+        for index in range(len(contour))
+    )
+
+
+def _live_e_shallow_notch_document() -> dict[str, object]:
+    document = _pentagon()
+    rooms = cast(list[dict[str, Any]], document["rooms"])
+    room = rooms[0]
+    room["contour"] = _live_e_shallow_notch_contour()
+    room["wallCount"] = 8
+    room["dimensions"] = [
+        {
+            "edgeIndex": 0,
+            "literalText": "3.50 m",
+            "value": 3.50,
+            "unit": "m",
+            "status": "proposed",
+        },
+        {
+            "edgeIndex": 5,
+            "literalText": "0.90 m",
+            "value": 0.90,
+            "unit": "m",
+            "status": "proposed",
+        },
+    ]
+    room["openings"] = [
+        {
+            "edgeIndex": 1,
+            "type": "window",
+            "position": 0.40,
+            "normalizedWidth": 0.20,
+            "status": "proposed",
+        },
+        {
+            "edgeIndex": 6,
+            "type": "door",
+            "position": 0.50,
+            "normalizedWidth": 0.22,
+            "status": "proposed",
+        },
+    ]
+    return document
+
+
+def _live_e_simplification_document() -> dict[str, object]:
+    document = _pentagon()
+    rooms = cast(list[dict[str, Any]], document["rooms"])
+    room = rooms[0]
+    contour = _live_e_staircase_contour()
+    room["contour"] = [[point["x"], point["y"]] for point in contour]
+    room["wallCount"] = 10
+    room["dimensions"] = [
+        {
+            "literalText": "3.50",
+            "value": 3.50,
+            "unit": "m",
+            "status": "proposed",
+            "edgeIndex": 9,
+        },
+        {
+            "literalText": "3.50",
+            "value": 3.50,
+            "unit": "m",
+            "status": "proposed",
+            "edgeIndex": 3,
+        },
+        {
+            "literalText": "1.50",
+            "value": 1.50,
+            "unit": "m",
+            "status": "proposed",
+            "edgeIndex": 0,
+        },
+        {
+            "literalText": "0.90",
+            "value": 0.90,
+            "unit": "m",
+            "status": "proposed",
+            "edgeIndex": 7,
+        },
+    ]
+    room["openings"] = [
+        {
+            "type": "door",
+            "wallIndex": 0,
+            "position": 0.43,
+            "normalizedWidth": 0.26,
+            "status": "proposed",
+        },
+        {
+            "type": "door",
+            "wallIndex": 7,
+            "position": 0.50,
+            "normalizedWidth": 0.26,
+            "status": "proposed",
+        },
+    ]
+    return document
+
+
+def test_semantic_contour_preserves_unverified_live_case_e_micro_fragments() -> None:
+    contour = _live_e_staircase_contour()
+    simplified, edge_mapping = floorplan_service._simplify_semantic_contour(contour)
+
+    # Only the duplicated closing vertex has an unambiguous justification for
+    # removal. A shallow stair may be a real wall: never force a rectangle.
+    assert simplified == contour[:-1]
+    assert len(simplified) == 10
+    assert simplified[0] != simplified[-1]
+    assert edge_mapping == list(range(10))
+    semantic_room = {**_room(), "contour": simplified, "wallCount": 10, "dimensions": [], "openings": []}
+    validated = FloorplanInterpretation.model_validate({**_pentagon(), "rooms": [semantic_room]})
+    assert validated.rooms[0].wall_count == 10
+
+def test_semantic_contour_preserves_unconfirmed_shallow_notch() -> None:
+    contour = _live_e_shallow_notch_contour()
+    simplified, edge_mapping = floorplan_service._simplify_semantic_contour(contour)
+
+    # Without corroborating image evidence, eliminating this recess changes
+    # physical topology; it must remain a proposal for manual confirmation.
+    assert simplified == contour
+    assert {point["y"] for point in simplified} == {0.15, 0.70, 0.75}
+    assert edge_mapping == list(range(8))
+    semantic_room = {**_room(), "contour": simplified, "wallCount": 8, "dimensions": [], "openings": []}
+    validated = FloorplanInterpretation.model_validate({**_pentagon(), "rooms": [semantic_room]})
+    assert validated.rooms[0].wall_count == 8
+
+def test_normalization_preserves_shallow_notch_and_evidence_associations() -> None:
+    document = _live_e_shallow_notch_document()
+    normalized, stats = floorplan_service._normalize_groq_response(document)
+    normalized_room = cast(dict[str, Any], cast(dict[str, Any], normalized)["rooms"][0])
+
+    assert normalized_room["wallCount"] == 8
+    assert normalized_room["contour"] == _live_e_shallow_notch_contour()
+    assert "semantic_contour_simplified" not in stats.actions
+    assert [item["edgeIndex"] for item in normalized_room["dimensions"]] == [0, 5]
+    assert [item["edgeIndex"] for item in normalized_room["openings"]] == [1, 6]
+    assert all(item["status"] == "proposed" for item in normalized_room["dimensions"])
+    assert FloorplanInterpretation.model_validate(normalized).rooms[0].wall_count == 8
+
+
+def test_simplify_semantic_contour_preserves_deep_architectural_alcove() -> None:
+    alcove = [
+        {"x": 0.10, "y": 0.10},
+        {"x": 0.90, "y": 0.10},
+        {"x": 0.90, "y": 0.90},
+        {"x": 0.70, "y": 0.90},
+        {"x": 0.70, "y": 0.65},
+        {"x": 0.40, "y": 0.65},
+        {"x": 0.40, "y": 0.90},
+        {"x": 0.10, "y": 0.90},
+    ]
+
+    simplified, edge_mapping = floorplan_service._simplify_semantic_contour(alcove)
+
+    assert simplified == alcove
+    assert len(simplified) == 8
+    assert {point["y"] for point in simplified} == {0.10, 0.65, 0.90}
+    assert edge_mapping == list(range(8))
+
+
+def test_semantic_contour_keeps_noisy_orthogonal_l_shape_without_inventing_walls() -> None:
+    contour = _noisy_orthogonal_l_contour()
+    simplified, edge_mapping = floorplan_service._simplify_semantic_contour(contour)
+
+    # A deterministic non-destructive fallback is preferable to deleting a
+    # series of visually ambiguous small recesses without image corroboration.
+    assert simplified == contour
+    for index in (0, 16, 32, 33, 39, 40):
+        assert contour[index] in simplified
+    assert edge_mapping == list(range(len(contour)))
+    semantic_room = {
+        **_room(), "contour": simplified, "wallCount": len(simplified), "dimensions": [], "openings": []
+    }
+    assert FloorplanInterpretation.model_validate(
+        {**_pentagon(), "rooms": [semantic_room]}
+    ).rooms[0].wall_count == len(contour)
+
+
+@pytest.mark.parametrize(
+    ("scale", "offset_x", "offset_y"),
+    [(1.0, 0.0, 0.0), (0.70, 0.10, 0.08)],
+)
+def test_simplification_does_not_replace_supported_right_angle_with_diagonal_chord(
+    scale: float, offset_x: float, offset_y: float
+) -> None:
+    contour = _transform_contour(
+        _noisy_orthogonal_l_contour(),
+        scale=scale,
+        offset_x=offset_x,
+        offset_y=offset_y,
+    )
+
+    simplified, edge_mapping = floorplan_service._simplify_semantic_contour(contour)
+
+    macro_corner = contour[16]
+    assert macro_corner in simplified
+    assert all(_point_to_contour_distance(point, simplified) <= 0.03 * scale for point in contour)
+    assert all(isinstance(edge, int) and 0 <= edge < len(simplified) for edge in edge_mapping)
+
+
+def test_simplify_semantic_contour_preserves_real_pentagon_corners() -> None:
+    contour = cast(list[dict[str, float]], _room()["contour"])
+    original_contour = [dict(point) for point in contour]
+
+    simplified, edge_mapping = floorplan_service._simplify_semantic_contour(  # type: ignore[attr-defined]
+        contour
+    )
+
+    assert simplified == original_contour
+    assert len(simplified) == 5
+    assert edge_mapping == [0, 1, 2, 3, 4]
+
+
+def test_simplify_semantic_contour_returns_deterministic_provider_edge_mapping() -> None:
+    contour = _live_e_staircase_contour()
+
+    simplified, edge_mapping = floorplan_service._simplify_semantic_contour(  # type: ignore[attr-defined]
+        contour
+    )
+    repeated_simplified, repeated_mapping = floorplan_service._simplify_semantic_contour(  # type: ignore[attr-defined]
+        contour
+    )
+
+    assert repeated_simplified == simplified
+    assert repeated_mapping == edge_mapping
+    assert len(edge_mapping) == len(contour) - 1
+
+    assert all(isinstance(edge, int) and 0 <= edge < len(simplified) for edge in edge_mapping)
+    assert set(edge_mapping) == set(range(len(simplified)))
+    # An ambiguous shallow jog does not justify merging provider walls.
+    assert edge_mapping == list(range(len(simplified)))
+
+
+def test_normalization_simplifies_live_case_e_and_derives_semantic_wall_count() -> None:
+    normalized, stats = floorplan_service._normalize_groq_response(_live_e_simplification_document())
+    normalized_room = cast(dict[str, Any], cast(dict[str, Any], normalized)["rooms"][0])
+
+    assert normalized_room["contour"] == _live_e_staircase_contour()[:-1]
+    assert normalized_room["wallCount"] == 10
+    assert normalized_room["contour"][0] != normalized_room["contour"][-1]
+    assert all(
+        0 <= item["edgeIndex"] < 10 for item in [*normalized_room["dimensions"], *normalized_room["openings"]]
+    )
+    validated = FloorplanInterpretation.model_validate(normalized)
+    assert validated.rooms[0].wall_count == 10
+    # The only unambiguous simplification is the duplicated closure.
+    assert "semantic_contour_simplified" in stats.actions
+
+
+def test_normalization_remaps_live_case_e_evidence_to_simplified_edges() -> None:
+    document = _live_e_simplification_document()
+    source_room = cast(dict[str, Any], cast(list[dict[str, Any]], document["rooms"])[0])
+    _, edge_mapping = floorplan_service._simplify_semantic_contour(_live_e_staircase_contour())
+
+    normalized, _ = floorplan_service._normalize_groq_response(document)
+    normalized_room = cast(dict[str, Any], cast(dict[str, Any], normalized)["rooms"][0])
+
+    for source, remapped in zip(source_room["dimensions"], normalized_room["dimensions"], strict=True):
+        source_dimension = cast(dict[str, Any], source)
+        normalized_dimension = cast(dict[str, Any], remapped)
+        assert normalized_dimension["edgeIndex"] == edge_mapping[source_dimension["edgeIndex"]]
+        assert normalized_dimension["literalText"] == source_dimension["literalText"]
+        assert normalized_dimension["value"] == source_dimension["value"]
+        assert normalized_dimension["unit"] == source_dimension["unit"]
+        assert normalized_dimension["status"] == source_dimension["status"]
+
+    for source, remapped in zip(source_room["openings"], normalized_room["openings"], strict=True):
+        source_opening = cast(dict[str, Any], source)
+        normalized_opening = cast(dict[str, Any], remapped)
+        assert normalized_opening["edgeIndex"] == edge_mapping[source_opening["wallIndex"]]
+        assert "wallIndex" not in normalized_opening
+        assert normalized_opening["type"] == source_opening["type"]
+        assert 0 <= normalized_opening["position"] <= 1
+        assert 0 < normalized_opening["normalizedWidth"] <= 1
+        assert normalized_opening["status"] == source_opening["status"]
+
+
+def test_normalization_preserves_real_pentagon_geometry_and_edge_associations() -> None:
+    document = _pentagon()
+    source_room = cast(dict[str, Any], cast(list[dict[str, Any]], document["rooms"])[0])
+
+    normalized, stats = floorplan_service._normalize_groq_response(document)
+    normalized_room = cast(dict[str, Any], cast(dict[str, Any], normalized)["rooms"][0])
+
+    assert normalized_room["contour"] == source_room["contour"]
+    assert normalized_room["wallCount"] == 5
+    assert [item["edgeIndex"] for item in normalized_room["dimensions"]] == [
+        item["edgeIndex"] for item in source_room["dimensions"]
+    ]
+    assert [item["edgeIndex"] for item in normalized_room["openings"]] == [
+        item["edgeIndex"] for item in source_room["openings"]
+    ]
+    assert "semantic_contour_simplified" not in stats.actions
+
+
 def test_invalid_geometry_gets_one_sanitized_corrective_attempt() -> None:
     invalid = _invalid_contour_document()
-    instruction_fragment = "simple, non-degenerate, non-self-intersecting"
     prompts: list[str] = []
     transport, calls = _sequential_transport(
         [_provider_response(invalid), _provider_response(_l_room_with_list_contour())], prompts
@@ -527,11 +1428,189 @@ def test_invalid_geometry_gets_one_sanitized_corrective_attempt() -> None:
             ).interpret(image=b"original-image", content_type="image/png")
 
     result = asyncio.run(run())
+    corrective_prompt = " ".join(prompts[1].split()).lower()
     assert len(result.rooms) == 1
     assert calls == [1, 2]
-    assert instruction_fragment not in prompts[0]
-    assert instruction_fragment in prompts[1]
+    assert prompts[1] != prompts[0]
+    assert "your previous room contour was rejected" in corrective_prompt
+    assert "original image" in corrective_prompt
+    assert "dominant room" in corrective_prompt
+    assert "semantic perimeter" in corrective_prompt
+    assert "do not repeat the first point" in corrective_prompt
+    assert "do not force a rectangle" in corrective_prompt
     assert json.dumps(invalid) not in prompts[1]
+
+
+def test_duplicate_closing_vertex_and_collinear_overlap_get_invalid_contour_retry(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="roomforge.floorplan_interpretation")
+    invalid = _live_e_duplicate_closure_document()
+    prompts: list[str] = []
+    transport, calls = _sequential_transport(
+        [_provider_response(invalid), _provider_response(_l_room_with_list_contour())], prompts
+    )
+
+    async def run() -> FloorplanInterpretation:
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await GroqFloorplanInterpreter(
+                api_key="test-key", model="model", timeout_seconds=2, client=client
+            ).interpret(image=b"original-image", content_type="image/png")
+
+    result = asyncio.run(run())
+    corrective_prompt = " ".join(prompts[1].split()).lower()
+    assert len(result.rooms) == 1
+    assert result.rooms[0].wall_count == 6
+    assert calls == [1, 2]
+    assert "reason=invalid_contour" in caplog.text
+    assert prompts[1] != prompts[0]
+    assert "your previous room contour was rejected" in corrective_prompt
+    assert "original image" in corrective_prompt
+    assert "dominant room" in corrective_prompt
+    assert "semantic perimeter" in corrective_prompt
+    assert "do not repeat the first point" in corrective_prompt
+    assert json.dumps(invalid) not in prompts[1]
+
+
+def test_invalid_contour_corrective_attempt_uses_topology_rescue_prompt() -> None:
+    prompts: list[str] = []
+    payloads: list[dict[str, Any]] = []
+    transport, calls = _topology_rescue_transport(prompts, payloads)
+
+    async def run() -> FloorplanInterpretation:
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await GroqFloorplanInterpreter(
+                api_key="test-key", model="model", timeout_seconds=2, client=client
+            ).interpret(image=b"original-image", content_type="image/png")
+
+    result = asyncio.run(run())
+    corrective_prompt = " ".join(prompts[1].split()).lower()
+
+    assert result.rooms[0].wall_count == 4
+    assert calls == [1, 2]
+    assert "original image" in corrective_prompt
+    assert "dominant room" in corrective_prompt
+    assert "semantic perimeter" in corrective_prompt
+    assert "one vertex per real architectural wall" in corrective_prompt
+    assert "closed by implication" in corrective_prompt
+    assert "non-self-intersecting" in corrective_prompt
+    assert "do not repeat the first point" in corrective_prompt
+    assert "door swing arcs" in corrective_prompt
+    assert "window strokes" in corrective_prompt
+    assert "wall thickness bands" in corrective_prompt
+    assert "furniture, text, dimensions" in corrective_prompt
+    assert "construction lines" in corrective_prompt
+    assert "preserve genuine irregular" in corrective_prompt
+    assert "do not force a rectangle" in corrective_prompt
+    assert "do not invent missing walls" in corrective_prompt
+    assert "target count" in corrective_prompt
+
+
+def test_invalid_contour_topology_rescue_uses_reduced_response_budget() -> None:
+    prompts: list[str] = []
+    payloads: list[dict[str, Any]] = []
+    transport, calls = _topology_rescue_transport(prompts, payloads)
+
+    async def run() -> FloorplanInterpretation:
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await GroqFloorplanInterpreter(
+                api_key="test-key", model="model", timeout_seconds=2, client=client
+            ).interpret(image=b"original-image", content_type="image/png")
+
+    asyncio.run(run())
+
+    assert calls == [1, 2]
+    assert payloads[1]["max_tokens"] < payloads[0]["max_tokens"]
+
+
+def test_dimensionless_topology_rescue_succeeds_with_two_semantic_attempts() -> None:
+    prompts: list[str] = []
+    payloads: list[dict[str, Any]] = []
+    transport, calls = _topology_rescue_transport(prompts, payloads)
+
+    async def run() -> FloorplanInterpretation:
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await GroqFloorplanInterpreter(
+                api_key="test-key", model="model", timeout_seconds=2, client=client
+            ).interpret(image=b"original-image", content_type="image/png")
+
+    result = asyncio.run(run())
+
+    assert calls == [1, 2]
+    assert len(result.rooms) == 1
+    assert result.rooms[0].wall_count == 4
+    assert result.rooms[0].dimensions == []
+
+
+def test_corrective_attempt_retries_short_rate_limit_without_consuming_semantic_attempt() -> None:
+    delays: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    invalid = _live_e_duplicate_closure_document()
+    prompts: list[str] = []
+    transport, calls = _sequential_transport(
+        [
+            _provider_response(invalid),
+            httpx.Response(429, headers={"Retry-After": "2"}),
+            _provider_response(_l_room_with_list_contour()),
+        ],
+        prompts,
+    )
+
+    async def run() -> FloorplanInterpretation:
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await GroqFloorplanInterpreter(
+                api_key="test-key",
+                model="model",
+                timeout_seconds=3,
+                client=client,
+                sleep=fake_sleep,
+            ).interpret(image=b"original-image", content_type="image/png")
+
+    result = asyncio.run(run())
+    corrective_prompt = " ".join(prompts[1].split()).lower()
+    assert result.rooms[0].wall_count == 6
+    assert calls == [1, 2, 3]
+    assert delays == [2.0]
+    assert "your previous room contour was rejected" in corrective_prompt
+    assert "original image" in corrective_prompt
+    assert "dominant room" in corrective_prompt
+    assert "semantic perimeter" in corrective_prompt
+    assert "do not repeat the first point" in corrective_prompt
+    assert prompts[1] == prompts[2]
+
+
+def test_corrective_rate_limit_repeats_only_once_then_propagates() -> None:
+    delays: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    prompts: list[str] = []
+    transport, calls = _sequential_transport(
+        [
+            _provider_response(_live_e_duplicate_closure_document()),
+            httpx.Response(429, headers={"Retry-After": "1"}),
+            httpx.Response(429, headers={"Retry-After": "1"}),
+        ],
+        prompts,
+    )
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            with pytest.raises(ProviderUnavailable) as raised:
+                await GroqFloorplanInterpreter(
+                    api_key="test-key", model="model", timeout_seconds=3,
+                    client=client, sleep=fake_sleep,
+                ).interpret(image=b"image", content_type="image/png")
+            assert raised.value.reason == "rate_limited"
+
+    asyncio.run(run())
+    assert calls == [1, 2, 3]
+    assert delays == [1.0]
+    assert prompts[1] == prompts[2]
 
 
 def test_retryable_unavailable_then_valid_retries_once() -> None:
@@ -978,6 +2057,135 @@ def test_provider_numeric_boundaries_are_accepted() -> None:
     assert opening.position == 0.0
     assert opening.normalized_width == 1.0
     assert opening.confidence == 1.0
+
+
+@pytest.mark.parametrize("association", [None, pytest.param("missing", id="missing")])
+def test_unassociated_opening_evidence_survives_normalization(association: object) -> None:
+    opening: dict[str, object] = {"type": "window", "status": "proposed"}
+    if association != "missing":
+        opening["edgeIndex"] = association
+    normalized, stats = floorplan_service._normalize_groq_response(
+        {**_pentagon(), "rooms": [{**_room(), "openings": [opening]}]}
+    )
+    room = cast(dict[str, Any], cast(list[object], cast(dict[str, Any], normalized)["rooms"])[0])
+    preserved = cast(list[dict[str, Any]], room["openings"])
+    assert preserved == [{**opening, "edgeIndex": None}]
+    assert stats.actions == ["opening_edge_unassociated"]
+    assert stats.dropped_openings == 0
+
+
+def test_null_wall_index_alias_survives_as_unassociated_opening() -> None:
+    normalized, stats = floorplan_service._normalize_groq_response(
+        {**_pentagon(), "rooms": [{**_room(), "openings": [{"wallIndex": None, "type": "door"}]}]}
+    )
+    room = cast(dict[str, Any], cast(list[object], cast(dict[str, Any], normalized)["rooms"])[0])
+    assert room["openings"] == [{"type": "door", "edgeIndex": None}]
+    assert stats.actions == ["opening_edge_unassociated"]
+
+
+@pytest.mark.parametrize("edge", [True, "1", 1.5, -1, 99])
+def test_invalid_non_null_opening_edge_is_still_dropped(edge: object) -> None:
+    normalized, stats = floorplan_service._normalize_groq_response(
+        {**_pentagon(), "rooms": [{**_room(), "openings": [{"edgeIndex": edge, "type": "door"}]}]}
+    )
+    room = cast(dict[str, Any], cast(list[object], cast(dict[str, Any], normalized)["rooms"])[0])
+    assert room["openings"] == []
+    assert stats.actions == ["opening_dropped_invalid_edge"]
+
+
+def test_room_candidate_accepts_unassociated_opening_but_rejects_invalid_concrete_edge() -> None:
+    accepted = FloorplanInterpretation.model_validate(
+        {**_pentagon(), "rooms": [{**_room(), "openings": [{"edgeIndex": None, "type": "unknown"}]}]}
+    )
+    assert accepted.rooms[0].openings[0].edge_index is None
+    with pytest.raises(ValidationError):
+        FloorplanInterpretation.model_validate(
+            {**_pentagon(), "rooms": [{**_room(), "openings": [{"edgeIndex": 99, "type": "unknown"}]}]}
+        )
+
+
+@pytest.mark.parametrize(
+    ("provider_edge", "semantic_edge", "expected_position", "expected_width"),
+    [
+        (
+            ({"x": 0.0, "y": 0.0}, {"x": 0.4, "y": 0.0}),
+            (({"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0}),),
+            0.2,
+            0.2,
+        ),
+        (
+            ({"x": 0.6, "y": 0.0}, {"x": 1.0, "y": 0.0}),
+            (({"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0}),),
+            0.8,
+            0.2,
+        ),
+        (
+            ({"x": 0.4, "y": 0.0}, {"x": 0.0, "y": 0.0}),
+            (({"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0}),),
+            0.2,
+            0.2,
+        ),
+    ],
+)
+def test_opening_geometry_is_remapped_to_semantic_edge(
+    provider_edge: tuple[dict[str, float], dict[str, float]],
+    semantic_edge: tuple[tuple[dict[str, float], dict[str, float]], ...],
+    expected_position: float,
+    expected_width: float,
+) -> None:
+    opening: dict[str, Any] = {"position": 0.5, "normalizedWidth": 0.5}
+    stats = floorplan_service._NormalizationStats()
+    provider = [*provider_edge, {"x": 0.4, "y": 0.4}]
+    semantic = [*semantic_edge[0], {"x": 1.0, "y": 1.0}, {"x": 0.0, "y": 1.0}]
+    floorplan_service._transform_opening_geometry_to_semantic_edge(
+        opening,
+        provider_contour=provider,
+        provider_edge_index=0,
+        semantic_contour=semantic,
+        semantic_edge_index=0,
+        stats=stats,
+    )
+    assert opening["position"] == pytest.approx(expected_position)
+    assert opening["normalizedWidth"] == pytest.approx(expected_width)
+
+
+def test_opening_geometry_uses_directed_semantic_edge_coordinates() -> None:
+    provider_contour = [
+        {"x": 0.0, "y": 0.0},
+        {"x": 1.0, "y": 0.0},
+        {"x": 1.0, "y": 1.0},
+        {"x": 0.0, "y": 1.0},
+    ]
+    forward_opening: dict[str, Any] = {"position": 0.2, "normalizedWidth": 0.1}
+    reversed_opening: dict[str, Any] = {"position": 0.2, "normalizedWidth": 0.1}
+    stats = floorplan_service._NormalizationStats()
+
+    floorplan_service._transform_opening_geometry_to_semantic_edge(
+        forward_opening,
+        provider_contour=provider_contour,
+        provider_edge_index=0,
+        semantic_contour=provider_contour,
+        semantic_edge_index=0,
+        stats=stats,
+    )
+    floorplan_service._transform_opening_geometry_to_semantic_edge(
+        reversed_opening,
+        provider_contour=provider_contour,
+        provider_edge_index=0,
+        semantic_contour=[
+            {"x": 1.0, "y": 0.0},
+            {"x": 0.0, "y": 0.0},
+            {"x": 0.0, "y": 1.0},
+            {"x": 1.0, "y": 1.0},
+        ],
+        semantic_edge_index=0,
+        stats=stats,
+    )
+
+    assert forward_opening["position"] == pytest.approx(0.2)
+    assert reversed_opening["position"] == pytest.approx(0.8)
+    assert forward_opening["normalizedWidth"] == pytest.approx(0.1)
+    assert reversed_opening["normalizedWidth"] == pytest.approx(0.1)
 
 
 def test_malformed_json_is_safe_failure() -> None:

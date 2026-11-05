@@ -218,6 +218,23 @@ class _ResultFloorplanInterpretationApi implements FloorplanInterpretationApi {
   }) async => result;
 }
 
+class _SequencedFloorplanInterpretationApi
+    implements FloorplanInterpretationApi {
+  _SequencedFloorplanInterpretationApi(this.results);
+
+  final List<FloorplanInterpretationResult> results;
+  var _next = 0;
+
+  @override
+  Future<FloorplanInterpretationResult> interpret({
+    required String accessToken,
+    required String agencyId,
+    required String listingId,
+    required List<int> imageBytes,
+    required String contentType,
+  }) async => results[_next++];
+}
+
 class _IncompleteOpeningFloorplanInterpretationApi
     implements FloorplanInterpretationApi {
   @override
@@ -243,6 +260,65 @@ class _IncompleteOpeningFloorplanInterpretationApi
           InterpretedOpeningProposal(
             edgeIndex: 1,
             type: FloorplanOpeningCandidateType.door,
+          ),
+        ],
+      ),
+    ],
+  );
+}
+
+class _PentagonOpeningsFloorplanInterpretationApi
+    implements FloorplanInterpretationApi {
+  @override
+  Future<FloorplanInterpretationResult> interpret({
+    required String accessToken,
+    required String agencyId,
+    required String listingId,
+    required List<int> imageBytes,
+    required String contentType,
+  }) async => const FloorplanInterpretationResult(
+    status: FloorplanInterpretationStatus.success,
+    rooms: [
+      InterpretedRoomCandidate(
+        id: 'pentagon-room',
+        contour: [
+          FloorPoint(0.20, 0.20),
+          FloorPoint(0.70, 0.15),
+          FloorPoint(0.85, 0.50),
+          FloorPoint(0.60, 0.82),
+          FloorPoint(0.18, 0.70),
+        ],
+        measurements: [
+          WallMeasurementCandidate(
+            id: 'pentagon-edge-0',
+            literalText: '3.50 m',
+            meters: 3.50,
+            edgeIndex: 0,
+            explicitUnit: true,
+            status: WallMeasurementCandidateStatus.proposed,
+          ),
+        ],
+        openings: [
+          InterpretedOpeningProposal(
+            edgeIndex: 0,
+            type: FloorplanOpeningCandidateType.window,
+            position: 0.40,
+            normalizedWidth: 0.20,
+            confidence: 0.90,
+          ),
+          InterpretedOpeningProposal(
+            edgeIndex: 1,
+            type: FloorplanOpeningCandidateType.window,
+            position: 0.55,
+            normalizedWidth: 0.18,
+            confidence: 0.88,
+          ),
+          InterpretedOpeningProposal(
+            edgeIndex: 3,
+            type: FloorplanOpeningCandidateType.door,
+            position: 0.50,
+            normalizedWidth: 0.22,
+            confidence: 0.95,
           ),
         ],
       ),
@@ -381,6 +457,35 @@ Future<void> _chooseAutomaticCapture(WidgetTester tester) => _tapAndSettle(
   tester,
   find.byKey(const ValueKey('automatic-capture-method')),
 );
+
+Future<void> _enterWallDimensions(
+  WidgetTester tester,
+  int wallCount, {
+  Set<int> keepExistingLengths = const {},
+}) async {
+  final scroll = find
+      .descendant(
+        of: find.byKey(const ValueKey('floorplan-trace-scroll')),
+        matching: find.byType(Scrollable),
+      )
+      .first;
+  for (var index = 0; index < wallCount; index++) {
+    final chip = find.byKey(ValueKey('wall-chip-$index'));
+    await tester.scrollUntilVisible(chip, -120, scrollable: scroll);
+    await tester.tap(chip);
+    await tester.pumpAndSettle();
+    if (!keepExistingLengths.contains(index)) {
+      final length = find.byKey(ValueKey('trace-wall-$index'));
+      await tester.scrollUntilVisible(length, 120, scrollable: scroll);
+      await tester.enterText(length, index.isEven ? '4,00' : '3,00');
+      await tester.pumpAndSettle();
+    }
+    final height = find.byKey(ValueKey('trace-wall-height-$index'));
+    await tester.scrollUntilVisible(height, 120, scrollable: scroll);
+    await tester.enterText(height, '2,60');
+    await tester.pumpAndSettle();
+  }
+}
 
 void main() {
   testWidgets('captures a room and shows its estimated dimensions', (
@@ -686,27 +791,8 @@ void main() {
       expect(close.hitTestable(), findsOneWidget);
       await tester.tap(close);
       await tester.pumpAndSettle();
-      for (var index = 0; index < 4; index++) {
-        await tester.tap(find.byKey(ValueKey('wall-chip-$index')));
-        await tester.pump();
-        final field = find.byKey(ValueKey('trace-wall-$index'));
-        await tester.scrollUntilVisible(
-          field,
-          150,
-          scrollable: find
-              .descendant(
-                of: find.byKey(const ValueKey('floorplan-trace-scroll')),
-                matching: find.byType(Scrollable),
-              )
-              .first,
-        );
-        await tester.enterText(field, '4,20');
-      }
+      await _enterWallDimensions(tester, 4);
       expect(find.text('Pared de referencia'), findsNothing);
-      await tester.enterText(
-        find.byKey(const ValueKey('trace-room-height')),
-        '2.65',
-      );
       await tester.pumpAndSettle();
       expect(find.text('Vista previa métrica'), findsOneWidget);
       final provenance = find.text('Plano o croquis con medidas por pared');
@@ -740,7 +826,7 @@ void main() {
       expect(room.name, 'Dormitorio plano');
       expect(room.acquisition.method, RoomAcquisitionMethod.floorplanTrace);
       expect(room.metrics, isNull);
-      expect(edgeLengths(room.corners).first, closeTo(4.2, 1e-9));
+      expect(edgeLengths(room.corners).first, closeTo(4, 1e-9));
       expect(
         find.text('Plano o croquis con medidas por pared'),
         findsOneWidget,
@@ -837,10 +923,13 @@ void main() {
     expect(tester.takeException(), isNull);
 
     final canvas = find.byKey(const ValueKey('floorplan-trace-canvas'));
+    final editMode = find.byKey(const ValueKey('trace-mode-edit'));
+    await tester.ensureVisible(editMode);
+    await tester.pumpAndSettle();
+    await tester.tap(editMode);
+    await tester.pumpAndSettle();
     final canvasOrigin = tester.getTopLeft(canvas);
     final canvasSize = tester.getSize(canvas);
-    await tester.tap(find.text('Trazar'));
-    await tester.pump();
     await tester.tapAt(canvasOrigin + canvasSize.center(Offset.zero));
     await tester.pump();
     List<FloorPoint> paintedPoints() => List<FloorPoint>.of(
@@ -856,8 +945,10 @@ void main() {
     final originalPoints = paintedPoints();
     expect(originalPoints, hasLength(1));
 
-    await tester.tap(find.text('Mover / zoom'));
-    await tester.pump();
+    final navigateMode = find.byKey(const ValueKey('trace-mode-navigate'));
+    await tester.ensureVisible(navigateMode);
+    await tester.tap(navigateMode);
+    await tester.pumpAndSettle();
     final viewerFinder = find.byKey(
       const ValueKey('floorplan-interactive-viewer'),
     );
@@ -906,10 +997,11 @@ void main() {
       imageHeight: 80,
     );
     expect(expected, isNotNull);
-    await tester.tap(find.text('Trazar'));
-    await tester.pump();
+    await tester.ensureVisible(editMode);
+    await tester.tap(editMode);
+    await tester.pumpAndSettle();
     final preservedTransform = transform.value.clone();
-    await tester.tapAt(canvasOrigin + viewportTap);
+    await tester.tapAt(tester.getTopLeft(canvas) + viewportTap);
     await tester.pump();
     final afterTrace = paintedPoints();
     expect(afterTrace, hasLength(2));
@@ -960,10 +1052,14 @@ void main() {
     // An unambiguous Groq metric seeds the scale without becoming a
     // user-authored value. The room is still only persisted on confirmation.
     expect(built.controller.rooms, isEmpty);
-    final height = find.byKey(const ValueKey('trace-room-height'));
+    // The provider proposal only becomes eligible once the agent accepts it:
+    // the value keeps its detected provenance instead of becoming user input.
+    final confirmMeasurement = find.byKey(
+      const ValueKey('measurement-confirm-groq-0'),
+    );
     await tester.scrollUntilVisible(
-      height,
-      180,
+      confirmMeasurement,
+      150,
       scrollable: find
           .descendant(
             of: find.byKey(const ValueKey('floorplan-trace-scroll')),
@@ -971,12 +1067,22 @@ void main() {
           )
           .first,
     );
-    await tester.enterText(height, '2,60');
+    await tester.pumpAndSettle();
+    await tester.tap(confirmMeasurement);
+    await tester.pumpAndSettle();
+    await _enterWallDimensions(tester, 4, keepExistingLengths: const {0});
     final save = find.byKey(const ValueKey('floorplan-trace-save'));
     expect(save.hitTestable(), findsOneWidget);
     await tester.tap(save);
     await tester.pumpAndSettle();
     expect(built.controller.rooms.single.references, hasLength(4));
+    final accepted = built.controller
+        .traceForRoom(built.controller.rooms.single.id)!
+        .visualDraft!
+        .measurements
+        .singleWhere((measurement) => measurement.provenance == 'ai_detected');
+    expect(accepted.provenance, 'ai_detected');
+    expect(accepted.requiresReview, isFalse);
     expect(
       built.controller.rooms.single.references.first.provenance,
       WallMeasurementProvenance.aiDetected,
@@ -1095,6 +1201,120 @@ void main() {
       expect(find.byType(TextField).evaluate().length, lessThanOrEqualTo(3));
       expect(tester.takeException(), isNull);
     });
+
+  testWidgets('replacing a floorplan clears a stale selected edge', (
+    tester,
+  ) async {
+    final contour22 = [
+      for (var index = 0; index < 22; index++)
+        FloorPoint(
+          0.5 + 0.35 * math.cos(index * 2 * math.pi / 22),
+          0.5 + 0.35 * math.sin(index * 2 * math.pi / 22),
+        ),
+    ];
+    final interpreter = _SequencedFloorplanInterpretationApi([
+      FloorplanInterpretationResult(
+        status: FloorplanInterpretationStatus.success,
+        rooms: [
+          InterpretedRoomCandidate(
+            id: 'many-walls',
+            contour: contour22,
+            measurements: const [],
+            openings: const [],
+          ),
+        ],
+      ),
+      const FloorplanInterpretationResult(
+        status: FloorplanInterpretationStatus.success,
+        rooms: [
+          InterpretedRoomCandidate(
+            id: 'five-walls',
+            contour: [
+              FloorPoint(0.20, 0.20),
+              FloorPoint(0.70, 0.15),
+              FloorPoint(0.85, 0.50),
+              FloorPoint(0.60, 0.82),
+              FloorPoint(0.18, 0.70),
+            ],
+            measurements: [],
+            openings: [],
+          ),
+        ],
+      ),
+    ]);
+    final source = _FloorplanPhotoSource(
+      await tester.runAsync(_testPng) ?? Uint8List(0),
+    );
+    final analyzer = _CountingFloorplanAnalyzer();
+    final built = await _build(
+      tester,
+      traceSource: source,
+      floorplanInterpreter: interpreter,
+    );
+    tester.view.physicalSize = const Size(720, 2400);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: andeanTheme(),
+        home: FloorplanTraceScreen(
+          controller: built.controller,
+          analyzer: analyzer,
+        ),
+      ),
+    );
+
+    final pick = find.byKey(const ValueKey('floorplan-pick-source'));
+    await tester.tap(pick);
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('22 paredes'), findsWidgets);
+
+    final wallSelector = find.byKey(const ValueKey('floorplan-wall-selector'));
+    final edge21 = find.byKey(const ValueKey('wall-chip-21'));
+    await tester.scrollUntilVisible(
+      edge21,
+      120,
+      scrollable: find
+          .descendant(of: wallSelector, matching: find.byType(Scrollable))
+          .first,
+    );
+    await tester.tap(edge21);
+    await tester.pumpAndSettle();
+    expect(tester.widget<ChoiceChip>(edge21).selected, isTrue);
+
+    await tester.ensureVisible(pick);
+    await tester.tap(pick);
+    await tester.pumpAndSettle();
+    final dialog = find.byType(AlertDialog);
+    expect(dialog, findsOneWidget);
+    final confirm = find.descendant(
+      of: dialog,
+      matching: find.byType(FilledButton),
+    );
+    expect(confirm, findsOneWidget);
+    await tester.tap(confirm);
+    await tester.pump();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('5 paredes'), findsWidgets);
+    for (final edge in [0, 1, 2, 3, 4]) {
+      expect(find.byKey(ValueKey('wall-chip-$edge')), findsOneWidget);
+    }
+    expect(find.byKey(const ValueKey('wall-chip-21')), findsNothing);
+    expect(
+      tester
+          .widget<ChoiceChip>(find.byKey(const ValueKey('wall-chip-0')))
+          .selected,
+      isTrue,
+    );
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('a stale analysis cannot replace a newer floorplan image', (
     tester,
@@ -1249,7 +1469,7 @@ void main() {
     expect(
       find.text(
         'No pudimos interpretar este plano con suficiente confianza. '
-        'Podés corregir o trazar el ambiente manualmente.',
+        'Podés reintentar con otra imagen o trazar el ambiente manualmente.',
       ),
       findsOneWidget,
     );
@@ -1444,6 +1664,343 @@ void main() {
     },
   );
 
+  testWidgets(
+    'incomplete AI opening stays reviewable but is not drawable geometry',
+    (tester) async {
+      final source = _FloorplanPhotoSource(
+        await tester.runAsync(_testPng) ?? Uint8List(0),
+      );
+      final analyzer = _CountingFloorplanAnalyzer();
+      final built = await _build(
+        tester,
+        traceSource: source,
+        floorplanInterpreter: _IncompleteOpeningFloorplanInterpretationApi(),
+      );
+      tester.view.physicalSize = const Size(720, 2400);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: andeanTheme(),
+          home: FloorplanTraceScreen(
+            controller: built.controller,
+            analyzer: analyzer,
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('floorplan-pick-source')));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('floorplan-opening-review')),
+        findsOneWidget,
+      );
+      expect(find.text('P2 · Puerta · falta posición y ancho'), findsOneWidget);
+
+      final paint = tester.widget<CustomPaint>(
+        find.byKey(const ValueKey('floorplan-trace-paint')),
+      );
+      final painter = paint.painter as dynamic;
+      final openings = painter.openings as List<InterpretedOpeningProposal>;
+      expect(openings, hasLength(1));
+
+      final opening = openings.single;
+      expect(opening.hasGeometry, isFalse);
+      expect(opening.position, isNull);
+      expect(opening.normalizedWidth, isNull);
+      expect(opening.position, isNot(0.5));
+      expect(opening.normalizedWidth, isNot(0.15));
+      expect(built.controller.rooms, isEmpty);
+    },
+  );
+
+  testWidgets('complete AI openings reach the floorplan review canvas', (
+    tester,
+  ) async {
+    final source = _FloorplanPhotoSource(
+      await tester.runAsync(_testPng) ?? Uint8List(0),
+    );
+    final analyzer = _CountingFloorplanAnalyzer();
+    final built = await _build(
+      tester,
+      traceSource: source,
+      floorplanInterpreter: _PentagonOpeningsFloorplanInterpretationApi(),
+    );
+    tester.view.physicalSize = const Size(720, 2400);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: andeanTheme(),
+        home: FloorplanTraceScreen(
+          controller: built.controller,
+          analyzer: analyzer,
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('floorplan-pick-source')));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('5 paredes · 3 aperturas por revisar'), findsOneWidget);
+
+    final paint = tester.widget<CustomPaint>(
+      find.byKey(const ValueKey('floorplan-trace-paint')),
+    );
+    final painter = paint.painter as dynamic;
+    final openings = painter.openings as List<InterpretedOpeningProposal>;
+    expect(openings, hasLength(3));
+    expect(
+      openings.where(
+        (opening) => opening.type == FloorplanOpeningCandidateType.window,
+      ),
+      hasLength(2),
+    );
+    expect(
+      openings.where(
+        (opening) => opening.type == FloorplanOpeningCandidateType.door,
+      ),
+      hasLength(1),
+    );
+
+    final firstWindow = openings.firstWhere(
+      (opening) =>
+          opening.type == FloorplanOpeningCandidateType.window &&
+          opening.edgeIndex == 0,
+    );
+    expect(firstWindow.position, 0.40);
+    expect(firstWindow.normalizedWidth, 0.20);
+
+    final door = openings.singleWhere(
+      (opening) => opening.type == FloorplanOpeningCandidateType.door,
+    );
+    expect(door.edgeIndex, 3);
+    expect(door.position, 0.50);
+    expect(door.normalizedWidth, 0.22);
+    expect(built.controller.rooms, isEmpty);
+  });
+
+  testWidgets('complete AI openings survive floorplan confirmation', (
+    tester,
+  ) async {
+    final source = _FloorplanPhotoSource(
+      await tester.runAsync(_testPng) ?? Uint8List(0),
+    );
+    final analyzer = _CountingFloorplanAnalyzer();
+    final built = await _build(
+      tester,
+      traceSource: source,
+      floorplanInterpreter: _PentagonOpeningsFloorplanInterpretationApi(),
+    );
+
+    tester.view.physicalSize = const Size(720, 2400);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: andeanTheme(),
+        home: FloorplanTraceScreen(
+          controller: built.controller,
+          analyzer: analyzer,
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('floorplan-pick-source')));
+
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('5 paredes'), findsWidgets);
+
+    await tester.tap(find.byTooltip('Herramientas de edición'));
+    await tester.pumpAndSettle();
+
+    await _enterWallDimensions(tester, 5);
+
+    final save = find.byKey(const ValueKey('floorplan-trace-save'));
+    expect(save.hitTestable(), findsOneWidget);
+
+    await tester.tap(save.hitTestable());
+    await tester.pumpAndSettle();
+
+    final room = built.controller.rooms.single;
+
+    expect(room.corners, hasLength(5));
+
+    expect(
+      room.openings,
+      isEmpty,
+      reason:
+          'Las aperturas detectadas desde un plano 2D no deben convertirse '
+          'todavía en RoomOpening sin completar los datos canónicos necesarios.',
+    );
+
+    final trace = built.controller.traceForRoom(room.id);
+    expect(trace, isNotNull);
+
+    expect(
+      trace!.openings,
+      hasLength(3),
+      reason:
+          'Las aperturas 2D detectadas por IA deben sobrevivir a la '
+          'confirmación dentro de FloorplanTraceMetadata.',
+    );
+
+    expect(
+      trace.openings.where(
+        (opening) => opening.type == FloorplanTraceOpeningType.window,
+      ),
+      hasLength(2),
+    );
+
+    expect(
+      trace.openings.where(
+        (opening) => opening.type == FloorplanTraceOpeningType.door,
+      ),
+      hasLength(1),
+    );
+
+    final firstWindow = trace.openings.firstWhere(
+      (opening) => opening.type == FloorplanTraceOpeningType.window,
+    );
+    expect(firstWindow.position, 0.40);
+    expect(firstWindow.normalizedWidth, 0.20);
+
+    final door = trace.openings.firstWhere(
+      (opening) => opening.type == FloorplanTraceOpeningType.door,
+    );
+    expect(door.edgeIndex, 3);
+    expect(door.position, 0.50);
+    expect(door.normalizedWidth, 0.22);
+
+    expect(analyzer.calls, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('persisted AI openings survive floorplan reopen and resave', (
+    tester,
+  ) async {
+    final source = _FloorplanPhotoSource(
+      await tester.runAsync(_testPng) ?? Uint8List(0),
+    );
+    final analyzer = _CountingFloorplanAnalyzer();
+    final built = await _build(
+      tester,
+      traceSource: source,
+      floorplanInterpreter: _PentagonOpeningsFloorplanInterpretationApi(),
+    );
+    tester.view.physicalSize = const Size(720, 2400);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: andeanTheme(),
+        home: FloorplanTraceScreen(
+          controller: built.controller,
+          analyzer: analyzer,
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('floorplan-pick-source')));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('5 paredes'), findsWidgets);
+    await tester.tap(find.byTooltip('Herramientas de edición'));
+    await tester.pumpAndSettle();
+    await _enterWallDimensions(tester, 5);
+    final save = find.byKey(const ValueKey('floorplan-trace-save'));
+    expect(save.hitTestable(), findsOneWidget);
+    await tester.tap(save.hitTestable());
+    await tester.pumpAndSettle();
+
+    final room = built.controller.rooms.single;
+    final initialTrace = built.controller.traceForRoom(room.id);
+    expect(initialTrace, isNotNull);
+    expect(initialTrace!.openings, hasLength(3));
+    expect(room.openings, isEmpty);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: andeanTheme(),
+        home: FloorplanTraceScreen(
+          controller: built.controller,
+          roomId: room.id,
+          analyzer: analyzer,
+        ),
+      ),
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pumpAndSettle();
+
+    final resave = find.byKey(const ValueKey('floorplan-trace-save'));
+    await tester.scrollUntilVisible(
+      resave,
+      180,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('floorplan-trace-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(resave.hitTestable(), findsOneWidget);
+    await tester.tap(resave);
+    await tester.pumpAndSettle();
+
+    final resavedTrace = built.controller.traceForRoom(room.id);
+    expect(resavedTrace, isNotNull);
+    expect(resavedTrace!.openings, hasLength(3));
+    expect(
+      resavedTrace.openings.where(
+        (opening) => opening.type == FloorplanTraceOpeningType.window,
+      ),
+      hasLength(2),
+    );
+    expect(
+      resavedTrace.openings.where(
+        (opening) => opening.type == FloorplanTraceOpeningType.door,
+      ),
+      hasLength(1),
+    );
+
+    final firstWindow = resavedTrace.openings.firstWhere(
+      (opening) =>
+          opening.type == FloorplanTraceOpeningType.window &&
+          opening.edgeIndex == 0,
+    );
+    expect(firstWindow.position, 0.40);
+    expect(firstWindow.normalizedWidth, 0.20);
+
+    final door = resavedTrace.openings.firstWhere(
+      (opening) => opening.type == FloorplanTraceOpeningType.door,
+    );
+    expect(door.edgeIndex, 3);
+    expect(door.position, 0.50);
+    expect(door.normalizedWidth, 0.22);
+    expect(built.controller.rooms.single.openings, isEmpty);
+    expect(analyzer.calls, 0);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('retracing a traced room keeps its exact height and provenance', (
     tester,
   ) async {
@@ -1514,7 +2071,7 @@ void main() {
     final after = built.controller.rooms.single;
     expect(after.id, room.id);
     expect(after.name, 'Dormitorio plano');
-    expect(after.height.value, 2.655);
+    expect(after.height!.value, 2.655);
     expect(after.openings, isEmpty);
     expect(after.acquisition.method, RoomAcquisitionMethod.floorplanTrace);
     expect(after.references.first.referenceMeters, 4.234);
@@ -1908,8 +2465,8 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('Altura: 2,65 m (ingresada a mano)'), findsOneWidget);
-    expect(built.controller.rooms.single.height.value, 2.65);
-    expect(built.controller.rooms.single.height.source, HeightSource.manual);
+    expect(built.controller.rooms.single.height!.value, 2.65);
+    expect(built.controller.rooms.single.height!.source, HeightSource.manual);
 
     final openings = find.text('Puertas y ventanas');
     await tester.scrollUntilVisible(

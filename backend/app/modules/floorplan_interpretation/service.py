@@ -9,13 +9,19 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from time import monotonic
-from typing import Any, Protocol, TypeGuard
+from typing import Any, Protocol, TypeGuard, cast
 from uuid import uuid4
 
 import httpx
 from pydantic import ValidationError
 
-from app.modules.floorplan_interpretation.schemas import FloorplanInterpretation
+from app.modules.floorplan_interpretation.schemas import (
+    FloorplanInterpretation,
+    Point,
+    _has_zero_length_edge,
+    _self_intersects,
+    _signed_area,
+)
 
 
 SYSTEM_PROMPT = """Return one concise JSON object describing architectural room candidates in the image.
@@ -23,13 +29,42 @@ First identify closed architectural spaces. Return one RoomCandidate per defensi
 rooms and must not become one mega-room contour. A semantic wall is one continuous room-perimeter segment ending only at
 a material direction or topology change. Doors, windows, gaps, wall thickness, furniture, labels, hatching, and
 dimension/extension lines do not split or create walls. Double wall bands are one wall.
+First identify the dominant room or enclosure and recover its semantic perimeter. Establish semantic topology before
+interpreting openings or dimensions. Use one contour vertex per real architectural corner or wall transition, in
+consistent order. The contour is closed by implication: do not repeat the first contour point as the final point, and
+it must be simple, non-degenerate, non-self-intersecting. Do not create contour vertices or walls from door swing arcs,
+window detail strokes, wall thickness bands, furniture, text, dimension lines, construction lines, auxiliary lines, or
+similar drawing noise. Do not infer room walls from nearby dimension labels.
+Contour points represent semantic architectural walls and room boundary segments for the selected room perimeter, rather
+than all visible linework. Doors and windows are openings in walls and must not create additional semantic walls; report
+them in openings, not as contour edges. Collinear or nearly-collinear boundary fragments separated by an opening or
+drawing gap, including a door, window, or wall-detail interruption, are one semantic wall when architecturally
+continuous and visually supported. Do not create contour walls from furniture, dimensions, text, labels, door swing arcs,
+window detail strokes, decorative lines, auxiliary/construction lines, or similar non-boundary graphical artifacts.
+Internal details or unrelated partitions belong in the contour only when they define the selected room boundary.
 Preserve L-shaped, concave, angled, pentagonal, and other irregular geometry; never force rectangles or orthogonality.
+Do not force a rectangle. Do not add or remove architectural walls merely to satisfy a target wall count.
 Hand sketches may yield partial or needs_review candidates when closed topology is defensible. Otherwise return
 low_confidence with no rooms. Geometry recognition must not depend on the plan language.
-After topology, report openings only when their wall association is reliable. Report dimensions only as visible evidence:
-every item requires literalText exactly as read and status proposed | unresolved | conflict. proposed requires a finite
-positive value and visible metric unit m/cm/mm. Bare numbers use unit unknown and unresolved. Assign edgeIndex only when
-dimension orientation, line/endpoints, and wall alignment support it; proximity alone is insufficient.
+After establishing semantic topology, inspect every semantic perimeter wall for openings and report every visually
+supported door or window. Classify each opening from its own visible architectural evidence: do not classify every wall
+gap as a door. A window must remain window when window-specific visual evidence supports it, and a door must remain door
+when door-specific visual evidence supports it; do not use a nearby dimension label to decide opening type. If an opening
+is visible but its type is genuinely ambiguous, use type="unknown". One physical opening per opening proposal:
+do not merge separate physical openings and do not duplicate a single physical opening. Do not create openings from
+furniture, annotations, dimension lines, wall thickness, door swing arcs alone, construction/auxiliary lines, decorative
+noise, or window-detail strokes alone; arcs and window detail can support classification only when a real wall opening is
+visible. After topology, assign opening edgeIndex only when wall association is visually defensible; never assign it by
+nearest distance when architectural association is uncertain. If an opening is visually supported but its semantic wall association is not defensible, preserve the opening and use edgeIndex=null. For each opening, position is the normalized center along
+the associated wall, directed from contour[edgeIndex] toward contour[(edgeIndex + 1) % wallCount]: position=0 is its start,
+position=0.5 is its midpoint, and position=1 is its end. Position is never the opening start, opening end, nearest jamb,
+or a dimension-chain offset. normalizedWidth is the physical opening span along that semantic wall divided by the semantic
+wall length: a fraction of the associated wall length, not an endpoint or a room-relative width. Report position and normalizedWidth only when visually
+defensible from the image. If the exact center is not defensible, return position=null. If the width is not defensible,
+return normalizedWidth=null. Otherwise return null rather than guessing. position is in [0,1] and normalizedWidth is in (0,1]. Never fabricate opening position or width. Never fabricate precise opening geometry or substitute typical/default door or window dimensions. Report dimensions only as visible
+evidence: every item requires literalText exactly as read and status proposed | unresolved | conflict. proposed
+requires a finite positive value and visible metric unit m/cm/mm. Bare numbers use unit unknown and unresolved. Assign
+edgeIndex only when dimension orientation, line/endpoints, and wall alignment support it; proximity alone is insufficient.
 Coordinates are normalized [0,1]. wallCount equals contour length and every edgeIndex is in range or null. Opening status
 is proposed; types are door/window/unknown. All output remains a proposal for human review with provenance ai_proposal /
 ai_detected. Never fabricate geometry, text, units, dimensions, openings, scale, area, or confidence.
@@ -42,6 +77,18 @@ _MAX_RETRY_AFTER_SECONDS = 3.0
 _FALLBACK_RETRY_DELAY_SECONDS = 0.1
 _RATE_LIMIT_FALLBACK_DELAY_SECONDS = 1.75
 _MAX_DIAGNOSTIC_PREVIEW_CHARS = 4000
+_DEFAULT_RESPONSE_MAX_TOKENS = 900
+_TOPOLOGY_RESCUE_MAX_TOKENS = 550
+_OPENING_EDGE_PROJECTION_TOLERANCE = 0.02
+
+# Dimensionless topology-review tolerances. These do not define architectural
+# wall sizes: they identify a dense sequence of material turns that is unusual
+# without independent evidence corroborating every inferred transition.
+_STRUCTURAL_SUSPICION_MIN_MEANINGFUL_TURNS = 7
+_STRUCTURAL_SUSPICION_MIN_TURN_ANGLE_DEGREES = 25.0
+_STRUCTURAL_SUSPICION_MAX_RELATIVE_COMPACT_EDGE = 0.30
+_STRUCTURAL_SUSPICION_MIN_COMPACT_EDGE_FRACTION = 0.75
+_STRUCTURAL_SUSPICION_MIN_TURN_DENSITY = 3.0
 
 LOGGER = logging.getLogger("roomforge.floorplan_interpretation")
 # Uvicorn supplies the runtime handlers. Keep this namespace independently
@@ -203,7 +250,192 @@ def _normalize_contour_point(point: object, stats: _NormalizationStats) -> objec
     return decoded
 
 
-def _normalize_dimensions(dimensions: object, *, wall_count: int, stats: _NormalizationStats) -> object:
+_SEMANTIC_CONTOUR_CLOSURE_EPSILON = 1e-9
+_SEMANTIC_EDGE_MIN_ORIENTATION_COSINE = math.cos(math.radians(12))
+_SEMANTIC_EDGE_MIN_ORIGINAL_OVERLAP = 0.8
+_SEMANTIC_EDGE_MAX_RELATIVE_PROJECTION_DISTANCE = 0.016
+
+
+def _simplify_semantic_contour(
+    contour: list[dict[str, float]],
+) -> tuple[list[dict[str, float]], list[int | None]]:
+    """Remove only exactly redundant collinear vertices from a valid contour.
+
+    The returned mapping associates a provider edge only when orientation,
+    projection distance and segment overlap establish one defensible semantic
+    correspondence. ``None`` deliberately preserves uncertainty.
+    """
+    points = [_semantic_contour_point(point) for point in contour]
+    if len(points) >= 2 and _semantic_points_equal(points[0], points[-1]):
+        points.pop()
+    if len(points) < 3:
+        raise ValueError("Semantic contour requires at least three points")
+
+    canonical_points = list(points)
+    working = [(point, index) for index, point in enumerate(points)]
+    # Short walls, corners, recesses and notches are architectural evidence.
+    # Their size alone is never sufficient justification for deleting them.
+    simplified, _ = _remove_redundant_collinear_vertices(working)
+    if not _semantic_polygon_is_valid(simplified):
+        return _semantic_contour_dicts(canonical_points), list(range(len(canonical_points)))
+
+    semantic_points = [point for point, _ in simplified]
+    mapping = [
+        _nearest_semantic_edge_index(
+            start=canonical_points[index],
+            end=canonical_points[(index + 1) % len(canonical_points)],
+            semantic_points=semantic_points,
+        )
+        for index in range(len(canonical_points))
+    ]
+    # A simplified contour is usable only when every original edge retains one
+    # unambiguous semantic wall. Otherwise preserve the original geometry and
+    # its identity mapping instead of guessing.
+    if any(edge_index is None for edge_index in mapping):
+        return _semantic_contour_dicts(canonical_points), list(range(len(canonical_points)))
+    return _semantic_contour_dicts(semantic_points), mapping
+
+
+def _semantic_contour_point(point: dict[str, float]) -> tuple[float, float]:
+    x = point.get("x")
+    y = point.get("y")
+    if not (_is_finite_number(x) and _is_finite_number(y) and 0 <= x <= 1 and 0 <= y <= 1):
+        raise ValueError("Semantic contour points must be finite and normalized")
+    return float(x), float(y)
+
+
+def _semantic_points_equal(first: tuple[float, float], second: tuple[float, float]) -> bool:
+    return math.hypot(first[0] - second[0], first[1] - second[1]) <= _SEMANTIC_CONTOUR_CLOSURE_EPSILON
+
+
+def _semantic_contour_dicts(points: list[tuple[float, float]]) -> list[dict[str, float]]:
+    return [{"x": x, "y": y} for x, y in points]
+
+
+def _remove_redundant_collinear_vertices(
+    working: list[tuple[tuple[float, float], int]],
+) -> tuple[list[tuple[tuple[float, float], int]], set[int]]:
+    simplified = list(working)
+    removed_indexes: set[int] = set()
+    while len(simplified) > 3:
+        removal: int | None = None
+        for index in range(len(simplified)):
+            previous = simplified[(index - 1) % len(simplified)][0]
+            current = simplified[index][0]
+            following = simplified[(index + 1) % len(simplified)][0]
+            if not _semantic_point_is_between(previous, current, following):
+                continue
+            candidate = [item for item_index, item in enumerate(simplified) if item_index != index]
+            if _semantic_polygon_is_valid(candidate):
+                removal = index
+                break
+        if removal is None:
+            break
+        removed_indexes.add(simplified[removal][1])
+        simplified = [item for index, item in enumerate(simplified) if index != removal]
+    return simplified, removed_indexes
+
+
+def _semantic_point_is_between(
+    previous: tuple[float, float], current: tuple[float, float], following: tuple[float, float]
+) -> bool:
+    cross = (current[0] - previous[0]) * (following[1] - previous[1]) - (current[1] - previous[1]) * (
+        following[0] - previous[0]
+    )
+    # Only an exactly collinear intermediate point is redundant. A tolerance
+    # here could erase a genuine shallow corner or recess.
+    if cross != 0.0:
+        return False
+    return (
+        min(previous[0], following[0]) <= current[0] <= max(previous[0], following[0])
+        and min(previous[1], following[1]) <= current[1] <= max(previous[1], following[1])
+    )
+
+
+def _semantic_polygon_is_valid(working: list[tuple[tuple[float, float], int]]) -> bool:
+    points = [Point(x=point[0], y=point[1]) for point, _ in working]
+    return (
+        len(points) >= 3
+        and not _has_zero_length_edge(points)
+        and abs(_signed_area(points)) >= 1e-6
+        and not _self_intersects(points)
+    )
+
+
+def _nearest_semantic_edge_index(
+    *,
+    start: tuple[float, float],
+    end: tuple[float, float],
+    semantic_points: list[tuple[float, float]],
+) -> int | None:
+    original_x = end[0] - start[0]
+    original_y = end[1] - start[1]
+    original_length = math.hypot(original_x, original_y)
+    if original_length <= _SEMANTIC_CONTOUR_CLOSURE_EPSILON:
+        return None
+    all_points = [start, end, *semantic_points]
+    diagonal = math.hypot(
+        max(point[0] for point in all_points) - min(point[0] for point in all_points),
+        max(point[1] for point in all_points) - min(point[1] for point in all_points),
+    )
+    if diagonal <= _SEMANTIC_CONTOUR_CLOSURE_EPSILON:
+        return None
+    max_distance = diagonal * _SEMANTIC_EDGE_MAX_RELATIVE_PROJECTION_DISTANCE
+    matches: list[tuple[float, float, float, int]] = []
+    for index, semantic_start in enumerate(semantic_points):
+        semantic_end = semantic_points[(index + 1) % len(semantic_points)]
+        semantic_x = semantic_end[0] - semantic_start[0]
+        semantic_y = semantic_end[1] - semantic_start[1]
+        semantic_length = math.hypot(semantic_x, semantic_y)
+        if semantic_length <= _SEMANTIC_CONTOUR_CLOSURE_EPSILON:
+            continue
+        orientation = abs(
+            (original_x * semantic_x + original_y * semantic_y)
+            / (original_length * semantic_length)
+        )
+        if orientation < _SEMANTIC_EDGE_MIN_ORIENTATION_COSINE:
+            continue
+        unit_x, unit_y = semantic_x / semantic_length, semantic_y / semantic_length
+        start_projection = (
+            (start[0] - semantic_start[0]) * unit_x
+            + (start[1] - semantic_start[1]) * unit_y
+        )
+        end_projection = (
+            (end[0] - semantic_start[0]) * unit_x
+            + (end[1] - semantic_start[1]) * unit_y
+        )
+        overlap = max(
+            0.0,
+            min(max(start_projection, end_projection), semantic_length)
+            - max(min(start_projection, end_projection), 0.0),
+        )
+        overlap_ratio = overlap / original_length
+        if overlap_ratio < _SEMANTIC_EDGE_MIN_ORIGINAL_OVERLAP:
+            continue
+        start_distance = abs(
+            semantic_x * (start[1] - semantic_start[1])
+            - semantic_y * (start[0] - semantic_start[0])
+        ) / semantic_length
+        end_distance = abs(
+            semantic_x * (end[1] - semantic_start[1])
+            - semantic_y * (end[0] - semantic_start[0])
+        ) / semantic_length
+        projection_distance = max(start_distance, end_distance)
+        if projection_distance > max_distance:
+            continue
+        matches.append((projection_distance, 1 - overlap_ratio, 1 - orientation, index))
+    # More than one defensible match is still ambiguous; proximity must never
+    # decide which logical wall receives physical evidence.
+    return matches[0][3] if len(matches) == 1 else None
+
+
+def _normalize_dimensions(
+    dimensions: object,
+    *,
+    wall_count: int,
+    stats: _NormalizationStats,
+    edge_mapping: list[int | None] | None = None,
+) -> object:
     if not isinstance(dimensions, list):
         return dimensions
     normalized: list[dict[str, Any]] = []
@@ -232,11 +464,25 @@ def _normalize_dimensions(dimensions: object, *, wall_count: int, stats: _Normal
             stats.dropped_dimensions += 1
             stats.record("dimension_dropped_invalid_contract")
             continue
-        if candidate.get("unit") not in {"m", "cm", "mm", "unknown"}:
+        unit = candidate.get("unit", "unknown")
+        if not isinstance(unit, str) or not unit.strip() or len(unit) > 32:
             stats.dropped_dimensions += 1
             stats.record("dimension_dropped_invalid_contract")
             continue
+        candidate["unit"] = unit
         changed = False
+        if "edgeIndex" in candidate:
+            provider_edge_index = candidate.get("edgeIndex")
+            candidate["edgeIndex"] = _remap_provider_edge(provider_edge_index, edge_mapping)
+            if (
+                edge_mapping is not None
+                and isinstance(provider_edge_index, int)
+                and not isinstance(provider_edge_index, bool)
+                and 0 <= provider_edge_index < len(edge_mapping)
+                and candidate["edgeIndex"] is None
+            ):
+                changed = True
+                stats.record("dimension_edge_mapping_unresolved")
         edge_index = candidate.get("edgeIndex")
         if edge_index is not None and (
             not isinstance(edge_index, int)
@@ -247,10 +493,16 @@ def _normalize_dimensions(dimensions: object, *, wall_count: int, stats: _Normal
             candidate["edgeIndex"] = None
             changed = True
             stats.record("dimension_edge_downgraded")
-        if candidate["status"] == "proposed" and (candidate.get("unit") == "unknown" or changed):
+        if candidate["status"] == "proposed" and (
+            candidate.get("edgeIndex") is None
+            or candidate.get("unit") not in {"m", "cm", "mm"}
+            or changed
+        ):
             candidate["status"] = "unresolved"
             changed = True
-            if candidate.get("unit") == "unknown":
+            if candidate.get("edgeIndex") is None:
+                stats.record("dimension_edge_unassociated")
+            if candidate.get("unit") not in {"m", "cm", "mm"}:
                 stats.record("unknown_unit_unresolved")
         if changed:
             stats.normalized_dimensions += 1
@@ -258,7 +510,15 @@ def _normalize_dimensions(dimensions: object, *, wall_count: int, stats: _Normal
     return normalized
 
 
-def _normalize_openings(openings: object, *, wall_count: int, stats: _NormalizationStats) -> object:
+def _normalize_openings(
+    openings: object,
+    *,
+    wall_count: int,
+    stats: _NormalizationStats,
+    edge_mapping: list[int | None] | None = None,
+    provider_contour: list[dict[str, float]] | None = None,
+    semantic_contour: list[dict[str, float]] | None = None,
+) -> object:
     if not isinstance(openings, list):
         return openings
     normalized: list[dict[str, Any]] = []
@@ -267,8 +527,15 @@ def _normalize_openings(openings: object, *, wall_count: int, stats: _Normalizat
             stats.dropped_openings += 1
             stats.record("opening_dropped_invalid_contract")
             continue
+        has_canonical_edge_index = "edgeIndex" in opening
         edge_index = opening.get("edgeIndex")
-        invalid_edge = (
+        uses_wall_index_alias = not has_canonical_edge_index and "wallIndex" in opening
+        if uses_wall_index_alias:
+            edge_index = opening.get("wallIndex")
+        provider_edge_index = edge_index
+        edge_index = _remap_provider_edge(edge_index, edge_mapping)
+        unassociated_edge = edge_index is None
+        invalid_edge = not unassociated_edge and (
             not isinstance(edge_index, int)
             or isinstance(edge_index, bool)
             or edge_index < 0
@@ -290,6 +557,35 @@ def _normalize_openings(openings: object, *, wall_count: int, stats: _Normalizat
             )
             continue
         candidate: dict[str, Any] = dict(opening)
+        candidate.pop("wallIndex", None)
+        candidate["edgeIndex"] = edge_index
+        if unassociated_edge:
+            # Positional geometry has meaning only in the coordinate system of
+            # a defensibly associated wall.
+            had_positional_geometry = "position" in candidate or "normalizedWidth" in candidate
+            candidate.pop("position", None)
+            candidate.pop("normalizedWidth", None)
+            if had_positional_geometry:
+                stats.record("opening_geometry_unresolved_after_edge_mapping")
+        if unassociated_edge:
+            stats.record("opening_edge_unassociated")
+        if uses_wall_index_alias and edge_index is not None:
+            stats.record("opening_wall_index_alias_normalized")
+        if (
+            isinstance(provider_edge_index, int)
+            and not isinstance(provider_edge_index, bool)
+            and isinstance(edge_index, int)
+            and provider_contour is not None
+            and semantic_contour is not None
+        ):
+            _transform_opening_geometry_to_semantic_edge(
+                candidate,
+                provider_contour=provider_contour,
+                provider_edge_index=provider_edge_index,
+                semantic_contour=semantic_contour,
+                semantic_edge_index=edge_index,
+                stats=stats,
+            )
         for key, lower, lower_inclusive in (
             ("position", 0.0, True),
             ("normalizedWidth", 0.0, False),
@@ -305,6 +601,67 @@ def _normalize_openings(openings: object, *, wall_count: int, stats: _Normalizat
                 stats.record("opening_invalid_field_dropped")
         normalized.append(candidate)
     return normalized
+
+
+def _transform_opening_geometry_to_semantic_edge(
+    opening: dict[str, Any],
+    *,
+    provider_contour: list[dict[str, float]],
+    provider_edge_index: int,
+    semantic_contour: list[dict[str, float]],
+    semantic_edge_index: int,
+    stats: _NormalizationStats,
+) -> None:
+    """Express provider-edge opening evidence in the mapped semantic-edge coordinates."""
+    if provider_edge_index >= len(provider_contour) or semantic_edge_index >= len(semantic_contour):
+        return
+    p0 = _semantic_contour_point(provider_contour[provider_edge_index])
+    p1 = _semantic_contour_point(provider_contour[(provider_edge_index + 1) % len(provider_contour)])
+    s0 = _semantic_contour_point(semantic_contour[semantic_edge_index])
+    s1 = _semantic_contour_point(semantic_contour[(semantic_edge_index + 1) % len(semantic_contour)])
+    if _semantic_points_equal(p0, s0) and _semantic_points_equal(p1, s1):
+        return
+    pdx, pdy = p1[0] - p0[0], p1[1] - p0[1]
+    sdx, sdy = s1[0] - s0[0], s1[1] - s0[1]
+    provider_length = math.hypot(pdx, pdy)
+    semantic_squared = sdx * sdx + sdy * sdy
+    semantic_length = math.sqrt(semantic_squared)
+    diagonal = math.hypot(
+        max(p["x"] for p in semantic_contour) - min(p["x"] for p in semantic_contour),
+        max(p["y"] for p in semantic_contour) - min(p["y"] for p in semantic_contour),
+    )
+    if provider_length <= 0 or semantic_length <= 0 or diagonal <= 0:
+        return
+    position = opening.get("position")
+    if not _is_finite_number(position):
+        return
+    qx, qy = p0[0] + float(position) * pdx, p0[1] + float(position) * pdy
+    semantic_position = ((qx - s0[0]) * sdx + (qy - s0[1]) * sdy) / semantic_squared
+    px, py = s0[0] + semantic_position * sdx, s0[1] + semantic_position * sdy
+    if (
+        -_OPENING_EDGE_PROJECTION_TOLERANCE <= semantic_position <= 1 + _OPENING_EDGE_PROJECTION_TOLERANCE
+        and math.hypot(qx - px, qy - py) <= _OPENING_EDGE_PROJECTION_TOLERANCE * diagonal
+    ):
+        opening["position"] = semantic_position
+        width = opening.get("normalizedWidth")
+        if _is_finite_number(width):
+            opening["normalizedWidth"] = float(width) * provider_length / semantic_length
+        stats.record("opening_geometry_remapped_to_semantic_edge")
+    else:
+        opening.pop("position", None)
+        opening.pop("normalizedWidth", None)
+        stats.record("opening_geometry_unresolved_after_edge_mapping")
+
+
+def _remap_provider_edge(edge_index: object, edge_mapping: list[int | None] | None) -> object:
+    if (
+        edge_mapping is not None
+        and isinstance(edge_index, int)
+        and not isinstance(edge_index, bool)
+        and 0 <= edge_index < len(edge_mapping)
+    ):
+        return edge_mapping[edge_index]
+    return edge_index
 
 
 def _append_warning(container: dict[str, Any], warning: str) -> None:
@@ -336,18 +693,33 @@ def _normalize_groq_response(raw: object) -> tuple[object, _NormalizationStats]:
             stats.record("string_contour_decoded")
         if isinstance(contour, list):
             normalized_contour = [_normalize_contour_point(point, stats) for point in contour]
-            normalized_room["contour"] = normalized_contour
             if _has_structurally_valid_contour(normalized_contour):
-                wall_count = len(normalized_contour)
+                simplified_contour, edge_mapping = _simplify_semantic_contour(
+                    cast(list[dict[str, float]], normalized_contour)
+                )
+                if simplified_contour != normalized_contour:
+                    stats.record("semantic_contour_simplified")
+                normalized_room["contour"] = simplified_contour
+                wall_count = len(simplified_contour)
                 if room.get("wallCount") != wall_count:
                     stats.record("derived_wall_count")
                 normalized_room["wallCount"] = wall_count
                 normalized_room["dimensions"] = _normalize_dimensions(
-                    room.get("dimensions", []), wall_count=wall_count, stats=stats
+                    room.get("dimensions", []),
+                    wall_count=wall_count,
+                    stats=stats,
+                    edge_mapping=edge_mapping,
                 )
                 normalized_room["openings"] = _normalize_openings(
-                    room.get("openings", []), wall_count=wall_count, stats=stats
+                    room.get("openings", []),
+                    wall_count=wall_count,
+                    stats=stats,
+                    edge_mapping=edge_mapping,
+                    provider_contour=cast(list[dict[str, float]], normalized_contour),
+                    semantic_contour=simplified_contour,
                 )
+            else:
+                normalized_room["contour"] = normalized_contour
         normalized_rooms.append(normalized_room)
     normalized["rooms"] = normalized_rooms
     if stats.dropped_dimensions:
@@ -367,7 +739,7 @@ def _apply_quality_gate(
     result: FloorplanInterpretation, stats: _NormalizationStats
 ) -> FloorplanInterpretation:
     """Downgrade only combined, obvious unusability signals; never reinterpret geometry."""
-    low_quality = False
+    quality_reason: str | None = None
     for room in result.rooms:
         openings_without_geometry = sum(
             opening.position is None or opening.normalized_width is None for opening in room.openings
@@ -375,15 +747,29 @@ def _apply_quality_gate(
         mostly_unusable_openings = bool(room.openings) and (
             openings_without_geometry / len(room.openings) >= 0.75
         )
-        no_useful_evidence = not room.dimensions and (not room.openings or mostly_unusable_openings)
-        if room.wall_count >= 20 and no_useful_evidence:
-            low_quality = True
+        weak_dimension_evidence = len(room.dimensions) <= 3
+        insufficient_corroboration = weak_dimension_evidence and (
+            not room.openings or mostly_unusable_openings
+        )
+        if room.wall_count >= 20 and insufficient_corroboration:
+            quality_reason = "oversegmentation"
             break
-    if not low_quality or result.status not in {"success", "partial"}:
+        if _has_suspicious_structural_complexity(room):
+            quality_reason = "structural_complexity"
+            break
+    if quality_reason is None or result.status not in {"success", "partial"}:
         return result
-    stats.record("low_quality_oversegmentation")
-    warning = "La propuesta automática presenta sobresegmentación y requiere corrección humana."
-    needed = "Reintentar la interpretación o corregir la geometría manualmente."
+    if quality_reason == "oversegmentation":
+        stats.record("low_quality_oversegmentation")
+        warning = "La propuesta automática presenta sobresegmentación y requiere corrección humana."
+        needed = "Reintentar la interpretación o corregir la geometría manualmente."
+    else:
+        stats.record("low_quality_structural_complexity")
+        warning = (
+            "La topología de la habitación contiene transiciones estructurales "
+            "inusualmente densas y debe revisarse."
+        )
+        needed = "Confirmar si las transiciones del contorno representan muros arquitectónicos reales."
     return result.model_copy(
         update={
             "status": "needs_review",
@@ -394,6 +780,81 @@ def _apply_quality_gate(
             ],
         }
     )
+
+
+def _has_suspicious_structural_complexity(room: Any) -> bool:
+    """Identify review-worthy dense topology without changing a room candidate.
+
+    A candidate is suspicious only when several scale-independent geometry
+    signals agree and dimensions/openings do not independently corroborate its
+    dense set of inferred wall transitions. This intentionally does not decide
+    which walls are real, so it cannot fabricate a replacement contour.
+    """
+    points = [(point.x, point.y) for point in room.contour]
+    if len(points) < _STRUCTURAL_SUSPICION_MIN_MEANINGFUL_TURNS:
+        return False
+
+    bounds_width = max(point[0] for point in points) - min(point[0] for point in points)
+    bounds_height = max(point[1] for point in points) - min(point[1] for point in points)
+    bounds_diagonal = math.hypot(bounds_width, bounds_height)
+    if bounds_diagonal <= _SEMANTIC_CONTOUR_CLOSURE_EPSILON:
+        return False
+
+    edge_lengths = [
+        math.dist(points[index], points[(index + 1) % len(points)]) for index in range(len(points))
+    ]
+    perimeter = sum(edge_lengths)
+    if perimeter <= _SEMANTIC_CONTOUR_CLOSURE_EPSILON:
+        return False
+
+    meaningful_turns = sum(
+        _structural_turn_angle_degrees(
+            points[(index - 1) % len(points)], points[index], points[(index + 1) % len(points)]
+        )
+        >= _STRUCTURAL_SUSPICION_MIN_TURN_ANGLE_DEGREES
+        for index in range(len(points))
+    )
+    compact_edge_fraction = sum(
+        edge_length / bounds_diagonal <= _STRUCTURAL_SUSPICION_MAX_RELATIVE_COMPACT_EDGE
+        for edge_length in edge_lengths
+    ) / len(edge_lengths)
+    turn_density = meaningful_turns * bounds_diagonal / perimeter
+
+    dimension_edges = {
+        dimension.edge_index for dimension in room.dimensions if dimension.edge_index is not None
+    }
+    complete_opening_edges = {
+        opening.edge_index
+        for opening in room.openings
+        if opening.edge_index is not None
+        and opening.position is not None
+        and opening.normalized_width is not None
+    }
+    strong_corroboration = len(dimension_edges) >= 3 or (
+        len(dimension_edges) >= 1 and len(complete_opening_edges) >= 3
+    )
+    return (
+        meaningful_turns >= _STRUCTURAL_SUSPICION_MIN_MEANINGFUL_TURNS
+        and compact_edge_fraction >= _STRUCTURAL_SUSPICION_MIN_COMPACT_EDGE_FRACTION
+        and turn_density >= _STRUCTURAL_SUSPICION_MIN_TURN_DENSITY
+        and not strong_corroboration
+    )
+
+
+def _structural_turn_angle_degrees(
+    previous: tuple[float, float], current: tuple[float, float], following: tuple[float, float]
+) -> float:
+    incoming = current[0] - previous[0], current[1] - previous[1]
+    outgoing = following[0] - current[0], following[1] - current[1]
+    incoming_length = math.hypot(*incoming)
+    outgoing_length = math.hypot(*outgoing)
+    if (
+        incoming_length <= _SEMANTIC_CONTOUR_CLOSURE_EPSILON
+        or outgoing_length <= _SEMANTIC_CONTOUR_CLOSURE_EPSILON
+    ):
+        return 0.0
+    cosine = (incoming[0] * outgoing[0] + incoming[1] * outgoing[1]) / (incoming_length * outgoing_length)
+    return math.degrees(math.acos(max(-1.0, min(1.0, cosine))))
 
 
 def _validation_details(error: ValidationError) -> tuple[str, str]:
@@ -417,9 +878,14 @@ _CORRECTIVE_INSTRUCTIONS = {
         "Do not invent or remove architectural walls merely to satisfy the count."
     ),
     "invalid_contour": (
-        "Your previous room contour was rejected as geometrically invalid. Re-evaluate the room "
-        "topology directly from the original image. Return a simple, non-degenerate, "
-        "non-self-intersecting semantic wall contour. Do not invent geometry to force validity."
+        "Your previous room contour was rejected as geometrically invalid. Re-read the original image "
+        "and focus on the dominant room's semantic perimeter. Return one vertex per real "
+        "architectural wall transition or corner, in consistent order. Return a simple, non-degenerate, "
+        "non-self-intersecting contour closed by implication; do not repeat the first point as the last "
+        "point. Ignore door swing arcs, window strokes and window detail strokes, wall thickness bands, "
+        "furniture, text, dimensions, and construction lines as contour edges. Preserve genuine irregular, "
+        "L-shaped, concave, angled, and pentagonal geometry; do not force a rectangle. Do not invent "
+        "missing walls or remove real architectural walls to reach a target count."
     ),
     "invalid_opening_edge": (
         "Your previous proposal referenced an opening outside the room's valid wall indexes. "
@@ -469,17 +935,28 @@ class GroqFloorplanInterpreter:
         owned = self._client is None
         client = self._client or httpx.AsyncClient(timeout=self._timeout)
         corrective_instruction: str | None = None
+        response_max_tokens = _DEFAULT_RESPONSE_MAX_TOKENS
         try:
             for attempt in (1, 2):
                 try:
-                    result, stats = await self._attempt(
-                        client=client,
-                        image=image,
-                        content_type=content_type,
-                        corrective_instruction=corrective_instruction,
-                        attempt=attempt,
-                        diagnostic_id=diagnostic_id,
-                    )
+                    remaining = self._timeout - (monotonic() - started)
+                    if remaining <= 0:
+                        raise ProviderUnavailable(reason="timeout")
+                    try:
+                        result, stats = await asyncio.wait_for(
+                            self._attempt(
+                                client=client,
+                                image=image,
+                                content_type=content_type,
+                                corrective_instruction=corrective_instruction,
+                                max_tokens=response_max_tokens,
+                                attempt=attempt,
+                                diagnostic_id=diagnostic_id,
+                            ),
+                            timeout=remaining,
+                        )
+                    except TimeoutError:
+                        raise ProviderUnavailable(reason="timeout") from None
                 except ProviderUnavailable as exc:
                     provider_outcome = {
                         "timeout": "PROVIDER_TIMEOUT",
@@ -516,15 +993,57 @@ class GroqFloorplanInterpreter:
                                 else _FALLBACK_RETRY_DELAY_SECONDS
                             )
                         )
+                        remaining = self._timeout - (monotonic() - started)
+                        if delay >= remaining:
+                            raise ProviderUnavailable(reason="timeout") from None
                         await self._sleep(delay)
                         continue
-                    if attempt == 2:
-                        LOGGER.warning(
-                            "[RoomForge][FloorplanInterpretation] floorplanDiag=%s provider=groq "
-                            "attempts=2 result=provider_unavailable",
-                            diagnostic_id,
+                    if (
+                        attempt == 2
+                        and corrective_instruction is not None
+                        and exc.reason == "rate_limited"
+                        and exc.retryable
+                    ):
+                        # A short transport-level rate limit on the corrective
+                        # semantic attempt must not consume a third semantic
+                        # attempt. Permit at most one repeat with the SAME prompt.
+                        delay = (
+                            exc.retry_after_seconds
+                            if exc.retry_after_seconds is not None
+                            else _RATE_LIMIT_FALLBACK_DELAY_SECONDS
                         )
-                    raise
+                        remaining = self._timeout - (monotonic() - started)
+                        if delay >= remaining:
+                            raise ProviderUnavailable(reason="timeout") from None
+                        await self._sleep(delay)
+                        remaining = self._timeout - (monotonic() - started)
+                        if remaining <= 0:
+                            raise ProviderUnavailable(reason="timeout") from None
+                        try:
+                            result, stats = await asyncio.wait_for(
+                                self._attempt(
+                                    client=client,
+                                    image=image,
+                                    content_type=content_type,
+                                    corrective_instruction=corrective_instruction,
+                                    max_tokens=response_max_tokens,
+                                    attempt=attempt,
+                                    diagnostic_id=diagnostic_id,
+                                ),
+                                timeout=remaining,
+                            )
+                        except TimeoutError:
+                            raise ProviderUnavailable(reason="timeout") from None
+                        # A second rate limit (or any other error) propagates;
+                        # never retry indefinitely or modify the proposal.
+                    else:
+                        if attempt == 2:
+                            LOGGER.warning(
+                                "[RoomForge][FloorplanInterpretation] floorplanDiag=%s provider=groq "
+                                "attempts=2 result=provider_unavailable",
+                                diagnostic_id,
+                            )
+                        raise
                 except InvalidProviderResponse as exc:
                     LOGGER.warning(
                         "[RoomForge][FloorplanInterpretation] floorplanDiag=%s provider=groq attempt=%d "
@@ -538,6 +1057,11 @@ class GroqFloorplanInterpreter:
                     )
                     if attempt == 1:
                         corrective_instruction = _CORRECTIVE_INSTRUCTIONS[exc.reason]
+                        response_max_tokens = (
+                            _TOPOLOGY_RESCUE_MAX_TOKENS
+                            if exc.reason == "invalid_contour"
+                            else _DEFAULT_RESPONSE_MAX_TOKENS
+                        )
                         continue
                     LOGGER.warning(
                         "[RoomForge][FloorplanInterpretation] floorplanDiag=%s provider=groq "
@@ -571,6 +1095,7 @@ class GroqFloorplanInterpreter:
         image: bytes,
         content_type: str,
         corrective_instruction: str | None,
+        max_tokens: int,
         attempt: int,
         diagnostic_id: str,
     ) -> tuple[FloorplanInterpretation, _NormalizationStats]:
@@ -580,7 +1105,7 @@ class GroqFloorplanInterpreter:
         payload = {
             "model": self._model,
             "temperature": 0,
-            "max_tokens": 900,
+            "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
             "messages": [
                 {

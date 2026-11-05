@@ -2,6 +2,32 @@ import 'package:captura_mobile/domain/spatial/spatial.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('wall-based floorplan does not require a fabricated global height', () {
+    final room = buildWallBasedFloorplanRoom(
+      id: 'f07',
+      name: 'F07',
+      normalizedTrace: const [
+        FloorPoint(0, 0),
+        FloorPoint(1, 0),
+        FloorPoint(1, 1),
+        FloorPoint(0, 1),
+      ],
+      imageWidth: 400,
+      imageHeight: 300,
+      wallDimensions: const [
+        CapturedWallDimension(wallId: 'a', lengthM: 4, heightM: 2.4),
+        CapturedWallDimension(wallId: 'b', lengthM: 3, heightM: 2.8),
+        CapturedWallDimension(wallId: 'c', lengthM: 4, heightM: 2.5),
+        CapturedWallDimension(wallId: 'd', lengthM: 3, heightM: 2.6),
+      ],
+    );
+
+    expect(room.height, isNull);
+    expect(room.wallDimensions, hasLength(4));
+    expect(room.wallDimensions[1].heightM, 2.8);
+    expect(buildScene(roomCapture(room)).document['version'], '2.0');
+  });
+
   group('manual L room', () {
     for (final recess in RecessCorner.values) {
       test('builds a valid six-corner ${recess.name} room', () {

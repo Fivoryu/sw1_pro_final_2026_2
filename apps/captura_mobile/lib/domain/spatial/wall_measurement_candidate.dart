@@ -6,6 +6,7 @@ class WallMeasurementCandidate {
     required this.literalText,
     required this.meters,
     this.rawValue,
+    this.unit,
     this.edgeIndex,
     this.explicitUnit = false,
     this.ambiguityReason,
@@ -24,6 +25,10 @@ class WallMeasurementCandidate {
   /// compare textual evidence without inventing metres.
   final double? rawValue;
 
+  /// Unit exactly as supplied by the provider. It is retained even when it is
+  /// unknown and therefore cannot be converted to metres.
+  final String? unit;
+
   final int? edgeIndex;
   final bool explicitUnit;
   final String? ambiguityReason;
@@ -38,6 +43,7 @@ class WallMeasurementCandidate {
     literalText: literalText,
     meters: meters,
     rawValue: rawValue,
+    unit: unit,
     edgeIndex: edgeIndex ?? this.edgeIndex,
     explicitUnit: explicitUnit,
     ambiguityReason: ambiguityReason ?? this.ambiguityReason,

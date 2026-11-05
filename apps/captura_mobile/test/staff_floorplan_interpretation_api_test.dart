@@ -357,6 +357,56 @@ void main() {
     },
   );
 
+  test(
+    'unassociated opening evidence is preserved but not canonical',
+    () async {
+      for (final opening in <Map<String, Object?>>[
+        {'edgeIndex': null, 'type': 'window', 'position': 0.5},
+        {'type': 'door'},
+      ]) {
+        final result = await _interpret(
+          _api({
+            'status': 'partial',
+            'rooms': [
+              _room(openings: [opening]),
+            ],
+          }),
+        );
+        final proposal = result.rooms.single.openings.single;
+        expect(proposal.edgeIndex, isNull);
+        expect(proposal.toCanonicalCandidate(), isNull);
+      }
+    },
+  );
+
+  test('malformed non-null opening edge remains malformed', () async {
+    await expectLater(
+      _interpret(
+        _api({
+          'status': 'partial',
+          'rooms': [
+            _room(
+              openings: [
+                {'edgeIndex': '1', 'type': 'door'},
+              ],
+            ),
+          ],
+        }),
+      ),
+      throwsA(isA<StaffAuthFailure>()),
+    );
+  });
+
+  test('trace opening JSON preserves an unassociated wall', () {
+    const opening = FloorplanTraceOpening(
+      type: FloorplanTraceOpeningType.unknown,
+      position: 0.5,
+    );
+    final restored = FloorplanTraceOpening.fromJson(opening.toJson());
+    expect(restored.edgeIndex, isNull);
+    expect(restored.position, 0.5);
+  });
+
   test('explicit opening geometry is preserved exactly', () async {
     final result = await _interpret(
       _api({

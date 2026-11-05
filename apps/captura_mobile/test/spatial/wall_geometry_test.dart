@@ -63,20 +63,49 @@ void main() {
     });
 
     test('medidas incompatibles no se distorsionan silenciosamente', () {
-      final result = fitConfirmedWallLengths(
-        _room(
-          const [
-            FloorPoint(0, 0),
-            FloorPoint(4, 0),
-            FloorPoint(4, 3),
-            FloorPoint(0, 3),
-          ],
-          const [10, 3, 2, 3],
-        ),
+      final room = _room(
+        const [
+          FloorPoint(0, 0),
+          FloorPoint(4, 0),
+          FloorPoint(4, 3),
+          FloorPoint(0, 3),
+        ],
+        const [10, 3, 2, 3],
       );
+      final result = fitConfirmedWallLengths(room);
 
       expect(result.isCoherent, isFalse);
       expect(result.message, contains('no permiten cerrar'));
+      expect(hasContradictoryConfirmedWallLengths(room), isTrue);
+    });
+
+    test('evidencia insuficiente o derivada no prueba contradicción', () {
+      final oneConfirmed = _room(
+        const [
+          FloorPoint(0, 0),
+          FloorPoint(4, 0),
+          FloorPoint(4, 3),
+          FloorPoint(0, 3),
+        ],
+        const [10],
+      );
+      final provisional = oneConfirmed.copyWith(
+        references: const [
+          ReferenceMeasurement(
+            edgeIndex: 0,
+            referenceMeters: 10,
+            provenance: WallMeasurementProvenance.derivedScale,
+          ),
+          ReferenceMeasurement(
+            edgeIndex: 1,
+            referenceMeters: 1,
+            provenance: WallMeasurementProvenance.unresolved,
+          ),
+        ],
+      );
+
+      expect(hasContradictoryConfirmedWallLengths(oneConfirmed), isFalse);
+      expect(hasContradictoryConfirmedWallLengths(provisional), isFalse);
     });
 
     test('confirmar otra pared no sobrescribe la primera ni la abertura', () {

@@ -14,11 +14,22 @@ const double _duplicateWallAngleDegrees = 3;
 const double _duplicateWallDistance = 0.3;
 const double _duplicateWallOverlap = 0.2;
 
+String _sceneWallId(String wallId) {
+  if (!wallId.contains('source-')) return wallId;
+  var hash = 0x811c9dc5;
+  for (final value in wallId.codeUnits) {
+    hash = ((hash ^ value) * 0x01000193) & 0xffffffff;
+  }
+  return 'wall-f07-${hash.toRadixString(16).padLeft(8, '0')}';
+}
+
 enum SceneWarningCode {
   assumedHeight,
   boxMissingHeight,
   boxRotationApproximated,
   openingExceedsWall,
+  openingIncomplete,
+  wallDimensionConflict,
   possibleDuplicateWall,
   roomsOverlap,
   roomNotConnected,
@@ -66,13 +77,31 @@ SceneBuildResult buildScene(PropertyCapture capture) {
 }
 
 class _WallRecord {
-  _WallRecord(this.id, this.start, this.end, this.height);
+  _WallRecord(
+    this.id,
+    this.start,
+    this.end,
+    this.height, {
+    this.sourceWallId,
+    this.lengthM,
+  }) : dimensionalEvidence = [
+         (sourceWallId: sourceWallId, lengthM: lengthM, height: height),
+       ];
 
   final String id;
   final int start;
   final int end;
-  RoomHeight height;
+  final RoomHeight height;
+  final String? sourceWallId;
+  final double? lengthM;
+  final List<_WallDimensionEvidence> dimensionalEvidence;
 }
+
+typedef _WallDimensionEvidence = ({
+  String? sourceWallId,
+  double? lengthM,
+  RoomHeight height,
+});
 
 /// Sub-wall of one room edge, in the direction of that room's contour.
 typedef _EdgePiece = ({int wall, int from, int to});
@@ -94,6 +123,17 @@ class _SceneBuilder {
 
   Map<String, Object?> build() {
     final rooms = capture.rooms;
+    for (final room in rooms) {
+      if (room.wallDimensions.isEmpty) continue;
+      if (room.wallDimensions.length != room.corners.length ||
+          room.wallDimensions.any((wall) => !wall.isValid) ||
+          room.wallDimensions.map((wall) => wall.wallId).toSet().length !=
+              room.wallDimensions.length) {
+        throw StateError(
+          'Room ${room.id} has invalid independent wall dimensions',
+        );
+      }
+    }
     final vertexIndexes = [
       for (final room in rooms) [for (final v in _centerline(room)) _weld(v)],
     ];
@@ -104,10 +144,36 @@ class _SceneBuilder {
       final pieces = <List<_EdgePiece>>[];
       final wallIds = <String>[];
       for (var i = 0; i < indexes.length; i++) {
+        final dimension = rooms[r].wallDimensions.isEmpty
+            ? null
+            : (i < rooms[r].wallDimensions.length
+                  ? rooms[r].wallDimensions[i]
+                  : null);
+        final wallHeight = dimension == null
+            ? rooms[r].height
+            : RoomHeight(dimension.heightM, HeightSource.manual);
+        if (wallHeight == null) {
+          throw StateError(
+            'Room ${rooms[r].id} has no height for contour edge $i',
+          );
+        }
         final chain = _splitEdge(indexes[i], indexes[(i + 1) % indexes.length]);
+        final wasSubdivided = chain.length > 2;
         final edgePieces = <_EdgePiece>[];
         for (var k = 0; k + 1 < chain.length; k++) {
-          final wall = _wallFor(chain[k], chain[k + 1], rooms[r].height);
+          final wall = _wallFor(
+            chain[k],
+            chain[k + 1],
+            wallHeight,
+            sourceWallId: dimension == null
+                ? null
+                : _sceneWallId(dimension.wallId),
+            // The physical length belongs to the original logical wall. A
+            // visual subdivision must not repeat that full value on every
+            // emitted Scene wall; wallDimensions retains the authoritative
+            // source measurement and sourceWallId retains lineage.
+            lengthM: wasSubdivided ? null : dimension?.lengthM,
+          );
           edgePieces.add((wall: wall, from: chain[k], to: chain[k + 1]));
           final id = _walls[wall].id;
           if (wallIds.isEmpty || wallIds.last != id) wallIds.add(id);
@@ -129,6 +195,17 @@ class _SceneBuilder {
       'version': '2.0',
       'unit': 'meters',
       'walls': [for (final wall in _walls) _wallJson(wall)],
+      if (rooms.any((room) => room.wallDimensions.isNotEmpty))
+        'wallDimensions': [
+          for (final room in rooms)
+            for (final wall in room.wallDimensions)
+              {
+                'roomId': room.id,
+                'wallId': _sceneWallId(wall.wallId),
+                'lengthM': roundTo(wall.lengthM, 3),
+                'heightM': roundTo(wall.heightM, 3),
+              },
+        ],
       'openings': _openings(),
       'rooms': roomDocuments,
       'objects': _objects(),
@@ -198,16 +275,64 @@ class _SceneBuilder {
     return [a, for (final point in inner) point.index, b];
   }
 
-  int _wallFor(int a, int b, RoomHeight height) {
+  int _wallFor(
+    int a,
+    int b,
+    RoomHeight height, {
+    String? sourceWallId,
+    double? lengthM,
+  }) {
     final key = a < b ? '$a:$b' : '$b:$a';
     final existing = _wallByEndpoints[key];
     if (existing != null) {
-      if (height.value > _walls[existing].height.value) {
-        _walls[existing].height = height;
+      final wall = _walls[existing];
+      final evidence = (
+        sourceWallId: sourceWallId,
+        lengthM: lengthM,
+        height: height,
+      );
+      final alreadyRecorded = wall.dimensionalEvidence.any(
+        (current) =>
+            current.sourceWallId == evidence.sourceWallId &&
+            current.lengthM == evidence.lengthM &&
+            current.height == evidence.height,
+      );
+      if (!alreadyRecorded) {
+        final conflicts = wall.dimensionalEvidence.any(
+          (current) =>
+              (current.height.value - height.value).abs() > 1e-9 ||
+              (current.lengthM != null &&
+                  lengthM != null &&
+                  (current.lengthM! - lengthM).abs() > 1e-9),
+        );
+        wall.dimensionalEvidence.add(evidence);
+        if (conflicts) {
+          warnings.add(
+            SceneWarning(
+              SceneWarningCode.wallDimensionConflict,
+              'La pared compartida «${wall.id}» tiene medidas físicas '
+              'conflictivas. Se preservaron para revisión sin reemplazar la '
+              'primera medida registrada.',
+            ),
+          );
+        }
       }
       return existing;
     }
-    _walls.add(_WallRecord('wall-${_walls.length + 1}', a, b, height));
+    var id = sourceWallId ?? 'wall-${_walls.length + 1}';
+    if (_walls.any((wall) => wall.id == id)) {
+      id = '$id-${_walls.length + 1}';
+    }
+    _walls.add(
+      _WallRecord(
+        id,
+        a,
+        b,
+        height,
+        sourceWallId: sourceWallId,
+        lengthM: lengthM,
+      ),
+    );
     return _wallByEndpoints[key] = _walls.length - 1;
   }
 
@@ -216,6 +341,8 @@ class _SceneBuilder {
     'start': _vertices[wall.start].toJson(),
     'end': _vertices[wall.end].toJson(),
     'height': roundTo(wall.height.value, 3),
+    if (wall.lengthM != null) 'lengthM': roundTo(wall.lengthM!, 3),
+    if (wall.sourceWallId != null) 'sourceWallId': wall.sourceWallId,
     'thickness': roundTo(capture.wallThickness, 3),
     'heightSource': wall.height.source.wire,
   };
@@ -226,6 +353,7 @@ class _SceneBuilder {
         '${connection.roomB}\u0000${connection.openingB}',
     };
     final result = <Map<String, Object?>>[];
+    final emittedCanonicalOpenings = <String>{};
     var doors = 0;
     var windows = 0;
     for (var r = 0; r < capture.rooms.length; r++) {
@@ -233,23 +361,56 @@ class _SceneBuilder {
       final interior = room.worldCorners();
       for (final opening in room.openings) {
         if (skipped.contains('${room.id}\u0000${opening.id}')) continue;
-        if (opening.edgeIndex < 0 || opening.edgeIndex >= interior.length) {
+        final dimensionIndex = opening.wallId == null
+            ? -1
+            : room.wallDimensions.indexWhere(
+                (dimension) => dimension.wallId == opening.wallId,
+              );
+        final edgeIndex = dimensionIndex >= 0
+            ? dimensionIndex
+            : opening.edgeIndex;
+        if (edgeIndex == null ||
+            edgeIndex < 0 ||
+            edgeIndex >= interior.length ||
+            (opening.wallId != null && dimensionIndex < 0)) {
+          warnings.add(
+            SceneWarning(
+              SceneWarningCode.openingIncomplete,
+              'La abertura «${opening.id}» no tiene una pared válida.',
+            ),
+          );
           continue;
         }
-        final start = interior[opening.edgeIndex];
-        final edge =
-            interior[(opening.edgeIndex + 1) % interior.length] - start;
+        final dimension = dimensionIndex >= 0
+            ? room.wallDimensions[dimensionIndex]
+            : null;
+        final start = interior[edgeIndex];
+        final edge = interior[(edgeIndex + 1) % interior.length] - start;
         if (edge.length == 0) continue;
         final direction = _unit(edge);
+        final normalizedPosition =
+            opening.offsetFromWallStartM != null && dimension != null
+            ? (opening.offsetFromWallStartM! + opening.width / 2) /
+                  dimension.lengthM
+            : opening.position;
+        if (normalizedPosition == null || !normalizedPosition.isFinite) {
+          warnings.add(
+            SceneWarning(
+              SceneWarningCode.openingIncomplete,
+              'La abertura «${opening.id}» no tiene una posición válida.',
+            ),
+          );
+          continue;
+        }
         final center =
             start +
-            edge.scale(opening.position) +
+            edge.scale(normalizedPosition) +
             FloorPoint(direction.z, -direction.x).scale(_halfThickness);
 
         _EdgePiece? best;
         var bestT = 0.0;
         var bestDistance = double.infinity;
-        for (final piece in _edges[r][opening.edgeIndex]) {
+        for (final piece in _edges[r][edgeIndex]) {
           final wall = _walls[piece.wall];
           final wallStart = _vertices[wall.start];
           final wallVector = _vertices[wall.end] - wallStart;
@@ -281,14 +442,63 @@ class _SceneBuilder {
           );
         }
         final isWindow = opening.type == OpeningType.window;
+        final sillHeight = isWindow
+            ? opening.explicitSillHeight ??
+                  (opening.wallId == null
+                      ? RoomOpening.defaultWindowSill
+                      : null)
+            : 0.0;
+        if (isWindow && sillHeight == null) {
+          warnings.add(
+            SceneWarning(
+              SceneWarningCode.openingIncomplete,
+              'La ventana «${opening.id}» no tiene altura desde el suelo.',
+            ),
+          );
+          continue;
+        }
+        final owningHeight = dimension?.heightM ?? room.height?.value;
+        final horizontalOffset = opening.offsetFromWallStartM;
+        final invalidPhysical =
+            !opening.width.isFinite ||
+            !opening.height.isFinite ||
+            opening.width <= 0 ||
+            opening.height <= 0 ||
+            (horizontalOffset != null &&
+                (!horizontalOffset.isFinite ||
+                    horizontalOffset < 0 ||
+                    dimension == null ||
+                    horizontalOffset + opening.width >
+                        dimension.lengthM + 1e-9)) ||
+            owningHeight == null ||
+            sillHeight! + opening.height > owningHeight + 1e-9;
+        if (invalidPhysical) {
+          warnings.add(
+            SceneWarning(
+              SceneWarningCode.openingExceedsWall,
+              'La abertura «${opening.id}» no cabe en su pared.',
+            ),
+          );
+          continue;
+        }
+        if (opening.wallId != null) {
+          final canonicalKey = '${opening.wallId}\u0000${opening.id}';
+          if (!emittedCanonicalOpenings.add(canonicalKey)) continue;
+        }
         result.add({
-          'id': isWindow ? 'window-${++windows}' : 'door-${++doors}',
+          'id': opening.wallId == null
+              ? (isWindow ? 'window-${++windows}' : 'door-${++doors}')
+              : opening.id,
           'wallId': wall.id,
+          if (opening.wallId != null)
+            'sourceWallId': _sceneWallId(opening.wallId!),
           'position': position,
+          if (horizontalOffset != null)
+            'offsetFromWallStartM': roundTo(horizontalOffset, 3),
           'width': roundTo(opening.width, 3),
           'height': roundTo(opening.height, 3),
           'type': opening.type.wire,
-          if (isWindow) 'sillHeight': roundTo(opening.sillHeight, 3),
+          if (isWindow) 'sillHeight': roundTo(sillHeight, 3),
         });
       }
     }
@@ -363,12 +573,13 @@ class _SceneBuilder {
 
   void _heightWarnings() {
     for (final room in capture.rooms) {
-      if (room.height.source == HeightSource.assumed) {
+      final height = room.height;
+      if (height?.source == HeightSource.assumed) {
         warnings.add(
           SceneWarning(
             SceneWarningCode.assumedHeight,
             'La altura de «${room.name}» es supuesta '
-            '(${room.height.value.toStringAsFixed(2)} m), no medida. Ajustala '
+            '(${height!.value.toStringAsFixed(2)} m), no medida. Ajustala '
             'si conocés el valor real.',
           ),
         );
