@@ -1,0 +1,42 @@
+
+ RUN  v3.2.7 C:/Users/LUIS ENRIQUE/AppData/Local/Temp/claude/C--dev-sw1-pro-final-2026-2/112280a3-8b60-4004-855f-fda0f782218e/scratchpad/wt-s2/panel/staff-shell
+
+ ✓ src/application/staffAuthApi.test.ts (9 tests) 22ms
+ ✓ src/application/sceneContract.test.ts (3 tests) 10ms
+ ✓ src/application/exchangeRatesApi.test.ts (8 tests) 21ms
+ ✓ src/application/staffListingsApi.test.ts (16 tests) 32ms
+ ✓ src/application/staffSession.test.ts (24 tests) 42ms
+ ✓ src/features/editor3d/SceneViewer.test.tsx (4 tests) 224ms
+stderr | src/features/rates/ExchangeRatesAdmin.test.tsx > ExchangeRatesAdmin > labels the current rates with their ingestion source
+Encountered two children with the same key, `USDT`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+
+ ✓ src/features/auth/ProtectedStaffShell.test.tsx (9 tests) 697ms
+ ✓ src/features/editor3d/FurnitureReviewPanel.test.tsx (7 tests) 1295ms
+   ✓ requires human dimensions and price for a new confirmed suggestion  486ms
+   ✓ supports manual inventory and explicit duplicate linking  331ms
+ ✓ src/features/editor3d/SceneEditor.test.tsx (8 tests) 1329ms
+   ✓ SceneEditor > sends a snapped 2D wall endpoint edit to the 3D viewer through shared scene state  385ms
+ ✓ src/App.test.tsx (20 tests) 1697ms
+   ✓ protected staff session lifecycle > waits for /me after MFA login and keeps the access token in memory only  987ms
+ ✓ src/features/rates/ExchangeRatesAdmin.test.tsx (12 tests) 2323ms
+   ✓ ExchangeRatesAdmin > shows the current rates with their effective dates and the newest-first history  364ms
+   ✓ ExchangeRatesAdmin > rejects the units-per-USD value "6.123456789" before contacting the server  302ms
+   ✓ ExchangeRatesAdmin > registers a rate and refreshes the current rates and the history  313ms
+ ✓ src/features/auth/InvitationAcceptancePage.test.tsx (4 tests) 2310ms
+   ✓ invitation-only staff enrollment > checks password confirmation before sending the one-time token  626ms
+   ✓ invitation-only staff enrollment > sends the invitation token and confirmed password before TOTP setup  630ms
+   ✓ invitation-only staff enrollment > verifies TOTP and displays recovery codes once without persisting them  801ms
+ ✓ src/features/listings/AgencyReviewQueue.test.tsx (20 tests) 2627ms
+   ✓ AgencyReviewQueue > requires a non-blank reason to reject and sends it trimmed  618ms
+ ✓ src/features/auth/StaffLoginShell.test.tsx (5 tests) 3712ms
+   ✓ StaffLoginShell credentials view > submits credentials and advances to the MFA challenge  775ms
+   ✓ StaffLoginShell credentials view > submits a TOTP code and returns the server-issued session  885ms
+   ✓ StaffLoginShell credentials view > allows a one-time recovery code as the alternative MFA proof  966ms
+   ✓ StaffLoginShell credentials view > keeps the MFA step available and reports rejected proofs  852ms
+
+ Test Files  14 passed (14)
+      Tests  149 passed (149)
+   Start at  23:39:51
+   Duration  14.59s (transform 3.41s, setup 29.82s, collect 12.55s, tests 16.34s, environment 81.03s, prepare 12.53s)
+
+exit 0
