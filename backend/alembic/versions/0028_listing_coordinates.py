@@ -18,8 +18,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("listing", sa.Column("latitude", sa.Float(), nullable=True))
-    op.add_column("listing", sa.Column("longitude", sa.Float(), nullable=True))
+    op.add_column("listing", sa.Column("latitude", sa.Double(), nullable=True))
+    op.add_column("listing", sa.Column("longitude", sa.Double(), nullable=True))
 
 
 def downgrade() -> None:

@@ -12,7 +12,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
-    Float,
+    Double,
     Index,
     Integer,
     Numeric,
@@ -95,8 +95,8 @@ class Listing(Base):
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     exact_address: Mapped[str | None] = mapped_column(Text, nullable=True)
-    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
-    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    latitude: Mapped[float | None] = mapped_column(Double, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Double, nullable=True)
     photos: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     extras: Mapped[list[ListingExtra]] = relationship(
         back_populates="listing",
