@@ -136,6 +136,8 @@ class CatalogListingItem(BaseModel):
     city: str
     zone: str
     cover_photo_url: str | None
+    latitude: float | None
+    longitude: float | None
 
 
 class CatalogPhotoItem(BaseModel):
@@ -313,7 +315,24 @@ class ListingAuthoringRequest(BaseModel):
     bathrooms: Annotated[StrictInt, Field(ge=0)]
     description: str | None = None
     exact_address: str | None = None
+    latitude: Annotated[float, Field(ge=-90, le=90, allow_inf_nan=False)] | None = None
+    longitude: Annotated[float, Field(ge=-180, le=180, allow_inf_nan=False)] | None = None
     extras: list[ExtraPayload] | None = None
+
+    @model_validator(mode="after")
+    def coordinates_must_be_paired(self) -> ListingAuthoringRequest:
+        if ("latitude" in self.model_fields_set) != ("longitude" in self.model_fields_set):
+            raise ValueError("latitude and longitude must be provided together")
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude and longitude must be provided together")
+        return self
+
+
+class ListingLocationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    latitude: Annotated[float, Field(ge=-90, le=90, allow_inf_nan=False)]
+    longitude: Annotated[float, Field(ge=-180, le=180, allow_inf_nan=False)]
 
 
 class ListingTransitionRequest(BaseModel):
@@ -336,6 +355,8 @@ class ListingAuthoringResponse(BaseModel):
     bathrooms: int
     description: str | None
     exact_address: str | None
+    latitude: float | None
+    longitude: float | None
     approval_status: ListingApprovalStatus
     is_published: bool
     offer_version: int

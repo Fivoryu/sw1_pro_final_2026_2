@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 
+import '../../data/map_config.dart';
 import '../../data/models/staff_listing.dart';
 import '../../data/services/photo_source.dart';
 import '../../domain/listing_drafts_controller.dart';
 import '../../domain/listing_photos_controller.dart';
 import 'listing_format.dart';
 import 'listing_photos_section.dart';
+import 'location_picker.dart';
 import '../theme/andean_theme.dart';
 import '../theme/andean_widgets.dart';
 import '../spatial/spatial_capture_screen.dart';
@@ -26,10 +29,14 @@ class ListingEditorScreen extends StatefulWidget {
     super.key,
     required this.controller,
     this.listing,
+    this.mapConfig = MapTileConfig.openStreetMap,
   });
 
   final ListingDraftsController controller;
   final StaffListing? listing;
+
+  /// Tile provider of the location map (F14).
+  final MapTileConfig mapConfig;
 
   @override
   State<ListingEditorScreen> createState() => _ListingEditorScreenState();
@@ -46,6 +53,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
   late final TextEditingController _address;
   late ListingOperation _operation;
   late ListingCurrency _currency;
+  LatLng? _point;
   StaffListing? _listing;
   Map<String, Object?>? _savedFields;
   String? _rejectionReason;
@@ -62,6 +70,9 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     // The server fixes the currency per listing (F05): the agent chooses it
     // only when creating, and the editor echoes it read-only afterwards.
     _currency = listing?.currency ?? ListingCurrency.bob;
+    final lat = listing?.latitude;
+    final lon = listing?.longitude;
+    if (lat != null && lon != null) _point = LatLng(lat, lon);
     _price = TextEditingController(text: listing?.basePrice ?? '');
     _city = TextEditingController(text: listing?.city ?? '');
     _zone = TextEditingController(text: listing?.zone ?? '');
@@ -259,6 +270,8 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
       bathrooms: int.parse(_bathrooms.text.trim()),
       description: _optional(_description.text),
       exactAddress: _optional(_address.text),
+      latitude: _point?.latitude,
+      longitude: _point?.longitude,
     );
   }
 
@@ -580,6 +593,12 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
                         helperText: 'No se muestra en el catálogo público.',
                         border: OutlineInputBorder(),
                       ),
+                    ),
+                    const SizedBox(height: 16),
+                    LocationPicker(
+                      point: _point,
+                      config: widget.mapConfig,
+                      onChanged: (point) => setState(() => _point = point),
                     ),
                     const SizedBox(height: 24),
                     ListingPhotosSection(

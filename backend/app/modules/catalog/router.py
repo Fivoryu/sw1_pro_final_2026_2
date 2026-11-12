@@ -55,6 +55,7 @@ from app.modules.catalog.schemas import (
     ListingDepositUpdateRequest,
     ExtraAuthoringResponse,
     ListingAuthoringRequest,
+    ListingLocationRequest,
     ListingAuthoringResponse,
     ListingTransitionRequest,
     ListingTransitionResponse,
@@ -66,6 +67,7 @@ from app.modules.catalog.service import (
     configure_listing_deposit,
     create_staff_listing,
     edit_staff_listing,
+    set_staff_listing_location,
     get_staff_listing,
     list_listing_transitions,
     list_staff_listings,
@@ -108,6 +110,8 @@ def _listing_item(listing: Listing, cover_photo_url: str | None) -> CatalogListi
         city=listing.city,
         zone=listing.zone,
         cover_photo_url=cover_photo_url,
+        latitude=listing.latitude,
+        longitude=listing.longitude,
     )
 
 
@@ -145,9 +149,14 @@ def list_public_listings(
     ] = None,
     min_rooms: Annotated[int | None, Query(ge=0)] = None,
     min_bathrooms: Annotated[int | None, Query(ge=0)] = None,
+    latitude: Annotated[float | None, Query(ge=-90, le=90, allow_inf_nan=False)] = None,
+    longitude: Annotated[float | None, Query(ge=-180, le=180, allow_inf_nan=False)] = None,
+    radius_km: Annotated[float | None, Query(ge=1, le=50, allow_inf_nan=False)] = None,
     cursor: Annotated[str | None, Query(max_length=512)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> CatalogListingPage:
+    if (latitude is None) != (longitude is None) or (radius_km is not None and latitude is None):
+        raise HTTPException(status_code=422, detail="invalid_filter")
     if city is not None and not normalize_geo_key(city):
         raise HTTPException(status_code=422, detail="invalid_filter")
     if zone is not None and not normalize_geo_key(zone):
@@ -162,7 +171,7 @@ def list_public_listings(
     session_factory: sessionmaker[Session] = request.app.state.session_factory
     with session_factory() as session:
         try:
-            listings, has_more = search_public_listings(
+            listings, has_more, last_distance = search_public_listings(
                 session,
                 city=city,
                 zone=zone,
@@ -171,6 +180,9 @@ def list_public_listings(
                 max_base_price=max_base_price,
                 min_rooms=min_rooms,
                 min_bathrooms=min_bathrooms,
+                latitude=latitude,
+                longitude=longitude,
+                radius_km=radius_km if radius_km is not None else 5,
                 limit=limit,
                 cursor_value=cursor,
             )
@@ -181,7 +193,10 @@ def list_public_listings(
             photos = _public_photos(request, session, listing.id)
             items.append(_listing_item(listing, photos[0].url if photos else None))
 
-    next_cursor = encode_cursor(listings[-1].created_at, listings[-1].id) if has_more else None
+    next_cursor = None
+    if has_more:
+        last = listings[-1]
+        next_cursor = encode_cursor(last.created_at, last.id, last_distance)
     return CatalogListingPage(items=items, next_cursor=next_cursor)
 
 
@@ -461,6 +476,8 @@ def _authoring_response(
         bathrooms=listing.bathrooms,
         description=listing.description,
         exact_address=listing.exact_address,
+        latitude=listing.latitude,
+        longitude=listing.longitude,
         approval_status=cast(ListingApprovalStatus, listing.approval_status),
         is_published=listing.is_published,
         offer_version=listing.offer_version,
@@ -594,6 +611,35 @@ def replace_agency_listing(
             raise HTTPException(
                 status_code=422, detail="Unknown or duplicated extra reference"
             ) from None
+        if listing is None:
+            raise HTTPException(status_code=404, detail="Listing not found")
+        return _authoring_response(listing, list_listing_extras(session, listing.id))
+
+
+@router.patch(
+    "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/location",
+    response_model=ListingAuthoringResponse,
+)
+def update_agency_listing_location(
+    agency_id: str,
+    listing_id: str,
+    body: ListingLocationRequest,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> ListingAuthoringResponse:
+    _require_listing_editor(staff, agency_id)
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    with session_factory.begin() as session:
+        listing = set_staff_listing_location(
+            session,
+            agency_id=agency_id,
+            listing_id=listing_id,
+            latitude=body.latitude,
+            longitude=body.longitude,
+            actor_id=staff["id"],
+            actor_role=staff["role"],
+            now=request.app.state.clock(),
+        )
         if listing is None:
             raise HTTPException(status_code=404, detail="Listing not found")
         return _authoring_response(listing, list_listing_extras(session, listing.id))

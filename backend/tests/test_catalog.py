@@ -335,6 +335,8 @@ def test_public_list_is_approved_published_and_cross_agency(
     assert response.status_code == 200
     assert set(_listing_ids(response)) == {"visible-a", "visible-b"}
     assert set(response.json()["items"][0]) == {
+        "latitude",
+        "longitude",
         "listing_id",
         "offer_version",
         "operation",
@@ -359,6 +361,8 @@ def test_detail_has_minimal_public_schema_and_hides_private_fields(
 
     assert response.status_code == 200
     assert response.json() == {
+        "latitude": None,
+        "longitude": None,
         "listing_id": "detail-listing",
         "offer_version": 2,
         "operation": "sale",
@@ -1296,6 +1300,8 @@ def test_openapi_and_validation_preserve_staff_customer_namespaces(
     assert "422" in paths["/api/v1/listings"]["get"]["responses"]
     schemas = openapi["components"]["schemas"]
     assert set(schemas["CatalogListingItem"]["properties"]) == {
+        "latitude",
+        "longitude",
         "listing_id",
         "offer_version",
         "operation",
@@ -1305,6 +1311,8 @@ def test_openapi_and_validation_preserve_staff_customer_namespaces(
         "cover_photo_url",
     }
     assert set(schemas["CatalogListingDetail"]["properties"]) == {
+        "latitude",
+        "longitude",
         "listing_id",
         "offer_version",
         "operation",

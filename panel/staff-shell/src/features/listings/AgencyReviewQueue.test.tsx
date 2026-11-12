@@ -9,6 +9,7 @@ import {
   listListingTransitions,
   StaffListingsApiError,
   transitionListing,
+  updateListingLocation,
   type ListingTransition,
   type StaffListing,
 } from "../../application/staffListingsApi";
@@ -18,6 +19,25 @@ import { AgencyReviewQueue, formatCop } from "./AgencyReviewQueue";
 vi.mock("../editor3d/SceneViewer", () => ({
   SceneViewer: ({ sceneDocument }: { sceneDocument: SceneDocument }) => (
     <div data-testid="review-scene-viewer">{sceneDocument.walls.length} muros</div>
+  ),
+}));
+
+vi.mock("./ListingLocationMap", () => ({
+  ListingLocationMap: ({
+    latitude,
+    longitude,
+    onChange,
+  }: {
+    latitude: number | null;
+    longitude: number | null;
+    onChange: (latitude: number, longitude: number) => void;
+  }) => (
+    <div data-testid="location-map">
+      {latitude === null ? "sin punto" : `${latitude},${longitude}`}
+      <button onClick={() => onChange(-17.5, -63.2)} type="button">
+        Marcar punto de prueba
+      </button>
+    </div>
   ),
 }));
 
@@ -32,6 +52,7 @@ vi.mock("../../application/staffListingsApi", async (importOriginal) => {
     listListingPhotos: vi.fn(),
     listListingTransitions: vi.fn(),
     transitionListing: vi.fn(),
+    updateListingLocation: vi.fn(),
   };
 });
 
@@ -47,6 +68,8 @@ function listing(overrides: Partial<StaffListing> = {}): StaffListing {
     bathrooms: 2,
     description: "Casa luminosa",
     exact_address: "Calle privada 123",
+    latitude: null,
+    longitude: null,
     currency: "BOB",
     approval_status: "pending",
     is_published: false,
@@ -94,6 +117,7 @@ beforeEach(() => {
   vi.mocked(listListingTransitions).mockReset().mockResolvedValue([transition()]);
   vi.mocked(listListingPhotos).mockReset().mockResolvedValue([]);
   vi.mocked(transitionListing).mockReset();
+  vi.mocked(updateListingLocation).mockReset();
   vi.mocked(getListingScene)
     .mockReset()
     .mockRejectedValue(
@@ -523,5 +547,97 @@ describe("AgencyReviewQueue", () => {
       expect(screen.getByRole("button", { name: "Aprobar" })).toBeEnabled();
     });
   });
-});
 
+  describe("listing location", () => {
+    it("shows the stored point and keeps save disabled until the point changes", async () => {
+      const user = userEvent.setup();
+      const item = listing({ latitude: -16.5, longitude: -68.1 });
+      vi.mocked(listAgencyListings).mockResolvedValue(page([item]));
+      renderQueue();
+      await openDetail(user, item);
+
+      expect(screen.getByTestId("location-map")).toHaveTextContent("-16.5,-68.1");
+      expect(screen.getByRole("button", { name: "Guardar ubicación" })).toBeDisabled();
+    });
+
+    it("saves a corrected point on a draft listing without asking for confirmation", async () => {
+      const user = userEvent.setup();
+      const item = listing({ approval_status: "draft" });
+      vi.mocked(listAgencyListings).mockResolvedValue(page([item]));
+      vi.mocked(updateListingLocation).mockResolvedValue({ ...item, latitude: -17.5, longitude: -63.2 });
+      renderQueue();
+      await openDetail(user, item);
+
+      await user.click(screen.getByRole("button", { name: "Marcar punto de prueba" }));
+      await user.click(screen.getByRole("button", { name: "Guardar ubicación" }));
+
+      expect(updateListingLocation).toHaveBeenCalledWith(
+        "volatile-access",
+        "agency-1",
+        "listing-1",
+        -17.5,
+        -63.2,
+      );
+      expect(await screen.findByText("Ubicación guardada.")).toBeInTheDocument();
+    });
+
+    it("warns before sending a published listing back to review", async () => {
+      const user = userEvent.setup();
+      const item = listing({ approval_status: "approved", is_published: true });
+      vi.mocked(listAgencyListings).mockResolvedValue(page([item]));
+      vi.mocked(updateListingLocation).mockResolvedValue({
+        ...item,
+        approval_status: "draft",
+        is_published: false,
+        latitude: -17.5,
+        longitude: -63.2,
+      });
+      renderQueue();
+      await user.click(screen.getByRole("tab", { name: "Aprobados" }));
+      await openDetail(user, item);
+
+      await user.click(screen.getByRole("button", { name: "Marcar punto de prueba" }));
+      await user.click(screen.getByRole("button", { name: "Guardar ubicación" }));
+
+      expect(updateListingLocation).not.toHaveBeenCalled();
+      const group = screen.getByRole("group", { name: "Confirmar cambio de ubicación" });
+      expect(group).toHaveTextContent("retirado del catálogo");
+      expect(group).toHaveTextContent("revisión");
+
+      await user.click(within(group).getByRole("button", { name: "Confirmar" }));
+      expect(updateListingLocation).toHaveBeenCalledTimes(1);
+      expect(await screen.findByText(/Ubicación guardada/)).toBeInTheDocument();
+    });
+
+    it("cancelling the confirmation sends nothing", async () => {
+      const user = userEvent.setup();
+      const item = listing({ approval_status: "approved", is_published: true });
+      vi.mocked(listAgencyListings).mockResolvedValue(page([item]));
+      renderQueue();
+      await user.click(screen.getByRole("tab", { name: "Aprobados" }));
+      await openDetail(user, item);
+
+      await user.click(screen.getByRole("button", { name: "Marcar punto de prueba" }));
+      await user.click(screen.getByRole("button", { name: "Guardar ubicación" }));
+      await user.click(screen.getByRole("button", { name: "Cancelar" }));
+
+      expect(updateListingLocation).not.toHaveBeenCalled();
+    });
+
+    it("shows an error when the location cannot be saved", async () => {
+      const user = userEvent.setup();
+      const item = listing({ approval_status: "draft" });
+      vi.mocked(listAgencyListings).mockResolvedValue(page([item]));
+      vi.mocked(updateListingLocation).mockRejectedValue(new StaffListingsApiError(500, "boom"));
+      renderQueue();
+      await openDetail(user, item);
+
+      await user.click(screen.getByRole("button", { name: "Marcar punto de prueba" }));
+      await user.click(screen.getByRole("button", { name: "Guardar ubicación" }));
+
+      expect(
+        await screen.findByText("No se pudo guardar la ubicación. Inténtalo nuevamente."),
+      ).toBeInTheDocument();
+    });
+  });
+});

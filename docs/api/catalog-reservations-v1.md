@@ -184,6 +184,7 @@ Toda futura escritura de personal deberá autenticar con `get_active_staff`, der
 | `min_base_price`, `max_base_price` | Rango inclusivo del precio COP. | Filtro confirmado; parámetros **PROPUESTA**, límite y comparación inclusiva implementados en esta rama. |
 | `min_rooms` | Mínimo de dormitorios. | Semántica confirmada; nombre **PROPUESTA**, conteo entero implementado en esta rama. |
 | `min_bathrooms` | Mínimo entero de baños. | Semántica confirmada; nombre **PROPUESTA**, filtro entero implementado en esta rama. |
+| `latitude`, `longitude`, `radius_km` | Búsqueda por zona (F14.5): inmuebles publicados dentro de un radio, en línea recta (haversine), ordenados por distancia ascendente. | **IMPLEMENTADO (F14.5).** `latitude` −90..90 y `longitude` −180..180 deben enviarse juntas; `radius_km` va de 1 a 50 y vale 5 si se omite. Enviar solo una coordenada, `radius_km` sin centro, valores fuera de rango o no finitos devuelve `422`. Los inmuebles sin coordenadas no aparecen en la búsqueda por zona y siguen en el catálogo general. La ubicación del cliente es solo un parámetro de consulta y no se guarda en la base de datos. |
 | `cursor`, `limit` | Continuación paginada. | **PROPUESTA TÉCNICA CC-04A:** cursor opaco por `created_at DESC, id DESC`; `limit` predeterminado 20 y máximo 100. |
 
 Ejemplo de respuesta parcial; los nombres y tipos de propiedades son **PROPUESTA** y no definen el significado de “habitación”:
@@ -426,6 +427,8 @@ Para CC-04B, `code`, `message`, `request_id` y `field_errors` están implementad
 Los códigos indicados como implementados describen solamente esta rama; los demás y la asignación global siguen **PROPUESTA**. No copiar el formato `detail` existente como si ya fuera el contrato de estos endpoints.
 
 ### Paginación propuesta
+
+**F14.5:** en una búsqueda por zona el orden es `distancia ASC, created_at DESC, id DESC` y el cursor incluye la distancia del último elemento. Un cursor de zona usado sin centro, o un cursor de catálogo usado con centro, devuelve `400` (`invalid_cursor`). El cursor no guarda centro ni radio: el cliente debe repetir los mismos parámetros al pedir páginas siguientes. Los elementos de la lista y del detalle exponen `latitude` y `longitude` (`null` si el agente no marcó un punto).
 
 **PROPUESTA TÉCNICA CC-04A, implementada en esta rama:** `cursor` opaco y `next_cursor` nullable para `GET /api/v1/listings`; orden estable `created_at DESC, id DESC`; `limit` predeterminado 20 y máximo 100. Los cursores se validan antes de consultar y una forma inválida devuelve `400` (`invalid_cursor`). Los filtros deben conservarse al pedir páginas siguientes. El cursor no es una autorización ni una firma criptográfica. Estos defaults son elecciones técnicas de la rama, no aprobación global del contrato.
 

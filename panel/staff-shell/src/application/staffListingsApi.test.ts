@@ -8,6 +8,7 @@ import {
   StaffListingsApiError,
   putListingScene,
   transitionListing,
+  updateListingLocation,
   type StaffListing,
 } from "./staffListingsApi";
 import { DEFAULT_SCENE_DOCUMENT } from "./sceneContract";
@@ -34,6 +35,8 @@ const listing: StaffListing = {
   bathrooms: 2,
   description: "Casa de prueba",
   exact_address: "Calle privada 123",
+  latitude: null,
+  longitude: null,
   approval_status: "pending",
   is_published: false,
   offer_version: 1,
@@ -265,5 +268,29 @@ describe("staff listing photos API", () => {
       new StaffListingsApiError(503, "Photo storage is not configured", "dependency_unavailable"),
     );
   });
-});
 
+  it("patches only the coordinates of the listing", async () => {
+    const moved = { ...listing, latitude: -17.78, longitude: -63.18, approval_status: "draft" as const };
+    respondWithJson(moved);
+
+    const result = await updateListingLocation("volatile-access", "agency 1", "listing/1", -17.78, -63.18);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/staff/agencies/agency%201/listings/listing%2F1/location",
+      {
+        method: "PATCH",
+        headers: { ...bearer, "Content-Type": "application/json" },
+        body: JSON.stringify({ latitude: -17.78, longitude: -63.18 }),
+      },
+    );
+    expect(result).toEqual(moved);
+  });
+
+  it("raises the server detail when the location is rejected", async () => {
+    respondWithJson({ detail: "Listing not found" }, 404);
+
+    await expect(
+      updateListingLocation("volatile-access", "agency-1", "listing-1", 1, 2),
+    ).rejects.toMatchObject(new StaffListingsApiError(404, "Listing not found"));
+  });
+});
