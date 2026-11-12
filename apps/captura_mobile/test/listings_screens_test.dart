@@ -10,6 +10,7 @@ import 'package:captura_mobile/domain/staff_session_controller.dart';
 import 'package:captura_mobile/ui/listings/listing_format.dart';
 import 'package:captura_mobile/ui/listings/listings_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fake_ar_capture.dart';
@@ -17,6 +18,7 @@ import 'support/fake_listings_backend.dart';
 import 'support/fake_photo_source.dart';
 import 'support/fake_scene_backend.dart';
 import 'support/fake_staff_backend.dart';
+import 'support/fake_tile_provider.dart';
 import 'support/in_memory_capture_draft_store.dart';
 
 Future<FakeListingsBackend> _pumpListings(
@@ -24,6 +26,7 @@ Future<FakeListingsBackend> _pumpListings(
   void Function(FakeListingsBackend backend)? seed,
   FakePhotoSource? source,
   bool spatial = false,
+  FakeTileProvider? tiles,
 }) async {
   final session = StaffSessionController(
     api: StaffAuthApi(
@@ -58,7 +61,12 @@ Future<FakeListingsBackend> _pumpListings(
     arCapture: spatial ? FakeArCapture() : null,
   );
   await tester.pumpWidget(
-    MaterialApp(home: ListingsScreen(controller: controller)),
+    MaterialApp(
+      home: ListingsScreen(
+        controller: controller,
+        mapConfig: (tiles ?? FakeTileProvider()).config,
+      ),
+    ),
   );
   await tester.pumpAndSettle();
   return backend;
@@ -82,6 +90,14 @@ Future<void> _tapVisible(WidgetTester tester, String key) async {
   await tester.ensureVisible(target);
   await tester.pumpAndSettle();
   await tester.tap(target);
+  await tester.pumpAndSettle();
+}
+
+/// Taps the middle of the location map; flutter_map waits out its double-tap
+/// window before reporting the tap.
+Future<void> _tapMap(WidgetTester tester) async {
+  await tester.tap(find.byType(FlutterMap));
+  await tester.pump(const Duration(milliseconds: 500));
   await tester.pumpAndSettle();
 }
 
@@ -260,6 +276,83 @@ void main() {
       );
     });
 
+    testWidgets('marks a point on the map and saves it with the draft', (
+      tester,
+    ) async {
+      final backend = await _pumpListings(tester);
+      await _tapVisible(tester, 'new-listing-button');
+      await _fillValidListing(tester);
+
+      expect(find.text('© OpenStreetMap contributors'), findsOneWidget);
+      expect(find.byKey(const ValueKey('location-marker')), findsNothing);
+      await tester.ensureVisible(find.byType(FlutterMap));
+      await tester.pumpAndSettle();
+      await _tapMap(tester);
+
+      expect(find.byKey(const ValueKey('location-marker')), findsOneWidget);
+      expect(
+        find.textContaining('Lat -17.78', skipOffstage: false),
+        findsOneWidget,
+      );
+      await _tapVisible(tester, 'listing-save-button');
+
+      final post = backend.requests.lastWhere((r) => r.method == 'POST');
+      final body = jsonDecode(post.body) as Map<String, Object?>;
+      expect(body['latitude'], closeTo(-17.78, 0.1));
+      expect(body['longitude'], closeTo(-63.18, 0.1));
+    });
+
+    testWidgets('clears the point and sends nulls to clear it on the server', (
+      tester,
+    ) async {
+      final backend = await _pumpListings(
+        tester,
+        seed: (b) => b.seed(id: 'listing-1'),
+      );
+      await tester.tap(find.byKey(const ValueKey('listing-item-listing-1')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byType(FlutterMap));
+      await tester.pumpAndSettle();
+      await _tapMap(tester);
+      expect(find.byKey(const ValueKey('location-marker')), findsOneWidget);
+
+      await _tapVisible(tester, 'location-clear');
+      expect(find.byKey(const ValueKey('location-marker')), findsNothing);
+      await _tapVisible(tester, 'listing-save-button');
+
+      final put = backend.requests.lastWhere((r) => r.method == 'PUT');
+      final body = jsonDecode(put.body) as Map<String, Object?>;
+      expect(body['latitude'], isNull);
+      expect(body['longitude'], isNull);
+    });
+
+    testWidgets('shows the stored point and an error with retry when tiles '
+        'fail', (tester) async {
+      final tiles = FakeTileProvider(failing: true);
+      final backend = await _pumpListings(
+        tester,
+        tiles: tiles,
+        seed: (b) {
+          b.seed(id: 'listing-1');
+          b.listings['listing-1']!['latitude'] = -17.8;
+          b.listings['listing-1']!['longitude'] = -63.2;
+        },
+      );
+      await tester.tap(find.byKey(const ValueKey('listing-item-listing-1')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byType(FlutterMap));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('location-marker')), findsOneWidget);
+      expect(find.text('Lat -17.800000, Lon -63.200000'), findsOneWidget);
+      expect(find.byKey(const ValueKey('location-map-error')), findsOneWidget);
+
+      tiles.failing = false;
+      await _tapVisible(tester, 'location-map-retry');
+      expect(find.byKey(const ValueKey('location-map-error')), findsNothing);
+      expect(backend.requests.where((r) => r.method == 'PUT'), isEmpty);
+    });
+
     testWidgets('saves a draft, then submits it after confirmation', (
       tester,
     ) async {
@@ -288,6 +381,8 @@ void main() {
         'bathrooms': 2,
         'description': null,
         'exact_address': null,
+        'latitude': null,
+        'longitude': null,
       });
       expect(find.text('Borrador guardado.'), findsOneWidget);
       // The snack bar sits over the bottom actions until it times out.

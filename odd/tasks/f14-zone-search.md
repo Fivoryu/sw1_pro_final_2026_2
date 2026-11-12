@@ -10,11 +10,11 @@ Las citas entre comillas son texto literal del dueño del repositorio. **[Propue
 
 - **S1 — Búsqueda por cercanía o por punto y radio.** «En si el cliente ve todos los inmuebles de las agencias, la idea es que vea por zonas que esten cerca de su ubicación o que pueda seleccionar una ubicación y poner un rango de km y visualizar los inmuebles que estan en dicha zona.»
   - Aceptación: con un punto y un radio, el catálogo público devuelve solo los inmuebles publicados dentro de ese radio; sin esos parámetros el catálogo se comporta igual que hoy.
-- **S2 — Coordenadas del inmueble.** El agente marca el punto en un mapa al crear o editar el inmueble. Los inmuebles publicados sin coordenadas no aparecen en la búsqueda por zona y siguen apareciendo en el catálogo general. El catálogo público expone la ubicación del inmueble.
+- **S2 — Coordenadas del inmueble.** El agente marca el punto en un mapa al crear o editar el inmueble. Los inmuebles publicados sin coordenadas no aparecen en la búsqueda por zona y siguen apareciendo en el catálogo general. El catálogo público expone la ubicación del inmueble. Cambiar la ubicación de un inmueble publicado lo retira de publicación y lo devuelve a revisión, como una edición normal.
 - **S3 — Sin permiso de ubicación. [Propuesta]** El cliente elige un punto en el mapa o una ciudad.
 - **S4 — Privacidad. [Propuesta]** La ubicación del cliente viaja solo como parámetro de la consulta y no se guarda.
 - **S5 — Distancia y radio.** Distancia en línea recta; radio de 1 a 50 km, 5 km por defecto.
-- **S6 — Mapa. [Propuesta]** OpenStreetMap, sin clave de pago. Verificar licencia y condiciones de uso de la librería y del servidor de teselas antes de elegir.
+- **S6 — Mapa.** Datos y servidor público de OpenStreetMap para el proyecto académico, sin clave de pago. El proveedor debe ser configurable y se debe mostrar un error si el mapa no carga. Respetar la licencia y las condiciones de uso de la librería y del servidor de teselas.
 
 ## Tasks
 
@@ -24,7 +24,7 @@ Estado: ☐ pendiente. Ruta por defecto: en línea.
 | --- | --- | --- | --- | --- | --- |
 | T1 | Backend: coordenadas opcionales en el inmueble (migración Alembic, un solo head, GAP-093), validación de rangos y exposición en borrador, revisión y catálogo. | S2 | delegada | ☑ | `81fd0cf`; 1009 tests aprobados, 16 omitidos; Ruff y Pyright sin errores; migración 0028 aplicada y revertida en SQLite aislado. |
 | T2 | Backend: filtro por punto y radio en el catálogo público, con orden por distancia y pruebas de borde (radio mínimo y máximo, inmueble sin coordenadas, parámetros incompletos). | S1, S4, S5 | en línea | ☑ | Commit `feat(catalog): add zone radius search`; 1032 tests + 3 nuevas aprobadas, Ruff y Pyright sin errores; plan PostgreSQL con ambos índices (L12). |
-| T3 | App de captura y panel: marcar y corregir el punto del inmueble en un mapa. | S2, S6 | en línea | ☐ | — |
+| T3 | App de captura y panel: marcar y corregir el punto del inmueble en un mapa. | S2, S6 | en línea | ☑ | Sin commit aún. App captura: 605 tests aprobados; panel: 207 aprobados y `tsc` sin errores; backend: 1047 aprobados, Ruff y Pyright sin errores (ver L16). |
 | T4 | App cliente: permiso de ubicación, selector de punto y radio, y resultados por zona con estados vacío, carga y error. | S1, S3, S5, S6 | en línea | ☐ | — |
 | T5 | Cierre: documentación, contrato de API y filas del plan maestro. | — | en línea | ☐ | — |
 
@@ -47,3 +47,6 @@ Estado: ☐ pendiente. Ruta por defecto: en línea.
 - **L12 (2026-11-12):** revisión independiente sin bloqueantes; advisorios: el cursor no liga centro/radio, el borde exacto del radio depende del flotante, faltan pruebas de cursor/modo sin coordenadas y de radio por defecto. PostgreSQL 16 descartable: `alembic upgrade head` hasta `0029` OK; la consulta real de la aplicación (200 000 filas sintéticas, radio 5 km) usó BitmapAnd sobre `ix_listing_latitude` e `ix_listing_longitude`, 0,4 ms. Esa corrida devolvió 0 filas por datos aleatorios, así que no prueba la corrección del resultado en PostgreSQL.
 - **L13:** se agregaron 3 pruebas (radio por defecto de 5 km, exclusión de no publicados/no aprobados, cursor de modo distinto → 400); `test_f14_zone_search.py`: 26 aprobadas, Ruff y Pyright sin errores. Suite completa no reejecutada tras este cambio (solo se añadieron pruebas).
 - **L10:** PostgreSQL 16 descartable con 200 000 filas sintéticas usó ambos índices en una consulta análoga (BitmapAnd); no es la consulta real de la aplicación y no reemplaza su plan ni la revisión independiente.
+- **L14 (usuario):** «si» a usar datos de OpenStreetMap y verificar condiciones y costos; «Dale» a usar el servidor público para el proyecto académico, con proveedor configurable y error visible si no carga. El servicio es de mejor esfuerzo y no garantiza disponibilidad.
+- **L15 (usuario):** «si» a que cambiar la ubicación retire el inmueble publicado y lo mande a revisión, igual que una edición normal. El panel requiere una operación acotada que no sobrescriba campos ajenos editados simultáneamente.
+- **L16:** T3 en dos unidades paralelas. Captura: modelo, solicitud, `MapTileConfig` configurable, `location_picker.dart` con error y reintento, permiso INTERNET en el manifiesto principal; `flutter analyze` con 1 advertencia previa en `spatial_capture_controller.dart:463` (archivo no tocado). Backend: `PATCH /api/v1/staff/agencies/{agency_id}/listings/{listing_id}/location` solo coordenadas, vuelve el inmueble a borrador. Panel: mapa Leaflet con corrección y confirmación. Reverificado en línea: 38 tests backend, 51 tests panel, 41 tests de captura. Pendientes: user-agent `com.example.captura_mobile` provisional, sin indicador de carga de teselas, e2e y `npm run build` del panel no ejecutados, sin revisión independiente.
