@@ -198,6 +198,7 @@ Matriz por actor (F03.3). «Agencia» es la agencia de la URL; la del actor sale
 | Crear, editar, enviar a revisión, leer transiciones | Sí | Sí | `403` | `403` | `401` |
 | Listar y consultar inmuebles de la agencia | Sí | Sí, todos los de su agencia | `403` | `403` | `401` |
 | Aprobar, rechazar, publicar, retirar | Sí | `403` | `403` | `403` | `401` |
+| Corregir solo la ubicación (`PATCH /api/v1/staff/agencies/{agency_id}/listings/{listing_id}/location`, cuerpo `{"latitude":-17.78,"longitude":-63.18}`; F14.5) | Sí | Sí | `403` | `403` | `401` |
 | Configurar el depósito (`PATCH .../deposit`, cuerpo `{"deposit_amount":"5000.00"}`) | Sí | `403` | `403` | `403` | `401` |
 | Fotos: pedir subida, confirmar, listar y borrar | Sí | Sí | `403` | `403` | `401` |
 | Catálogo público (`GET /api/v1/listings` y detalle) | Sí | Sí | Sí | Sí | Sí, sin sesión |
