@@ -108,6 +108,8 @@ def _listing_item(listing: Listing, cover_photo_url: str | None) -> CatalogListi
         city=listing.city,
         zone=listing.zone,
         cover_photo_url=cover_photo_url,
+        latitude=listing.latitude,
+        longitude=listing.longitude,
     )
 
 
@@ -461,6 +463,8 @@ def _authoring_response(
         bathrooms=listing.bathrooms,
         description=listing.description,
         exact_address=listing.exact_address,
+        latitude=listing.latitude,
+        longitude=listing.longitude,
         approval_status=cast(ListingApprovalStatus, listing.approval_status),
         is_published=listing.is_published,
         offer_version=listing.offer_version,

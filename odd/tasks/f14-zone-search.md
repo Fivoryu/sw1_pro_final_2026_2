@@ -10,7 +10,7 @@ Las citas entre comillas son texto literal del dueño del repositorio. **[Propue
 
 - **S1 — Búsqueda por cercanía o por punto y radio.** «En si el cliente ve todos los inmuebles de las agencias, la idea es que vea por zonas que esten cerca de su ubicación o que pueda seleccionar una ubicación y poner un rango de km y visualizar los inmuebles que estan en dicha zona.»
   - Aceptación: con un punto y un radio, el catálogo público devuelve solo los inmuebles publicados dentro de ese radio; sin esos parámetros el catálogo se comporta igual que hoy.
-- **S2 — Coordenadas del inmueble. [Propuesta]** El agente marca el punto en un mapa al crear o editar el inmueble. Los inmuebles publicados sin coordenadas no aparecen en la búsqueda por zona y siguen apareciendo en el catálogo general.
+- **S2 — Coordenadas del inmueble.** El agente marca el punto en un mapa al crear o editar el inmueble. Los inmuebles publicados sin coordenadas no aparecen en la búsqueda por zona y siguen apareciendo en el catálogo general. El catálogo público expone la ubicación del inmueble.
 - **S3 — Sin permiso de ubicación. [Propuesta]** El cliente elige un punto en el mapa o una ciudad.
 - **S4 — Privacidad. [Propuesta]** La ubicación del cliente viaja solo como parámetro de la consulta y no se guarda.
 - **S5 — Distancia y radio. [Propuesta]** Distancia en línea recta; radio de 1 a 50 km, 5 km por defecto.
@@ -36,3 +36,5 @@ Estado: ☐ pendiente. Ruta por defecto: en línea.
 
 - **L1 (2026-11-12, usuario):** «En si el cliente ve todos los inmuebles de las agencias, la idea es que vea por zonas que esten cerca de su ubicación o que pueda seleccionar una ubicación y poner un rango de km y visualizar los inmuebles que estan en dicha zona.»
 - **L2 (2026-11-12):** el asistente propuso S2–S6 para cubrir huecos; el usuario no los objetó ni los confirmó de forma expresa. A la pregunta de agregar las funcionalidades al plan y crear los documentos respondió «5. Si». Siguiente paso: T1.
+- **L3 (usuario):** «Vamos papu» en respuesta a la propuesta de que el agente marque el punto y que los inmuebles sin coordenadas aparezcan en el catálogo general, pero no en búsquedas por radio.
+- **L4 (usuario):** «QUe exponga la ubicacion del inmueble» en respuesta a si el catálogo público expone la ubicación exacta.

@@ -413,6 +413,8 @@ def create_staff_listing(
         bathrooms=content.bathrooms,
         description=content.description,
         exact_address=content.exact_address,
+        latitude=content.latitude,
+        longitude=content.longitude,
     )
     session.add(listing)
     session.flush()
@@ -475,6 +477,8 @@ def edit_staff_listing(
             bathrooms=content.bathrooms,
             description=content.description,
             exact_address=content.exact_address,
+            latitude=content.latitude if "latitude" in content.model_fields_set else listing.latitude,
+            longitude=content.longitude if "longitude" in content.model_fields_set else listing.longitude,
             approval_status="draft",
             is_published=False,
         )
