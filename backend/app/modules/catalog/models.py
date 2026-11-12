@@ -61,6 +61,8 @@ class Listing(Base):
             "created_at",
             "id",
         ),
+        Index("ix_listing_latitude", "latitude"),
+        Index("ix_listing_longitude", "longitude"),
         Index("ix_listing_city_key", "city_key"),
         Index("ix_listing_zone_key", "zone_key"),
     )

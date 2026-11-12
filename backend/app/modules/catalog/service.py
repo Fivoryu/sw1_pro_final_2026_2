@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
-from sqlalchemy import and_, delete, or_, text, update
+from sqlalchemy import and_, case, delete, func, or_, text, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -99,6 +99,7 @@ def _scene_etag_matches(header: str, revision: int | None, *, weak: bool) -> boo
 class ListingCursor:
     created_at: datetime
     listing_id: str
+    distance_km: float | None = None
 
 
 def normalize_geo_key(value: str) -> str:
@@ -208,11 +209,13 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def encode_cursor(created_at: datetime, listing_id: str) -> str:
-    payload = {
+def encode_cursor(created_at: datetime, listing_id: str, distance_km: float | None = None) -> str:
+    payload: dict[str, str | float] = {
         "created_at": _as_utc(created_at).isoformat(timespec="microseconds"),
         "listing_id": listing_id,
     }
+    if distance_km is not None:
+        payload["distance_km"] = distance_km
     encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     return base64.urlsafe_b64encode(encoded).decode("ascii").rstrip("=")
 
@@ -224,7 +227,15 @@ def decode_cursor(value: str) -> ListingCursor:
         padded = value + "=" * (-len(value) % 4)
         raw = base64.b64decode(padded, altchars=b"-_", validate=True)
         payload = json.loads(raw.decode("utf-8"))
-        if not isinstance(payload, dict) or set(payload) != {"created_at", "listing_id"}:
+        if not isinstance(payload, dict) or set(payload) not in (
+            {"created_at", "listing_id"}, {"created_at", "listing_id", "distance_km"}
+        ):
+            raise InvalidCursorError
+        distance_km = payload.get("distance_km")
+        if distance_km is not None and (
+            isinstance(distance_km, bool) or not isinstance(distance_km, (int, float))
+            or not math.isfinite(distance_km) or not 0 <= distance_km <= 50
+        ):
             raise InvalidCursorError
         raw_timestamp = payload["created_at"]
         listing_id = payload["listing_id"]
@@ -238,7 +249,7 @@ def decode_cursor(value: str) -> ListingCursor:
         created_at = datetime.fromisoformat(raw_timestamp)
         if created_at.tzinfo is None:
             raise InvalidCursorError
-        return ListingCursor(created_at=_as_utc(created_at), listing_id=listing_id)
+        return ListingCursor(created_at=_as_utc(created_at), listing_id=listing_id, distance_km=distance_km)
     except InvalidCursorError:
         raise
     except (ValueError, UnicodeDecodeError, binascii.Error):
@@ -257,7 +268,14 @@ def search_public_listings(
     min_bathrooms: int | None,
     limit: int,
     cursor_value: str | None,
-) -> tuple[list[Listing], bool]:
+    latitude: float | None = None,
+    longitude: float | None = None,
+    radius_km: float = 5,
+) -> tuple[list[Listing], bool, float | None]:
+    cursor = decode_cursor(cursor_value) if cursor_value is not None else None
+    geographic = latitude is not None and longitude is not None
+    if cursor is not None and (cursor.distance_km is not None) != geographic:
+        raise InvalidCursorError
     query = session.query(Listing).filter(
         Listing.approval_status == "approved",
         Listing.is_published.is_(True),
@@ -276,8 +294,52 @@ def search_public_listings(
         query = query.filter(Listing.bedrooms >= min_rooms)
     if min_bathrooms is not None:
         query = query.filter(Listing.bathrooms >= min_bathrooms)
-    if cursor_value is not None:
-        cursor = decode_cursor(cursor_value)
+    if latitude is not None and longitude is not None:
+        # Expand slightly to avoid excluding boundary points due to rounding.
+        angular_radius = radius_km / 6371.0
+        lat_delta = math.degrees(angular_radius) + 1e-9
+        lower_lat = max(-90.0, latitude - lat_delta)
+        upper_lat = min(90.0, latitude + lat_delta)
+        query = query.filter(Listing.latitude >= lower_lat, Listing.latitude <= upper_lat)
+        if lower_lat > -90.0 and upper_lat < 90.0:
+            lon_delta = math.degrees(math.asin(min(1.0, math.sin(angular_radius) / math.cos(math.radians(latitude))))) + 1e-9
+            lower_lon = longitude - lon_delta
+            upper_lon = longitude + lon_delta
+            if lower_lon <= -180.0:
+                query = query.filter(or_(Listing.longitude >= lower_lon + 360.0, Listing.longitude <= upper_lon))
+            elif upper_lon >= 180.0:
+                query = query.filter(or_(Listing.longitude >= lower_lon, Listing.longitude <= upper_lon - 360.0))
+            else:
+                query = query.filter(Listing.longitude >= lower_lon, Listing.longitude <= upper_lon)
+        radians = math.pi / 180.0
+        lat_sine = func.sin((Listing.latitude - latitude) * radians / 2.0)
+        lon_sine = func.sin((Listing.longitude - longitude) * radians / 2.0)
+        haversine = (
+            lat_sine * lat_sine
+            + math.cos(math.radians(latitude)) * func.cos(Listing.latitude * radians)
+            * lon_sine * lon_sine
+        )
+        clamped = case((haversine < 0, 0.0), (haversine > 1, 1.0), else_=haversine)
+        distance = 12742.0 * func.asin(func.sqrt(clamped))
+        query = query.filter(
+            Listing.latitude.is_not(None), Listing.longitude.is_not(None), distance <= radius_km
+        )
+        if cursor is not None:
+            assert cursor.distance_km is not None
+            query = query.filter(or_(
+                distance > cursor.distance_km,
+                and_(distance == cursor.distance_km, or_(
+                    Listing.created_at < cursor.created_at,
+                    and_(Listing.created_at == cursor.created_at, Listing.id < cursor.listing_id),
+                )),
+            ))
+        pairs = query.with_entities(Listing, distance).order_by(
+            distance.asc(), Listing.created_at.desc(), Listing.id.desc()
+        ).limit(limit + 1).all()
+        page = pairs[:limit]
+        return [row for row, _ in page], len(pairs) > limit, float(page[-1][1]) if page else None
+
+    if cursor is not None:
         query = query.filter(
             or_(
                 Listing.created_at < cursor.created_at,
@@ -287,7 +349,7 @@ def search_public_listings(
 
     rows = query.order_by(Listing.created_at.desc(), Listing.id.desc()).limit(limit + 1).all()
     has_more = len(rows) > limit
-    return rows[:limit], has_more
+    return rows[:limit], has_more, None
 
 
 def get_public_listing(session: Session, listing_id: str) -> Listing | None:
