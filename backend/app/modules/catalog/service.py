@@ -551,9 +551,31 @@ def edit_staff_listing(
     if content.extras is not None:
         _apply_extras_diff(session, listing_id=listing_id, payloads=content.extras)
         session.refresh(listing)
+    _record_edit_transition(
+        session,
+        listing=listing,
+        from_status=from_status,
+        from_published=from_published,
+        actor_id=actor_id,
+        actor_role=actor_role,
+        now=now,
+    )
+    return listing
+
+
+def _record_edit_transition(
+    session: Session,
+    *,
+    listing: Listing,
+    from_status: str,
+    from_published: bool,
+    actor_id: str,
+    actor_role: str,
+    now: datetime,
+) -> None:
     session.add(
         ListingTransition(
-            agency_id=agency_id,
+            agency_id=listing.agency_id,
             listing_id=listing.id,
             action="edit",
             from_status=from_status,
@@ -566,6 +588,51 @@ def edit_staff_listing(
         )
     )
     session.flush()
+
+
+def set_staff_listing_location(
+    session: Session,
+    *,
+    agency_id: str,
+    listing_id: str,
+    latitude: float,
+    longitude: float,
+    actor_id: str,
+    actor_role: str,
+    now: datetime,
+) -> Listing | None:
+    """Change only the coordinates; like any edit, it reopens the listing as an unpublished draft."""
+    listing = (
+        session.query(Listing)
+        .filter(Listing.id == listing_id, Listing.agency_id == agency_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if listing is None:
+        return None
+    from_status, from_published = listing.approval_status, listing.is_published
+    session.execute(
+        update(Listing)
+        .where(Listing.id == listing_id, Listing.agency_id == agency_id)
+        .values(
+            latitude=latitude,
+            longitude=longitude,
+            approval_status="draft",
+            is_published=False,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    session.flush()
+    session.refresh(listing)
+    _record_edit_transition(
+        session,
+        listing=listing,
+        from_status=from_status,
+        from_published=from_published,
+        actor_id=actor_id,
+        actor_role=actor_role,
+        now=now,
+    )
     return listing
 
 

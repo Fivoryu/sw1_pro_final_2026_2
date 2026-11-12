@@ -55,6 +55,7 @@ from app.modules.catalog.schemas import (
     ListingDepositUpdateRequest,
     ExtraAuthoringResponse,
     ListingAuthoringRequest,
+    ListingLocationRequest,
     ListingAuthoringResponse,
     ListingTransitionRequest,
     ListingTransitionResponse,
@@ -66,6 +67,7 @@ from app.modules.catalog.service import (
     configure_listing_deposit,
     create_staff_listing,
     edit_staff_listing,
+    set_staff_listing_location,
     get_staff_listing,
     list_listing_transitions,
     list_staff_listings,
@@ -609,6 +611,35 @@ def replace_agency_listing(
             raise HTTPException(
                 status_code=422, detail="Unknown or duplicated extra reference"
             ) from None
+        if listing is None:
+            raise HTTPException(status_code=404, detail="Listing not found")
+        return _authoring_response(listing, list_listing_extras(session, listing.id))
+
+
+@router.patch(
+    "/api/v1/staff/agencies/{agency_id}/listings/{listing_id}/location",
+    response_model=ListingAuthoringResponse,
+)
+def update_agency_listing_location(
+    agency_id: str,
+    listing_id: str,
+    body: ListingLocationRequest,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> ListingAuthoringResponse:
+    _require_listing_editor(staff, agency_id)
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    with session_factory.begin() as session:
+        listing = set_staff_listing_location(
+            session,
+            agency_id=agency_id,
+            listing_id=listing_id,
+            latitude=body.latitude,
+            longitude=body.longitude,
+            actor_id=staff["id"],
+            actor_role=staff["role"],
+            now=request.app.state.clock(),
+        )
         if listing is None:
             raise HTTPException(status_code=404, detail="Listing not found")
         return _authoring_response(listing, list_listing_extras(session, listing.id))

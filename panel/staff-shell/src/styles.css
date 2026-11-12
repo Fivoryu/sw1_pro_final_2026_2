@@ -2159,3 +2159,25 @@ a {
   font-size: 0.82rem;
   font-weight: 700;
 }
+
+.location-map__canvas {
+  height: 18rem;
+  border: 1px solid var(--line, #d0d5dd);
+  border-radius: 0.5rem;
+}
+
+.location-map__attribution {
+  margin: 0.25rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+}
+
+.location-pin {
+  width: 22px;
+  height: 22px;
+  border: 3px solid #fff;
+  border-radius: 50% 50% 50% 0;
+  background: #d92d20;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  transform: rotate(-45deg);
+}

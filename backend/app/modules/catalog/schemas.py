@@ -328,6 +328,13 @@ class ListingAuthoringRequest(BaseModel):
         return self
 
 
+class ListingLocationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    latitude: Annotated[float, Field(ge=-90, le=90, allow_inf_nan=False)]
+    longitude: Annotated[float, Field(ge=-180, le=180, allow_inf_nan=False)]
+
+
 class ListingTransitionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 

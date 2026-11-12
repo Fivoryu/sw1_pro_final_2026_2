@@ -43,6 +43,8 @@ const listing: StaffListing = {
   bathrooms: 2,
   description: null,
   exact_address: null,
+  latitude: null,
+  longitude: null,
   approval_status: "approved",
   is_published: true,
   offer_version: 1,

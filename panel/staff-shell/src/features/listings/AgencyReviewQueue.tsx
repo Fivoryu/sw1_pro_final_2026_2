@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { SceneDocument } from "../../application/sceneContract";
 import { SceneViewer } from "../editor3d/SceneViewer";
+import { ListingLocationMap } from "./ListingLocationMap";
 import {
   getAgencyListing,
   getListingScene,
@@ -9,6 +10,7 @@ import {
   listListingTransitions,
   StaffListingsApiError,
   transitionListing,
+  updateListingLocation,
   type ListingReviewAction,
   type ListingPhoto,
   type ListingTransition,
@@ -85,6 +87,7 @@ const STATUS_LABELS: Record<StaffListing["approval_status"], string> = {
   rejected: "Rechazado",
 };
 
+const LOCATION_SAVED = "Ubicación guardada.";
 const SESSION_EXPIRED = "Tu sesión expiró. Cierra sesión y vuelve a ingresar.";
 const CONFLICT =
   "El inmueble cambió de estado mientras lo revisabas. Se cargó su estado actual.";
@@ -328,6 +331,7 @@ function ListingReviewDetail({
   const [reason, setReason] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [locationNotice, setLocationNotice] = useState<string | null>(null);
   const [photos, setPhotos] = useState<LoadState<ListingPhoto[]>>({ kind: "loading" });
   const [scene, setScene] = useState<LoadState<SceneDocument | null>>({ kind: "loading" });
   const confirmationId = useId();
@@ -505,6 +509,21 @@ function ListingReviewDetail({
             </div>
           </dl>
 
+          <ListingLocationEditor
+            key={`${detail.value.listing.latitude}:${detail.value.listing.longitude}`}
+            listing={detail.value.listing}
+            onSaved={() => {
+              setLocationNotice(LOCATION_SAVED);
+              setDetailReload((value) => value + 1);
+            }}
+            tokenRef={tokenRef}
+          />
+          {locationNotice ? (
+            <p className="review-notice" role="status">
+              {locationNotice}
+            </p>
+          ) : null}
+
           <section aria-labelledby={`${confirmationId}-photos`} className="review-photos">
             <h4 id={`${confirmationId}-photos`}>Fotos</h4>
             {photos.kind === "loading" ? <p>Cargando fotos…</p> : null}
@@ -630,5 +649,114 @@ function ListingReviewDetail({
         </>
       ) : null}
     </article>
+  );
+}
+
+interface ListingLocationEditorProps {
+  listing: StaffListing;
+  onSaved: () => void;
+  tokenRef: { readonly current: string };
+}
+
+function ListingLocationEditor({ listing, onSaved, tokenRef }: ListingLocationEditorProps) {
+  const [point, setPoint] = useState<{ latitude: number; longitude: number } | null>(
+    listing.latitude !== null && listing.longitude !== null
+      ? { latitude: listing.latitude, longitude: listing.longitude }
+      : null,
+  );
+  const [changed, setChanged] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const headingId = useId();
+  const confirmationId = useId();
+  const reopens = listing.approval_status !== "draft";
+
+  async function save() {
+    if (!point || isSaving) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await updateListingLocation(
+        tokenRef.current,
+        listing.agency_id,
+        listing.listing_id,
+        point.latitude,
+        point.longitude,
+      );
+      setConfirming(false);
+      onSaved();
+    } catch (failure) {
+      setConfirming(false);
+      setError(
+        errorMessage(failure, "No se pudo guardar la ubicación. Inténtalo nuevamente."),
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <section aria-labelledby={headingId} className="review-location">
+      <h4 id={headingId}>Ubicación</h4>
+      <ListingLocationMap
+        latitude={point?.latitude ?? null}
+        longitude={point?.longitude ?? null}
+        onChange={(latitude, longitude) => {
+          setPoint({ latitude, longitude });
+          setChanged(true);
+          setConfirming(false);
+        }}
+      />
+      <p className="review-photos__note">
+        {point
+          ? `Punto: ${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}. Haz clic en el mapa o arrastra el marcador para corregirlo.`
+          : "Este inmueble no tiene ubicación. Haz clic en el mapa para marcarla; sin ubicación no aparece en la búsqueda por zona."}
+      </p>
+      {error ? (
+        <p className="review-queue__message review-queue__message--error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {confirming ? (
+        <div aria-labelledby={confirmationId} className="review-confirmation" role="group">
+          <h4 id={confirmationId}>Confirmar cambio de ubicación</h4>
+          <p>
+            {listing.is_published
+              ? "El inmueble será retirado del catálogo y volverá a revisión: tendrá que enviarse y aprobarse de nuevo antes de publicarse."
+              : "El inmueble volverá a borrador y tendrá que enviarse a revisión de nuevo."}
+          </p>
+          <div className="review-actions">
+            <button
+              className="review-button"
+              disabled={isSaving}
+              onClick={() => void save()}
+              type="button"
+            >
+              {isSaving ? "Guardando…" : "Confirmar"}
+            </button>
+            <button
+              className="review-button review-button--secondary"
+              disabled={isSaving}
+              onClick={() => setConfirming(false)}
+              type="button"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="review-actions">
+          <button
+            className="review-button review-button--secondary"
+            disabled={!changed || !point || isSaving}
+            onClick={() => (reopens ? setConfirming(true) : void save())}
+            type="button"
+          >
+            Guardar ubicación
+          </button>
+        </div>
+      )}
+    </section>
   );
 }
