@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../../../data/map_config.dart';
 import '../../../../data/models/catalog_models.dart';
+import '../../../../data/services/device_location.dart';
 import '../../../../data/services/quote_api.dart';
 import '../../../../data/services/scene_api.dart';
 import '../../../../domain/catalog_controller.dart';
@@ -23,9 +25,17 @@ class CatalogScreen extends StatefulWidget {
     this.sessionController,
     this.sceneApi,
     this.quoteApi,
+    this.deviceLocation = const GeolocatorDeviceLocation(),
+    this.mapConfig = MapTileConfig.openStreetMap,
   });
 
   final CatalogController controller;
+
+  /// Reads the customer's position for the "near me" search; never stored.
+  final DeviceLocation deviceLocation;
+
+  /// Tile provider of the zone map.
+  final MapTileConfig mapConfig;
   final CustomerReservationsController? reservationsController;
   final CustomerSessionController? sessionController;
 
@@ -55,7 +65,11 @@ class _CatalogScreenState extends State<CatalogScreen> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => CatalogFiltersSheet(initialFilters: _controller.filters),
+      builder: (_) => CatalogFiltersSheet(
+        initialFilters: _controller.filters,
+        deviceLocation: widget.deviceLocation,
+        mapConfig: widget.mapConfig,
+      ),
     );
     if (filters != null && mounted) await _controller.search(filters);
   }
@@ -116,6 +130,18 @@ class _CatalogScreenState extends State<CatalogScreen> {
               icon: const Icon(Icons.tune),
               label: const Text('Filtrar catálogo'),
             ),
+            if (_controller.filters.hasZone) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: AndeanPillChip(
+                  key: const ValueKey('catalog-zone-chip'),
+                  label:
+                      'Zona: a ${_controller.filters.radiusKm.round()} km del punto elegido',
+                  backgroundColor: AndeanColors.surfaceContainerHigh,
+                ),
+              ),
+            ],
             if (!_controller.filters.isEmpty) ...[
               const SizedBox(height: 8),
               SizedBox(
@@ -171,6 +197,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
             Text(
               _controller.filters.isEmpty
                   ? 'Todavía no hay inmuebles publicados.'
+                  : _controller.filters.hasZone
+                  ? 'No hay inmuebles publicados dentro de ese radio. Probá ampliarlo.'
                   : 'No hay inmuebles con esos filtros.',
               key: const ValueKey('catalog-empty'),
               style: Theme.of(context).textTheme.bodyLarge,

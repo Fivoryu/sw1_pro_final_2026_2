@@ -44,6 +44,8 @@ class CatalogListing {
     required this.city,
     required this.zone,
     this.coverPhotoUrl,
+    this.latitude,
+    this.longitude,
   });
 
   factory CatalogListing.fromJson(Object? json) {
@@ -55,11 +57,15 @@ class CatalogListing {
     final city = json['city'];
     final zone = json['zone'];
     final cover = json['cover_photo_url'];
+    final latitude = json['latitude'];
+    final longitude = json['longitude'];
     if (listingId is! String ||
         offerVersion is! int ||
         city is! String ||
         zone is! String ||
-        (cover != null && cover is! String)) {
+        (cover != null && cover is! String) ||
+        (latitude != null && latitude is! num) ||
+        (longitude != null && longitude is! num)) {
       throw const FormatException('Listing fields are invalid');
     }
     return CatalogListing(
@@ -70,6 +76,8 @@ class CatalogListing {
       city: city,
       zone: zone,
       coverPhotoUrl: cover as String?,
+      latitude: (latitude as num?)?.toDouble(),
+      longitude: (longitude as num?)?.toDouble(),
     );
   }
 
@@ -79,6 +87,10 @@ class CatalogListing {
   final CatalogMoney basePrice;
   final String city;
   final String zone;
+
+  /// Public point of the listing, or null when the agency never marked one.
+  final double? latitude;
+  final double? longitude;
 
   /// Short-lived signed link to the first photo, or null without photos.
   final String? coverPhotoUrl;
@@ -209,7 +221,15 @@ class CatalogFilters {
     this.maxBasePrice,
     this.minBedrooms,
     this.minBathrooms,
+    this.latitude,
+    this.longitude,
+    this.radiusKm = defaultRadiusKm,
   });
+
+  /// Radius the API applies when none is sent, and the bounds it accepts.
+  static const double defaultRadiusKm = 5;
+  static const double minRadiusKm = 1;
+  static const double maxRadiusKm = 50;
 
   final String? city;
   final String? zone;
@@ -220,6 +240,32 @@ class CatalogFilters {
   final String? maxBasePrice;
   final int? minBedrooms;
   final int? minBathrooms;
+
+  /// Centre of the zone search, kept only in memory and sent as query
+  /// parameters: it is never persisted (F14, S4).
+  final double? latitude;
+  final double? longitude;
+  final double radiusKm;
+
+  bool get hasZone => latitude != null && longitude != null;
+
+  /// A copy with the zone replaced; a null point removes the zone search.
+  CatalogFilters withZone({
+    double? latitude,
+    double? longitude,
+    double radiusKm = defaultRadiusKm,
+  }) => CatalogFilters(
+    city: city,
+    zone: zone,
+    operation: operation,
+    minBasePrice: minBasePrice,
+    maxBasePrice: maxBasePrice,
+    minBedrooms: minBedrooms,
+    minBathrooms: minBathrooms,
+    latitude: latitude,
+    longitude: longitude,
+    radiusKm: radiusKm,
+  );
 
   bool get isEmpty => toQuery().isEmpty;
 
@@ -232,5 +278,13 @@ class CatalogFilters {
     'max_base_price': ?maxBasePrice,
     'min_rooms': ?minBedrooms?.toString(),
     'min_bathrooms': ?minBathrooms?.toString(),
+    if (hasZone) ...{
+      'latitude': '$latitude',
+      'longitude': '$longitude',
+      'radius_km': _formatRadius(radiusKm),
+    },
   };
+
+  static String _formatRadius(double value) =>
+      value == value.roundToDouble() ? '${value.round()}' : '$value';
 }
