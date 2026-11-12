@@ -1050,6 +1050,32 @@ No se presenta esta lista como certificación ISO. Los umbrales de FPS, respuest
 - **Depende de:** F04, F05 y F09 (datos existentes). Solo consulta.
 - **Aceptación:** el administrador ve métricas consistentes con la base, sin exponer datos de otra agencia (aislamiento F03.3).
 
+> **Subfases F14.5–F14.8 (agregadas el 2026-11-12 por decisión del dueño del repositorio):** sin implementación; issues #76 (F14.5), #75 (F14.6), #77 (F14.7) y #78 (F14.8). El detalle acordado está en los documentos `odd/tasks/f14-*.md` que cada subfase cita; como las demás de F14, no son requisito de entrega de §7.1.
+
+### F14.5 — Búsqueda de inmuebles por zona
+
+- **Qué:** el cliente ve los inmuebles cercanos a su ubicación, o elige una ubicación y un radio en kilómetros, y el catálogo muestra los inmuebles de esa zona. Requiere que cada inmueble registre sus coordenadas, dato que hoy no existe en el modelo.
+- **Depende de:** F04.4 (catálogo). Comparte el módulo `catalog` y la app cliente (ver §1.4.4).
+- **Aceptación:** con una ubicación y un radio, el catálogo devuelve solo los inmuebles publicados dentro de ese radio; sin permiso de ubicación el cliente puede elegir el punto a mano. Detalle: `odd/tasks/f14-zone-search.md`.
+
+### F14.6 — Chat entre cliente y agencia con asignación de agentes
+
+- **Qué:** desde la ficha de un inmueble el cliente conversa con la agencia. La agencia asigna agentes a cada inmueble; el primero que responde se queda con la conversación y los demás agentes dejan de verla. Si el administrador inactiva a ese agente, el sistema la reasigna a otro agente disponible del inmueble, que conserva el historial. El cliente ve el nombre de la agencia y no el del agente; la agencia sí identifica al autor de cada mensaje. Disponible en la app cliente, la app de captura y el panel.
+- **Depende de:** F03 (roles y agencias) y F04 (inmuebles publicados).
+- **Aceptación:** dos agentes no atienden la misma conversación; la reasignación conserva el historial; el cliente nunca ve la identidad del agente. Detalle: `odd/tasks/f14-agency-chat.md`.
+
+### F14.7 — Notificaciones
+
+- **Qué:** avisos de mensajes nuevos y de cambios de estado de la reserva, con bandeja y contador en la app cliente, la app de captura y el panel. La entrega con la aplicación cerrada (Firebase) es una segunda entrega posterior.
+- **Depende de:** F14.6 (eventos de chat) y F09 (estados de reserva).
+- **Aceptación:** cada evento genera un aviso solo para sus destinatarios, que pueden marcarlo como leído. Detalle: `odd/tasks/f14-notifications.md`.
+
+### F14.8 — Reseñas de agencia e inmueble
+
+- **Qué:** el cliente califica desde la ficha del inmueble, con una nota para la atención de la agencia y otra para el inmueble. Puede calificar quien haya conversado con la agencia; la reseña de quien reservó pesa más y se muestra como verificada.
+- **Depende de:** F14.6 (haber conversado) y F09 (reserva).
+- **Aceptación:** solo califica quien cumple la condición de conversación; el promedio distingue las reseñas verificadas. Detalle: `odd/tasks/f14-reviews.md`.
+
 ## 6. Decisiones abiertas y riesgos
 
 ### 6.1 Qué bloquea cada pendiente
