@@ -1,0 +1,47 @@
+name: Funcionalidad F14
+description: Proponer o planificar una funcionalidad de la fase F14.
+title: ""
+labels: ["f14", "type:feature"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Descripción
+      description: Describe la funcionalidad y el problema que resuelve.
+    validations:
+      required: true
+  - type: textarea
+    id: current_state
+    attributes:
+      label: Estado actual
+      description: Describe el estado verificado y distingue las incertidumbres.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Alcance
+      description: Indica las superficies afectadas y los límites conocidos.
+    validations:
+      required: true
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Tareas
+      description: Enumera las tareas previstas y sus dependencias.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Criterios de aceptación
+      description: Describe resultados verificables y decisiones pendientes.
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: Referencias
+      description: Enlaza el plan maestro y otras fuentes relevantes.
+    validations:
+      required: true
