@@ -12,9 +12,20 @@ class MapTileConfig {
   });
 
   /// Public OpenStreetMap tiles.
+  ///
+  /// The tile URL and the identifier sent to the tile server can be replaced at
+  /// build time without touching code, for example a self-hosted or commercial
+  /// provider: `--dart-define=MAP_TILE_URL=...` and
+  /// `--dart-define=MAP_USER_AGENT=...`.
   static const openStreetMap = MapTileConfig(
-    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    userAgentPackageName: 'com.example.captura_mobile',
+    urlTemplate: String.fromEnvironment(
+      'MAP_TILE_URL',
+      defaultValue: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    ),
+    userAgentPackageName: String.fromEnvironment(
+      'MAP_USER_AGENT',
+      defaultValue: 'roomforge-captura-sw1-g12',
+    ),
     attribution: '© OpenStreetMap contributors',
   );
 

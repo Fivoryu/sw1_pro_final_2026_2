@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.core.log_redaction import install_location_redaction
 from app.core.config import DETECTION_LEASE_SECONDS_DEFAULT, Settings
 from app.core.errors import ErrorResponse, error_code_for_status
 from app.core.rate_source import official_rate_refresh_interval_seconds
@@ -390,6 +391,7 @@ def create_app(
     reconstruction_queue: ReconstructionQueue | None = None,
     floorplan_interpreter: FloorplanInterpreter | None = None,
 ) -> FastAPI:
+    install_location_redaction()
     resolved_settings = settings or Settings.from_env()
     resolved_settings.validate()
     Fernet(resolved_settings.totp_encryption_key.encode("ascii"))
