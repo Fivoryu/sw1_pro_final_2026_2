@@ -43,10 +43,8 @@ class StaffNotificationsApi {
     }
   }
 
-  Future<void> markRead({
-    required String accessToken,
-    required String id,
-  }) => _send('POST', '$_path/$id/read', accessToken: accessToken);
+  Future<void> markRead({required String accessToken, required String id}) =>
+      _send('POST', '$_path/$id/read', accessToken: accessToken);
 
   Future<void> markAllRead({required String accessToken}) =>
       _send('POST', '$_path/read-all', accessToken: accessToken);

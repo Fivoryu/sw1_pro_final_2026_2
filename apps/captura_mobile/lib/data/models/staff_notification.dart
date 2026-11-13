@@ -26,7 +26,8 @@ class StaffNotification {
         json['kind'] is! String ||
         json['read'] is! bool ||
         json['created_at'] is! String ||
-        (json['conversation_id'] != null && json['conversation_id'] is! String) ||
+        (json['conversation_id'] != null &&
+            json['conversation_id'] is! String) ||
         (json['reservation_id'] != null && json['reservation_id'] is! String) ||
         (json['detail'] != null && json['detail'] is! String)) {
       throw const FormatException('Notification fields are invalid');

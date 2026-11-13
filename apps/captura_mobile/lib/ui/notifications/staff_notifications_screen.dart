@@ -159,7 +159,9 @@ class _StaffNotificationsScreenState extends State<StaffNotificationsScreen> {
                   Text(
                     controller.message ?? _openError!,
                     key: const ValueKey('notifications-error'),
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
                   ),
                 if (controller.message == null && controller.items.isEmpty)
                   const Padding(

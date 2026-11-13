@@ -36,10 +36,8 @@ class _FakeNotificationsBackend {
     'read': read,
   });
 
-  StaffNotificationsApi get api => StaffNotificationsApi(
-    baseUrl: chatBaseUrl,
-    client: MockClient(_handle),
-  );
+  StaffNotificationsApi get api =>
+      StaffNotificationsApi(baseUrl: chatBaseUrl, client: MockClient(_handle));
 
   http.Response _json(Object body, int code) => http.Response(
     jsonEncode(body),
@@ -50,7 +48,8 @@ class _FakeNotificationsBackend {
   Future<http.Response> _handle(http.Request request) async {
     requests.add(request);
     if (offline) throw http.ClientException('offline');
-    if (status != 200) return _json({'detail': 'no', 'code': 'forbidden'}, status);
+    if (status != 200)
+      return _json({'detail': 'no', 'code': 'forbidden'}, status);
     const root = '/api/v1/staff/notifications';
     final path = request.url.path;
     if (path == root && request.method == 'GET') {
@@ -139,7 +138,10 @@ void main() {
     });
 
     test('rejects malformed data', () {
-      expect(() => StaffNotification.fromJson({'id': 1}), throwsFormatException);
+      expect(
+        () => StaffNotification.fromJson({'id': 1}),
+        throwsFormatException,
+      );
       expect(
         () => StaffNotificationInbox.fromJson({'unread': 'x', 'items': []}),
         throwsFormatException,
@@ -167,7 +169,10 @@ void main() {
 
       await controller.start();
 
-      expect(backend.requests.first.headers['Authorization'], startsWith('Bearer '));
+      expect(
+        backend.requests.first.headers['Authorization'],
+        startsWith('Bearer '),
+      );
     });
 
     test('markRead and markAllRead update the counter', () async {
@@ -209,7 +214,11 @@ void main() {
 
     test('a platform admin has no inbox', () async {
       final backend = _FakeNotificationsBackend();
-      final controller = await _controller(null, backend, role: 'platform_admin');
+      final controller = await _controller(
+        null,
+        backend,
+        role: 'platform_admin',
+      );
 
       expect(controller.available, isFalse);
       controller.sync();
@@ -223,7 +232,10 @@ void main() {
 
       await controller.start();
 
-      expect(controller.message, 'Tu cuenta no tiene permisos para esta conversación.');
+      expect(
+        controller.message,
+        'Tu cuenta no tiene permisos para esta conversación.',
+      );
     });
 
     test('an offline poll keeps the last inbox without an error', () async {
@@ -280,7 +292,9 @@ void main() {
       }
     }
 
-    testWidgets('lists notices and opens the conversation on tap', (tester) async {
+    testWidgets('lists notices and opens the conversation on tap', (
+      tester,
+    ) async {
       final backend = _FakeNotificationsBackend()
         ..add('n1', 'chat_assigned', conversationId: 'c1');
       final chat = FakeChatBackend()
@@ -329,7 +343,10 @@ void main() {
           home: Scaffold(
             appBar: AppBar(
               actions: [
-                StaffNotificationsBell(controller: controller, onPressed: () {}),
+                StaffNotificationsBell(
+                  controller: controller,
+                  onPressed: () {},
+                ),
               ],
             ),
           ),
@@ -362,7 +379,10 @@ void main() {
           ),
         ),
       );
-      await settleUntil(tester, find.byKey(const ValueKey('notifications-empty')));
+      await settleUntil(
+        tester,
+        find.byKey(const ValueKey('notifications-empty')),
+      );
 
       expect(find.byKey(const ValueKey('notifications-empty')), findsOneWidget);
       await tester.pumpWidget(const SizedBox());

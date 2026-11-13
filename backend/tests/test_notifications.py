@@ -176,7 +176,9 @@ def test_losing_the_last_agent_notifies_the_admin(agency_api_context: AgencyApiC
     agent_a = seed_staff(context, "agent-a2", agency_id="agency-chat")
     assert agent_a
     with context.session_factory.begin() as session:
-        session.get(ChatConversation, conversation_id).agent_id = "agent-a"
+        conversation = session.get(ChatConversation, conversation_id)
+        assert conversation is not None
+        conversation.agent_id = "agent-a"
 
     response = context.client.post(
         "/api/v1/agencies/agents/agent-a/deactivate", headers=admin
@@ -197,6 +199,7 @@ def test_overdue_conversation_escalates_to_the_admin_once(
 
     with context.session_factory.begin() as session:
         conversation = session.get(ChatConversation, conversation_id)
+        assert conversation is not None
         conversation.awaiting_since = context.now - timedelta(hours=25)
 
     first = _inbox(context, admin, staff=True)
@@ -215,6 +218,7 @@ def test_a_conversation_waiting_less_than_a_day_does_not_escalate(
     _customer_says(context, customer, conversation_id)
     with context.session_factory.begin() as session:
         conversation = session.get(ChatConversation, conversation_id)
+        assert conversation is not None
         conversation.awaiting_since = context.now - timedelta(hours=23)
 
     assert _inbox(context, admin, staff=True)["items"] == []
