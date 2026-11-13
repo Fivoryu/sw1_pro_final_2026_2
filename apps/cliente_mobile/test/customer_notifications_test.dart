@@ -158,6 +158,8 @@ void main() {
       await controller.start();
 
       controller.stop();
+      // A request already in flight may still land; nothing new starts after it.
+      await Future<void>.delayed(const Duration(milliseconds: 60));
       final requestsAtStop = backend.requests.length;
       await Future<void>.delayed(const Duration(milliseconds: 80));
 
