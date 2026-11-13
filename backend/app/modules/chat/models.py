@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -61,7 +62,9 @@ class ChatConversation(Base):
         ForeignKey("staff_account.id", ondelete="SET NULL"), nullable=True
     )
     # Set when no active agent was left to take over; the agency admin must act.
-    needs_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    needs_admin: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     # Since when the customer waits for an answer; NULL when nothing is pending.
     awaiting_since: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
