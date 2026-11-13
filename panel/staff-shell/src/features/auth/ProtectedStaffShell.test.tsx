@@ -10,6 +10,7 @@ import {
 import { getCurrentExchangeRates, getExchangeRateHistory } from "../../application/exchangeRatesApi";
 import { getAgencies } from "../../application/agencyAdminInvitationsApi";
 import { listAgencyListings } from "../../application/staffListingsApi";
+import { listNotifications } from "../../application/staffNotificationsApi";
 import { ProtectedStaffShell } from "./ProtectedStaffShell";
 
 vi.mock("../editor3d/SceneViewer", () => ({
@@ -54,6 +55,11 @@ vi.mock("../../application/staffAuthApi", async (importOriginal) => {
   };
 });
 
+vi.mock("../../application/staffNotificationsApi", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../application/staffNotificationsApi")>();
+  return { ...actual, listNotifications: vi.fn() };
+});
+
 function expiredAccessToken(): string {
   const exp = Math.floor(Date.now() / 1000) - 60;
   return `header.${btoa(JSON.stringify({ exp }))}.signature`;
@@ -69,6 +75,7 @@ function staffUser(role: string): StaffUser {
 }
 
 beforeEach(() => {
+  vi.mocked(listNotifications).mockReset().mockResolvedValue({ unread: 0, items: [] });
   sessionStorage.clear();
   vi.mocked(getStaffMe).mockReset();
   vi.mocked(logoutStaffSession).mockReset();
@@ -273,5 +280,26 @@ describe("ProtectedStaffShell", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Tu sesión expiró. Inicia sesión nuevamente.",
     );
+  });
+
+  it("shows the notification bell to agency staff only", async () => {
+    sessionStorage.setItem("roomforge.staff.csrf", "stored-csrf");
+    vi.mocked(refreshStaffSession).mockResolvedValue({
+      access_token: "volatile-access",
+      csrf_token: "rotated-csrf",
+    });
+    vi.mocked(getStaffMe).mockResolvedValue({ user: staffUser("agent") });
+
+    const { unmount } = render(<ProtectedStaffShell />);
+    expect(await screen.findByRole("button", { name: /Notificaciones/ })).toBeVisible();
+    expect(listNotifications).toHaveBeenCalledWith("volatile-access", 30);
+    unmount();
+
+    vi.mocked(listNotifications).mockClear();
+    vi.mocked(getStaffMe).mockResolvedValue({ user: staffUser("platform_admin") });
+    render(<ProtectedStaffShell />);
+    expect(await screen.findByRole("heading", { name: "Administración de plataforma" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Notificaciones/ })).not.toBeInTheDocument();
+    expect(listNotifications).not.toHaveBeenCalled();
   });
 });

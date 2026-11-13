@@ -14,6 +14,7 @@ import { AgencyAdminInvitations } from "../agencies/AgencyAdminInvitations";
 import { AgencyDashboard } from "../agencies/AgencyDashboard";
 import { ChatInbox } from "../chat/ChatInbox";
 import { ChatReports } from "../chat/ChatReports";
+import { NotificationBell } from "../notifications/NotificationBell";
 import { AgencyReviewQueue } from "../listings/AgencyReviewQueue";
 import { ExchangeRatesAdmin } from "../rates/ExchangeRatesAdmin";
 import { StripeCardPaymentsAdmin } from "../reservations/StripeCardPaymentsAdmin";
@@ -49,6 +50,7 @@ export function ProtectedStaffShell() {
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<"unavailable" | "denied" | null>(null);
   const [agencyWorkspace, setAgencyWorkspace] = useState<"home" | "scenes" | "chat">("home");
+  const [chatConversationId, setChatConversationId] = useState<string | null>(null);
 
   function applySession(nextSession: StaffSession | null) {
     if (
@@ -237,6 +239,15 @@ export function ProtectedStaffShell() {
           <span>{presentation.heading}</span>
           <span>{session.user.email}</span>
         </div>
+        {isAgencyStaff ? (
+          <NotificationBell
+            accessToken={session.accessToken}
+            onOpenChat={(conversationId) => {
+              setChatConversationId(conversationId);
+              setAgencyWorkspace("chat");
+            }}
+          />
+        ) : null}
         <button
           className="staff-logout-action"
           disabled={isLoggingOut}
@@ -270,7 +281,10 @@ export function ProtectedStaffShell() {
               <button
                 aria-current={agencyWorkspace === "chat" ? "page" : undefined}
                 className="protected-staff-navigation__item"
-                onClick={() => setAgencyWorkspace("chat")}
+                onClick={() => {
+                  setChatConversationId(null);
+                  setAgencyWorkspace("chat");
+                }}
                 type="button"
               >
                 Chat
@@ -294,6 +308,7 @@ export function ProtectedStaffShell() {
             <ChatInbox
               accessToken={session.accessToken}
               isAgencyAdmin={session.user.role === "agency_admin"}
+              initialConversationId={chatConversationId}
             />
           ) : session.user.role === "agency_admin" && agencyId ? (
             <>
