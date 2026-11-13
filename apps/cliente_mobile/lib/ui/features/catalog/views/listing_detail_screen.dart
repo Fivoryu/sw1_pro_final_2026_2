@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../../data/models/catalog_models.dart';
 import '../../../../data/models/reservation_models.dart';
 import '../../../../data/services/customer_chat_api.dart';
+import '../../../../data/services/customer_reviews_api.dart';
 import '../../../../data/services/quote_api.dart';
 import '../../../../data/services/scene_api.dart';
 import '../../../../domain/catalog_controller.dart';
@@ -11,6 +12,7 @@ import '../../../../domain/customer_session_controller.dart';
 import 'catalog_format.dart';
 import 'listing_photo.dart';
 import '../../chat/chat_conversation_screen.dart';
+import '../../reviews/listing_reviews_section.dart';
 import '../../viewer/views/listing_viewer_screen.dart';
 import '../../viewer/views/object_hotspot_sheet.dart';
 import '../../../theme/andean_theme.dart';
@@ -30,10 +32,12 @@ class ListingDetailScreen extends StatefulWidget {
     this.sceneApi,
     this.quoteApi,
     this.chatApi,
+    this.reviewsApi,
   });
 
   /// When provided, the detail offers a chat with the agency.
   final CustomerChatApi? chatApi;
+  final CustomerReviewsApi? reviewsApi;
 
   final CatalogController controller;
   final String listingId;
@@ -315,6 +319,14 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
             const SizedBox(height: 8),
             Text(_chatMessage!, key: const ValueKey('chat-message')),
           ],
+        ],
+        if (widget.reviewsApi != null) ...[
+          const SizedBox(height: 24),
+          ListingReviewsSection(
+            api: widget.reviewsApi!,
+            listingId: widget.listingId,
+            sessionController: widget.sessionController,
+          ),
         ],
         const SizedBox(height: 24),
         Text('Recorrido 3D', style: AndeanTypography.headlineMd),

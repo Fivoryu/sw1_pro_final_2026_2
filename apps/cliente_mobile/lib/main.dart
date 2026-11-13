@@ -4,6 +4,7 @@ import 'data/services/catalog_api.dart';
 import 'data/services/customer_booking_api.dart';
 import 'data/services/customer_chat_api.dart';
 import 'data/services/customer_notifications_api.dart';
+import 'data/services/customer_reviews_api.dart';
 import 'data/services/local_wallet_connect.dart';
 import 'data/services/customer_auth_api.dart';
 import 'data/services/customer_token_store.dart';
@@ -45,6 +46,10 @@ void main() => runApp(
       baseUrl: _apiBaseUrl,
       accessTokenProvider: () => _customerSession.obtainAccessToken(),
     ),
+    reviewsApi: CustomerReviewsApi(
+      baseUrl: _apiBaseUrl,
+      accessTokenProvider: () => _customerSession.obtainAccessToken(),
+    ),
   ),
 );
 
@@ -64,6 +69,7 @@ class RoomForgeApp extends StatelessWidget {
     this.quoteApi,
     this.chatApi,
     this.notificationsApi,
+    this.reviewsApi,
   });
 
   final CustomerSessionController sessionController;
@@ -73,6 +79,7 @@ class RoomForgeApp extends StatelessWidget {
   final QuoteApi? quoteApi;
   final CustomerChatApi? chatApi;
   final CustomerNotificationsApi? notificationsApi;
+  final CustomerReviewsApi? reviewsApi;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -86,6 +93,7 @@ class RoomForgeApp extends StatelessWidget {
       quoteApi: quoteApi,
       chatApi: chatApi,
       notificationsApi: notificationsApi,
+      reviewsApi: reviewsApi,
     ),
   );
 }
@@ -100,6 +108,7 @@ class CustomerShell extends StatefulWidget {
     this.quoteApi,
     this.chatApi,
     this.notificationsApi,
+    this.reviewsApi,
   });
 
   final CustomerSessionController sessionController;
@@ -109,6 +118,7 @@ class CustomerShell extends StatefulWidget {
   final QuoteApi? quoteApi;
   final CustomerChatApi? chatApi;
   final CustomerNotificationsApi? notificationsApi;
+  final CustomerReviewsApi? reviewsApi;
 
   @override
   State<CustomerShell> createState() => _CustomerShellState();
@@ -199,6 +209,7 @@ class _CustomerShellState extends State<CustomerShell> {
           sceneApi: widget.sceneApi,
           quoteApi: widget.quoteApi,
           chatApi: widget.chatApi,
+          reviewsApi: widget.reviewsApi,
         ),
         CustomerReservationsScreen(
           controller: _reservations,

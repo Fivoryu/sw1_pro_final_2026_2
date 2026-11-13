@@ -4,6 +4,7 @@ import '../../../../data/map_config.dart';
 import '../../../../data/models/catalog_models.dart';
 import '../../../../data/services/device_location.dart';
 import '../../../../data/services/customer_chat_api.dart';
+import '../../../../data/services/customer_reviews_api.dart';
 import '../../../../data/services/quote_api.dart';
 import '../../../../data/services/scene_api.dart';
 import '../../../../domain/catalog_controller.dart';
@@ -27,6 +28,7 @@ class CatalogScreen extends StatefulWidget {
     this.sceneApi,
     this.quoteApi,
     this.chatApi,
+    this.reviewsApi,
     this.deviceLocation = const GeolocatorDeviceLocation(),
     this.mapConfig = MapTileConfig.openStreetMap,
   });
@@ -49,6 +51,9 @@ class CatalogScreen extends StatefulWidget {
 
   /// When provided, the listing detail offers a chat with the agency.
   final CustomerChatApi? chatApi;
+
+  /// When provided, the listing detail shows ratings and lets eligible customers rate.
+  final CustomerReviewsApi? reviewsApi;
 
   @override
   State<CatalogScreen> createState() => _CatalogScreenState();
@@ -90,6 +95,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
           sceneApi: widget.sceneApi,
           quoteApi: widget.quoteApi,
           chatApi: widget.chatApi,
+          reviewsApi: widget.reviewsApi,
         ),
       ),
     );
