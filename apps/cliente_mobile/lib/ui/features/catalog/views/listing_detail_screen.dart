@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../data/models/catalog_models.dart';
 import '../../../../data/models/reservation_models.dart';
+import '../../../../data/services/customer_chat_api.dart';
 import '../../../../data/services/quote_api.dart';
 import '../../../../data/services/scene_api.dart';
 import '../../../../domain/catalog_controller.dart';
@@ -9,6 +10,7 @@ import '../../../../domain/customer_reservations_controller.dart';
 import '../../../../domain/customer_session_controller.dart';
 import 'catalog_format.dart';
 import 'listing_photo.dart';
+import '../../chat/chat_conversation_screen.dart';
 import '../../viewer/views/listing_viewer_screen.dart';
 import '../../viewer/views/object_hotspot_sheet.dart';
 import '../../../theme/andean_theme.dart';
@@ -27,7 +29,11 @@ class ListingDetailScreen extends StatefulWidget {
     this.sessionController,
     this.sceneApi,
     this.quoteApi,
+    this.chatApi,
   });
+
+  /// When provided, the detail offers a chat with the agency.
+  final CustomerChatApi? chatApi;
 
   final CatalogController controller;
   final String listingId;
@@ -56,6 +62,32 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
   String _quoteCurrency = 'BOB';
   QuoteSnapshot? _quote;
   String? _bookingMessage;
+  String? _chatMessage;
+  bool _openingChat = false;
+
+  Future<void> _openChat() async {
+    final session = widget.sessionController;
+    if (session?.status != CustomerSessionStatus.signedIn) {
+      setState(
+        () => _chatMessage = 'Iniciá sesión en Cuenta para chatear con la inmobiliaria.',
+      );
+      return;
+    }
+    setState(() {
+      _openingChat = true;
+      _chatMessage = null;
+    });
+    final failure = await openListingChat(
+      context,
+      api: widget.chatApi!,
+      listingId: widget.listingId,
+    );
+    if (!mounted) return;
+    setState(() {
+      _openingChat = false;
+      _chatMessage = failure;
+    });
+  }
 
   @override
   void initState() {
@@ -267,6 +299,22 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
         if (_bookingMessage != null) ...[
           const SizedBox(height: 8),
           Text(_bookingMessage!, key: const ValueKey('booking-message')),
+        ],
+        if (widget.chatApi != null) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 48,
+            child: OutlinedButton.icon(
+              key: const ValueKey('detail-open-chat'),
+              onPressed: _openingChat ? null : _openChat,
+              icon: const Icon(Icons.chat_bubble_outline),
+              label: const Text('Chatear con la inmobiliaria'),
+            ),
+          ),
+          if (_chatMessage != null) ...[
+            const SizedBox(height: 8),
+            Text(_chatMessage!, key: const ValueKey('chat-message')),
+          ],
         ],
         const SizedBox(height: 24),
         Text('Recorrido 3D', style: AndeanTypography.headlineMd),
