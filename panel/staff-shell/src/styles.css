@@ -2181,3 +2181,136 @@ a {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
   transform: rotate(-45deg);
 }
+
+/* Agency chat (F14.6) */
+.chat-inbox,
+.chat-conversation {
+  display: grid;
+  gap: 1rem;
+}
+
+.chat-list {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-list__item {
+  display: grid;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.8rem 1rem;
+  border: 1px solid #d9ddd2;
+  border-radius: 0.75rem;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.chat-list__item:hover {
+  border-color: var(--forest);
+}
+
+.chat-list__customer {
+  font-weight: 650;
+}
+
+.chat-list__meta {
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+.chat-list__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.chat-list__badge--alert {
+  background: #f6dcd4;
+  color: #7a2a14;
+}
+
+.chat-messages {
+  display: grid;
+  gap: 0.5rem;
+  max-height: 24rem;
+  margin: 0;
+  padding: 0.5rem;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid #d9ddd2;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+
+.chat-message {
+  display: grid;
+  gap: 0.15rem;
+  max-width: 80%;
+  padding: 0.5rem 0.8rem;
+  border-radius: 0.75rem;
+  background: #f0f2ec;
+}
+
+.chat-message--mine {
+  justify-self: end;
+  background: #dfe9e1;
+}
+
+.chat-message__meta {
+  font-size: 0.72rem;
+  opacity: 0.75;
+}
+
+.chat-message__body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-compose,
+.chat-moderation form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.chat-compose textarea,
+.chat-moderation textarea,
+.chat-moderation select {
+  width: 100%;
+  font: inherit;
+}
+
+.chat-moderation {
+  display: grid;
+  gap: 1rem;
+}
+
+.chat-reports__list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-reports__list li {
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #d9ddd2;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+
+.review-agents {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.review-agents__option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
