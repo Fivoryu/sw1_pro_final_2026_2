@@ -9,6 +9,7 @@ from app.core.errors import ERROR_RESPONSES
 from app.modules.catalog.models import Listing
 from app.modules.chat.models import ListingAgent
 from app.modules.chat.schemas import ListingAgentsResponse, ListingAgentsUpdate
+from app.modules.chat.service import reassign_for_agent
 from app.modules.identity.models import StaffAccount
 from app.modules.identity.session import ActiveStaff, get_active_staff
 
@@ -107,6 +108,8 @@ def replace_listing_agents(
             session.query(ListingAgent).filter(
                 ListingAgent.listing_id == listing_id, ListingAgent.agent_id == agent_id
             ).delete(synchronize_session=False)
+            # Conversations the removed agent owned move to another assigned agent.
+            reassign_for_agent(session, agent_id=agent_id, listing_id=listing_id)
         for agent_id in wanted:
             if agent_id not in current:
                 session.add(

@@ -27,6 +27,7 @@ from app.modules.agencies.service import (
     create_agency_wallet_challenge,
     verify_and_link_agency_wallet,
 )
+from app.modules.chat.service import reassign_for_agent
 from app.modules.identity.invitations import (
     InvitationConflictError,
     InvitationDeliveryError,
@@ -282,6 +283,7 @@ def _set_agent_active(
 
         agent.active = active
         if not active:
+            reassign_for_agent(session, agent_id=agent.id)
             (
                 session.query(StaffSession)
                 .filter(
