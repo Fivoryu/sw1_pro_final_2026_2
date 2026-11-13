@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'data/services/catalog_api.dart';
 import 'data/services/customer_booking_api.dart';
+import 'data/services/customer_chat_api.dart';
 import 'data/services/local_wallet_connect.dart';
 import 'data/services/customer_auth_api.dart';
 import 'data/services/customer_token_store.dart';
@@ -33,6 +34,10 @@ void main() => runApp(
     ),
     sceneApi: SceneApi(baseUrl: _apiBaseUrl),
     quoteApi: QuoteApi(baseUrl: _apiBaseUrl),
+    chatApi: CustomerChatApi(
+      baseUrl: _apiBaseUrl,
+      accessTokenProvider: () => _customerSession.obtainAccessToken(),
+    ),
   ),
 );
 
@@ -50,6 +55,7 @@ class RoomForgeApp extends StatelessWidget {
     this.bookingApi,
     this.sceneApi,
     this.quoteApi,
+    this.chatApi,
   });
 
   final CustomerSessionController sessionController;
@@ -57,6 +63,7 @@ class RoomForgeApp extends StatelessWidget {
   final CustomerBookingApi? bookingApi;
   final SceneApi? sceneApi;
   final QuoteApi? quoteApi;
+  final CustomerChatApi? chatApi;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -68,6 +75,7 @@ class RoomForgeApp extends StatelessWidget {
       bookingApi: bookingApi,
       sceneApi: sceneApi,
       quoteApi: quoteApi,
+      chatApi: chatApi,
     ),
   );
 }
@@ -80,6 +88,7 @@ class CustomerShell extends StatefulWidget {
     this.bookingApi,
     this.sceneApi,
     this.quoteApi,
+    this.chatApi,
   });
 
   final CustomerSessionController sessionController;
@@ -87,6 +96,7 @@ class CustomerShell extends StatefulWidget {
   final CustomerBookingApi? bookingApi;
   final SceneApi? sceneApi;
   final QuoteApi? quoteApi;
+  final CustomerChatApi? chatApi;
 
   @override
   State<CustomerShell> createState() => _CustomerShellState();
@@ -133,10 +143,12 @@ class _CustomerShellState extends State<CustomerShell> {
           sessionController: widget.sessionController,
           sceneApi: widget.sceneApi,
           quoteApi: widget.quoteApi,
+          chatApi: widget.chatApi,
         ),
         CustomerReservationsScreen(
           controller: _reservations,
           sessionController: widget.sessionController,
+          chatApi: widget.chatApi,
         ),
         CustomerAccountScreen(
           controller: widget.sessionController,

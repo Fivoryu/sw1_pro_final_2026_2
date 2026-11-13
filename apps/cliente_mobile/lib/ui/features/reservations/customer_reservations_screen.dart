@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../../../data/models/reservation_models.dart';
+import '../../../../data/services/customer_chat_api.dart';
 import '../../../../domain/customer_reservations_controller.dart';
+import '../chat/chat_conversations_screen.dart';
 import '../../../../domain/customer_session_controller.dart';
 import '../../theme/andean_theme.dart';
 import '../../theme/andean_widgets.dart';
@@ -11,8 +13,11 @@ class CustomerReservationsScreen extends StatefulWidget {
     super.key,
     required this.controller,
     required this.sessionController,
+    this.chatApi,
   });
 
+  /// When provided, the screen links to the customer's chat conversations.
+  final CustomerChatApi? chatApi;
   final CustomerReservationsController? controller;
   final CustomerSessionController sessionController;
 
@@ -94,6 +99,17 @@ class _CustomerReservationsScreenState
           const Expanded(
             child: AndeanSectionHeading('Mis reservas'),
           ),
+          if (widget.chatApi != null)
+            IconButton(
+              key: const ValueKey('open-conversations'),
+              tooltip: 'Mis conversaciones',
+              onPressed: () => Navigator.of(context).push<void>(
+                MaterialPageRoute<void>(
+                  builder: (_) => ChatConversationsScreen(api: widget.chatApi!),
+                ),
+              ),
+              icon: const Icon(Icons.chat_bubble_outline),
+            ),
           IconButton(
             key: const ValueKey('refresh-reservations'),
             tooltip: 'Actualizar',

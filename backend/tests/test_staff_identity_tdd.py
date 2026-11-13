@@ -409,13 +409,16 @@ def test_staff_identity_schema_tables_contain_required_columns() -> None:
         )
 
 
-def test_agency_schema_persists_only_a_unique_string_identifier() -> None:
+def test_agency_schema_persists_a_unique_string_identifier_and_a_display_name() -> None:
     table = _staff_schema_table("agency")
 
-    assert set(table.columns.keys()) == {"id"}
+    assert set(table.columns.keys()) == {"id", "name"}
     assert table.primary_key.columns.keys() == ["id"]
     assert isinstance(table.columns["id"].type, String)
     assert table.columns["id"].type.length == 36
+    assert isinstance(table.columns["name"].type, String)
+    assert table.columns["name"].type.length == 120
+    assert table.columns["name"].nullable is False
 
 
 def test_staff_account_schema_enforces_identity_and_platform_admin_rules() -> None:

@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { SceneDocument } from "../../application/sceneContract";
 import { SceneViewer } from "../editor3d/SceneViewer";
 import { ListingLocationMap } from "./ListingLocationMap";
+import { ListingAgentsAssignment } from "./ListingAgentsAssignment";
 import {
   getAgencyListing,
   getListingScene,
@@ -569,6 +570,12 @@ function ListingReviewDetail({
               </>
             ) : null}
           </section>
+
+          <ListingAgentsAssignment
+            accessToken={tokenRef.current}
+            agencyId={agencyId}
+            listingId={listingId}
+          />
 
           <section aria-labelledby={`${confirmationId}-history`} className="review-history">
             <h4 id={`${confirmationId}-history`}>Historial</h4>

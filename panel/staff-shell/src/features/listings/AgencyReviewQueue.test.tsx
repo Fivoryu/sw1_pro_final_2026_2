@@ -41,6 +41,12 @@ vi.mock("./ListingLocationMap", () => ({
   ),
 }));
 
+vi.mock("./ListingAgentsAssignment", () => ({
+  ListingAgentsAssignment: ({ listingId }: { listingId: string }) => (
+    <section aria-label="Agentes asignados">Asignación de {listingId}</section>
+  ),
+}));
+
 vi.mock("../../application/staffListingsApi", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../application/staffListingsApi")>();
@@ -182,6 +188,19 @@ describe("AgencyReviewQueue", () => {
     expect(screen.getByText("Moneda")).toBeVisible();
     expect(screen.getByText("USD")).toBeVisible();
     expect(screen.getByText("USD 250.000,00")).toBeVisible();
+  });
+
+  it("renders the agent assignment for the opened listing", async () => {
+    const user = userEvent.setup();
+    const item = listing();
+    vi.mocked(listAgencyListings).mockResolvedValue(page([item]));
+
+    renderQueue();
+    await openDetail(user, item);
+
+    expect(await screen.findByLabelText("Agentes asignados")).toHaveTextContent(
+      "Asignación de listing-1",
+    );
   });
 
   it("explains an empty review queue", async () => {

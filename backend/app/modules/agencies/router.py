@@ -27,6 +27,7 @@ from app.modules.agencies.service import (
     create_agency_wallet_challenge,
     verify_and_link_agency_wallet,
 )
+from app.modules.chat.service import reassign_for_agent
 from app.modules.identity.invitations import (
     InvitationConflictError,
     InvitationDeliveryError,
@@ -70,13 +71,14 @@ def create_agency(
 ) -> dict[str, str]:
     _require_platform_admin(staff)
     session_factory: sessionmaker[Session] = request.app.state.session_factory
+    name = agency.name if agency.name is not None else agency.id
     try:
         with session_factory.begin() as session:
-            session.add(Agency(id=agency.id))
+            session.add(Agency(id=agency.id, name=name))
             session.flush()
     except IntegrityError:
         raise HTTPException(status_code=409, detail="Agency ID already exists") from None
-    return {"id": agency.id}
+    return {"id": agency.id, "name": name}
 
 
 @router.get("", response_model=AgencyListResponse)
@@ -90,15 +92,15 @@ def list_agencies(
     session_factory: sessionmaker[Session] = request.app.state.session_factory
     with session_factory() as session:
         total = session.query(func.count(Agency.id)).scalar() or 0
-        agency_ids = (
-            session.query(Agency.id)
+        rows = (
+            session.query(Agency.id, Agency.name)
             .order_by(Agency.id)
             .offset(offset)
             .limit(limit)
             .all()
         )
     return {
-        "agencies": [{"id": agency_id} for (agency_id,) in agency_ids],
+        "agencies": [{"id": agency_id, "name": name} for agency_id, name in rows],
         "pagination": {"limit": limit, "offset": offset, "total": total},
     }
 
@@ -281,6 +283,7 @@ def _set_agent_active(
 
         agent.active = active
         if not active:
+            reassign_for_agent(session, agent_id=agent.id)
             (
                 session.query(StaffSession)
                 .filter(

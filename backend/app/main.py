@@ -33,6 +33,9 @@ from app.modules.catalog.photos import (
     cleanup_photo_deletion_intents,
 )
 from app.modules.catalog.router import router as catalog_router
+from app.modules.chat.assignment_router import router as listing_agents_router
+from app.modules.chat.router import customer_router as customer_chat_router
+from app.modules.chat.router import staff_router as staff_chat_router
 from app.modules.customer_identity.router import router as customer_identity_router
 from app.modules.customer_identity.router import wallet_router as customer_wallet_router
 from app.modules.detection.furniture_review import router as furniture_review_router
@@ -466,6 +469,9 @@ def create_app(
     app.include_router(public_exchange_rates_router)
     app.include_router(catalog_router)
     app.include_router(catalog_photo_router)
+    app.include_router(listing_agents_router)
+    app.include_router(customer_chat_router)
+    app.include_router(staff_chat_router)
     app.include_router(detection_router)
     app.include_router(furniture_review_router)
     app.include_router(detection_worker_router)

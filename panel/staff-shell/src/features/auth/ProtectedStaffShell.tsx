@@ -12,6 +12,8 @@ import {
 import { SceneEditor } from "../editor3d/SceneEditor";
 import { AgencyAdminInvitations } from "../agencies/AgencyAdminInvitations";
 import { AgencyDashboard } from "../agencies/AgencyDashboard";
+import { ChatInbox } from "../chat/ChatInbox";
+import { ChatReports } from "../chat/ChatReports";
 import { AgencyReviewQueue } from "../listings/AgencyReviewQueue";
 import { ExchangeRatesAdmin } from "../rates/ExchangeRatesAdmin";
 import { StripeCardPaymentsAdmin } from "../reservations/StripeCardPaymentsAdmin";
@@ -46,7 +48,7 @@ export function ProtectedStaffShell() {
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<"unavailable" | "denied" | null>(null);
-  const [agencyWorkspace, setAgencyWorkspace] = useState<"home" | "scenes">("home");
+  const [agencyWorkspace, setAgencyWorkspace] = useState<"home" | "scenes" | "chat">("home");
 
   function applySession(nextSession: StaffSession | null) {
     if (
@@ -265,6 +267,14 @@ export function ProtectedStaffShell() {
               >
                 Editor de escenas
               </button>
+              <button
+                aria-current={agencyWorkspace === "chat" ? "page" : undefined}
+                className="protected-staff-navigation__item"
+                onClick={() => setAgencyWorkspace("chat")}
+                type="button"
+              >
+                Chat
+              </button>
             </>
           ) : (
             <span aria-current="page">{presentation.navigation}</span>
@@ -280,6 +290,11 @@ export function ProtectedStaffShell() {
           ) : null}
           {isAgencyStaff && agencyWorkspace === "scenes" ? (
             <SceneEditor accessToken={session.accessToken} agencyId={agencyId ?? ""} />
+          ) : isAgencyStaff && agencyWorkspace === "chat" ? (
+            <ChatInbox
+              accessToken={session.accessToken}
+              isAgencyAdmin={session.user.role === "agency_admin"}
+            />
           ) : session.user.role === "agency_admin" && agencyId ? (
             <>
               <AgencyDashboard accessToken={session.accessToken} agencyId={agencyId} />
@@ -290,6 +305,7 @@ export function ProtectedStaffShell() {
             <>
               <ExchangeRatesAdmin accessToken={session.accessToken} />
               <AgencyAdminInvitations accessToken={session.accessToken} />
+              <ChatReports accessToken={session.accessToken} showBlocks={false} />
             </>
           ) : session.user.role === "agent" ? (
             <section className="protected-staff-placeholder" aria-label="Vista inicial">
