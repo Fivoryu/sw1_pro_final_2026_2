@@ -5,6 +5,7 @@ import 'data/services/ar_capture_channel.dart';
 import 'data/services/capture_draft_store.dart';
 import 'data/services/staff_auth_api.dart';
 import 'data/services/staff_capture_api.dart';
+import 'data/services/staff_chat_api.dart';
 import 'data/services/photo_source.dart';
 import 'data/services/staff_credential_store.dart';
 import 'data/services/staff_listing_photos_api.dart';
@@ -12,7 +13,9 @@ import 'data/services/staff_listings_api.dart';
 import 'data/services/staff_scene_api.dart';
 import 'data/services/staff_floorplan_interpretation_api.dart';
 import 'domain/listing_drafts_controller.dart';
+import 'domain/staff_chat_controller.dart';
 import 'domain/staff_session_controller.dart';
+import 'ui/chat/chat_inbox_screen.dart';
 import 'ui/listings/listings_screen.dart';
 import 'ui/theme/andean_theme.dart';
 
@@ -53,6 +56,7 @@ void main() => runApp(
     captureApi: StaffCaptureApi(baseUrl: _apiBaseUrl),
     floorplanInterpreter: StaffFloorplanInterpretationApi(baseUrl: _apiBaseUrl),
     uploadStore: FilePendingUploadStore(root: getApplicationSupportDirectory),
+    chatApi: StaffChatApi(baseUrl: _apiBaseUrl),
   ),
 );
 
@@ -69,6 +73,7 @@ class CaptureApp extends StatelessWidget {
     this.captureApi,
     this.uploadStore,
     this.floorplanInterpreter,
+    this.chatApi,
   });
 
   final StaffSessionController controller;
@@ -81,6 +86,7 @@ class CaptureApp extends StatelessWidget {
   final StaffCaptureApi? captureApi;
   final PendingUploadStore? uploadStore;
   final FloorplanInterpretationApi? floorplanInterpreter;
+  final StaffChatApi? chatApi;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -97,6 +103,7 @@ class CaptureApp extends StatelessWidget {
       captureApi: captureApi,
       uploadStore: uploadStore,
       floorplanInterpreter: floorplanInterpreter,
+      chatApi: chatApi,
     ),
   );
 }
@@ -115,6 +122,7 @@ class AgentAccessScreen extends StatefulWidget {
     this.captureApi,
     this.uploadStore,
     this.floorplanInterpreter,
+    this.chatApi,
   });
 
   final StaffSessionController controller;
@@ -127,6 +135,7 @@ class AgentAccessScreen extends StatefulWidget {
   final StaffCaptureApi? captureApi;
   final PendingUploadStore? uploadStore;
   final FloorplanInterpretationApi? floorplanInterpreter;
+  final StaffChatApi? chatApi;
 
   @override
   State<AgentAccessScreen> createState() => _AgentAccessScreenState();
@@ -322,6 +331,23 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
     ),
   ];
 
+  void _openChat() {
+    final api = widget.chatApi;
+    if (api == null) return;
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ChatInboxScreen(
+          controller: StaffInboxController(
+            api: api,
+            session: widget.controller,
+          ),
+          api: api,
+          session: widget.controller,
+        ),
+      ),
+    );
+  }
+
   List<Widget> _signedIn(BuildContext context) {
     final account = widget.controller.account;
     return [
@@ -360,6 +386,16 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
         icon: const Icon(Icons.arrow_forward),
         label: const Text('Continuar a mis inmuebles'),
       ),
+      if (widget.chatApi != null && canUseStaffChat(account)) ...[
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const ValueKey('access-chat-button'),
+          style: OutlinedButton.styleFrom(minimumSize: _actionMinSize),
+          onPressed: _openChat,
+          icon: const Icon(Icons.chat_bubble_outline),
+          label: const Text('Conversaciones'),
+        ),
+      ],
       const SizedBox(height: 8),
       OutlinedButton(
         key: const ValueKey('access-logout'),

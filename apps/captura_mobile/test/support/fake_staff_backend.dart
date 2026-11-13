@@ -41,6 +41,10 @@ class InMemoryStaffCredentialStore implements StaffCredentialStore {
 
 /// Programmable stand-in for `/api/v1/auth/*`.
 class FakeStaffBackend {
+  FakeStaffBackend({this.role = 'agent'});
+
+  /// Role of the account the fake signs in (`agent` or `agency_admin`).
+  final String role;
   bool offline = false;
   bool loginRejected = false;
   bool codeRejected = false;
@@ -66,13 +70,13 @@ class FakeStaffBackend {
   static http.Response _failure(int status, String code) =>
       _json({'detail': 'Rejected by the API.', 'code': code}, status);
 
-  static Map<String, Object?> _grantBody(String csrf) => {
+  Map<String, Object?> _grantBody(String csrf) => {
     'access_token': 'access-token',
     'csrf_token': csrf,
     'user': {
       'id': 'staff-1',
       'email': 'agent@example.test',
-      'role': 'agent',
+      'role': role,
       'tenant_id': 'agency-1',
     },
   };
@@ -105,7 +109,7 @@ class FakeStaffBackend {
         'user': {
           'id': 'staff-1',
           'email': 'agent@example.test',
-          'role': 'agent',
+          'role': role,
           'tenant_id': 'agency-1',
         },
       }, 200),
