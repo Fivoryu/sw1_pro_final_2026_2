@@ -50,6 +50,7 @@ function TextForm({ label, submitLabel, onSubmit }: ReasonFormProps) {
       await onSubmit(body.trim());
     } catch (caught) {
       setError(reviewsErrorMessage(caught, "No se pudo enviar."));
+    } finally {
       setBusy(false);
     }
   }

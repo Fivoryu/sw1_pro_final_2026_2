@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -107,6 +107,19 @@ describe("AgencyReviews", () => {
     expect(replyToReview).toHaveBeenCalledWith("tok", "r1", "Gracias por escribir");
     expect(await screen.findByText("Respuesta de la agencia")).toBeVisible();
     expect(screen.queryByLabelText("Tu respuesta")).not.toBeInTheDocument();
+  });
+
+  it("does not leave the reply button stuck when the review is still unanswered after sending", async () => {
+    const user = userEvent.setup();
+    // The reload brings back the same unanswered review, so the form stays mounted.
+    vi.mocked(listReviews).mockResolvedValue({ summary: manySummary, reviews: [review()] });
+
+    render(<AgencyReviews accessToken="tok" isAgencyAdmin />);
+    await user.type(await screen.findByLabelText("Tu respuesta"), "Gracias");
+    await user.click(screen.getByRole("button", { name: "Responder" }));
+
+    expect(replyToReview).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Responder" })).toBeEnabled());
   });
 
   it("shows the server error when a reply conflicts", async () => {
