@@ -232,7 +232,9 @@ def test_platform_admin_can_create_and_list_id_only_agencies(
     headers = _headers(_platform_admin_token(context))
 
     created_later = context.client.post(
-        "/api/v1/agencies", json={"id": "agency-z"}, headers=headers
+        "/api/v1/agencies",
+        json={"id": "agency-z", "name": "  Zeta Realty  "},
+        headers=headers,
     )
     created_first = context.client.post(
         "/api/v1/agencies", json={"id": "agency-a"}, headers=headers
@@ -240,14 +242,34 @@ def test_platform_admin_can_create_and_list_id_only_agencies(
     listed = context.client.get("/api/v1/agencies", headers=headers)
 
     assert created_later.status_code == 201
-    assert created_later.json() == {"id": "agency-z"}
+    assert created_later.json() == {"id": "agency-z", "name": "Zeta Realty"}
     assert created_first.status_code == 201
-    assert created_first.json() == {"id": "agency-a"}
+    assert created_first.json() == {"id": "agency-a", "name": "agency-a"}
     assert listed.status_code == 200
     assert listed.json() == {
-        "agencies": [{"id": "agency-a"}, {"id": "agency-z"}],
+        "agencies": [
+            {"id": "agency-a", "name": "agency-a"},
+            {"id": "agency-z", "name": "Zeta Realty"},
+        ],
         "pagination": {"limit": 20, "offset": 0, "total": 2},
     }
+
+
+def test_agency_name_must_not_be_blank_or_too_long(
+    agency_api_context: AgencyApiContext,
+) -> None:
+    context = agency_api_context
+    headers = _headers(_platform_admin_token(context))
+
+    blank = context.client.post(
+        "/api/v1/agencies", json={"id": "agency-b", "name": "   "}, headers=headers
+    )
+    too_long = context.client.post(
+        "/api/v1/agencies", json={"id": "agency-c", "name": "x" * 121}, headers=headers
+    )
+
+    assert blank.status_code == 422
+    assert too_long.status_code == 422
 
 
 def test_agency_list_paginates_in_stable_order_and_keeps_total_accurate(
@@ -263,7 +285,10 @@ def test_agency_list_paginates_in_stable_order_and_keeps_total_accurate(
 
     assert page.status_code == 200
     assert page.json() == {
-        "agencies": [{"id": "agency-b"}, {"id": "agency-c"}],
+        "agencies": [
+            {"id": "agency-b", "name": "agency-b"},
+            {"id": "agency-c", "name": "agency-c"},
+        ],
         "pagination": {"limit": 2, "offset": 1, "total": 5},
     }
     assert beyond_end.status_code == 200
