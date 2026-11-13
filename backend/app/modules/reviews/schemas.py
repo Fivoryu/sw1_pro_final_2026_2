@@ -74,6 +74,8 @@ class RatingSummaryView(BaseModel):
 
 
 class ListingReviews(BaseModel):
+    agency_id: str
+    agency_name: str
     listing: RatingSummaryView
     agency: RatingSummaryView
     reviews: list[ReviewView]

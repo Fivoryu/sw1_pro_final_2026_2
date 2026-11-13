@@ -192,6 +192,7 @@ def test_few_reviews_show_no_average_but_the_counts(
 
     page = context.client.get(PUBLIC).json()
 
+    assert (page["agency_id"], page["agency_name"]) == ("agency-chat", "Casa Norte")
     assert page["listing"] == {
         "average": None,
         "count": 2,

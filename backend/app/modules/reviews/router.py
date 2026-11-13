@@ -154,10 +154,13 @@ def write_review(
 def listing_reviews(listing_id: str, request: Request) -> ListingReviews:
     with _factory(request)() as session:
         listing = _published_listing(session, listing_id)
+        agency = session.get(Agency, listing.agency_id)
         own = service.visible_reviews_for_listing(session, listing_id)
         agency_reviews = service.visible_reviews_for_agency(session, listing.agency_id)
         verified = service.verified_pairs(session, agency_reviews)
         return ListingReviews(
+            agency_id=listing.agency_id,
+            agency_name=agency.name if agency is not None else listing.agency_id,
             listing=_summary(own, verified, "listing"),
             agency=_summary(agency_reviews, verified, "agency"),
             reviews=[_view(review, verified) for review in own],
