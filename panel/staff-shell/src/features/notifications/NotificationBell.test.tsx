@@ -98,7 +98,7 @@ describe("NotificationBell", () => {
     expect(screen.queryByLabelText(/sin leer/)).not.toBeInTheDocument();
   });
 
-  it("polls every 30 seconds, stops quietly on failure and clears the timer on unmount", async () => {
+  it("polls every 30 seconds, survives a failed poll and clears the timer on unmount", async () => {
     vi.useFakeTimers();
     const { unmount } = render(
       <NotificationBell accessToken="staff-access" onOpenChat={vi.fn()} />,
@@ -116,11 +116,15 @@ describe("NotificationBell", () => {
       await vi.advanceTimersByTimeAsync(NOTIFICATIONS_POLL_MS);
     });
     expect(listNotifications).toHaveBeenCalledTimes(3);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(NOTIFICATIONS_POLL_MS * 2);
-    });
-    expect(listNotifications).toHaveBeenCalledTimes(3);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    // The service comes back: the next tick delivers again instead of staying dead.
+    vi.mocked(listNotifications).mockResolvedValue({ unread: 4, items: [] });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(NOTIFICATIONS_POLL_MS);
+    });
+    expect(listNotifications).toHaveBeenCalledTimes(4);
+    expect(screen.getByLabelText(/4/)).toBeInTheDocument();
 
     unmount();
     expect(vi.getTimerCount()).toBe(0);

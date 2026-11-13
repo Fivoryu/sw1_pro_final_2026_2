@@ -48,14 +48,17 @@ export function NotificationBell({ accessToken, onOpenChat }: NotificationBellPr
   useEffect(() => {
     let isCurrent = true;
     let timer: number | undefined;
-    // A failure stops the polling quietly; only the first load reports it.
+    // A failed poll is skipped quietly and retried on the next tick; only the
+    // first load reports a failure.
     function schedule() {
       timer = window.setTimeout(() => {
         load().then(
           () => {
             if (isCurrent) schedule();
           },
-          () => undefined,
+          () => {
+            if (isCurrent) schedule();
+          },
         );
       }, NOTIFICATIONS_POLL_MS);
     }

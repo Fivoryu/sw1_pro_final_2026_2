@@ -50,7 +50,7 @@ export function ProtectedStaffShell() {
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<"unavailable" | "denied" | null>(null);
   const [agencyWorkspace, setAgencyWorkspace] = useState<"home" | "scenes" | "chat">("home");
-  const [chatConversationId, setChatConversationId] = useState<string | null>(null);
+  const [chatOpenRequest, setChatOpenRequest] = useState<{ conversationId: string } | null>(null);
 
   function applySession(nextSession: StaffSession | null) {
     if (
@@ -243,7 +243,7 @@ export function ProtectedStaffShell() {
           <NotificationBell
             accessToken={session.accessToken}
             onOpenChat={(conversationId) => {
-              setChatConversationId(conversationId);
+              setChatOpenRequest({ conversationId });
               setAgencyWorkspace("chat");
             }}
           />
@@ -282,7 +282,7 @@ export function ProtectedStaffShell() {
                 aria-current={agencyWorkspace === "chat" ? "page" : undefined}
                 className="protected-staff-navigation__item"
                 onClick={() => {
-                  setChatConversationId(null);
+                  setChatOpenRequest(null);
                   setAgencyWorkspace("chat");
                 }}
                 type="button"
@@ -308,7 +308,7 @@ export function ProtectedStaffShell() {
             <ChatInbox
               accessToken={session.accessToken}
               isAgencyAdmin={session.user.role === "agency_admin"}
-              initialConversationId={chatConversationId}
+              openRequest={chatOpenRequest}
             />
           ) : session.user.role === "agency_admin" && agencyId ? (
             <>
