@@ -82,7 +82,8 @@ class StaffConversation(BaseModel):
     overdue: bool
     created_at: datetime
     last_message_at: datetime | None
-    # Only the agency admin sees who owns a conversation.
+    # Only the agency admin sees who owns a conversation and the customer id to block.
+    customer_id: str | None = None
     agent_id: str | None = None
     agent_email: str | None = None
 
@@ -131,6 +132,7 @@ class ReportList(BaseModel):
 
 class BlockedCustomer(BaseModel):
     customer_id: str
+    customer_email: str
     created_at: datetime
 
 

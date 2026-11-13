@@ -241,6 +241,7 @@ def _staff_conversation_view(
         overdue=service.is_overdue(conversation, now),
         created_at=conversation.created_at,
         last_message_at=conversation.last_message_at,
+        customer_id=conversation.customer_id if is_admin else None,
         agent_id=conversation.agent_id if is_admin else None,
         agent_email=service.staff_email(session, conversation.agent_id) if is_admin else None,
     )
@@ -471,7 +472,8 @@ def list_blocks(request: Request, staff: _Staff) -> BlockedCustomerList:
     tenant_id = _require_agency_admin(staff)
     with _factory(request)() as session:
         rows = (
-            session.query(ChatCustomerBlock)
+            session.query(ChatCustomerBlock, CustomerAccount.email)
+            .join(CustomerAccount, CustomerAccount.id == ChatCustomerBlock.customer_id)
             .filter(ChatCustomerBlock.agency_id == tenant_id)
             .order_by(ChatCustomerBlock.created_at, ChatCustomerBlock.customer_id)
             .all()
@@ -479,8 +481,12 @@ def list_blocks(request: Request, staff: _Staff) -> BlockedCustomerList:
         return BlockedCustomerList.model_validate(
             {
                 "blocked": [
-                    {"customer_id": row.customer_id, "created_at": row.created_at}
-                    for row in rows
+                    {
+                        "customer_id": row.customer_id,
+                        "customer_email": email,
+                        "created_at": row.created_at,
+                    }
+                    for row, email in rows
                 ]
             }
         )

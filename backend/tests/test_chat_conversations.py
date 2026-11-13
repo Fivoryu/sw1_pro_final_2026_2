@@ -333,6 +333,19 @@ def test_customer_and_staff_reports_reach_the_admins_with_the_agents_involved(
     assert context.client.get(f"{STAFF}/reports", headers=agent_a).status_code == 403
 
 
+def test_only_the_admin_learns_the_customer_id_needed_to_block(
+    agency_api_context: AgencyApiContext,
+) -> None:
+    context = agency_api_context
+    admin, agent_a, _, customer_id, _, _ = _setup(context)
+
+    as_admin = context.client.get(f"{STAFF}/conversations", headers=admin).json()
+    as_agent = context.client.get(f"{STAFF}/conversations", headers=agent_a).json()
+
+    assert as_admin["conversations"][0]["customer_id"] == customer_id
+    assert as_agent["conversations"][0]["customer_id"] is None
+
+
 def test_blocked_customer_cannot_write_to_that_agency_and_can_be_unblocked(
     agency_api_context: AgencyApiContext,
 ) -> None:
@@ -351,6 +364,7 @@ def test_blocked_customer_cannot_write_to_that_agency_and_can_be_unblocked(
     assert context.client.post(OPEN, headers=customer).status_code == 403
     blocked = context.client.get(f"{STAFF}/blocks", headers=admin).json()
     assert [b["customer_id"] for b in blocked["blocked"]] == [customer_id]
+    assert blocked["blocked"][0]["customer_email"] == "customer@example.test"
 
     assert (
         context.client.post(f"{STAFF}/customers/{customer_id}/unblock", headers=admin).status_code
