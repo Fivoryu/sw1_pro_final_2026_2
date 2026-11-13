@@ -23,8 +23,8 @@ Estado: ☐ pendiente. Ruta por defecto: en línea.
 | T1 | Backend: modelo de avisos (migración con un solo head), generación desde los eventos de chat y de reservas, listado, contador y marca de leído, con aislamiento por destinatario. | S3, S4 | en línea | ☑ | `1c455c7`: migración `0033_notifications`, módulo `notifications`, 11 pruebas; suite 1087 verdes, Ruff y Pyright limpios. La escalada por falta de respuesta se genera al leer la bandeja el administrador (no hay tarea programada). |
 | T2 | App cliente: bandeja, contador y navegación al destino. | S1, S4 | en línea | ☑ | `51a944a`: campana con contador, bandeja y navegación a la conversación o a Reservas; consulta periódica cada 30 s con la sesión iniciada. 14 pruebas nuevas, 215 en total, `flutter analyze` limpio. |
 | T3 | Panel y app de captura: bandeja, contador y navegación al destino. | S1, S4 | en línea | ☑ | Panel `be90767` (campana, bandeja, abre la conversación exacta; 259 pruebas del panel verdes, `tsc` limpio) y captura `50948de` (13 pruebas nuevas, análisis sin avisos nuevos). Los avisos de reserva solo se marcan como leídos: el panel y la app de captura no tienen vista de reservas. |
-| T4 | **Segunda entrega, bloqueada hasta que exista el proyecto de Firebase:** registro del dispositivo y envío del aviso con la aplicación cerrada. | S2 | en línea | ☐ | — |
-| T5 | Cierre: contrato de API, documentación y filas del plan maestro. | — | en línea | ☐ | — |
+| T4 | **Segunda entrega, bloqueada hasta que exista el proyecto de Firebase:** registro del dispositivo y envío del aviso con la aplicación cerrada. | S2 | en línea | ☐ | Pendiente: requiere que el dueño cree el proyecto de Firebase. |
+| T5 | Cierre: contrato de API, documentación y filas del plan maestro. | — | en línea | ☑ | `docs/api/f14-notifications.md`, filas del plan maestro y arreglo de dos advertencias de la revisión nativa en el panel (`f617d1c`). |
 
 **Riesgo previsto:** T1 nombra el ítem 2 (un aviso no debe llegar a quien no corresponde) y el ítem 1 (migración); T4 el ítem 5 (dependencia y credenciales externas).
 
@@ -36,3 +36,4 @@ Estado: ☐ pendiente. Ruta por defecto: en línea.
 - **L2 (2026-11-12, usuario):** «Tambien el agente tiene la app movil»
 - **L3 (2026-11-12, usuario):** «firebase será lo posterior.»
 - **L4 (2026-11-12):** el asistente propuso S3 y S4; el usuario no los objetó ni los confirmó de forma expresa. Siguiente paso: T1, una vez integrada F14.6.
+- **L5 (2026-11-13):** T1–T3 y T5 hechas. La revisión nativa (lentes riesgo y confiabilidad) aprobó T1–T3 sin bloqueos; sus dos advertencias de confiabilidad se corrigieron en `f617d1c`. T4 queda pendiente por Firebase.
