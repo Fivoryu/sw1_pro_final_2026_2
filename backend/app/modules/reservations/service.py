@@ -18,6 +18,7 @@ from app.modules.customer_identity.models import CustomerWallet
 from app.modules.identity.models import Agency
 from app.modules.customer_identity.session import ActiveCustomer
 from app.modules.identity.session import ActiveStaff
+from app.modules.notifications import service as notifications
 from app.modules.reservations import chain
 from app.modules.reservations.authorization import (
     ReservationAction,
@@ -171,6 +172,7 @@ def _expire_due_reservations(
     expired = query.all()
     for reservation in expired:
         reservation.status = "expired"
+        notifications.on_reservation_status(session, reservation, now)
     return len(expired)
 
 
@@ -1052,6 +1054,7 @@ def reconcile_chain_transaction(
                     "cancel": "cancelled",
                     "expire": "expired",
                 }[action]
+                notifications.on_reservation_status(session, locked_reservation, now)
             session.flush()
             return _chain_transaction_response(audit, status=locked_reservation.status, replayed=False)
     except IntegrityError:

@@ -283,7 +283,7 @@ def _set_agent_active(
 
         agent.active = active
         if not active:
-            reassign_for_agent(session, agent_id=agent.id)
+            reassign_for_agent(session, agent_id=agent.id, now=now)
             (
                 session.query(StaffSession)
                 .filter(
