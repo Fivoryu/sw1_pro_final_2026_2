@@ -21,7 +21,7 @@ Estado: ☐ pendiente. Ruta por defecto: en línea.
 | ID | Tarea | Specs | Ruta | Estado | Commit / evidencia |
 | --- | --- | --- | --- | --- | --- |
 | T1 | Backend: modelo de avisos (migración con un solo head), generación desde los eventos de chat y de reservas, listado, contador y marca de leído, con aislamiento por destinatario. | S3, S4 | en línea | ☑ | `1c455c7`: migración `0033_notifications`, módulo `notifications`, 11 pruebas; suite 1087 verdes, Ruff y Pyright limpios. La escalada por falta de respuesta se genera al leer la bandeja el administrador (no hay tarea programada). |
-| T2 | App cliente: bandeja, contador y navegación al destino. | S1, S4 | en línea | ☐ | — |
+| T2 | App cliente: bandeja, contador y navegación al destino. | S1, S4 | en línea | ☑ | `51a944a`: campana con contador, bandeja y navegación a la conversación o a Reservas; consulta periódica cada 30 s con la sesión iniciada. 14 pruebas nuevas, 215 en total, `flutter analyze` limpio. |
 | T3 | Panel y app de captura: bandeja, contador y navegación al destino. | S1, S4 | en línea | ☐ | — |
 | T4 | **Segunda entrega, bloqueada hasta que exista el proyecto de Firebase:** registro del dispositivo y envío del aviso con la aplicación cerrada. | S2 | en línea | ☐ | — |
 | T5 | Cierre: contrato de API, documentación y filas del plan maestro. | — | en línea | ☐ | — |
