@@ -12,6 +12,7 @@ from app.modules.catalog import models as catalog_models  # noqa: F401
 from app.modules.chat import models as chat_models  # noqa: F401
 from app.modules.customer_identity import models as customer_identity_models  # noqa: F401
 from app.modules.identity import models as identity_models
+from app.modules.notifications import models as notification_models  # noqa: F401
 from app.modules.reservations import models as reservation_models  # noqa: F401
 
 config = context.config

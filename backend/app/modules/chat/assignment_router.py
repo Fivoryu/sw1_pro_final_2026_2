@@ -109,7 +109,9 @@ def replace_listing_agents(
                 ListingAgent.listing_id == listing_id, ListingAgent.agent_id == agent_id
             ).delete(synchronize_session=False)
             # Conversations the removed agent owned move to another assigned agent.
-            reassign_for_agent(session, agent_id=agent_id, listing_id=listing_id)
+            reassign_for_agent(
+                session, agent_id=agent_id, listing_id=listing_id, now=now
+            )
         for agent_id in wanted:
             if agent_id not in current:
                 session.add(

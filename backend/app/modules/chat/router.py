@@ -389,7 +389,11 @@ def reassign(
                 )
         exclude = {conversation.agent_id} if conversation.agent_id else set()
         service.reassign_conversation(
-            session, conversation, exclude=exclude, new_agent_id=body.agent_id
+            session,
+            conversation,
+            exclude=exclude,
+            now=_now(request),
+            new_agent_id=body.agent_id,
         )
         session.flush()
         email = session.query(CustomerAccount.email).filter(

@@ -179,6 +179,40 @@ describe("conversation view", () => {
     return user;
   }
 
+  it("opens the requested conversation when given an open request", async () => {
+    vi.mocked(listConversations).mockResolvedValue([
+      conversation(),
+      conversation({ id: "c2", customer_email: "otro@example.test" }),
+    ]);
+    vi.mocked(listMessages).mockResolvedValue({ messages: [message({ id: 5, body: "Mensaje de c2" })], read_only: false });
+
+    render(<ChatInbox accessToken="staff-access" openRequest={{ conversationId: "c2" }} isAgencyAdmin={false} />);
+
+    expect(await screen.findByText("Mensaje de c2")).toBeVisible();
+    expect(listMessages).toHaveBeenCalledWith("staff-access", "c2", 0);
+  });
+
+  it("reopens the same conversation when asked again after the user went back", async () => {
+    vi.mocked(listConversations).mockResolvedValue([conversation({ id: "c2" })]);
+    vi.mocked(listMessages).mockResolvedValue({
+      messages: [message({ id: 5, body: "Mensaje de c2" })],
+      read_only: false,
+    });
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ChatInbox accessToken="staff-access" isAgencyAdmin={false} openRequest={{ conversationId: "c2" }} />,
+    );
+    expect(await screen.findByText("Mensaje de c2")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Volver a la bandeja" }));
+    expect(screen.queryByText("Mensaje de c2")).not.toBeInTheDocument();
+
+    rerender(
+      <ChatInbox accessToken="staff-access" isAgencyAdmin={false} openRequest={{ conversationId: "c2" }} />,
+    );
+    expect(await screen.findByText("Mensaje de c2")).toBeVisible();
+  });
+
   it("loads messages from the start and sends a reply", async () => {
     vi.mocked(sendMessage).mockResolvedValue(
       message({ id: 2, sender: "agent", mine: true, body: "Sí, disponible" }),

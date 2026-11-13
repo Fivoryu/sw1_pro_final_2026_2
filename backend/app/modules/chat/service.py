@@ -21,6 +21,7 @@ from app.modules.chat.models import (
 )
 from app.modules.identity.models import Agency, StaffAccount
 from app.modules.identity.session import ActiveStaff
+from app.modules.notifications import service as notifications
 from app.modules.reservations.models import Reservation
 
 
@@ -139,6 +140,10 @@ def append_message(
     else:
         conversation.awaiting_since = None
     session.flush()
+    if role == "customer":
+        notifications.on_customer_message(session, conversation, now)
+    else:
+        notifications.on_staff_message(session, conversation, now)
     return message
 
 
@@ -259,6 +264,7 @@ def reassign_conversation(
     conversation: ChatConversation,
     *,
     exclude: set[str],
+    now: datetime,
     new_agent_id: str | None = None,
 ) -> None:
     """Hand a conversation to another agent, or flag it for the admin if none is left."""
@@ -267,10 +273,11 @@ def reassign_conversation(
     )
     conversation.agent_id = target
     conversation.needs_admin = target is None
+    notifications.on_assignment(session, conversation, now)
 
 
 def reassign_for_agent(
-    session: Session, *, agent_id: str, listing_id: str | None = None
+    session: Session, *, agent_id: str, now: datetime, listing_id: str | None = None
 ) -> int:
     """Move an agent's conversations away (deactivation or removal from a listing)."""
     query = session.query(ChatConversation).filter(ChatConversation.agent_id == agent_id)
@@ -278,7 +285,7 @@ def reassign_for_agent(
         query = query.filter(ChatConversation.listing_id == listing_id)
     conversations = query.all()
     for conversation in conversations:
-        reassign_conversation(session, conversation, exclude={agent_id})
+        reassign_conversation(session, conversation, exclude={agent_id}, now=now)
     session.flush()
     return len(conversations)
 

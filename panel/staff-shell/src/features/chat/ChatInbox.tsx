@@ -13,6 +13,10 @@ const TAKEN_NOTICE = "Otro agente ya tomó esta conversación. La bandeja se act
 interface ChatInboxProps {
   accessToken: string;
   isAgencyAdmin: boolean;
+  /** Asks the inbox to open a conversation, for example from a notification.
+   * Each request is a new object, so asking again for the same conversation
+   * reopens it after the user closed it. */
+  openRequest?: { conversationId: string } | null;
 }
 
 type InboxState =
@@ -25,15 +29,19 @@ function statusLabel(conversation: StaffConversation): string {
   return conversation.mine ? "Atendida por ti" : "Atendida";
 }
 
-export function ChatInbox({ accessToken, isAgencyAdmin }: ChatInboxProps) {
+export function ChatInbox({ accessToken, isAgencyAdmin, openRequest = null }: ChatInboxProps) {
   const tokenRef = useRef(accessToken);
   tokenRef.current = accessToken;
   const [inbox, setInbox] = useState<InboxState>({ kind: "loading" });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(openRequest?.conversationId ?? null);
   const [notice, setNotice] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
 
   const refresh = useCallback(() => setReload((value) => value + 1), []);
+
+  useEffect(() => {
+    if (openRequest) setSelectedId(openRequest.conversationId);
+  }, [openRequest]);
 
   useEffect(() => {
     let isCurrent = true;
