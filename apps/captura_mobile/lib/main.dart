@@ -7,6 +7,7 @@ import 'data/services/staff_auth_api.dart';
 import 'data/services/staff_capture_api.dart';
 import 'data/services/staff_chat_api.dart';
 import 'data/services/staff_notifications_api.dart';
+import 'data/services/staff_reviews_api.dart';
 import 'data/services/photo_source.dart';
 import 'data/services/staff_credential_store.dart';
 import 'data/services/staff_listing_photos_api.dart';
@@ -16,9 +17,11 @@ import 'data/services/staff_floorplan_interpretation_api.dart';
 import 'domain/listing_drafts_controller.dart';
 import 'domain/staff_chat_controller.dart';
 import 'domain/staff_notifications_controller.dart';
+import 'domain/staff_reviews_controller.dart';
 import 'domain/staff_session_controller.dart';
 import 'ui/chat/chat_inbox_screen.dart';
 import 'ui/notifications/staff_notifications_screen.dart';
+import 'ui/reviews/staff_reviews_screen.dart';
 import 'ui/listings/listings_screen.dart';
 import 'ui/theme/andean_theme.dart';
 
@@ -61,6 +64,7 @@ void main() => runApp(
     uploadStore: FilePendingUploadStore(root: getApplicationSupportDirectory),
     chatApi: StaffChatApi(baseUrl: _apiBaseUrl),
     notificationsApi: StaffNotificationsApi(baseUrl: _apiBaseUrl),
+    reviewsApi: StaffReviewsApi(baseUrl: _apiBaseUrl),
   ),
 );
 
@@ -79,6 +83,7 @@ class CaptureApp extends StatelessWidget {
     this.floorplanInterpreter,
     this.chatApi,
     this.notificationsApi,
+    this.reviewsApi,
   });
 
   final StaffSessionController controller;
@@ -93,6 +98,7 @@ class CaptureApp extends StatelessWidget {
   final FloorplanInterpretationApi? floorplanInterpreter;
   final StaffChatApi? chatApi;
   final StaffNotificationsApi? notificationsApi;
+  final StaffReviewsApi? reviewsApi;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -111,6 +117,7 @@ class CaptureApp extends StatelessWidget {
       floorplanInterpreter: floorplanInterpreter,
       chatApi: chatApi,
       notificationsApi: notificationsApi,
+      reviewsApi: reviewsApi,
     ),
   );
 }
@@ -131,6 +138,7 @@ class AgentAccessScreen extends StatefulWidget {
     this.floorplanInterpreter,
     this.chatApi,
     this.notificationsApi,
+    this.reviewsApi,
   });
 
   final StaffSessionController controller;
@@ -145,6 +153,7 @@ class AgentAccessScreen extends StatefulWidget {
   final FloorplanInterpretationApi? floorplanInterpreter;
   final StaffChatApi? chatApi;
   final StaffNotificationsApi? notificationsApi;
+  final StaffReviewsApi? reviewsApi;
 
   @override
   State<AgentAccessScreen> createState() => _AgentAccessScreenState();
@@ -175,6 +184,21 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
 
   /// The inbox only polls while agency staff are signed in.
   void _syncNotifications() => _notifications?.sync();
+
+  void _openReviews() {
+    final api = widget.reviewsApi;
+    if (api == null) return;
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => StaffReviewsScreen(
+          controller: StaffReviewsController(
+            api: api,
+            session: widget.controller,
+          ),
+        ),
+      ),
+    );
+  }
 
   void _openNotifications() {
     final api = widget.chatApi;
@@ -445,6 +469,16 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
           onPressed: _openChat,
           icon: const Icon(Icons.chat_bubble_outline),
           label: const Text('Conversaciones'),
+        ),
+      ],
+      if (widget.reviewsApi != null && canUseStaffChat(account)) ...[
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const ValueKey('access-reviews-button'),
+          style: OutlinedButton.styleFrom(minimumSize: _actionMinSize),
+          onPressed: _openReviews,
+          icon: const Icon(Icons.star_outline),
+          label: const Text('Reseñas'),
         ),
       ],
       const SizedBox(height: 8),

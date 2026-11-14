@@ -14,6 +14,8 @@ import { AgencyAdminInvitations } from "../agencies/AgencyAdminInvitations";
 import { AgencyDashboard } from "../agencies/AgencyDashboard";
 import { ChatInbox } from "../chat/ChatInbox";
 import { ChatReports } from "../chat/ChatReports";
+import { AgencyReviews } from "../reviews/AgencyReviews";
+import { ReviewReportsQueue } from "../reviews/ReviewReportsQueue";
 import { NotificationBell } from "../notifications/NotificationBell";
 import { AgencyReviewQueue } from "../listings/AgencyReviewQueue";
 import { ExchangeRatesAdmin } from "../rates/ExchangeRatesAdmin";
@@ -49,7 +51,7 @@ export function ProtectedStaffShell() {
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<"unavailable" | "denied" | null>(null);
-  const [agencyWorkspace, setAgencyWorkspace] = useState<"home" | "scenes" | "chat">("home");
+  const [agencyWorkspace, setAgencyWorkspace] = useState<"home" | "scenes" | "chat" | "reviews">("home");
   const [chatOpenRequest, setChatOpenRequest] = useState<{ conversationId: string } | null>(null);
 
   function applySession(nextSession: StaffSession | null) {
@@ -289,6 +291,14 @@ export function ProtectedStaffShell() {
               >
                 Chat
               </button>
+              <button
+                aria-current={agencyWorkspace === "reviews" ? "page" : undefined}
+                className="protected-staff-navigation__item"
+                onClick={() => setAgencyWorkspace("reviews")}
+                type="button"
+              >
+                Reseñas
+              </button>
             </>
           ) : (
             <span aria-current="page">{presentation.navigation}</span>
@@ -310,6 +320,11 @@ export function ProtectedStaffShell() {
               isAgencyAdmin={session.user.role === "agency_admin"}
               openRequest={chatOpenRequest}
             />
+          ) : isAgencyStaff && agencyWorkspace === "reviews" ? (
+            <AgencyReviews
+              accessToken={session.accessToken}
+              isAgencyAdmin={session.user.role === "agency_admin"}
+            />
           ) : session.user.role === "agency_admin" && agencyId ? (
             <>
               <AgencyDashboard accessToken={session.accessToken} agencyId={agencyId} />
@@ -321,6 +336,7 @@ export function ProtectedStaffShell() {
               <ExchangeRatesAdmin accessToken={session.accessToken} />
               <AgencyAdminInvitations accessToken={session.accessToken} />
               <ChatReports accessToken={session.accessToken} showBlocks={false} />
+              <ReviewReportsQueue accessToken={session.accessToken} />
             </>
           ) : session.user.role === "agent" ? (
             <section className="protected-staff-placeholder" aria-label="Vista inicial">
