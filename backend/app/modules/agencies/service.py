@@ -210,17 +210,24 @@ def get_agency_metrics(
 
     with session_factory() as session:
         # 1. Métricas de Inmuebles (Listings)
+        # La base guarda draft/pending/approved/rejected y la publicación va aparte en
+        # is_published, así que se traducen a las tarjetas del panel:
+        #   draft -> draft, pending -> in_review, approved + is_published -> published.
         listing_counts = (
-            session.query(Listing.approval_status, func.count(Listing.id)) # <--- CAMBIO AQUÍ
+            session.query(Listing.approval_status, Listing.is_published, func.count(Listing.id))
             .filter(Listing.agency_id == agency_id)
-            .group_by(Listing.approval_status)                             # <--- CAMBIO AQUÍ
+            .group_by(Listing.approval_status, Listing.is_published)
             .all()
         )
         l_metrics = {"draft": 0, "in_review": 0, "published": 0}
-        for status, count in listing_counts:
+        for status, is_published, count in listing_counts:
             status_str = getattr(status, "value", str(status)).lower()
-            if status_str in l_metrics:
-                l_metrics[status_str] = count
+            if status_str == "draft":
+                l_metrics["draft"] += count
+            elif status_str == "pending":
+                l_metrics["in_review"] += count
+            elif status_str == "approved" and is_published:
+                l_metrics["published"] += count
 
         # 2. Cotizaciones Activas (Quotes)
         active_quotes = (
