@@ -31,8 +31,12 @@ class ListingReview(Base):
     __tablename__ = "listing_review"
     __table_args__ = (
         UniqueConstraint("listing_id", "customer_id", name="uq_listing_review_listing_customer"),
-        CheckConstraint("listing_rating BETWEEN 1 AND 5", name="ck_listing_review_listing_rating"),
-        CheckConstraint("agency_rating BETWEEN 1 AND 5", name="ck_listing_review_agency_rating"),
+        CheckConstraint(
+            "listing_rating >= 1 AND listing_rating <= 5", name="ck_listing_review_listing_rating"
+        ),
+        CheckConstraint(
+            "agency_rating >= 1 AND agency_rating <= 5", name="ck_listing_review_agency_rating"
+        ),
         Index("ix_listing_review_agency_id", "agency_id"),
     )
 

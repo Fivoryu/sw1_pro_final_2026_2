@@ -38,8 +38,12 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["customer_id"], ["customer_account.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["agency_reply_by"], ["staff_account.id"], ondelete="SET NULL"),
         sa.UniqueConstraint("listing_id", "customer_id", name="uq_listing_review_listing_customer"),
-        sa.CheckConstraint("listing_rating BETWEEN 1 AND 5", name="ck_listing_review_listing_rating"),
-        sa.CheckConstraint("agency_rating BETWEEN 1 AND 5", name="ck_listing_review_agency_rating"),
+        sa.CheckConstraint(
+            "listing_rating >= 1 AND listing_rating <= 5", name="ck_listing_review_listing_rating"
+        ),
+        sa.CheckConstraint(
+            "agency_rating >= 1 AND agency_rating <= 5", name="ck_listing_review_agency_rating"
+        ),
     )
     op.create_index("ix_listing_review_agency_id", "listing_review", ["agency_id"])
 
