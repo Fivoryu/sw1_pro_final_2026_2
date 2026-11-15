@@ -104,7 +104,10 @@ CapturedRoom rectangleRoom({
   openings: openings,
   boxes: boxes,
   references: const [],
-  metrics: sampleMetrics,
+  acquisition: const RoomAcquisition(
+    method: RoomAcquisitionMethod.arcoreWalls,
+    arMetrics: sampleMetrics,
+  ),
   placement: placement,
 );
 

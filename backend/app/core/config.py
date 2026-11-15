@@ -83,6 +83,9 @@ class Settings:
     stripe_publishable_key: str | None = None
     stripe_webhook_secret: str | None = None
     stripe_connect_account_country: str | None = None
+    groq_api_key: str | None = None
+    groq_floorplan_model: str = "qwen/qwen3.8-27b"
+    groq_floorplan_timeout_seconds: int = 30
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -164,6 +167,12 @@ class Settings:
             stripe_publishable_key=os.environ.get("STRIPE_PUBLISHABLE_KEY") or None,
             stripe_webhook_secret=os.environ.get("STRIPE_WEBHOOK_SECRET") or None,
             stripe_connect_account_country=os.environ.get("STRIPE_CONNECT_ACCOUNT_COUNTRY") or None,
+            groq_api_key=os.environ.get("GROQ_API_KEY") or None,
+            groq_floorplan_model=os.environ.get("GROQ_FLOORPLAN_MODEL")
+            or "qwen/qwen3.8-27b",
+            groq_floorplan_timeout_seconds=_positive_timeout_from_env(
+                "GROQ_FLOORPLAN_TIMEOUT_SECONDS", 30
+            ),
         )
 
     def escrow_address_for(self, currency: str) -> str | None:
@@ -212,6 +221,7 @@ class Settings:
                 self.reconstruction_lease_seconds,
                 self.reconstruction_sweep_seconds,
                 self.capture_retention_days,
+                self.groq_floorplan_timeout_seconds,
             )
             < 1
         ):

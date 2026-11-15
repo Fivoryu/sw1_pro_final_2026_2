@@ -13,6 +13,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.modules.agencies.models import AgencyWallet, AgencyWalletChallenge
 
+from sqlalchemy import func
+from app.modules.catalog.models import Listing, QuoteSnapshot
+from app.modules.reservations.models import Reservation
+from app.modules.agencies.schemas import AgencyMetricsResponse, ListingMetrics, ReservationMetrics
+
 
 AGENCY_WALLET_CHALLENGE_TTL = timedelta(minutes=5)
 AGENCY_WALLET_CHALLENGE_PURPOSE = "link-agency-wallet"
@@ -194,3 +199,56 @@ def verify_and_link_agency_wallet(
         raise
 
     return {"agency_id": agency_id, "address": expected_address, "linked_at": now_utc}
+
+def get_agency_metrics(
+    *,
+    session_factory: sessionmaker[Session],
+    agency_id: str,
+    now: datetime,
+) -> AgencyMetricsResponse:
+    now_utc = _as_utc(now)
+
+    with session_factory() as session:
+        # 1. Métricas de Inmuebles (Listings)
+        listing_counts = (
+            session.query(Listing.approval_status, func.count(Listing.id)) # <--- CAMBIO AQUÍ
+            .filter(Listing.agency_id == agency_id)
+            .group_by(Listing.approval_status)                             # <--- CAMBIO AQUÍ
+            .all()
+        )
+        l_metrics = {"draft": 0, "in_review": 0, "published": 0}
+        for status, count in listing_counts:
+            status_str = getattr(status, "value", str(status)).lower()
+            if status_str in l_metrics:
+                l_metrics[status_str] = count
+
+        # 2. Cotizaciones Activas (Quotes)
+        active_quotes = (
+            session.query(func.count(QuoteSnapshot.id))
+            .join(Listing, Listing.id == QuoteSnapshot.listing_id)
+            .filter(
+                Listing.agency_id == agency_id,
+                QuoteSnapshot.expires_at > now_utc
+            )
+            .scalar() or 0
+        )
+
+        # 3. Métricas de Reservas (Reservations)
+        reservation_counts = (
+            session.query(Reservation.status, func.count(Reservation.id))
+            .join(Listing, Listing.id == Reservation.listing_id)
+            .filter(Listing.agency_id == agency_id)
+            .group_by(Reservation.status)
+            .all()
+        )
+        r_metrics = {"pending": 0, "accepted": 0, "rejected": 0, "cancelled": 0, "expired": 0}
+        for status, count in reservation_counts:
+            status_str = getattr(status, "value", str(status)).lower()
+            if status_str in r_metrics:
+                r_metrics[status_str] = count
+
+    return AgencyMetricsResponse(
+        listings=ListingMetrics(**l_metrics),
+        active_quotes=active_quotes,
+        reservations=ReservationMetrics(**r_metrics)
+    )

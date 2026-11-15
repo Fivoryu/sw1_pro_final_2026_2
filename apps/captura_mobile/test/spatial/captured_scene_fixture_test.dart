@@ -132,6 +132,7 @@ void main() {
     expect(result.document, fixture);
     expectEveryRoomCloses(result.document);
     expect(result.warnings.map((warning) => warning.code), [
+      SceneWarningCode.wallDimensionConflict,
       SceneWarningCode.assumedHeight,
     ]);
   });

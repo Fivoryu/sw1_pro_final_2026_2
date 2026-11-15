@@ -20,6 +20,27 @@ abstract interface class CaptureDraftStore {
 
   /// Bytes used by [ownerId]'s drafts, so the agent can see the space taken.
   Future<int> sizeBytes(String ownerId);
+
+  Future<String> saveTraceSource(
+    String ownerId,
+    String listingId,
+    List<int> bytes,
+    String contentType,
+  );
+
+  Future<List<int>?> readTraceSource(
+    String ownerId,
+    String listingId,
+    String sourceId,
+  );
+
+  Future<void> deleteTraceSource(
+    String ownerId,
+    String listingId,
+    String sourceId,
+  );
+
+  Future<void> deleteTraceSources(String ownerId, String listingId);
 }
 
 /// [CaptureDraftStore] with one JSON file per listing under
@@ -68,6 +89,7 @@ class FileCaptureDraftStore implements CaptureDraftStore {
   Future<void> delete(String ownerId, String listingId) async {
     final file = await _file(ownerId, listingId);
     if (await file.exists()) await file.delete();
+    await deleteTraceSources(ownerId, listingId);
   }
 
   @override
@@ -90,10 +112,60 @@ class FileCaptureDraftStore implements CaptureDraftStore {
     final dir = await _ownerDir(ownerId);
     if (!await dir.exists()) return 0;
     var total = 0;
-    await for (final entry in dir.list()) {
+    await for (final entry in dir.list(recursive: true)) {
       if (entry is File) total += await entry.length();
     }
     return total;
+  }
+
+  @override
+  Future<String> saveTraceSource(
+    String ownerId,
+    String listingId,
+    List<int> bytes,
+    String contentType,
+  ) async {
+    _checkId(listingId);
+    final extension = switch (contentType) {
+      'image/jpeg' => 'jpg',
+      'image/png' => 'png',
+      'image/webp' => 'webp',
+      _ => throw ArgumentError.value(contentType, 'contentType'),
+    };
+    final sourceId =
+        '${DateTime.now().microsecondsSinceEpoch}-${bytes.length}.$extension';
+    final file = await _traceFile(ownerId, listingId, sourceId);
+    await file.parent.create(recursive: true);
+    await file.writeAsBytes(bytes, flush: true);
+    return sourceId;
+  }
+
+  @override
+  Future<List<int>?> readTraceSource(
+    String ownerId,
+    String listingId,
+    String sourceId,
+  ) async {
+    final file = await _traceFile(ownerId, listingId, sourceId);
+    return await file.exists() ? file.readAsBytes() : null;
+  }
+
+  @override
+  Future<void> deleteTraceSource(
+    String ownerId,
+    String listingId,
+    String sourceId,
+  ) async {
+    final file = await _traceFile(ownerId, listingId, sourceId);
+    if (await file.exists()) await file.delete();
+  }
+
+  @override
+  Future<void> deleteTraceSources(String ownerId, String listingId) async {
+    _checkId(listingId);
+    final owner = await _ownerDir(ownerId);
+    final dir = Directory('${owner.path}/trace_sources/$listingId');
+    if (await dir.exists()) await dir.delete(recursive: true);
   }
 
   Future<Directory> _ownerDir(String ownerId) async {
@@ -106,6 +178,20 @@ class FileCaptureDraftStore implements CaptureDraftStore {
     _checkId(listingId);
     final dir = await _ownerDir(ownerId);
     return File('${dir.path}/$listingId.json');
+  }
+
+  Future<File> _traceFile(
+    String ownerId,
+    String listingId,
+    String sourceId,
+  ) async {
+    _checkId(listingId);
+    if (!RegExp(r'^[A-Za-z0-9_.-]{1,160}$').hasMatch(sourceId) ||
+        sourceId.contains('..')) {
+      throw ArgumentError.value(sourceId, 'sourceId');
+    }
+    final owner = await _ownerDir(ownerId);
+    return File('${owner.path}/trace_sources/$listingId/$sourceId');
   }
 
   void _checkId(String id) {

@@ -19,7 +19,7 @@ const extra = { extra_id: "extra-1", name: "Silla existente", price: "20.50", qu
 const data = {
   listing: { listing_id: "listing-1", agency_id: "agency-1", operation: "sale" as const,
     base_price: "100000.00", currency: "BOB" as const, city: "La Paz", zone: "Centro",
-    bedrooms: 2, bathrooms: 1, description: null, exact_address: null,
+    bedrooms: 2, bathrooms: 1, description: null, exact_address: null, latitude: null, longitude: null,
     approval_status: "draft" as const, is_published: false, offer_version: 4,
     created_at: "2026-10-21T10:00:00Z", extras: [extra] },
   suggestions: [{ job_id: "job-1", detection_index: 0, photo_id: "photo-1", model_id: "model-1",

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../data/map_config.dart';
 import '../../data/models/staff_listing.dart';
 import '../../domain/listing_drafts_controller.dart';
 import 'listing_editor_screen.dart';
@@ -18,9 +19,14 @@ const _tabs = <(ListingStatus, String, String)>[
 
 /// The agent's listings of the agency, by review status (F04.1 / F04.3).
 class ListingsScreen extends StatefulWidget {
-  const ListingsScreen({super.key, required this.controller});
+  const ListingsScreen({
+    super.key,
+    required this.controller,
+    this.mapConfig = MapTileConfig.openStreetMap,
+  });
 
   final ListingDraftsController controller;
+  final MapTileConfig mapConfig;
 
   @override
   State<ListingsScreen> createState() => _ListingsScreenState();
@@ -39,6 +45,7 @@ class _ListingsScreenState extends State<ListingsScreen> {
         builder: (_) => ListingEditorScreen(
           controller: widget.controller,
           listing: listing,
+          mapConfig: widget.mapConfig,
         ),
       ),
     );

@@ -25,6 +25,12 @@ class Agency(Base):
     __tablename__ = "agency"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    # Display name shown to customers; defaults to the id for rows created without one.
+    name: Mapped[str] = mapped_column(
+        String(120),
+        nullable=False,
+        default=lambda context: context.get_current_parameters()["id"],
+    )
 
 
 class StaffAccount(Base):

@@ -50,16 +50,25 @@ RoomPlacement placementForConnection({
   if (opening == null) {
     throw ArgumentError.value(openingId, 'openingId', 'Unknown opening');
   }
-  if (opening.edgeIndex < 0 || opening.edgeIndex >= corners.length) {
+  final edgeIndex = room.edgeIndexForOpening(opening);
+  if (edgeIndex == null || edgeIndex < 0 || edgeIndex >= corners.length) {
     throw ArgumentError.value(openingId, 'openingId', 'Edge out of range');
   }
-  final start = corners[opening.edgeIndex];
-  final edge = corners[(opening.edgeIndex + 1) % corners.length] - start;
+  final start = corners[edgeIndex];
+  final edge = corners[(edgeIndex + 1) % corners.length] - start;
   if (edge.length == 0) {
     throw ArgumentError.value(openingId, 'openingId', 'Degenerate edge');
   }
+  final normalizedPosition =
+      opening.position ??
+      (opening.offsetFromWallStartM == null
+          ? null
+          : (opening.offsetFromWallStartM! + opening.width / 2) / edge.length);
+  if (normalizedPosition == null) {
+    throw ArgumentError.value(openingId, 'openingId', 'Missing position');
+  }
   return (
-    center: start + edge.scale(opening.position),
+    center: start + edge.scale(normalizedPosition),
     direction: edge.scale(1 / edge.length),
   );
 }

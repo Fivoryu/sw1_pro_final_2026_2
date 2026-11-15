@@ -113,6 +113,7 @@ String contourIssueMessage(ContourIssue issue) => switch (issue.code) {
 
 enum OpeningIssueCode {
   edgeIndexOutOfRange,
+  incompletePhysicalDimensions,
   nonPositiveSize,
   widthExceedsEdge,
   outsideEdge,
@@ -132,33 +133,69 @@ class OpeningIssue {
 /// Validates [opening] against the contour and height of [room].
 List<OpeningIssue> validateOpening(CapturedRoom room, RoomOpening opening) {
   final count = room.corners.length;
-  if (opening.edgeIndex < 0 || opening.edgeIndex >= count || count < 2) {
+  final wallIndex = opening.wallId == null
+      ? opening.edgeIndex
+      : room.wallDimensions.indexWhere(
+          (dimension) => dimension.wallId == opening.wallId,
+        );
+  if (wallIndex == null || wallIndex < 0 || wallIndex >= count || count < 2) {
     return const [OpeningIssue(OpeningIssueCode.edgeIndexOutOfRange)];
   }
-  if (opening.width <= 0 || opening.height <= 0 || opening.sillHeight < 0) {
+  final wallDimension = wallIndex < room.wallDimensions.length
+      ? room.wallDimensions[wallIndex]
+      : null;
+  final explicitSill =
+      opening.explicitSillHeight ??
+      (opening.type == OpeningType.window && opening.wallId == null
+          ? RoomOpening.defaultWindowSill
+          : null);
+  if ((opening.wallId != null && opening.offsetFromWallStartM == null) ||
+      (opening.type == OpeningType.window && explicitSill == null)) {
+    return const [OpeningIssue(OpeningIssueCode.incompletePhysicalDimensions)];
+  }
+  final sill = opening.type == OpeningType.door ? 0.0 : explicitSill!;
+  if (!opening.width.isFinite ||
+      !opening.height.isFinite ||
+      !sill.isFinite ||
+      opening.width <= 0 ||
+      opening.height <= 0 ||
+      sill < 0) {
     return const [OpeningIssue(OpeningIssueCode.nonPositiveSize)];
   }
   final issues = <OpeningIssue>[];
-  final edge = room.corners[opening.edgeIndex].distanceTo(
-    room.corners[(opening.edgeIndex + 1) % count],
-  );
-  if (opening.width > edge - 2 * openingEdgeMargin) {
+  final edge =
+      wallDimension?.lengthM ??
+      room.corners[wallIndex].distanceTo(room.corners[(wallIndex + 1) % count]);
+  if (opening.width >
+      edge - (opening.wallId == null ? 2 * openingEdgeMargin : 0)) {
     issues.add(const OpeningIssue(OpeningIssueCode.widthExceedsEdge));
   }
-  final center = opening.position * edge;
-  final half = opening.width / 2;
-  if (opening.position < 0 ||
-      opening.position > 1 ||
-      center - half < openingEdgeMargin - 1e-9 ||
-      center + half > edge - openingEdgeMargin + 1e-9) {
+  final offset = opening.offsetFromWallStartM;
+  final invalidHorizontal = offset != null
+      ? !offset.isFinite || offset < 0 || offset + opening.width > edge + 1e-9
+      : opening.position == null ||
+            !opening.position!.isFinite ||
+            opening.position! < 0 ||
+            opening.position! > 1 ||
+            opening.position! * edge - opening.width / 2 <
+                openingEdgeMargin - 1e-9 ||
+            opening.position! * edge + opening.width / 2 >
+                edge - openingEdgeMargin + 1e-9;
+  if (invalidHorizontal) {
     issues.add(const OpeningIssue(OpeningIssueCode.outsideEdge));
   }
-  if (opening.height > room.height.value) {
+  final wallHeight = wallDimension?.heightM ?? room.height?.value;
+  if (wallHeight == null) {
+    issues.add(
+      const OpeningIssue(OpeningIssueCode.incompletePhysicalDimensions),
+    );
+  } else if (opening.height > wallHeight) {
     issues.add(const OpeningIssue(OpeningIssueCode.tallerThanRoom));
   }
   if (opening.type == OpeningType.window &&
-      opening.height <= room.height.value &&
-      opening.sillHeight + opening.height > room.height.value) {
+      wallHeight != null &&
+      opening.height <= wallHeight &&
+      sill + opening.height > wallHeight + 1e-9) {
     issues.add(const OpeningIssue(OpeningIssueCode.windowAboveCeiling));
   }
   return issues;
@@ -168,6 +205,8 @@ List<OpeningIssue> validateOpening(CapturedRoom room, RoomOpening opening) {
 String openingIssueMessage(OpeningIssue issue) => switch (issue.code) {
   OpeningIssueCode.edgeIndexOutOfRange =>
     'La pared elegida no existe en el ambiente. Elegí otra pared.',
+  OpeningIssueCode.incompletePhysicalDimensions =>
+    'Completá las medidas físicas y la pared de la abertura.',
   OpeningIssueCode.nonPositiveSize =>
     'El ancho y la altura de la abertura deben ser mayores que cero.',
   OpeningIssueCode.widthExceedsEdge =>

@@ -8,7 +8,10 @@ import {
   type StaffUser,
 } from "../../application/staffAuthApi";
 import { getCurrentExchangeRates, getExchangeRateHistory } from "../../application/exchangeRatesApi";
+import { getAgencies } from "../../application/agencyAdminInvitationsApi";
 import { listAgencyListings } from "../../application/staffListingsApi";
+import { listNotifications } from "../../application/staffNotificationsApi";
+import { listReviewReports, listReviews } from "../../application/staffReviewsApi";
 import { ProtectedStaffShell } from "./ProtectedStaffShell";
 
 vi.mock("../editor3d/SceneViewer", () => ({
@@ -19,6 +22,12 @@ vi.mock("../../application/staffListingsApi", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../application/staffListingsApi")>();
   return { ...actual, listAgencyListings: vi.fn() };
+});
+
+vi.mock("../../application/agencyAdminInvitationsApi", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../application/agencyAdminInvitationsApi")>();
+  return { ...actual, getAgencies: vi.fn() };
 });
 
 vi.mock("../../application/exchangeRatesApi", async (importOriginal) => {
@@ -47,6 +56,16 @@ vi.mock("../../application/staffAuthApi", async (importOriginal) => {
   };
 });
 
+vi.mock("../../application/staffNotificationsApi", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../application/staffNotificationsApi")>();
+  return { ...actual, listNotifications: vi.fn() };
+});
+
+vi.mock("../../application/staffReviewsApi", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../application/staffReviewsApi")>();
+  return { ...actual, listReviews: vi.fn(), listReviewReports: vi.fn() };
+});
+
 function expiredAccessToken(): string {
   const exp = Math.floor(Date.now() / 1000) - 60;
   return `header.${btoa(JSON.stringify({ exp }))}.signature`;
@@ -62,10 +81,21 @@ function staffUser(role: string): StaffUser {
 }
 
 beforeEach(() => {
+  vi.mocked(listNotifications).mockReset().mockResolvedValue({ unread: 0, items: [] });
   sessionStorage.clear();
+  vi.mocked(listReviews)
+    .mockReset()
+    .mockResolvedValue({
+      summary: { average: null, count: 0, verified_count: 0, few_ratings: true },
+      reviews: [],
+    });
+  vi.mocked(listReviewReports).mockReset().mockResolvedValue([]);
   vi.mocked(getStaffMe).mockReset();
   vi.mocked(logoutStaffSession).mockReset();
   vi.mocked(refreshStaffSession).mockReset();
+  vi.mocked(getAgencies)
+    .mockReset()
+    .mockResolvedValue({ agencies: [], pagination: { limit: 50, offset: 0, total: 0 } });
   vi.mocked(getCurrentExchangeRates)
     .mockReset()
     .mockResolvedValue({ rates: [] });
@@ -104,6 +134,10 @@ describe("ProtectedStaffShell", () => {
     expect(
       await screen.findByRole("heading", { name: "Tasas de cambio" }),
     ).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "Invitar administrador de inmobiliaria" }),
+    ).toBeVisible();
+    expect(getAgencies).toHaveBeenCalledWith("volatile-access");
     expect(listAgencyListings).not.toHaveBeenCalled();
   });
 
@@ -125,6 +159,7 @@ describe("ProtectedStaffShell", () => {
       ),
     ).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Tasas de cambio" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Invitar administrador de inmobiliaria" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /crear|editar|aprobar|publicar/i })).not.toBeInTheDocument();
     expect(listAgencyListings).not.toHaveBeenCalled();
   });
@@ -173,6 +208,37 @@ describe("ProtectedStaffShell", () => {
     expect(listAgencyListings).toHaveBeenCalledWith("volatile-access", "agency-1", {
       status: "approved",
     });
+  });
+
+  it.each(["agent", "agency_admin"])("opens the reviews workspace for %s", async (role) => {
+    const user = userEvent.setup();
+    sessionStorage.setItem("roomforge.staff.csrf", "stored-csrf");
+    vi.mocked(refreshStaffSession).mockResolvedValue({
+      access_token: "volatile-access",
+      csrf_token: "rotated-csrf",
+    });
+    vi.mocked(getStaffMe).mockResolvedValue({ user: staffUser(role) });
+
+    render(<ProtectedStaffShell />);
+    await user.click(await screen.findByRole("button", { name: "Reseñas" }));
+
+    expect(await screen.findByRole("heading", { level: 2, name: "Reseñas" })).toBeVisible();
+    expect(listReviews).toHaveBeenCalledWith("volatile-access");
+  });
+
+  it("shows the review reports queue, not the reviews item, to platform admins", async () => {
+    sessionStorage.setItem("roomforge.staff.csrf", "stored-csrf");
+    vi.mocked(refreshStaffSession).mockResolvedValue({
+      access_token: "volatile-access",
+      csrf_token: "rotated-csrf",
+    });
+    vi.mocked(getStaffMe).mockResolvedValue({ user: staffUser("platform_admin") });
+
+    render(<ProtectedStaffShell />);
+
+    expect(await screen.findByRole("heading", { name: "Reportes de reseñas" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Reseñas" })).not.toBeInTheDocument();
+    expect(listReviewReports).toHaveBeenCalledWith("volatile-access", "open");
   });
 
   it("returns to login after a successful API logout", async () => {
@@ -258,5 +324,26 @@ describe("ProtectedStaffShell", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Tu sesión expiró. Inicia sesión nuevamente.",
     );
+  });
+
+  it("shows the notification bell to agency staff only", async () => {
+    sessionStorage.setItem("roomforge.staff.csrf", "stored-csrf");
+    vi.mocked(refreshStaffSession).mockResolvedValue({
+      access_token: "volatile-access",
+      csrf_token: "rotated-csrf",
+    });
+    vi.mocked(getStaffMe).mockResolvedValue({ user: staffUser("agent") });
+
+    const { unmount } = render(<ProtectedStaffShell />);
+    expect(await screen.findByRole("button", { name: /Notificaciones/ })).toBeVisible();
+    expect(listNotifications).toHaveBeenCalledWith("volatile-access", 30);
+    unmount();
+
+    vi.mocked(listNotifications).mockClear();
+    vi.mocked(getStaffMe).mockResolvedValue({ user: staffUser("platform_admin") });
+    render(<ProtectedStaffShell />);
+    expect(await screen.findByRole("heading", { name: "Administración de plataforma" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Notificaciones/ })).not.toBeInTheDocument();
+    expect(listNotifications).not.toHaveBeenCalled();
   });
 });

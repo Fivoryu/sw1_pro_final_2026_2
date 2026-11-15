@@ -189,8 +189,55 @@ void main() {
         'bathrooms': 2,
         'description': 'Casa luminosa',
         'exact_address': null,
+        'latitude': null,
+        'longitude': null,
       });
       expect(listing.status, ListingStatus.draft);
+    });
+
+    test('sends the map point and reads it back', () async {
+      final harness = _build(
+        (_) async => _json({
+          ..._listingBody(),
+          'latitude': -17.7833,
+          'longitude': -63.1821,
+        }, 201),
+      );
+      final listing = await harness.api.createListing(
+        accessToken: 'access-token',
+        agencyId: 'agency-1',
+        input: const ListingDraftInput(
+          operation: ListingOperation.rent,
+          basePrice: '2500000.00',
+          currency: ListingCurrency.bob,
+          city: 'Medellín',
+          zone: 'El Poblado',
+          bedrooms: 3,
+          bathrooms: 2,
+          description: null,
+          exactAddress: null,
+          latitude: -17.7833,
+          longitude: -63.1821,
+        ),
+      );
+
+      final body =
+          jsonDecode(harness.requests.single.body) as Map<String, Object?>;
+      expect(body['latitude'], -17.7833);
+      expect(body['longitude'], -63.1821);
+      expect(listing.latitude, -17.7833);
+      expect(listing.longitude, -63.1821);
+    });
+
+    test('a listing without a point has null coordinates', () async {
+      final harness = _build((_) async => _json(_listingBody(), 201));
+      final listing = await harness.api.createListing(
+        accessToken: 'access-token',
+        agencyId: 'agency-1',
+        input: _input,
+      );
+      expect(listing.latitude, isNull);
+      expect(listing.longitude, isNull);
     });
 
     test('sends the chosen currency when creating', () async {

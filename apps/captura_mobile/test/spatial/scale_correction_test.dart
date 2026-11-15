@@ -19,12 +19,15 @@ CapturedRoom _room({
   openings: const [],
   boxes: boxes,
   references: references,
-  metrics: const CaptureMetrics(
-    durationMs: 1000,
-    trackingLossCount: 0,
-    depthSupported: true,
-    cornerHitDistances: [1, 1, 1, 1],
-    floorY: -1.3,
+  acquisition: const RoomAcquisition(
+    method: RoomAcquisitionMethod.arcoreWalls,
+    arMetrics: CaptureMetrics(
+      durationMs: 1000,
+      trackingLossCount: 0,
+      depthSupported: true,
+      cornerHitDistances: [1, 1, 1, 1],
+      floorY: -1.3,
+    ),
   ),
 );
 

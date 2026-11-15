@@ -7,9 +7,13 @@ class FakeArCapture implements ArCapture {
   final List<String> names = [];
   final List<CaptureMode> modes = [];
   final List<String?> listingIds = [];
+  int availabilityChecks = 0;
 
   @override
-  Future<ArAvailability> availability() async => available;
+  Future<ArAvailability> availability() async {
+    availabilityChecks++;
+    return available;
+  }
 
   @override
   Future<ArCaptureResult> captureRoom(

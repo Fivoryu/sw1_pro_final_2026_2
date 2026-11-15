@@ -62,7 +62,7 @@ function staffUser(role: string): StaffUser {
 beforeEach(() => {
   sessionStorage.clear();
   localStorage.clear();
-  window.history.replaceState({}, "", "/staff");
+  window.history.replaceState({}, "", "/panel");
   vi.mocked(completeStaffLogin).mockReset();
   vi.mocked(getStaffMe).mockReset();
   vi.mocked(logoutStaffSession).mockReset();
@@ -155,6 +155,65 @@ describe("staff invitation routing", () => {
     expect(restoreStaffSession).not.toHaveBeenCalled();
     expect(refreshStaffSession).not.toHaveBeenCalled();
     restoreStaffSession.mockRestore();
+  });
+});
+
+describe("public landing routing", () => {
+  it("renders the landing page at the root path", () => {
+    window.history.replaceState({}, "", "/");
+
+    render(<App />);
+
+    expect(
+      screen.getByRole("heading", {
+        level: 1,
+        name: "Publicá inmuebles con recorridos 3D",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getAllByRole("link", { name: "Entrar al panel" }).length,
+    ).toBeGreaterThanOrEqual(1);
+    for (const link of screen.getAllByRole("link", { name: "Entrar al panel" })) {
+      expect(link).toHaveAttribute("href", "/panel");
+    }
+  });
+
+  it.each(["/ruta-inexistente", "/staff"])(
+    "renders the landing page for unknown paths: %s",
+    (url) => {
+      window.history.replaceState({}, "", url);
+
+      render(<App />);
+
+      expect(
+        screen.getByRole("heading", {
+          level: 1,
+          name: "Publicá inmuebles con recorridos 3D",
+        }),
+      ).toBeVisible();
+      expect(
+        screen.queryByRole("heading", { name: "Acceso de personal" }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it("opens the staff login at /panel", async () => {
+    window.history.replaceState({}, "", "/panel");
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Acceso de personal" }),
+    ).toBeVisible();
+    expect(screen.queryByText("Publicá inmuebles con recorridos 3D")).not.toBeInTheDocument();
+  });
+
+  it("keeps the dedicated 3D viewer route at /visor3d", () => {
+    window.history.replaceState({}, "", "/visor3d");
+
+    render(<App />);
+
+    expect(screen.getByLabelText("Visor 3D de la escena")).toBeVisible();
   });
 });
 

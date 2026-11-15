@@ -10,6 +10,7 @@ from app.core.errors import ERROR_RESPONSES
 from app.modules.agencies.schemas import (
     AgencyAdminInvitationCreate,
     AgencyCreate,
+    AgencyMetricsResponse,
     AgencyListResponse,
     AgencyWalletChallengeCreate,
     AgencyWalletChallengeResponse,
@@ -22,9 +23,11 @@ from app.modules.agencies.service import (
     AgencyWalletAddressConflictError,
     AgencyWalletAlreadyLinkedError,
     InvalidAgencyWalletChallengeError,
+    get_agency_metrics,
     create_agency_wallet_challenge,
     verify_and_link_agency_wallet,
 )
+from app.modules.chat.service import reassign_for_agent
 from app.modules.identity.invitations import (
     InvitationConflictError,
     InvitationDeliveryError,
@@ -68,13 +71,14 @@ def create_agency(
 ) -> dict[str, str]:
     _require_platform_admin(staff)
     session_factory: sessionmaker[Session] = request.app.state.session_factory
+    name = agency.name if agency.name is not None else agency.id
     try:
         with session_factory.begin() as session:
-            session.add(Agency(id=agency.id))
+            session.add(Agency(id=agency.id, name=name))
             session.flush()
     except IntegrityError:
         raise HTTPException(status_code=409, detail="Agency ID already exists") from None
-    return {"id": agency.id}
+    return {"id": agency.id, "name": name}
 
 
 @router.get("", response_model=AgencyListResponse)
@@ -88,15 +92,15 @@ def list_agencies(
     session_factory: sessionmaker[Session] = request.app.state.session_factory
     with session_factory() as session:
         total = session.query(func.count(Agency.id)).scalar() or 0
-        agency_ids = (
-            session.query(Agency.id)
+        rows = (
+            session.query(Agency.id, Agency.name)
             .order_by(Agency.id)
             .offset(offset)
             .limit(limit)
             .all()
         )
     return {
-        "agencies": [{"id": agency_id} for (agency_id,) in agency_ids],
+        "agencies": [{"id": agency_id, "name": name} for agency_id, name in rows],
         "pagination": {"limit": limit, "offset": offset, "total": total},
     }
 
@@ -279,6 +283,7 @@ def _set_agent_active(
 
         agent.active = active
         if not active:
+            reassign_for_agent(session, agent_id=agent.id, now=now)
             (
                 session.query(StaffSession)
                 .filter(
@@ -318,4 +323,32 @@ def activate_agent(
         active=True,
         request=request,
         staff=staff,
+    )
+
+@agency_wallet_router.get(
+    "/{agency_id}/metrics",
+    response_model=AgencyMetricsResponse,
+    operation_id="get_agency_metrics",
+    summary="Get agency metrics dashboard",
+)
+def get_metrics(
+    agency_id: str,
+    request: Request,
+    staff: ActiveStaff = Depends(get_active_staff),
+) -> AgencyMetricsResponse:
+    """
+    Returns aggregated metrics for the agency (listings, quotes, reservations).
+    F03.3 Isolation: Staff can only query metrics for their own agency.
+    """
+    # Cumplimiento estricto F03.3: Solo el personal de esta agencia (o platform_admin) puede ver las métricas
+    if staff["role"] != "platform_admin" and staff["tenant_id"] != agency_id:
+        raise HTTPException(status_code=403, detail="Not authorized for this agency")
+
+    session_factory: sessionmaker[Session] = request.app.state.session_factory
+    clock = request.app.state.clock
+    
+    return get_agency_metrics(
+        session_factory=session_factory,
+        agency_id=agency_id,
+        now=clock(),
     )

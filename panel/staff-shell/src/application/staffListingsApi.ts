@@ -17,6 +17,8 @@ export interface StaffListing {
   bathrooms: number;
   description: string | null;
   exact_address: string | null;
+  latitude: number | null;
+  longitude: number | null;
   approval_status: ListingApprovalStatus;
   is_published: boolean;
   offer_version: number;
@@ -198,5 +200,23 @@ export function transitionListing(
       "Content-Type": "application/json",
     },
     body: JSON.stringify(observation === undefined ? {} : { observation }),
+  });
+}
+
+/** Changes only the point of the listing; the server reopens it as an unpublished draft. */
+export function updateListingLocation(
+  accessToken: string,
+  agencyId: string,
+  listingId: string,
+  latitude: number,
+  longitude: number,
+): Promise<StaffListing> {
+  return requestJson<StaffListing>(`${listingPath(agencyId, listingId)}/location`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ latitude, longitude }),
   });
 }

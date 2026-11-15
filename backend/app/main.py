@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.core.log_redaction import install_location_redaction
 from app.core.config import DETECTION_LEASE_SECONDS_DEFAULT, Settings
 from app.core.errors import ErrorResponse, error_code_for_status
 from app.core.rate_source import official_rate_refresh_interval_seconds
@@ -32,6 +33,14 @@ from app.modules.catalog.photos import (
     cleanup_photo_deletion_intents,
 )
 from app.modules.catalog.router import router as catalog_router
+from app.modules.chat.assignment_router import router as listing_agents_router
+from app.modules.chat.router import customer_router as customer_chat_router
+from app.modules.chat.router import staff_router as staff_chat_router
+from app.modules.notifications.router import customer_router as customer_notifications_router
+from app.modules.notifications.router import staff_router as staff_notifications_router
+from app.modules.reviews.router import customer_router as customer_reviews_router
+from app.modules.reviews.router import public_router as public_reviews_router
+from app.modules.reviews.router import staff_router as staff_reviews_router
 from app.modules.customer_identity.router import router as customer_identity_router
 from app.modules.customer_identity.router import wallet_router as customer_wallet_router
 from app.modules.detection.furniture_review import router as furniture_review_router
@@ -46,6 +55,8 @@ from app.modules.exchange_rates.router import (
 )
 from app.modules.exchange_rates.service import refresh_official_rates
 from app.modules.identity.router import router as identity_router
+from app.modules.floorplan_interpretation.router import router as floorplan_interpretation_router
+from app.modules.floorplan_interpretation.service import FloorplanInterpreter, GroqFloorplanInterpreter
 from app.modules.reconstruction.job_queue import (
     ReconstructionQueue,
     create_reconstruction_queue,
@@ -386,7 +397,9 @@ def create_app(
     photo_storage: PhotoStorage | None = None,
     job_queue: JobQueue | None = None,
     reconstruction_queue: ReconstructionQueue | None = None,
+    floorplan_interpreter: FloorplanInterpreter | None = None,
 ) -> FastAPI:
+    install_location_redaction()
     resolved_settings = settings or Settings.from_env()
     resolved_settings.validate()
     Fernet(resolved_settings.totp_encryption_key.encode("ascii"))
@@ -431,6 +444,11 @@ def create_app(
     )
     app.state.job_queue = resolved_job_queue
     app.state.reconstruction_queue = resolved_reconstruction_queue
+    app.state.floorplan_interpreter = floorplan_interpreter or GroqFloorplanInterpreter(
+        api_key=resolved_settings.groq_api_key,
+        model=resolved_settings.groq_floorplan_model,
+        timeout_seconds=resolved_settings.groq_floorplan_timeout_seconds,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[resolved_settings.web_origin.rstrip("/")],
@@ -456,11 +474,20 @@ def create_app(
     app.include_router(public_exchange_rates_router)
     app.include_router(catalog_router)
     app.include_router(catalog_photo_router)
+    app.include_router(listing_agents_router)
+    app.include_router(customer_chat_router)
+    app.include_router(staff_chat_router)
+    app.include_router(customer_notifications_router)
+    app.include_router(staff_notifications_router)
+    app.include_router(customer_reviews_router)
+    app.include_router(public_reviews_router)
+    app.include_router(staff_reviews_router)
     app.include_router(detection_router)
     app.include_router(furniture_review_router)
     app.include_router(detection_worker_router)
     app.include_router(reconstruction_router)
     app.include_router(reconstruction_worker_router)
+    app.include_router(floorplan_interpretation_router)
     app.include_router(reservations_router)
     app.include_router(staff_reservations_router)
     app.include_router(stripe_payments_router)

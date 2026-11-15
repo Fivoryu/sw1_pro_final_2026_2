@@ -154,6 +154,41 @@ void main() {
         (widget) => widget.onPressed != null,
       );
     });
+
+    testWidgets('quote snapshot gives the payable total stronger hierarchy', (
+      tester,
+    ) async {
+      final detail = await _pumpDetail(
+        tester,
+        quoteApi: QuoteApi(
+          baseUrl: 'https://api.example.test',
+          client: MockClient((_) async => _json(_snapshot(), 201)),
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ListingQuoteScreen(
+            quoteApi: QuoteApi(
+              baseUrl: 'https://api.example.test',
+              client: MockClient((_) async => _json(_snapshot(), 201)),
+            ),
+            detail: detail,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('quote-create')));
+      await tester.pumpAndSettle();
+
+      final total = tester.widget<Text>(find.textContaining('Total:')).style;
+      final validity = tester
+          .widget<Text>(find.textContaining('Válida hasta'))
+          .style;
+      expect(total, isNotNull);
+      expect(validity, isNotNull);
+      expect(total!.fontSize, greaterThan(validity!.fontSize!));
+      expect(total.fontWeight, isNot(FontWeight.w400));
+    });
   });
 
   group('object hotspot sheet', () {

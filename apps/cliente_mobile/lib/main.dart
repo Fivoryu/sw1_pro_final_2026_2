@@ -2,16 +2,21 @@ import 'package:flutter/material.dart';
 
 import 'data/services/catalog_api.dart';
 import 'data/services/customer_booking_api.dart';
+import 'data/services/customer_chat_api.dart';
+import 'data/services/customer_notifications_api.dart';
+import 'data/services/customer_reviews_api.dart';
 import 'data/services/local_wallet_connect.dart';
 import 'data/services/customer_auth_api.dart';
 import 'data/services/customer_token_store.dart';
 import 'data/services/quote_api.dart';
 import 'data/services/scene_api.dart';
 import 'domain/catalog_controller.dart';
+import 'domain/customer_notifications_controller.dart';
 import 'domain/customer_reservations_controller.dart';
 import 'domain/customer_session_controller.dart';
 import 'ui/features/auth/views/customer_account_screen.dart';
 import 'ui/features/catalog/views/catalog_screen.dart';
+import 'ui/features/notifications/notifications_screen.dart';
 import 'ui/features/reservations/customer_reservations_screen.dart';
 
 import 'ui/theme/andean_theme.dart';
@@ -33,6 +38,18 @@ void main() => runApp(
     ),
     sceneApi: SceneApi(baseUrl: _apiBaseUrl),
     quoteApi: QuoteApi(baseUrl: _apiBaseUrl),
+    chatApi: CustomerChatApi(
+      baseUrl: _apiBaseUrl,
+      accessTokenProvider: () => _customerSession.obtainAccessToken(),
+    ),
+    notificationsApi: CustomerNotificationsApi(
+      baseUrl: _apiBaseUrl,
+      accessTokenProvider: () => _customerSession.obtainAccessToken(),
+    ),
+    reviewsApi: CustomerReviewsApi(
+      baseUrl: _apiBaseUrl,
+      accessTokenProvider: () => _customerSession.obtainAccessToken(),
+    ),
   ),
 );
 
@@ -50,6 +67,9 @@ class RoomForgeApp extends StatelessWidget {
     this.bookingApi,
     this.sceneApi,
     this.quoteApi,
+    this.chatApi,
+    this.notificationsApi,
+    this.reviewsApi,
   });
 
   final CustomerSessionController sessionController;
@@ -57,6 +77,9 @@ class RoomForgeApp extends StatelessWidget {
   final CustomerBookingApi? bookingApi;
   final SceneApi? sceneApi;
   final QuoteApi? quoteApi;
+  final CustomerChatApi? chatApi;
+  final CustomerNotificationsApi? notificationsApi;
+  final CustomerReviewsApi? reviewsApi;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -68,6 +91,9 @@ class RoomForgeApp extends StatelessWidget {
       bookingApi: bookingApi,
       sceneApi: sceneApi,
       quoteApi: quoteApi,
+      chatApi: chatApi,
+      notificationsApi: notificationsApi,
+      reviewsApi: reviewsApi,
     ),
   );
 }
@@ -80,6 +106,9 @@ class CustomerShell extends StatefulWidget {
     this.bookingApi,
     this.sceneApi,
     this.quoteApi,
+    this.chatApi,
+    this.notificationsApi,
+    this.reviewsApi,
   });
 
   final CustomerSessionController sessionController;
@@ -87,6 +116,9 @@ class CustomerShell extends StatefulWidget {
   final CustomerBookingApi? bookingApi;
   final SceneApi? sceneApi;
   final QuoteApi? quoteApi;
+  final CustomerChatApi? chatApi;
+  final CustomerNotificationsApi? notificationsApi;
+  final CustomerReviewsApi? reviewsApi;
 
   @override
   State<CustomerShell> createState() => _CustomerShellState();
@@ -102,15 +134,44 @@ class _CustomerShellState extends State<CustomerShell> {
           wallet: _walletConnect,
         );
   late final _walletConnect = LocalWalletConnect(context: context);
+  late final _notifications = widget.notificationsApi == null
+      ? null
+      : CustomerNotificationsController(api: widget.notificationsApi!);
 
   @override
   void initState() {
     super.initState();
+    widget.sessionController.addListener(_syncNotifications);
     widget.sessionController.restore();
+  }
+
+  /// The inbox only polls while a customer is signed in.
+  void _syncNotifications() {
+    final notifications = _notifications;
+    if (notifications == null) return;
+    if (widget.sessionController.status == CustomerSessionStatus.signedIn) {
+      notifications.start();
+    } else {
+      notifications.stop();
+    }
+  }
+
+  void _openNotifications() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => NotificationsScreen(
+          controller: _notifications!,
+          chatApi: widget.chatApi,
+          onOpenReservations: () => setState(() => _selectedIndex = 1),
+        ),
+      ),
+    );
   }
 
   @override
   void dispose() {
+    widget.sessionController.removeListener(_syncNotifications);
+    _notifications?.dispose();
     _catalog.dispose();
     _reservations?.dispose();
     _walletConnect.dispose();
@@ -119,7 +180,25 @@ class _CustomerShellState extends State<CustomerShell> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('RoomForge')),
+    appBar: AppBar(
+      title: const Text('RoomForge', style: AndeanTypography.headlineLg),
+      titleSpacing: 20,
+      toolbarHeight: 72,
+      actions: [
+        if (_notifications != null)
+          ListenableBuilder(
+            listenable: widget.sessionController,
+            builder: (context, _) =>
+                widget.sessionController.status ==
+                    CustomerSessionStatus.signedIn
+                ? NotificationsBell(
+                    controller: _notifications,
+                    onPressed: _openNotifications,
+                  )
+                : const SizedBox.shrink(),
+          ),
+      ],
+    ),
     body: IndexedStack(
       index: _selectedIndex,
       children: [
@@ -129,10 +208,13 @@ class _CustomerShellState extends State<CustomerShell> {
           sessionController: widget.sessionController,
           sceneApi: widget.sceneApi,
           quoteApi: widget.quoteApi,
+          chatApi: widget.chatApi,
+          reviewsApi: widget.reviewsApi,
         ),
         CustomerReservationsScreen(
           controller: _reservations,
           sessionController: widget.sessionController,
+          chatApi: widget.chatApi,
         ),
         CustomerAccountScreen(
           controller: widget.sessionController,
@@ -142,6 +224,8 @@ class _CustomerShellState extends State<CustomerShell> {
       ],
     ),
     bottomNavigationBar: NavigationBar(
+      height: 76,
+      elevation: 0,
       selectedIndex: _selectedIndex,
       onDestinationSelected: (index) => setState(() => _selectedIndex = index),
       destinations: const [

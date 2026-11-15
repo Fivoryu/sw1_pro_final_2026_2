@@ -12,6 +12,26 @@ enum AndeanBannerVariant {
   demo,
 }
 
+/// Editorial section heading used to keep hierarchy consistent across flows.
+class AndeanSectionHeading extends StatelessWidget {
+  const AndeanSectionHeading(this.title, {super.key, this.subtitle});
+
+  final String title;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(title, style: AndeanTypography.headlineLg),
+      if (subtitle != null) ...[
+        const SizedBox(height: 6),
+        Text(subtitle!, style: AndeanTypography.bodySm),
+      ],
+    ],
+  );
+}
+
 /// Architectural candor notice card following Andean design guidelines
 class AndeanNoticeBanner extends StatelessWidget {
   const AndeanNoticeBanner({
@@ -67,10 +87,17 @@ class AndeanNoticeBanner extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: AndeanColors.border, width: 1),
+        boxShadow: const [
+          BoxShadow(
+            color: Color.fromRGBO(27, 59, 54, 0.04),
+            blurRadius: 16,
+            offset: Offset(0, 6),
+          ),
+        ],
       ),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

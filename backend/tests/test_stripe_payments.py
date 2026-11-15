@@ -1,15 +1,25 @@
 from decimal import Decimal
+from email.message import Message
 import hashlib
 import hmac
 import importlib.util
+import json
+from io import BytesIO
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.parse import parse_qs
+from unittest.mock import patch
 
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import create_engine, inspect, text
 
-from app.modules.stripe_payments.gateway import StripeGateway, verify_webhook_signature
+from app.modules.stripe_payments.gateway import (
+    StripeGateway,
+    StripeGatewayError,
+    verify_webhook_signature,
+)
 from app.modules.stripe_payments.service import payment_amount_minor_units, stripe_currency
 
 
@@ -125,3 +135,87 @@ def test_stripe_migration_preserves_wallet_rows_and_allows_card_rows() -> None:
             }.issubset(set(inspect(connection).get_table_names()))
     finally:
         engine.dispose()
+
+
+def test_connect_account_request_uses_marketplace_express_transfer_payload() -> None:
+    gateway = StripeGateway("sk_test_gateway")
+    with patch("app.modules.stripe_payments.gateway.urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value.read.return_value = json.dumps(
+            {"id": "acct_test_only", "object": "account"}
+        ).encode()
+
+        result = gateway.create_connect_account(
+            country="US",
+            agency_id="f09-demo-agency",
+            idempotency_key="roomforge-connect-account-f09-demo-agency",
+        )
+
+    request = urlopen.call_args.args[0]
+    assert request.full_url == "https://api.stripe.com/v1/accounts"
+    assert request.get_method() == "POST"
+    assert request.get_header("Idempotency-key") == (
+        "roomforge-connect-account-f09-demo-agency"
+    )
+    assert parse_qs(request.data.decode("utf-8")) == {
+        "type": ["express"],
+        "country": ["US"],
+        "capabilities[transfers][requested]": ["true"],
+        "metadata[agency_id]": ["f09-demo-agency"],
+    }
+    assert result["object"] == "account"
+
+
+def test_connect_account_provider_error_is_logged_safely(caplog: pytest.LogCaptureFixture) -> None:
+    headers = Message()
+    headers["Request-Id"] = "req_test_diagnostics"
+    body = json.dumps(
+        {
+            "error": {
+                "type": "invalid_request_error",
+                "code": "parameter_invalid",
+                "param": "capabilities[transfers][requested]",
+                "message": (
+                    "Rejected key sk_test_supersecret and account acct_sensitive_123; "
+                    "webhook whsec_sensitive_456"
+                ),
+            }
+        }
+    ).encode("utf-8")
+    provider_error = HTTPError(
+        "https://api.stripe.com/v1/accounts",
+        400,
+        "Bad Request",
+        headers,
+        BytesIO(body),
+    )
+    gateway = StripeGateway("sk_test_gateway")
+
+    with patch("app.modules.stripe_payments.gateway.urlopen", side_effect=provider_error):
+        with caplog.at_level(
+            "WARNING", logger="app.modules.stripe_payments.gateway"
+        ), pytest.raises(StripeGatewayError) as captured:
+            gateway.create_connect_account(
+                country="US",
+                agency_id="f09-demo-agency",
+                idempotency_key="roomforge-connect-account-f09-demo-agency",
+            )
+
+    error = captured.value
+    assert error.http_status == 400
+    assert error.provider_error_type == "invalid_request_error"
+    assert error.provider_error_code == "parameter_invalid"
+    assert error.provider_error_param == "capabilities[transfers][requested]"
+    assert error.provider_request_id == "req_test_diagnostics"
+    assert error.provider_error_message == (
+        "Rejected key [redacted] and account [redacted]; webhook [redacted]"
+    )
+    assert error.__cause__ is None
+    assert str(error) == "Stripe is unavailable or rejected the request"
+    assert "invalid_request_error" in caplog.text
+    assert "parameter_invalid" in caplog.text
+    assert "capabilities[transfers][requested]" in caplog.text
+    assert "req_test_diagnostics" in caplog.text
+    assert "Rejected key" in caplog.text
+    assert "sk_test_supersecret" not in caplog.text
+    assert "acct_sensitive_123" not in caplog.text
+    assert "whsec_sensitive_456" not in caplog.text

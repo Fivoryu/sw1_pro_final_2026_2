@@ -9,13 +9,16 @@ from sqlalchemy import engine_from_config, pool
 from app.db.base import Base
 from app.modules.agencies import models as agency_models  # noqa: F401
 from app.modules.catalog import models as catalog_models  # noqa: F401
+from app.modules.chat import models as chat_models  # noqa: F401
 from app.modules.customer_identity import models as customer_identity_models  # noqa: F401
 from app.modules.identity import models as identity_models
+from app.modules.notifications import models as notification_models  # noqa: F401
 from app.modules.reservations import models as reservation_models  # noqa: F401
+from app.modules.reviews import models as review_models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 if os.environ.get("DATABASE_URL"):
     config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"].replace("%", "%%"))
 target_metadata = Base.metadata

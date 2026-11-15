@@ -81,7 +81,10 @@ class AndeanNoticeBanner extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (title != null || badge != null) ...[
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       if (title != null)
                         Text(
@@ -92,7 +95,6 @@ class AndeanNoticeBanner extends StatelessWidget {
                           ),
                         ),
                       if (badge != null) ...[
-                        const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 6,

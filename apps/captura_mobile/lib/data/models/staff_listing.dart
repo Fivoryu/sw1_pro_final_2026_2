@@ -73,6 +73,8 @@ class StaffListing {
     required this.bathrooms,
     required this.description,
     required this.exactAddress,
+    this.latitude,
+    this.longitude,
     required this.status,
     required this.isPublished,
     required this.offerVersion,
@@ -92,6 +94,8 @@ class StaffListing {
     bathrooms: _int(json, 'bathrooms'),
     description: _optionalString(json, 'description'),
     exactAddress: _optionalString(json, 'exact_address'),
+    latitude: _optionalDouble(json, 'latitude'),
+    longitude: _optionalDouble(json, 'longitude'),
     status: ListingStatus.fromWire(json['approval_status']),
     isPublished: _bool(json, 'is_published'),
     offerVersion: _int(json, 'offer_version'),
@@ -112,6 +116,8 @@ class StaffListing {
     bathrooms: bathrooms,
     description: description,
     exactAddress: exactAddress,
+    latitude: latitude,
+    longitude: longitude,
     status: ListingStatus.draft,
     isPublished: false,
     offerVersion: offerVersion,
@@ -129,6 +135,10 @@ class StaffListing {
   final int bathrooms;
   final String? description;
   final String? exactAddress;
+
+  /// Map point of the listing (F14); both are null or both are set.
+  final double? latitude;
+  final double? longitude;
   final ListingStatus status;
   final bool isPublished;
   final int offerVersion;
@@ -173,6 +183,8 @@ class ListingDraftInput {
     required this.bathrooms,
     required this.description,
     required this.exactAddress,
+    this.latitude,
+    this.longitude,
   });
 
   final ListingOperation operation;
@@ -185,6 +197,10 @@ class ListingDraftInput {
   final String? description;
   final String? exactAddress;
 
+  /// Null on both clears the point on the server.
+  final double? latitude;
+  final double? longitude;
+
   Map<String, Object?> toJson() => {
     'operation': operation.wireName,
     'base_price': basePrice,
@@ -195,6 +211,8 @@ class ListingDraftInput {
     'bathrooms': bathrooms,
     'description': description,
     'exact_address': exactAddress,
+    'latitude': latitude,
+    'longitude': longitude,
   };
 }
 
@@ -209,6 +227,13 @@ String? _optionalString(Map<String, Object?> json, String key) {
   if (value == null) return null;
   if (value is! String) throw FormatException('Invalid string field: $key');
   return value;
+}
+
+double? _optionalDouble(Map<String, Object?> json, String key) {
+  final value = json[key];
+  if (value == null) return null;
+  if (value is! num) throw FormatException('Invalid number field: $key');
+  return value.toDouble();
 }
 
 int _int(Map<String, Object?> json, String key) {

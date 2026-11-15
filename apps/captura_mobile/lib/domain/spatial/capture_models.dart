@@ -70,40 +70,104 @@ enum OpeningType {
   );
 }
 
+class CapturedWallDimension {
+  const CapturedWallDimension({
+    required this.wallId,
+    required this.lengthM,
+    required this.heightM,
+  });
+  factory CapturedWallDimension.fromJson(Map<String, Object?> json) {
+    final value = CapturedWallDimension(
+      wallId: json['wallId']! as String,
+      lengthM: readDouble(json, 'lengthM'),
+      heightM: readDouble(json, 'heightM'),
+    );
+    if (!value.isValid) {
+      throw const FormatException('Invalid captured wall dimension');
+    }
+    return value;
+  }
+  final String wallId;
+  final double lengthM;
+  final double heightM;
+  bool get isValid =>
+      wallId.isNotEmpty &&
+      lengthM.isFinite &&
+      lengthM > 0 &&
+      heightM.isFinite &&
+      heightM > 0;
+  Map<String, Object?> toJson() => {
+    'wallId': wallId,
+    'lengthM': lengthM,
+    'heightM': heightM,
+  };
+}
+
 /// A door or window on edge [edgeIndex] of a room contour (edge `i` goes from
 /// corner `i` to corner `i + 1`). [position] (0..1) is the opening centre
 /// along that edge, measured from its start corner.
 class RoomOpening {
   const RoomOpening({
     required this.id,
-    required this.edgeIndex,
-    required this.position,
+    this.edgeIndex,
+    this.position,
     required this.width,
     required this.height,
     required this.type,
+    this.wallId,
+    this.offsetFromWallStartM,
     double? sillHeight,
   }) : _sillHeight = sillHeight;
 
-  factory RoomOpening.fromJson(Map<String, Object?> json) => RoomOpening(
-    id: json['id']! as String,
-    edgeIndex: (json['edgeIndex']! as num).toInt(),
-    position: readDouble(json, 'position'),
-    width: readDouble(json, 'width'),
-    height: readDouble(json, 'height'),
-    type: OpeningType.fromWire(json['type']),
-    sillHeight: readOptionalDouble(json, 'sillHeight'),
-  );
+  factory RoomOpening.fromJson(Map<String, Object?> json) {
+    final type = OpeningType.fromWire(json['type']);
+    final isLegacyWindow =
+        type == OpeningType.window &&
+        !json.containsKey('sillHeight') &&
+        !json.containsKey('wallId') &&
+        !json.containsKey('offsetFromWallStartM');
+    final opening = RoomOpening(
+      id: json['id']! as String,
+      edgeIndex: (json['edgeIndex'] as num?)?.toInt(),
+      position: readOptionalDouble(json, 'position'),
+      width: readDouble(json, 'width'),
+      height: readDouble(json, 'height'),
+      type: type,
+      wallId: json['wallId'] as String?,
+      offsetFromWallStartM: readOptionalDouble(json, 'offsetFromWallStartM'),
+      sillHeight: isLegacyWindow
+          ? RoomOpening.defaultWindowSill
+          : readOptionalDouble(json, 'sillHeight'),
+    );
+    final offset = opening.offsetFromWallStartM;
+    final sill = opening.explicitSillHeight;
+    if (opening.id.isEmpty ||
+        !opening.width.isFinite ||
+        !opening.height.isFinite ||
+        opening.width <= 0 ||
+        opening.height <= 0 ||
+        (offset != null && (!offset.isFinite || offset < 0)) ||
+        (sill != null && (!sill.isFinite || sill < 0)) ||
+        (opening.type == OpeningType.door && sill != null && sill != 0)) {
+      throw const FormatException('Invalid room opening dimensions');
+    }
+    return opening;
+  }
 
   /// Default sill of a window, as in the scene contract.
   static const double defaultWindowSill = 0.9;
 
   final String id;
-  final int edgeIndex;
-  final double position;
+  final int? edgeIndex;
+  final double? position;
   final double width;
   final double height;
   final OpeningType type;
+  final String? wallId;
+  final double? offsetFromWallStartM;
   final double? _sillHeight;
+
+  double? get explicitSillHeight => _sillHeight;
 
   /// Sill height: 0 for doors, 0.9 m by default for windows.
   double get sillHeight =>
@@ -115,6 +179,8 @@ class RoomOpening {
     double? width,
     double? height,
     OpeningType? type,
+    String? wallId,
+    double? offsetFromWallStartM,
     double? sillHeight,
   }) => RoomOpening(
     id: id,
@@ -123,17 +189,22 @@ class RoomOpening {
     width: width ?? this.width,
     height: height ?? this.height,
     type: type ?? this.type,
+    wallId: wallId ?? this.wallId,
+    offsetFromWallStartM: offsetFromWallStartM ?? this.offsetFromWallStartM,
     sillHeight: sillHeight ?? _sillHeight,
   );
 
   Map<String, Object?> toJson() => {
     'id': id,
-    'edgeIndex': edgeIndex,
-    'position': position,
+    if (edgeIndex != null) 'edgeIndex': edgeIndex,
+    if (position != null) 'position': position,
     'width': width,
     'height': height,
     'type': type.wire,
-    'sillHeight': sillHeight,
+    if (wallId != null) 'wallId': wallId,
+    if (offsetFromWallStartM != null)
+      'offsetFromWallStartM': offsetFromWallStartM,
+    if (_sillHeight != null) 'sillHeight': _sillHeight,
   };
 }
 
@@ -224,26 +295,71 @@ class OccupancyBox {
   };
 }
 
-/// Independent tape-measure length of one contour edge typed by the agent.
+enum WallMeasurementProvenance {
+  aiDetected('ai_detected'),
+  derivedScale('derived_scale'),
+  derivedGeometry('derived_geometry'),
+  user('user'),
+  unresolved('unresolved');
+
+  const WallMeasurementProvenance(this.wire);
+  final String wire;
+
+  static WallMeasurementProvenance fromWire(Object? value) {
+    // PR4 drafts used "ocr" for any automatic interpretation. Preserve their
+    // meaning while writing the provider-neutral provenance from now on.
+    if (value == 'ocr') return WallMeasurementProvenance.aiDetected;
+    if (value == null) return WallMeasurementProvenance.user;
+    return values.firstWhere(
+      (item) => item.wire == value,
+      // Explicit future/unknown values cannot become authoritative.
+      orElse: () => WallMeasurementProvenance.unresolved,
+    );
+  }
+}
+
+/// Metric length of one semantic contour edge and its local provenance.
 class ReferenceMeasurement {
   const ReferenceMeasurement({
     required this.edgeIndex,
     required this.referenceMeters,
+    this.provenance = WallMeasurementProvenance.user,
   });
 
   factory ReferenceMeasurement.fromJson(Map<String, Object?> json) =>
       ReferenceMeasurement(
         edgeIndex: (json['edgeIndex']! as num).toInt(),
         referenceMeters: readDouble(json, 'referenceMeters'),
+        provenance: WallMeasurementProvenance.fromWire(json['provenance']),
       );
 
   final int edgeIndex;
   final double referenceMeters;
+  final WallMeasurementProvenance provenance;
 
   Map<String, Object?> toJson() => {
     'edgeIndex': edgeIndex,
     'referenceMeters': referenceMeters,
+    if (provenance != WallMeasurementProvenance.user)
+      'provenance': provenance.wire,
   };
+}
+
+/// Meaning of [CapturedRoom.references]. Missing persisted values deliberately
+/// retain the PR2/PR3 behavior: one or more references calibrate the complete
+/// contour with a uniform scale factor.
+enum RoomMeasurementMode {
+  legacyUniform('legacy_uniform'),
+  wallConstraints('wall_constraints');
+
+  const RoomMeasurementMode(this.wire);
+  final String wire;
+
+  static RoomMeasurementMode fromWire(Object? value) => values.firstWhere(
+    (mode) => mode.wire == value,
+    orElse: () =>
+        throw FormatException('Unknown room measurement mode: $value'),
+  );
 }
 
 /// Session metrics reported by the native capture.
@@ -282,6 +398,72 @@ class CaptureMetrics {
     'depthSupported': depthSupported,
     'cornerHitDistances': cornerHitDistances,
     'floorY': floorY,
+  };
+}
+
+/// Technology used to obtain a room's geometry.
+///
+/// Only the two ARCore methods are operational camera captures today. The
+/// remaining values make provenance explicit without exposing unfinished UI.
+enum RoomAcquisitionMethod {
+  legacyArcore('legacy_arcore'),
+  arcoreWalkthrough('arcore_walkthrough'),
+  arcoreWalls('arcore_walls'),
+  manual('manual'),
+  manualSketch('manual_sketch'),
+  floorplanTrace('floorplan_trace'),
+  floorplan('floorplan'),
+  assistedCamera('assisted_camera');
+
+  const RoomAcquisitionMethod(this.wire);
+
+  final String wire;
+
+  bool get usesArCore =>
+      this == legacyArcore || this == arcoreWalkthrough || this == arcoreWalls;
+
+  static RoomAcquisitionMethod fromWire(Object? wire) => values.firstWhere(
+    (method) => method.wire == wire,
+    orElse: () => throw FormatException('Unknown acquisition method: $wire'),
+  );
+}
+
+/// Provenance of a room geometry and, only for ARCore captures, its native
+/// session metrics. Manual geometry never fabricates AR tracking values.
+class RoomAcquisition {
+  const RoomAcquisition({required this.method, this.arMetrics})
+    : assert(
+        (method != RoomAcquisitionMethod.legacyArcore &&
+                method != RoomAcquisitionMethod.arcoreWalkthrough &&
+                method != RoomAcquisitionMethod.arcoreWalls) ||
+            arMetrics != null,
+        'ARCore acquisitions require capture metrics',
+      ),
+      assert(
+        method == RoomAcquisitionMethod.legacyArcore ||
+            method == RoomAcquisitionMethod.arcoreWalkthrough ||
+            method == RoomAcquisitionMethod.arcoreWalls ||
+            arMetrics == null,
+        'Non-AR acquisitions cannot contain ARCore metrics',
+      );
+
+  factory RoomAcquisition.fromJson(Map<String, Object?> json) {
+    final method = RoomAcquisitionMethod.fromWire(json['method']);
+    final rawMetrics = json['arMetrics'];
+    return RoomAcquisition(
+      method: method,
+      arMetrics: rawMetrics == null
+          ? null
+          : CaptureMetrics.fromJson(asJsonMap(rawMetrics, 'arMetrics')),
+    );
+  }
+
+  final RoomAcquisitionMethod method;
+  final CaptureMetrics? arMetrics;
+
+  Map<String, Object?> toJson() => {
+    'method': method.wire,
+    if (arMetrics != null) 'arMetrics': arMetrics!.toJson(),
   };
 }
 
@@ -342,20 +524,22 @@ class RoomPlacement {
   String toString() => 'RoomPlacement($x, $z, $rotationDegrees°)';
 }
 
-/// One room captured in its own AR session, in its room-local frame: the
-/// first corner is the origin, the first edge lies on +x and corners run
-/// counter-clockwise (see [FloorPoint] for the orientation convention).
-/// Corners trace the interior face of the walls.
+/// One room geometry in its room-local frame. Its acquisition technology is
+/// recorded separately in [acquisition]. The first corner is the origin, the
+/// first edge lies on +x and corners run counter-clockwise (see [FloorPoint]
+/// for the orientation convention). Corners trace the interior wall faces.
 class CapturedRoom {
   const CapturedRoom({
     required this.id,
     required this.name,
     required this.corners,
-    required this.height,
+    this.height,
     required this.openings,
     required this.boxes,
     required this.references,
-    required this.metrics,
+    required this.acquisition,
+    this.wallDimensions = const [],
+    this.measurementMode = RoomMeasurementMode.legacyUniform,
     this.placement = RoomPlacement.identity,
   });
 
@@ -442,44 +626,102 @@ class CapturedRoom {
       openings: const [],
       boxes: boxes,
       references: const [],
-      metrics: CaptureMetrics.fromJson(asJsonMap(json['metrics'], 'metrics')),
+      acquisition: RoomAcquisition(
+        method:
+            json['metrics'] is Map &&
+                (json['metrics']! as Map)['method'] == 'walkthrough'
+            ? RoomAcquisitionMethod.arcoreWalkthrough
+            : RoomAcquisitionMethod.arcoreWalls,
+        arMetrics: CaptureMetrics.fromJson(
+          asJsonMap(json['metrics'], 'metrics'),
+        ),
+      ),
     );
   }
 
-  factory CapturedRoom.fromJson(Map<String, Object?> json) => CapturedRoom(
-    id: json['id']! as String,
-    name: json['name']! as String,
-    corners: [
+  factory CapturedRoom.fromJson(Map<String, Object?> json) {
+    final corners = [
       for (final corner in asJsonList(json['corners'], 'corners'))
         FloorPoint.fromJson(asJsonMap(corner, 'corners[]')),
-    ],
-    height: RoomHeight.fromJson(asJsonMap(json['height'], 'height')),
-    openings: [
-      for (final opening in asJsonList(json['openings'], 'openings'))
-        RoomOpening.fromJson(asJsonMap(opening, 'openings[]')),
-    ],
-    boxes: [
-      for (final box in asJsonList(json['boxes'], 'boxes'))
-        OccupancyBox.fromJson(asJsonMap(box, 'boxes[]')),
-    ],
-    references: [
-      for (final reference in asJsonList(json['references'], 'references'))
-        ReferenceMeasurement.fromJson(asJsonMap(reference, 'references[]')),
-    ],
-    metrics: CaptureMetrics.fromJson(asJsonMap(json['metrics'], 'metrics')),
-    placement: RoomPlacement.fromJson(
-      asJsonMap(json['placement'], 'placement'),
-    ),
-  );
+    ];
+    final wallDimensions = json['wallDimensions'] == null
+        ? const <CapturedWallDimension>[]
+        : [
+            for (final value in asJsonList(
+              json['wallDimensions'],
+              'wallDimensions',
+            ))
+              CapturedWallDimension.fromJson(
+                asJsonMap(value, 'wallDimensions[]'),
+              ),
+          ];
+    if (wallDimensions.map((value) => value.wallId).toSet().length !=
+        wallDimensions.length) {
+      throw const FormatException('Duplicate captured wall id');
+    }
+    if (wallDimensions.isNotEmpty && wallDimensions.length != corners.length) {
+      throw const FormatException(
+        'Wall dimensions must match the room contour',
+      );
+    }
+    if (json['height'] == null && wallDimensions.isEmpty) {
+      throw const FormatException('Room needs height or wall dimensions');
+    }
+    return CapturedRoom(
+      id: json['id']! as String,
+      name: json['name']! as String,
+      corners: corners,
+      height: json['height'] == null
+          ? null
+          : RoomHeight.fromJson(asJsonMap(json['height'], 'height')),
+      openings: [
+        for (final opening in asJsonList(json['openings'], 'openings'))
+          RoomOpening.fromJson(asJsonMap(opening, 'openings[]')),
+      ],
+      boxes: [
+        for (final box in asJsonList(json['boxes'], 'boxes'))
+          OccupancyBox.fromJson(asJsonMap(box, 'boxes[]')),
+      ],
+      references: [
+        for (final reference in asJsonList(json['references'], 'references'))
+          ReferenceMeasurement.fromJson(asJsonMap(reference, 'references[]')),
+      ],
+      acquisition: json['acquisition'] == null
+          // Drafts written before adaptive capture were exclusively ARCore
+          // rooms. Their exact native mode was not persisted, so provenance
+          // remains explicitly unknown within ARCore and is never manual.
+          ? RoomAcquisition(
+              method: RoomAcquisitionMethod.legacyArcore,
+              arMetrics: CaptureMetrics.fromJson(
+                asJsonMap(json['metrics'], 'metrics'),
+              ),
+            )
+          : RoomAcquisition.fromJson(
+              asJsonMap(json['acquisition'], 'acquisition'),
+            ),
+      wallDimensions: wallDimensions,
+      measurementMode: json['measurementMode'] == null
+          ? RoomMeasurementMode.legacyUniform
+          : RoomMeasurementMode.fromWire(json['measurementMode']),
+      placement: RoomPlacement.fromJson(
+        asJsonMap(json['placement'], 'placement'),
+      ),
+    );
+  }
 
   final String id;
   final String name;
   final List<FloorPoint> corners;
-  final RoomHeight height;
+  final RoomHeight? height;
   final List<RoomOpening> openings;
   final List<OccupancyBox> boxes;
   final List<ReferenceMeasurement> references;
-  final CaptureMetrics metrics;
+  final RoomAcquisition acquisition;
+  final List<CapturedWallDimension> wallDimensions;
+  final RoomMeasurementMode measurementMode;
+
+  /// Native metrics for an ARCore room, absent for technology-neutral rooms.
+  CaptureMetrics? get metrics => acquisition.arMetrics;
   final RoomPlacement placement;
 
   /// Corners in the property frame after applying [placement].
@@ -487,23 +729,40 @@ class CapturedRoom {
     for (final corner in corners) placement.apply(corner),
   ];
 
+  int? edgeIndexForOpening(RoomOpening opening) {
+    final wallId = opening.wallId;
+    if (wallId == null) return opening.edgeIndex;
+    // Visual-plan projections can retain canonical wall ids before all
+    // measurements are confirmed. Their derived edge index remains usable
+    // for local door alignment, but is not metric wall evidence.
+    if (wallDimensions.isEmpty) return opening.edgeIndex;
+    final index = wallDimensions.indexWhere((wall) => wall.wallId == wallId);
+    return index < 0 ? null : index;
+  }
+
   CapturedRoom copyWith({
     String? name,
     List<FloorPoint>? corners,
     RoomHeight? height,
+    bool clearHeight = false,
     List<RoomOpening>? openings,
     List<OccupancyBox>? boxes,
     List<ReferenceMeasurement>? references,
+    RoomAcquisition? acquisition,
+    List<CapturedWallDimension>? wallDimensions,
+    RoomMeasurementMode? measurementMode,
     RoomPlacement? placement,
   }) => CapturedRoom(
     id: id,
     name: name ?? this.name,
     corners: corners ?? this.corners,
-    height: height ?? this.height,
+    height: clearHeight ? null : height ?? this.height,
     openings: openings ?? this.openings,
     boxes: boxes ?? this.boxes,
     references: references ?? this.references,
-    metrics: metrics,
+    acquisition: acquisition ?? this.acquisition,
+    wallDimensions: wallDimensions ?? this.wallDimensions,
+    measurementMode: measurementMode ?? this.measurementMode,
     placement: placement ?? this.placement,
   );
 
@@ -511,11 +770,14 @@ class CapturedRoom {
     'id': id,
     'name': name,
     'corners': [for (final corner in corners) corner.toJson()],
-    'height': height.toJson(),
+    if (height != null) 'height': height!.toJson(),
     'openings': [for (final opening in openings) opening.toJson()],
     'boxes': [for (final box in boxes) box.toJson()],
     'references': [for (final reference in references) reference.toJson()],
-    'metrics': metrics.toJson(),
+    'acquisition': acquisition.toJson(),
+    if (wallDimensions.isNotEmpty)
+      'wallDimensions': [for (final wall in wallDimensions) wall.toJson()],
+    'measurementMode': measurementMode.wire,
     'placement': placement.toJson(),
   };
 }

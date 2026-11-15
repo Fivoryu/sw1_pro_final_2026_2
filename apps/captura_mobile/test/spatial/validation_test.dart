@@ -219,5 +219,62 @@ void main() {
         'La abertura es más alta que el ambiente. Revisá su altura.',
       );
     });
+
+    test('wallId opening uses independent horizontal and vertical limits', () {
+      const physicalRoom = CapturedRoom(
+        id: 'f07',
+        name: 'F07',
+        corners: [
+          FloorPoint(0, 0),
+          FloorPoint(4, 0),
+          FloorPoint(4, 3),
+          FloorPoint(0, 3),
+        ],
+        openings: [],
+        boxes: [],
+        references: [],
+        acquisition: RoomAcquisition(
+          method: RoomAcquisitionMethod.floorplanTrace,
+        ),
+        wallDimensions: [
+          CapturedWallDimension(wallId: 'a', lengthM: 4, heightM: 2.4),
+          CapturedWallDimension(wallId: 'b', lengthM: 3, heightM: 2.8),
+          CapturedWallDimension(wallId: 'c', lengthM: 4, heightM: 2.4),
+          CapturedWallDimension(wallId: 'd', lengthM: 3, heightM: 2.4),
+        ],
+        measurementMode: RoomMeasurementMode.wallConstraints,
+      );
+      const valid = RoomOpening(
+        id: 'window',
+        wallId: 'a',
+        width: 1.2,
+        height: 1.1,
+        offsetFromWallStartM: .5,
+        sillHeight: .8,
+        type: OpeningType.window,
+      );
+      expect(validateOpening(physicalRoom, valid), isEmpty);
+      expect(
+        validateOpening(
+          physicalRoom,
+          valid.copyWith(offsetFromWallStartM: 3),
+        ).map((issue) => issue.code),
+        contains(OpeningIssueCode.outsideEdge),
+      );
+      expect(
+        validateOpening(
+          physicalRoom,
+          valid.copyWith(sillHeight: 1.4),
+        ).map((issue) => issue.code),
+        contains(OpeningIssueCode.windowAboveCeiling),
+      );
+      expect(
+        validateOpening(
+          physicalRoom,
+          valid.copyWith(wallId: 'missing'),
+        ).map((issue) => issue.code),
+        [OpeningIssueCode.edgeIndexOutOfRange],
+      );
+    });
   });
 }

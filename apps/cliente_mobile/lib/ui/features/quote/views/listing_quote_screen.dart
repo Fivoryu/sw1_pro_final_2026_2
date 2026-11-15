@@ -6,6 +6,7 @@ import '../../../../data/services/quote_api.dart';
 import '../../../../domain/catalog_controller.dart' show DisplayCurrency;
 import '../../../../domain/quote_controller.dart';
 import '../../catalog/views/catalog_format.dart';
+import '../../../theme/andean_theme.dart';
 
 /// Minimal quote screen (F06.5): selects extras of the listing, requests a
 /// snapshot from `POST /api/v1/quotes` and shows exactly what the server
@@ -58,9 +59,9 @@ class _ListingQuoteScreenState extends State<ListingQuoteScreen> {
       body: AnimatedBuilder(
         animation: _controller,
         builder: (context, _) => ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
           children: [
-            Text('Precio base', style: theme.textTheme.titleMedium),
+            Text('Precio base', style: AndeanTypography.headlineMd),
             const SizedBox(height: 4),
             Text(
               chargeLabel(widget.detail.listing.basePrice, widget.detail.listing.operation),
@@ -69,7 +70,7 @@ class _ListingQuoteScreenState extends State<ListingQuoteScreen> {
             if (widget.detail.extras.isEmpty)
               const Text('Este inmueble no tiene opcionales publicados.')
             else ...[
-              Text('Opcionales', style: theme.textTheme.titleMedium),
+              Text('Opcionales', style: AndeanTypography.headlineMd),
               for (final extra in widget.detail.extras)
                 CheckboxListTile(
                   key: ValueKey('quote-extra-${extra.extraId}'),
@@ -88,7 +89,7 @@ class _ListingQuoteScreenState extends State<ListingQuoteScreen> {
                 ),
             ],
             const SizedBox(height: 16),
-            Text('Moneda de la cotización', style: theme.textTheme.titleMedium),
+            Text('Moneda de la cotización', style: AndeanTypography.headlineMd),
             const SizedBox(height: 4),
             SegmentedButton<DisplayCurrency>(
               segments: [
@@ -150,7 +151,7 @@ class _QuoteSnapshotCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Cotización ${snapshot.quoteId}', style: theme.textTheme.titleMedium),
+            Text('Cotización ${snapshot.quoteId}', style: AndeanTypography.headlineMd),
             const SizedBox(height: 8),
             Text('Vigencia de precios: oferta v${snapshot.offerVersion}'),
             const SizedBox(height: 8),
@@ -166,7 +167,10 @@ class _QuoteSnapshotCard extends StatelessWidget {
             const Divider(),
             Text(
               'Total: ${formatMoney(oneTime.amount, oneTime.currency)}',
-              style: theme.textTheme.titleMedium,
+              style: AndeanTypography.headlineMd.copyWith(
+                color: AndeanColors.primaryContainer,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             if (snapshot.monthlyTotal.amount != '0.00')
               Text(

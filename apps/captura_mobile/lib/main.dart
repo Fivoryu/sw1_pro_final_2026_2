@@ -5,13 +5,23 @@ import 'data/services/ar_capture_channel.dart';
 import 'data/services/capture_draft_store.dart';
 import 'data/services/staff_auth_api.dart';
 import 'data/services/staff_capture_api.dart';
+import 'data/services/staff_chat_api.dart';
+import 'data/services/staff_notifications_api.dart';
+import 'data/services/staff_reviews_api.dart';
 import 'data/services/photo_source.dart';
 import 'data/services/staff_credential_store.dart';
 import 'data/services/staff_listing_photos_api.dart';
 import 'data/services/staff_listings_api.dart';
 import 'data/services/staff_scene_api.dart';
+import 'data/services/staff_floorplan_interpretation_api.dart';
 import 'domain/listing_drafts_controller.dart';
+import 'domain/staff_chat_controller.dart';
+import 'domain/staff_notifications_controller.dart';
+import 'domain/staff_reviews_controller.dart';
 import 'domain/staff_session_controller.dart';
+import 'ui/chat/chat_inbox_screen.dart';
+import 'ui/notifications/staff_notifications_screen.dart';
+import 'ui/reviews/staff_reviews_screen.dart';
 import 'ui/listings/listings_screen.dart';
 import 'ui/theme/andean_theme.dart';
 
@@ -50,7 +60,11 @@ void main() => runApp(
     captureStore: FileCaptureDraftStore(root: getApplicationSupportDirectory),
     arCapture: MethodChannelArCapture(),
     captureApi: StaffCaptureApi(baseUrl: _apiBaseUrl),
+    floorplanInterpreter: StaffFloorplanInterpretationApi(baseUrl: _apiBaseUrl),
     uploadStore: FilePendingUploadStore(root: getApplicationSupportDirectory),
+    chatApi: StaffChatApi(baseUrl: _apiBaseUrl),
+    notificationsApi: StaffNotificationsApi(baseUrl: _apiBaseUrl),
+    reviewsApi: StaffReviewsApi(baseUrl: _apiBaseUrl),
   ),
 );
 
@@ -66,6 +80,10 @@ class CaptureApp extends StatelessWidget {
     this.arCapture,
     this.captureApi,
     this.uploadStore,
+    this.floorplanInterpreter,
+    this.chatApi,
+    this.notificationsApi,
+    this.reviewsApi,
   });
 
   final StaffSessionController controller;
@@ -77,6 +95,10 @@ class CaptureApp extends StatelessWidget {
   final ArCapture? arCapture;
   final StaffCaptureApi? captureApi;
   final PendingUploadStore? uploadStore;
+  final FloorplanInterpretationApi? floorplanInterpreter;
+  final StaffChatApi? chatApi;
+  final StaffNotificationsApi? notificationsApi;
+  final StaffReviewsApi? reviewsApi;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -92,6 +114,10 @@ class CaptureApp extends StatelessWidget {
       arCapture: arCapture,
       captureApi: captureApi,
       uploadStore: uploadStore,
+      floorplanInterpreter: floorplanInterpreter,
+      chatApi: chatApi,
+      notificationsApi: notificationsApi,
+      reviewsApi: reviewsApi,
     ),
   );
 }
@@ -109,6 +135,10 @@ class AgentAccessScreen extends StatefulWidget {
     this.arCapture,
     this.captureApi,
     this.uploadStore,
+    this.floorplanInterpreter,
+    this.chatApi,
+    this.notificationsApi,
+    this.reviewsApi,
   });
 
   final StaffSessionController controller;
@@ -120,6 +150,10 @@ class AgentAccessScreen extends StatefulWidget {
   final ArCapture? arCapture;
   final StaffCaptureApi? captureApi;
   final PendingUploadStore? uploadStore;
+  final FloorplanInterpretationApi? floorplanInterpreter;
+  final StaffChatApi? chatApi;
+  final StaffNotificationsApi? notificationsApi;
+  final StaffReviewsApi? reviewsApi;
 
   @override
   State<AgentAccessScreen> createState() => _AgentAccessScreenState();
@@ -133,15 +167,58 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
   final _code = TextEditingController();
   bool _submitting = false;
   bool _passwordVisible = false;
+  late final StaffNotificationsController? _notifications =
+      widget.notificationsApi == null
+      ? null
+      : StaffNotificationsController(
+          api: widget.notificationsApi!,
+          session: widget.controller,
+        );
 
   @override
   void initState() {
     super.initState();
+    widget.controller.addListener(_syncNotifications);
     widget.controller.restore();
+  }
+
+  /// The inbox only polls while agency staff are signed in.
+  void _syncNotifications() => _notifications?.sync();
+
+  void _openReviews() {
+    final api = widget.reviewsApi;
+    if (api == null) return;
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => StaffReviewsScreen(
+          controller: StaffReviewsController(
+            api: api,
+            session: widget.controller,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openNotifications() {
+    final api = widget.chatApi;
+    final notifications = _notifications;
+    if (api == null || notifications == null) return;
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => StaffNotificationsScreen(
+          controller: notifications,
+          chatApi: api,
+          session: widget.controller,
+        ),
+      ),
+    );
   }
 
   @override
   void dispose() {
+    widget.controller.removeListener(_syncNotifications);
+    _notifications?.dispose();
     _email.dispose();
     _password.dispose();
     _code.dispose();
@@ -156,7 +233,21 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('RoomForge Captura')),
+    appBar: AppBar(
+      title: const Text('RoomForge Captura'),
+      actions: [
+        if (_notifications != null && widget.chatApi != null)
+          ListenableBuilder(
+            listenable: widget.controller,
+            builder: (context, _) => _notifications.available
+                ? StaffNotificationsBell(
+                    controller: _notifications,
+                    onPressed: _openNotifications,
+                  )
+                : const SizedBox.shrink(),
+          ),
+      ],
+    ),
     body: ListenableBuilder(
       listenable: widget.controller,
       builder: (context, _) => _PrototypePage(
@@ -315,6 +406,23 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
     ),
   ];
 
+  void _openChat() {
+    final api = widget.chatApi;
+    if (api == null) return;
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ChatInboxScreen(
+          controller: StaffInboxController(
+            api: api,
+            session: widget.controller,
+          ),
+          api: api,
+          session: widget.controller,
+        ),
+      ),
+    );
+  }
+
   List<Widget> _signedIn(BuildContext context) {
     final account = widget.controller.account;
     return [
@@ -345,6 +453,7 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
                 arCapture: widget.arCapture,
                 captureApi: widget.captureApi,
                 uploadStore: widget.uploadStore,
+                floorplanInterpreter: widget.floorplanInterpreter,
               ),
             ),
           ),
@@ -352,6 +461,26 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
         icon: const Icon(Icons.arrow_forward),
         label: const Text('Continuar a mis inmuebles'),
       ),
+      if (widget.chatApi != null && canUseStaffChat(account)) ...[
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const ValueKey('access-chat-button'),
+          style: OutlinedButton.styleFrom(minimumSize: _actionMinSize),
+          onPressed: _openChat,
+          icon: const Icon(Icons.chat_bubble_outline),
+          label: const Text('Conversaciones'),
+        ),
+      ],
+      if (widget.reviewsApi != null && canUseStaffChat(account)) ...[
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const ValueKey('access-reviews-button'),
+          style: OutlinedButton.styleFrom(minimumSize: _actionMinSize),
+          onPressed: _openReviews,
+          icon: const Icon(Icons.star_outline),
+          label: const Text('Reseñas'),
+        ),
+      ],
       const SizedBox(height: 8),
       OutlinedButton(
         key: const ValueKey('access-logout'),

@@ -39,6 +39,17 @@ String localEscrowAddressForCurrency(
 bool _isLocalAddress(String value) =>
     RegExp(r'^0x[0-9a-fA-F]{40}$').hasMatch(value);
 
+String permitIdHash(String apiId) => '0x${codec.hex.encode(keccakUtf8(apiId))}';
+
+bool permitIdsMatch({
+  required String permitReservationId,
+  required String permitListingId,
+  required String reservationId,
+  required String listingId,
+}) =>
+    permitReservationId == permitIdHash(reservationId) &&
+    permitListingId == permitIdHash(listingId);
+
 /// Sends the customer-side allowance and deposit to the local Hardhat escrow,
 /// then asks the backend to verify the mined receipt/event before UI state can
 /// be treated as deposited.
@@ -110,7 +121,14 @@ class HardhatReservationExecutor {
     }
 
     final permit = await _api.requestDepositPermit(reservation.reservationId);
-    _validatePermit(permit, reservation, walletAddress);
+    _validatePermit(
+      permit,
+      reservation,
+      walletAddress,
+      expectedAction: 0,
+      errorMessage:
+          'El permiso de depósito no coincide con esta reserva/wallet.',
+    );
     final amount = BigInt.from(permit.amount);
 
     final approveData = _erc20Abi().functions
@@ -178,16 +196,14 @@ class HardhatReservationExecutor {
         action: 'cancel',
       ),
     );
-    if (permit.action != 3 ||
-        permit.reservationId != reservation.reservationId ||
-        permit.listingId != reservation.listingId ||
-        permit.actor.toLowerCase() != walletAddress.toLowerCase() ||
-        permit.customer.toLowerCase() != walletAddress.toLowerCase() ||
-        !RegExp(r'^0x[0-9a-fA-F]{130}$').hasMatch(permit.signature)) {
-      throw StateError(
-        'El permiso de cancelación no coincide con esta reserva/wallet.',
-      );
-    }
+    _validatePermit(
+      permit,
+      reservation,
+      walletAddress,
+      expectedAction: 3,
+      errorMessage:
+          'El permiso de cancelación no coincide con esta reserva/wallet.',
+    );
     final action = [
       _bytes32(permit.reservationId),
       _bytes32(permit.listingId),
@@ -291,18 +307,22 @@ class HardhatReservationExecutor {
   void _validatePermit(
     ReservationPermit permit,
     ReservationRecord reservation,
-    String walletAddress,
-  ) {
-    if (permit.action != 0 ||
-        permit.reservationId != reservation.reservationId ||
-        permit.listingId != reservation.listingId ||
+    String walletAddress, {
+    required int expectedAction,
+    required String errorMessage,
+  }) {
+    if (permit.action != expectedAction ||
+        !permitIdsMatch(
+          permitReservationId: permit.reservationId,
+          permitListingId: permit.listingId,
+          reservationId: reservation.reservationId,
+          listingId: reservation.listingId,
+        ) ||
         permit.actor.toLowerCase() != walletAddress.toLowerCase() ||
         permit.customer.toLowerCase() != walletAddress.toLowerCase() ||
         permit.amount <= 0 ||
         !RegExp(r'^0x[0-9a-fA-F]{130}$').hasMatch(permit.signature)) {
-      throw StateError(
-        'El permiso de depósito no coincide con esta reserva/wallet.',
-      );
+      throw StateError(errorMessage);
     }
   }
 

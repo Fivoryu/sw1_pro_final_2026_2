@@ -6,6 +6,93 @@ import 'package:http/http.dart' as http;
 
 import 'staff_auth_failure.dart';
 
+/// Explicit Scene v2 wire DTO. The local scene keeps dimensional lineage and
+/// review metadata, while the strict backend accepts only these contract
+/// fields. Keeping this allowlist at the HTTP boundary prevents internal F07
+/// evidence from leaking into a request with `extra="forbid"`.
+Map<String, Object?> sceneUploadDocument(Map<String, Object?> document) {
+  Map<String, Object?> map(Object? value) =>
+      (value as Map).cast<String, Object?>();
+  List<Object?> list(String key) => (document[key] as List?) ?? const [];
+  Map<String, Object?> point(Object? value) {
+    final source = map(value);
+    return {'x': source['x'], 'z': source['z']};
+  }
+
+  Map<String, Object?> wall(Object? value) {
+    final source = map(value);
+    return {
+      'id': source['id'],
+      'start': point(source['start']),
+      'end': point(source['end']),
+      'height': source['height'],
+      'thickness': source['thickness'],
+      if (source['color'] != null) 'color': source['color'],
+      if (source['heightSource'] != null)
+        'heightSource': source['heightSource'],
+    };
+  }
+
+  Map<String, Object?> opening(Object? value) {
+    final source = map(value);
+    return {
+      'id': source['id'],
+      'wallId': source['wallId'],
+      'position': source['position'],
+      'width': source['width'],
+      'height': source['height'],
+      'type': source['type'],
+      if (source['sillHeight'] != null) 'sillHeight': source['sillHeight'],
+    };
+  }
+
+  Map<String, Object?> room(Object? value) {
+    final source = map(value);
+    return {
+      'id': source['id'],
+      if (source['name'] != null) 'name': source['name'],
+      'wallIds': source['wallIds'],
+      if (source['color'] != null) 'color': source['color'],
+    };
+  }
+
+  Map<String, Object?> position(Object? value) {
+    final source = map(value);
+    return {'x': source['x'], 'y': source['y'], 'z': source['z']};
+  }
+
+  Map<String, Object?> dimensions(Object? value) {
+    final source = map(value);
+    return {
+      'width': source['width'],
+      'height': source['height'],
+      'depth': source['depth'],
+    };
+  }
+
+  Map<String, Object?> object(Object? value) {
+    final source = map(value);
+    return {
+      'id': source['id'],
+      'type': source['type'],
+      'position': position(source['position']),
+      'dimensions': dimensions(source['dimensions']),
+      'color': source['color'],
+      if (source['source'] != null) 'source': source['source'],
+      if (source['confidence'] != null) 'confidence': source['confidence'],
+    };
+  }
+
+  return {
+    'version': document['version'],
+    'unit': document['unit'],
+    'walls': [for (final value in list('walls')) wall(value)],
+    'openings': [for (final value in list('openings')) opening(value)],
+    'rooms': [for (final value in list('rooms')) room(value)],
+    'objects': [for (final value in list('objects')) object(value)],
+  };
+}
+
 /// Remote state of a listing's scene.
 sealed class RemoteSceneState {
   const RemoteSceneState();
@@ -98,7 +185,7 @@ class StaffSceneApi {
       'PUT',
       _scenePath(agencyId, listingId),
       accessToken: accessToken,
-      body: document,
+      body: sceneUploadDocument(document),
       headers: baseEtag == null
           ? const {'If-None-Match': '*'}
           : {'If-Match': baseEtag},

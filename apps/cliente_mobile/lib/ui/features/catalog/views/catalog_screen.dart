@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../../../../data/map_config.dart';
 import '../../../../data/models/catalog_models.dart';
+import '../../../../data/services/device_location.dart';
+import '../../../../data/services/customer_chat_api.dart';
+import '../../../../data/services/customer_reviews_api.dart';
 import '../../../../data/services/quote_api.dart';
 import '../../../../data/services/scene_api.dart';
 import '../../../../domain/catalog_controller.dart';
@@ -11,6 +15,7 @@ import 'catalog_format.dart';
 import 'listing_detail_screen.dart';
 import 'listing_photo.dart';
 import '../../../theme/andean_theme.dart';
+import '../../../theme/andean_widgets.dart';
 
 /// The "Explorar" tab: published listings with filters, paging and honest
 /// loading, empty and error states.
@@ -22,9 +27,19 @@ class CatalogScreen extends StatefulWidget {
     this.sessionController,
     this.sceneApi,
     this.quoteApi,
+    this.chatApi,
+    this.reviewsApi,
+    this.deviceLocation = const GeolocatorDeviceLocation(),
+    this.mapConfig = MapTileConfig.openStreetMap,
   });
 
   final CatalogController controller;
+
+  /// Reads the customer's position for the "near me" search; never stored.
+  final DeviceLocation deviceLocation;
+
+  /// Tile provider of the zone map.
+  final MapTileConfig mapConfig;
   final CustomerReservationsController? reservationsController;
   final CustomerSessionController? sessionController;
 
@@ -33,6 +48,12 @@ class CatalogScreen extends StatefulWidget {
 
   /// When provided, scene objects open their commercial hotspot.
   final QuoteApi? quoteApi;
+
+  /// When provided, the listing detail offers a chat with the agency.
+  final CustomerChatApi? chatApi;
+
+  /// When provided, the listing detail shows ratings and lets eligible customers rate.
+  final CustomerReviewsApi? reviewsApi;
 
   @override
   State<CatalogScreen> createState() => _CatalogScreenState();
@@ -54,7 +75,11 @@ class _CatalogScreenState extends State<CatalogScreen> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => CatalogFiltersSheet(initialFilters: _controller.filters),
+      builder: (_) => CatalogFiltersSheet(
+        initialFilters: _controller.filters,
+        deviceLocation: widget.deviceLocation,
+        mapConfig: widget.mapConfig,
+      ),
     );
     if (filters != null && mounted) await _controller.search(filters);
   }
@@ -69,6 +94,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
           sessionController: widget.sessionController,
           sceneApi: widget.sceneApi,
           quoteApi: widget.quoteApi,
+          chatApi: widget.chatApi,
+          reviewsApi: widget.reviewsApi,
         ),
       ),
     );
@@ -83,11 +110,11 @@ class _CatalogScreenState extends State<CatalogScreen> {
         builder: (context, _) => ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            Text(
+            const AndeanSectionHeading(
               'Explorar inmuebles',
-              style: Theme.of(context).textTheme.headlineSmall,
+              subtitle: 'Encontrá un espacio que se sienta propio.',
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             DropdownButtonFormField<DisplayCurrency>(
               key: const ValueKey('catalog-currency-selector'),
               initialValue: _controller.displayCurrency,
@@ -115,6 +142,18 @@ class _CatalogScreenState extends State<CatalogScreen> {
               icon: const Icon(Icons.tune),
               label: const Text('Filtrar catálogo'),
             ),
+            if (_controller.filters.hasZone) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: AndeanPillChip(
+                  key: const ValueKey('catalog-zone-chip'),
+                  label:
+                      'Zona: a ${_controller.filters.radiusKm.round()} km del punto elegido',
+                  backgroundColor: AndeanColors.surfaceContainerHigh,
+                ),
+              ),
+            ],
             if (!_controller.filters.isEmpty) ...[
               const SizedBox(height: 8),
               SizedBox(
@@ -170,6 +209,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
             Text(
               _controller.filters.isEmpty
                   ? 'Todavía no hay inmuebles publicados.'
+                  : _controller.filters.hasZone
+                  ? 'No hay inmuebles publicados dentro de ese radio. Probá ampliarlo.'
                   : 'No hay inmuebles con esos filtros.',
               key: const ValueKey('catalog-empty'),
               style: Theme.of(context).textTheme.bodyLarge,
@@ -207,7 +248,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
       margin: const EdgeInsets.only(bottom: 16),
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
         side: const BorderSide(color: AndeanColors.border, width: 1),
       ),
       color: AndeanColors.surfaceContainerLowest,
@@ -286,31 +327,18 @@ class _CatalogScreenState extends State<CatalogScreen> {
                           ),
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AndeanColors.surfaceContainerHigh,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          operationLabel(listing.operation),
-                          style: AndeanTypography.labelSm.copyWith(
-                            color: AndeanColors.onSurfaceVariant,
-                          ),
-                        ),
+                      AndeanPillChip(
+                        label: operationLabel(listing.operation),
+                        backgroundColor: AndeanColors.surfaceContainerHigh,
                       ),
                     ],
                   ),
                   const SizedBox(height: 8),
                   Text(
                     chargeLabel(listing.basePrice, listing.operation),
-                    style: AndeanTypography.headlineSm.copyWith(
+                    style: AndeanTypography.headlineMd.copyWith(
                       color: AndeanColors.primaryContainer,
                       fontWeight: FontWeight.bold,
-                      fontSize: 18,
                     ),
                   ),
                 ],

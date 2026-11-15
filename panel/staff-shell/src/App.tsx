@@ -1,8 +1,10 @@
 import { InvitationAcceptancePage } from "./features/auth/InvitationAcceptancePage";
 import { ProtectedStaffShell } from "./features/auth/ProtectedStaffShell";
+import { LandingPage } from "./features/landing/LandingPage";
 import { SceneViewer } from "./features/editor3d/SceneViewer";
 
 const INVITATION_PATH = "/accept-invitation";
+const STAFF_PANEL_PATH = "/panel";
 const BACKEND_INVITATION_PATH = "/invitations/accept";
 const BACKEND_INVITATION_PREFIX = `${BACKEND_INVITATION_PATH}/`;
 const URL_SAFE_INVITATION_TOKEN = /^[A-Za-z0-9_-]+$/;
@@ -53,5 +55,11 @@ export function App() {
     );
   }
 
-  return <ProtectedStaffShell />;
+  if (currentUrl.pathname === STAFF_PANEL_PATH) {
+    return <ProtectedStaffShell />;
+  }
+
+  // Known paths render their exclusive surfaces above; everything else is the
+  // public landing page, so staff stays behind /panel.
+  return <LandingPage />;
 }

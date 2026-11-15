@@ -13,6 +13,7 @@ class AgencyCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(min_length=1, max_length=36)
+    name: str | None = Field(default=None, max_length=120)
 
     @field_validator("id")
     @classmethod
@@ -21,9 +22,20 @@ class AgencyCreate(BaseModel):
             raise ValueError("Agency ID must not be blank")
         return value
 
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Agency name must not be blank")
+        return stripped
+
 
 class AgencyListItem(BaseModel):
     id: str
+    name: str
 
 
 class AgencyPagination(BaseModel):
@@ -98,3 +110,23 @@ class AgentListItem(BaseModel):
 class AgentListResponse(BaseModel):
     agents: list[AgentListItem]
     pagination: AgencyPagination
+
+# --- Nuevos esquemas para el Dashboard de Métricas (F14.4) ---
+
+class ListingMetrics(BaseModel):
+    draft: int = 0
+    in_review: int = 0
+    published: int = 0
+
+class ReservationMetrics(BaseModel):
+    pending: int = 0
+    accepted: int = 0
+    rejected: int = 0
+    cancelled: int = 0
+    expired: int = 0
+
+class AgencyMetricsResponse(BaseModel):
+    listings: ListingMetrics
+    active_quotes: int = 0
+    reservations: ReservationMetrics
+

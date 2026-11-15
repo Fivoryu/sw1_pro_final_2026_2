@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../../../data/models/catalog_models.dart';
 import '../../../../data/models/reservation_models.dart';
+import '../../../../data/services/customer_chat_api.dart';
+import '../../../../data/services/customer_reviews_api.dart';
 import '../../../../data/services/quote_api.dart';
 import '../../../../data/services/scene_api.dart';
 import '../../../../domain/catalog_controller.dart';
@@ -9,8 +11,12 @@ import '../../../../domain/customer_reservations_controller.dart';
 import '../../../../domain/customer_session_controller.dart';
 import 'catalog_format.dart';
 import 'listing_photo.dart';
+import '../../chat/chat_conversation_screen.dart';
+import '../../reviews/listing_reviews_section.dart';
 import '../../viewer/views/listing_viewer_screen.dart';
 import '../../viewer/views/object_hotspot_sheet.dart';
+import '../../../theme/andean_theme.dart';
+import '../../../theme/andean_widgets.dart';
 
 /// Public detail of one published listing.
 ///
@@ -25,7 +31,13 @@ class ListingDetailScreen extends StatefulWidget {
     this.sessionController,
     this.sceneApi,
     this.quoteApi,
+    this.chatApi,
+    this.reviewsApi,
   });
+
+  /// When provided, the detail offers a chat with the agency.
+  final CustomerChatApi? chatApi;
+  final CustomerReviewsApi? reviewsApi;
 
   final CatalogController controller;
   final String listingId;
@@ -54,6 +66,32 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
   String _quoteCurrency = 'BOB';
   QuoteSnapshot? _quote;
   String? _bookingMessage;
+  String? _chatMessage;
+  bool _openingChat = false;
+
+  Future<void> _openChat() async {
+    final session = widget.sessionController;
+    if (session?.status != CustomerSessionStatus.signedIn) {
+      setState(
+        () => _chatMessage = 'Iniciá sesión en Cuenta para chatear con la inmobiliaria.',
+      );
+      return;
+    }
+    setState(() {
+      _openingChat = true;
+      _chatMessage = null;
+    });
+    final failure = await openListingChat(
+      context,
+      api: widget.chatApi!,
+      listingId: widget.listingId,
+    );
+    if (!mounted) return;
+    setState(() {
+      _openingChat = false;
+      _chatMessage = failure;
+    });
+  }
 
   @override
   void initState() {
@@ -119,7 +157,6 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
       );
     }
 
-    final theme = Theme.of(context);
     final listing = detail.listing;
     return ListView(
       key: const ValueKey('property-detail-content'),
@@ -127,17 +164,29 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
       children: [
         _gallery(context, detail),
         const SizedBox(height: 16),
-        Text(locationLabel(listing), style: theme.textTheme.headlineSmall),
-        const SizedBox(height: 4),
-        Text(operationLabel(listing.operation)),
-        const SizedBox(height: 4),
-        Text(roomsLabel(detail.bedrooms, detail.bathrooms)),
+        AndeanSectionHeading(locationLabel(listing)),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            AndeanPillChip(label: operationLabel(listing.operation)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                roomsLabel(detail.bedrooms, detail.bathrooms),
+                style: AndeanTypography.bodySm,
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: 24),
-        Text('Precio base', style: theme.textTheme.titleMedium),
+        Text('Precio base', style: AndeanTypography.headlineMd),
         const SizedBox(height: 8),
         Text(
           chargeLabel(listing.basePrice, listing.operation),
-          style: theme.textTheme.titleLarge,
+          style: AndeanTypography.headlineLg.copyWith(
+            color: AndeanColors.primaryContainer,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         const SizedBox(height: 4),
         Text(basePriceNote(listing.operation)),
@@ -147,7 +196,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
           Text(cotizableNote(widget.controller.displayCurrency.code)),
         ],
         const SizedBox(height: 24),
-        Text('Opcionales', style: theme.textTheme.titleMedium),
+        Text('Opcionales', style: AndeanTypography.headlineMd),
         const SizedBox(height: 8),
         if (detail.extras.isEmpty)
           const Text('Este inmueble no tiene opcionales.')
@@ -211,7 +260,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                 children: [
                   Text(
                     'Cotización del servidor',
-                    style: theme.textTheme.titleMedium,
+                    style: AndeanTypography.headlineMd,
                   ),
                   const SizedBox(height: 8),
                   for (final line in quote.lines)
@@ -255,12 +304,36 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
           const SizedBox(height: 8),
           Text(_bookingMessage!, key: const ValueKey('booking-message')),
         ],
+        if (widget.chatApi != null) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 48,
+            child: OutlinedButton.icon(
+              key: const ValueKey('detail-open-chat'),
+              onPressed: _openingChat ? null : _openChat,
+              icon: const Icon(Icons.chat_bubble_outline),
+              label: const Text('Chatear con la inmobiliaria'),
+            ),
+          ),
+          if (_chatMessage != null) ...[
+            const SizedBox(height: 8),
+            Text(_chatMessage!, key: const ValueKey('chat-message')),
+          ],
+        ],
+        if (widget.reviewsApi != null) ...[
+          const SizedBox(height: 24),
+          ListingReviewsSection(
+            api: widget.reviewsApi!,
+            listingId: widget.listingId,
+            sessionController: widget.sessionController,
+          ),
+        ],
         const SizedBox(height: 24),
-        Text('Recorrido 3D', style: theme.textTheme.titleMedium),
+        Text('Recorrido 3D', style: AndeanTypography.headlineMd),
         const SizedBox(height: 8),
         _sceneSection(context),
         const SizedBox(height: 24),
-        Text('Disponibilidad', style: theme.textTheme.titleMedium),
+        Text('Disponibilidad', style: AndeanTypography.headlineMd),
         const SizedBox(height: 8),
         const Text('Disponibilidad no consultada ni confirmada.'),
       ],
