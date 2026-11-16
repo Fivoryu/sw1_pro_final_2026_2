@@ -2,13 +2,17 @@ package com.example.captura_mobile.video
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.SurfaceTexture
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -21,12 +25,14 @@ import android.view.MotionEvent
 import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
@@ -34,6 +40,7 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import com.example.captura_mobile.R
 import com.example.captura_mobile.ar.JsonWriter
 import java.io.File
 import java.util.Locale
@@ -72,10 +79,14 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
     private lateinit var warningText: TextView
     private lateinit var hintText: TextView
     private lateinit var timerText: TextView
-    private lateinit var recordButton: Button
-    private lateinit var nextRoomButton: Button
-    private lateinit var referenceButton: Button
-    private lateinit var stopButton: Button
+    private lateinit var recordButton: View
+    private lateinit var nextRoomButton: View
+    private lateinit var referenceButton: View
+    private lateinit var stopButton: View
+    private lateinit var timerChip: View
+    private lateinit var rail: FrameLayout
+    private lateinit var chipsLayer: FrameLayout
+    private var cancelDialog: AlertDialog? = null
     private lateinit var controlsPanel: LinearLayout
     private lateinit var referencePanel: ScrollView
     private lateinit var presetSpinner: Spinner
@@ -117,7 +128,38 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
+    private fun rounded(color: Int, radiusDp: Int, strokeColor: Int? = null) = GradientDrawable().apply {
+        setColor(color)
+        cornerRadius = dp(radiusDp).toFloat()
+        if (strokeColor != null) setStroke(dp(2), strokeColor)
+    }
+
+    /** Rounded chip over the preview used by the instruction and the banners. */
+    private fun chip(textView: TextView, background: Int, horizontalDp: Int = 12, verticalDp: Int = 6) = textView.apply {
+        setPadding(dp(horizontalDp), dp(verticalDp), dp(horizontalDp), dp(verticalDp))
+        this.background = rounded(background, 16)
+    }
+
+    private fun wrap() = ViewGroup.LayoutParams.WRAP_CONTENT
+    private fun match() = ViewGroup.LayoutParams.MATCH_PARENT
+
     private fun buildUi() {
+        // Edge-to-edge: the preview is full-bleed and every control is padded by the system insets.
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+
         textureView = TextureView(this).apply {
             surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                 override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
@@ -131,71 +173,215 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             }
         }
         markView = ReferenceMarkView(this).apply { visibility = View.GONE }
-        warningText = TextView(this).apply {
-            text = "Sin referencia: el modelo quedará sin escala métrica."
-            setTextColor(Color.BLACK)
-            setBackgroundColor(Color.argb(220, 255, 193, 7))
-            setPadding(dp(8), dp(4), dp(8), dp(4))
-            visibility = View.GONE
+        stage = AspectFrameLayout(this).apply {
+            addView(textureView, match(), match())
+            addView(markView, match(), match())
         }
-        hintText = TextView(this).apply {
-            setTextColor(Color.BLACK)
-            setBackgroundColor(Color.argb(220, 255, 255, 255))
-            setPadding(dp(8), dp(4), dp(8), dp(4))
-            visibility = View.GONE
-        }
+
         timerText = TextView(this).apply {
             setTextColor(Color.WHITE)
-            setBackgroundColor(Color.argb(140, 0, 0, 0))
-            setPadding(dp(8), dp(4), dp(8), dp(4))
+            textSize = 15f
+            typeface = Typeface.MONOSPACE
+            text = "00:00"
+        }
+        val recDot = View(this).apply { background = rounded(RED, 6) }
+        timerChip = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(6), dp(14), dp(6))
+            background = rounded(SCRIM, 16)
+            addView(recDot, LinearLayout.LayoutParams(dp(10), dp(10)).apply { rightMargin = dp(8) })
+            addView(timerText)
             visibility = View.GONE
         }
-        stage = AspectFrameLayout(this).apply {
-            addView(textureView, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            addView(markView, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            addView(warningText, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START))
-            addView(hintText, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
-            addView(timerText, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END))
-        }
+        statusText = chip(
+            TextView(this).apply {
+                setTextColor(Color.WHITE)
+                textSize = 14f
+                gravity = Gravity.CENTER
+                maxLines = 2
+                text = IDLE_INSTRUCTION
+            },
+            SCRIM,
+            horizontalDp = 16,
+            verticalDp = 8,
+        )
+        warningText = chip(
+            TextView(this).apply {
+                text = "Sin referencia: el modelo quedará sin escala métrica."
+                setTextColor(Color.BLACK)
+                textSize = 13f
+                visibility = View.GONE
+            },
+            Color.argb(235, 255, 193, 7),
+        )
+        hintText = chip(
+            TextView(this).apply {
+                setTextColor(Color.BLACK)
+                textSize = 13f
+                visibility = View.GONE
+            },
+            Color.argb(235, 255, 255, 255),
+        )
 
-        statusText = TextView(this).apply {
+        recordButton = circleAction(R.drawable.ic_video_record, "Grabar") { startRecording() }
+        stopButton = circleAction(R.drawable.ic_video_stop, "Detener y guardar") { finishRecording(reachedTimeLimit = false) }
+            .apply { visibility = View.GONE }
+        referenceButton = railButton(R.drawable.ic_video_reference, "Marcar referencia") { beginReference() }
+            .apply { visibility = View.GONE }
+        nextRoomButton = railButton(R.drawable.ic_video_next_room, "Siguiente ambiente") { nextRoom() }
+            .apply { visibility = View.GONE }
+        val cancelButton = TextView(this).apply {
+            text = "Cancelar"
             setTextColor(Color.WHITE)
-            text = "Encuadrá un objeto de medida conocida (hoja A4, tarjeta, puerta) y tocá «Grabar». " +
-                "Después marcá la referencia, o seguí sin ella."
+            textSize = 13f
+            gravity = Gravity.CENTER
+            minHeight = dp(48)
+            minWidth = dp(48)
+            contentDescription = "Cancelar"
+            setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_video_close, 0, 0, 0)
+            compoundDrawablePadding = dp(4)
+            compoundDrawableTintList = ColorStateList.valueOf(Color.WHITE)
+            isClickable = true
+            setOnClickListener { cancelCapture() }
         }
-        recordButton = button("Grabar") { startRecording() }
-        referenceButton = button("Marcar referencia") { beginReference() }.apply { visibility = View.GONE }
-        nextRoomButton = button("Siguiente ambiente") { nextRoom() }.apply { visibility = View.GONE }
-        stopButton = button("Detener y guardar") { finishRecording(reachedTimeLimit = false) }.apply { visibility = View.GONE }
-        val cancelButton = button("Cancelar") { cancelCapture() }
         controlsPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(statusText)
-            addView(recordButton)
-            addView(referenceButton)
-            addView(nextRoomButton)
-            addView(stopButton)
-            addView(cancelButton)
+            gravity = Gravity.CENTER_HORIZONTAL
+            addView(cancelButton, LinearLayout.LayoutParams(wrap(), wrap()))
+            addView(View(this@VideoCaptureActivity), LinearLayout.LayoutParams(0, 0, 1f))
+            addView(referenceButton, railItemParams())
+            addView(nextRoomButton, railItemParams())
+            addView(View(this@VideoCaptureActivity), LinearLayout.LayoutParams(0, 0, 1f))
+            addView(recordButton, railItemParams())
+            addView(stopButton, railItemParams())
         }
-        referencePanel = buildReferencePanel().apply { visibility = View.GONE }
+        // The rail runs to the window edge so its scrim also covers the navigation bar; its content is inset.
+        rail = FrameLayout(this).apply {
+            setBackgroundColor(RAIL_SCRIM)
+            addView(controlsPanel, FrameLayout.LayoutParams(match(), match()))
+        }
+        referencePanel = buildReferencePanel().apply { setBackgroundColor(Color.argb(225, 0, 0, 0)) }.also { it.visibility = View.GONE }
 
-        val side = FrameLayout(this).apply {
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            addView(controlsPanel)
-            addView(referencePanel)
+        // Overlay for the chips and banners, kept inside the safe area plus a 16dp margin and clear of the rail.
+        chipsLayer = FrameLayout(this).apply {
+            addView(timerChip, FrameLayout.LayoutParams(wrap(), wrap(), Gravity.TOP or Gravity.START))
+            addView(
+                statusText,
+                FrameLayout.LayoutParams(wrap(), wrap(), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+                    leftMargin = dp(112)
+                    rightMargin = dp(8)
+                },
+            )
+            val banners = LinearLayout(this@VideoCaptureActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(hintText, LinearLayout.LayoutParams(wrap(), wrap()).apply { topMargin = dp(8) })
+                addView(warningText, LinearLayout.LayoutParams(wrap(), wrap()).apply { topMargin = dp(8) })
+            }
+            addView(banners, FrameLayout.LayoutParams(wrap(), wrap(), Gravity.BOTTOM or Gravity.START))
         }
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+
+        val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
-            addView(stage, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-            addView(side, LinearLayout.LayoutParams(dp(260), ViewGroup.LayoutParams.MATCH_PARENT))
+            addView(stage, FrameLayout.LayoutParams(match(), match(), Gravity.CENTER))
+            addView(chipsLayer, FrameLayout.LayoutParams(match(), match()))
+            addView(rail, FrameLayout.LayoutParams(dp(RAIL_WIDTH_DP), match(), Gravity.END))
+            addView(referencePanel, FrameLayout.LayoutParams(dp(REFERENCE_PANEL_WIDTH_DP), match(), Gravity.END))
+        }
+        root.setOnApplyWindowInsetsListener { _, insets ->
+            applySafeInsets(insets)
+            insets
         }
         setContentView(root)
+        root.requestApplyInsets()
     }
 
-    private fun button(label: String, onClick: () -> Unit) = Button(this).apply {
+    /** Pads the chipsLayer, the rail and the reference panel by the system bars and the display cutout. */
+    private fun applySafeInsets(insets: WindowInsets) {
+        val left: Int
+        val top: Int
+        val right: Int
+        val bottom: Int
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            left = safe.left; top = safe.top; right = safe.right; bottom = safe.bottom
+        } else {
+            @Suppress("DEPRECATION")
+            run {
+                left = insets.systemWindowInsetLeft; top = insets.systemWindowInsetTop
+                right = insets.systemWindowInsetRight; bottom = insets.systemWindowInsetBottom
+            }
+        }
+        val margin = dp(MARGIN_DP)
+        val railWidth = dp(RAIL_WIDTH_DP) + right
+        rail.layoutParams = (rail.layoutParams as FrameLayout.LayoutParams).apply { width = railWidth }
+        controlsPanel.setPadding(dp(8), top + margin, right + dp(8), bottom + margin)
+        referencePanel.layoutParams = (referencePanel.layoutParams as FrameLayout.LayoutParams).apply {
+            width = dp(REFERENCE_PANEL_WIDTH_DP) + right
+        }
+        referencePanel.setPadding(dp(12), top + dp(8), right + dp(12), bottom + dp(8))
+        chipsLayer.setPadding(left + margin, top + margin, railWidth + margin, bottom + margin)
+    }
+
+    private fun railItemParams() = LinearLayout.LayoutParams(match(), wrap()).apply {
+        topMargin = dp(6)
+        bottomMargin = dp(6)
+    }
+
+    /** Large round action (record or stop) with its short label underneath. */
+    private fun circleAction(icon: Int, label: String, onClick: () -> Unit): LinearLayout {
+        val iconView = ImageView(this).apply {
+            setImageResource(icon)
+            scaleType = ImageView.ScaleType.CENTER
+            background = rounded(RED, 32, Color.WHITE)
+        }
+        val text = TextView(this).apply {
+            this.text = label
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            gravity = Gravity.CENTER
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            contentDescription = label
+            isClickable = true
+            addView(iconView, LinearLayout.LayoutParams(dp(64), dp(64)))
+            addView(text, LinearLayout.LayoutParams(wrap(), wrap()).apply { topMargin = dp(4) })
+            setOnClickListener { onClick() }
+        }
+    }
+
+    /** Secondary tonal action: icon over a short label, at least 48dp high. */
+    private fun railButton(icon: Int, label: String, onClick: () -> Unit): LinearLayout {
+        val iconView = ImageView(this).apply { setImageResource(icon) }
+        val text = TextView(this).apply {
+            this.text = label
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            gravity = Gravity.CENTER
+            maxLines = 2
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            minimumHeight = dp(60)
+            setPadding(dp(4), dp(6), dp(4), dp(6))
+            background = rounded(Color.argb(70, 255, 255, 255), 14)
+            contentDescription = label
+            isClickable = true
+            addView(iconView, LinearLayout.LayoutParams(dp(24), dp(24)))
+            addView(text, LinearLayout.LayoutParams(wrap(), wrap()))
+            setOnClickListener { onClick() }
+        }
+    }
+
+    private fun button(label: String, filled: Boolean = false, onClick: () -> Unit) = Button(this).apply {
         text = label
         minimumHeight = dp(48)
+        isAllCaps = false
+        setTextColor(Color.WHITE)
+        background = rounded(if (filled) RED else Color.argb(70, 255, 255, 255), 14)
         setOnClickListener { onClick() }
     }
 
@@ -237,7 +423,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             check(SURFACE_WALL_ID)
         }
         val hint = TextView(this).apply {
-            setTextColor(Color.WHITE)
+            setTextColor(Color.WHITE); textSize = 12f
             text = "Tocá los dos extremos del objeto sobre la imagen congelada. La grabación sigue."
         }
         val panel = LinearLayout(this).apply {
@@ -247,9 +433,9 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             addView(lengthInput)
             addView(labelInput)
             addView(surfaceGroup)
-            addView(button("Confirmar referencia") { confirmReference() })
-            addView(button("Repetir puntos") { markView.clearPoints() })
-            addView(button("Seguir sin referencia") { endReference() })
+            addView(button("Confirmar referencia", filled = true) { confirmReference() }, LinearLayout.LayoutParams(match(), wrap()).apply { topMargin = dp(2) })
+            addView(button("Repetir puntos") { markView.clearPoints() }, LinearLayout.LayoutParams(match(), wrap()).apply { topMargin = dp(2) })
+            addView(button("Seguir sin referencia") { endReference() }, LinearLayout.LayoutParams(match(), wrap()).apply { topMargin = dp(2) })
         }
         return ScrollView(this).apply { addView(panel) }
     }
@@ -327,10 +513,9 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             referenceButton.visibility = View.VISIBLE
             nextRoomButton.visibility = View.VISIBLE
             stopButton.visibility = View.VISIBLE
-            timerText.visibility = View.VISIBLE
+            timerChip.visibility = View.VISIBLE
             warningText.visibility = View.VISIBLE
-            statusText.text = "Grabando. Marcá la referencia ahora si querés escala métrica; después recorré " +
-                "el inmueble y tocá «Siguiente ambiente» al cambiar de ambiente."
+            statusText.text = RECORDING_INSTRUCTION
             main.post(tick)
         }
     }
@@ -358,7 +543,8 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         phase = Phase.MARKING
         markView.show(frame, frameNs)
         markView.visibility = View.VISIBLE
-        controlsPanel.visibility = View.GONE
+        rail.visibility = View.GONE
+        chipsLayer.visibility = View.GONE
         referencePanel.visibility = View.VISIBLE
         presetSpinner.setSelection(0)
         lengthInput.setText(ReferencePresets.ALL[0].lengthM.toString())
@@ -394,7 +580,8 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         markView.visibility = View.GONE
         markView.clear()
         referencePanel.visibility = View.GONE
-        controlsPanel.visibility = View.VISIBLE
+        rail.visibility = View.VISIBLE
+        chipsLayer.visibility = View.VISIBLE
     }
 
     // endregion
@@ -407,10 +594,14 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         main.removeCallbacks(tick)
         hintText.visibility = View.GONE
         statusText.text = "Guardando el recorrido…"
-        controlsPanel.visibility = View.VISIBLE
+        rail.visibility = View.VISIBLE
+        chipsLayer.visibility = View.VISIBLE
         referencePanel.visibility = View.GONE
         markView.visibility = View.GONE
-        listOf(referenceButton, nextRoomButton, stopButton).forEach { it.isEnabled = false }
+        listOf(referenceButton, nextRoomButton, stopButton).forEach {
+            it.isEnabled = false
+            it.alpha = 0.4f
+        }
         val active = recorder ?: return
         active.stopRecording { videoOk ->
             // Runs on the camera thread; packaging is slow, so it gets its own thread.
@@ -481,6 +672,21 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
 
     private fun cancelCapture() {
         if (phase == Phase.FINISHING || phase == Phase.DONE) return
+        if (phase == Phase.RECORDING || phase == Phase.MARKING) {
+            // An unrepeatable recording: never discard it on a single tap.
+            if (cancelDialog?.isShowing == true) return
+            cancelDialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setMessage("¿Descartar esta grabación?")
+                .setPositiveButton("Descartar") { _, _ -> discardCapture() }
+                .setNegativeButton("Seguir grabando", null)
+                .show()
+            return
+        }
+        discardCapture()
+    }
+
+    private fun discardCapture() {
+        if (phase == Phase.FINISHING || phase == Phase.DONE) return
         main.removeCallbacks(tick)
         workDir.deleteRecursively()
         finishWithResult(VideoCaptureResult.cancelled())
@@ -490,6 +696,8 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         if (phase == Phase.DONE) return
         phase = Phase.DONE
         main.removeCallbacks(tick)
+        cancelDialog?.dismiss()
+        cancelDialog = null
         recorder?.release()
         recorder = null
         if (result["outcome"] != "captured") workDir.deleteRecursively()
@@ -537,17 +745,29 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         private const val SURFACE_FLOOR_ID = 9101
         private const val SURFACE_WALL_ID = 9102
         private const val TAG = "RoomForgeVideo"
+        private const val MARGIN_DP = 16
+        private const val RAIL_WIDTH_DP = 112
+        private const val REFERENCE_PANEL_WIDTH_DP = 300
+        private val RED = Color.rgb(229, 57, 53)
+        private val SCRIM = Color.argb(150, 0, 0, 0)
+        private val RAIL_SCRIM = Color.argb(170, 0, 0, 0)
+        private const val IDLE_INSTRUCTION = "Encuadrá un objeto de medida conocida y tocá Grabar"
+        private const val RECORDING_INSTRUCTION = "Grabando · marcá la referencia y recorré el inmueble"
     }
 }
 
-/** Keeps its children at the 16:9 of the recorded frame so normalised taps map onto it. */
+/**
+ * Keeps its children at the 16:9 of the recorded frame so normalised taps map onto it, scaled to cover the
+ * whole window (full-bleed): the part of the frame beyond the screen edges is cropped from view only, the
+ * recorded video is unchanged.
+ */
 internal class AspectFrameLayout(context: android.content.Context) : FrameLayout(context) {
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val maxW = MeasureSpec.getSize(widthMeasureSpec)
         val maxH = MeasureSpec.getSize(heightMeasureSpec)
-        val fitsByHeight = maxW * VideoSpec.HEIGHT > maxH * VideoSpec.WIDTH
-        val w = if (fitsByHeight) maxH * VideoSpec.WIDTH / VideoSpec.HEIGHT else maxW
-        val h = if (fitsByHeight) maxH else maxW * VideoSpec.HEIGHT / VideoSpec.WIDTH
+        val widthLimited = maxW * VideoSpec.HEIGHT > maxH * VideoSpec.WIDTH
+        val w = if (widthLimited) maxW else maxH * VideoSpec.WIDTH / VideoSpec.HEIGHT
+        val h = if (widthLimited) maxW * VideoSpec.HEIGHT / VideoSpec.WIDTH else maxH
         super.onMeasure(
             MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY),
