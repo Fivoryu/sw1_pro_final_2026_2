@@ -1,0 +1,345 @@
+package com.example.captura_mobile.video
+
+import com.example.captura_mobile.ar.JsonWriter
+import com.example.captura_mobile.ar.PackageZip
+import java.io.File
+
+/*
+ * Pure parts of the F07 video capture package, schema 2 (docs/api/f07-capture-package.md):
+ * manifest, frame and sensor logs, rooms, scale reference and the ZIP. Nothing here depends on
+ * Android so everything is JVM-tested; the Camera2 and sensor code lives in VideoRecorder.kt.
+ * Every value below is the frozen S9 contract of odd/tasks/f07-video-capture-reconstruction.md.
+ */
+
+object VideoSpec {
+    const val SCHEMA_VERSION = 2
+    const val VIDEO_FILE = "video.mp4"
+    const val FRAMES_FILE = "frames.jsonl"
+    const val SENSORS_FILE = "sensors.jsonl"
+    const val MANIFEST_FILE = "manifest.json"
+    const val WIDTH = 1280
+    const val HEIGHT = 720
+    const val FPS = 30
+    const val BITRATE_BPS = 3_000_000
+    const val SENSOR_RATE_HZ = 100
+}
+
+object VideoCaptureLimits {
+    const val MAX_DURATION_NS = 5L * 60L * 1_000_000_000L
+
+    /** The server's `MAX_PACKAGE_BYTES`: 150 MiB. */
+    const val MAX_PACKAGE_BYTES = 150L * 1024L * 1024L
+
+    fun reachedTimeLimit(startedAtNs: Long, nowNs: Long): Boolean = nowNs - startedAtNs >= MAX_DURATION_NS
+
+    fun exceedsSize(bytes: Long): Boolean = bytes > MAX_PACKAGE_BYTES
+}
+
+object TimestampSource {
+    const val REALTIME = "realtime"
+    const val UNKNOWN = "unknown"
+
+    /** Camera2 `SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME`. */
+    private const val CAMERA_SOURCE_REALTIME = 1
+
+    /** `realtime` only when the camera reports the realtime source; otherwise `unknown`. */
+    fun fromCamera(sensorInfoTimestampSource: Int?): String =
+        if (sensorInfoTimestampSource == CAMERA_SOURCE_REALTIME) REALTIME else UNKNOWN
+}
+
+// region Scale reference (S5)
+
+enum class ReferenceSurface(val wireName: String) { FLOOR("floor"), WALL("wall") }
+
+/** A point on the frame, normalised to 0..1 with the origin at the top left. */
+data class ReferencePoint(val x: Double, val y: Double) {
+    fun toMap(): Map<String, Any?> = linkedMapOf("x" to x, "y" to y)
+
+    companion object {
+        /** Taps slightly outside the frame clamp to its edge. */
+        fun fromPixels(px: Float, py: Float, width: Float, height: Float): ReferencePoint {
+            require(width > 0f && height > 0f) { "Frame size must be positive" }
+            return ReferencePoint(
+                (px / width).toDouble().coerceIn(0.0, 1.0),
+                (py / height).toDouble().coerceIn(0.0, 1.0),
+            )
+        }
+    }
+}
+
+/** An object of known length the agent marked on frame [frameNs]. */
+class ReferenceMark private constructor(
+    val frameNs: Long,
+    val p1: ReferencePoint,
+    val p2: ReferencePoint,
+    val lengthM: Double,
+    val label: String,
+    val surface: ReferenceSurface,
+) {
+    fun toMap(): Map<String, Any?> = linkedMapOf(
+        "kind" to "object",
+        "label" to label,
+        "lengthM" to lengthM,
+        "surface" to surface.wireName,
+        "frameNs" to frameNs,
+        "p1" to p1.toMap(),
+        "p2" to p2.toMap(),
+    )
+
+    companion object {
+        /** @throws IllegalArgumentException for a non-positive length or two identical ends. */
+        fun create(
+            frameNs: Long,
+            p1: ReferencePoint,
+            p2: ReferencePoint,
+            lengthM: Double,
+            label: String,
+            surface: ReferenceSurface,
+        ): ReferenceMark {
+            require(lengthM.isFinite() && lengthM > 0.0) { "The reference length must be a positive number" }
+            require(p1 != p2) { "The two ends of the reference must be different points" }
+            return ReferenceMark(frameNs, p1, p2, lengthM, label.trim().ifEmpty { "Objeto" }, surface)
+        }
+    }
+}
+
+/** Known sizes offered to the agent; the length stays editable and a free value is always allowed. */
+data class ReferencePreset(val label: String, val lengthM: Double, val surface: ReferenceSurface)
+
+object ReferencePresets {
+    val ALL = listOf(
+        ReferencePreset("Hoja A4 (lado largo)", 0.297, ReferenceSurface.WALL),
+        ReferencePreset("Tarjeta (lado largo)", 0.0856, ReferenceSurface.WALL),
+        ReferencePreset("Puerta estándar (alto)", 2.0, ReferenceSurface.FLOOR),
+    )
+}
+
+// endregion
+
+// region Rooms (S6)
+
+/** One room interval of the video, in `elapsedRealtimeNanos`: [fromNs, toNs). */
+data class VideoRoom(val id: String, val name: String, val fromNs: Long, val toNs: Long)
+
+/**
+ * Rooms of one recording. The first takes the name the agent typed (or «Ambiente 1»); «Siguiente
+ * ambiente» closes the current interval and opens the next at the same instant, so intervals
+ * never overlap and always cover the recording.
+ */
+class RoomTimeline(firstName: String) {
+    private class Open(val id: String, val name: String, val fromNs: Long)
+
+    private val firstRoomName = firstName.trim().ifEmpty { "Ambiente 1" }
+    private val closed = mutableListOf<VideoRoom>()
+    private var current: Open? = null
+
+    val currentId: String? get() = current?.id
+
+    fun start(startNs: Long) {
+        check(current == null) { "The timeline was already started" }
+        current = Open("room-1", firstRoomName, startNs)
+    }
+
+    /** Opens the next room at [nowNs]; null (and no change) when no time has passed in the current one. */
+    fun nextRoom(nowNs: Long): VideoRoom? {
+        val open = checkNotNull(current) { "The timeline was not started" }
+        if (nowNs <= open.fromNs) return null
+        closed.add(VideoRoom(open.id, open.name, open.fromNs, nowNs))
+        val number = closed.size + 1
+        current = Open("room-$number", "Ambiente $number", nowNs)
+        return VideoRoom("room-$number", "Ambiente $number", nowNs, nowNs)
+    }
+
+    /** Closes the last room at [endNs]. An empty trailing room is dropped unless it is the only one. */
+    fun finish(endNs: Long): List<VideoRoom> {
+        val open = checkNotNull(current) { "The timeline was not started" }
+        current = null
+        if (endNs > open.fromNs || closed.isEmpty()) {
+            closed.add(VideoRoom(open.id, open.name, open.fromNs, maxOf(endNs, open.fromNs)))
+        }
+        return closed.toList()
+    }
+}
+
+// endregion
+
+// region frames.jsonl / sensors.jsonl
+
+/** One entry per frame: `{"i":0,"t":<sensor timestamp ns>}`. */
+class FrameLog {
+    private val timestamps = ArrayList<Long>()
+
+    val count: Int get() = timestamps.size
+    val firstTimestampNs: Long? get() = timestamps.firstOrNull()
+
+    @Synchronized
+    fun contains(timestampNs: Long): Boolean = timestamps.contains(timestampNs)
+
+    @Synchronized
+    fun add(timestampNs: Long) {
+        timestamps.add(timestampNs)
+    }
+
+    @Synchronized
+    fun lines(): List<String> = timestamps.mapIndexed { i, t -> """{"i":$i,"t":$t}""" }
+}
+
+enum class SensorKind(val wireName: String) {
+    GYRO("gyro"),
+    ACCEL("accel"),
+    GRAVITY("gravity"),
+    MAG("mag"),
+}
+
+/** Sensor samples kept in memory (about 120k for 5 minutes) and written sorted by time. */
+class SensorLog {
+    private class Sample(val t: Long, val kind: SensorKind, val x: Float, val y: Float, val z: Float)
+
+    private val samples = ArrayList<Sample>()
+
+    /** Non-finite samples are dropped instead of written as fictitious values. */
+    @Synchronized
+    fun add(timestampNs: Long, kind: SensorKind, x: Float, y: Float, z: Float) {
+        if (!x.isFinite() || !y.isFinite() || !z.isFinite()) return
+        samples.add(Sample(timestampNs, kind, x, y, z))
+    }
+
+    @Synchronized
+    fun lines(): List<String> = samples.sortedBy { it.t }.map {
+        """{"t":${it.t},"type":"${it.kind.wireName}","x":${it.x.toDouble()},"y":${it.y.toDouble()},"z":${it.z.toDouble()}}"""
+    }
+}
+
+// endregion
+
+// region manifest, package, result
+
+data class VideoManifestInput(
+    val captureId: String,
+    val listingId: String,
+    val deviceModel: String,
+    val osVersion: String,
+    val startedAtNs: Long,
+    val timestampSource: String,
+    /** Camera2 SENSOR_ORIENTATION of the camera used (0, 90, 180 or 270); frames are stored unrotated. */
+    val sensorOrientation: Int,
+    val rooms: List<VideoRoom>,
+    val reference: ReferenceMark?,
+)
+
+/** The worker rejects a reference whose frame is not in frames.jsonl or lies outside every room. */
+object ReferenceCoverage {
+    fun isCovered(reference: ReferenceMark, frames: FrameLog, rooms: List<VideoRoom>): Boolean =
+        frames.contains(reference.frameNs) && rooms.any { reference.frameNs >= it.fromNs && reference.frameNs < it.toNs }
+}
+
+object VideoManifestBuilder {
+    fun build(input: VideoManifestInput): Map<String, Any?> {
+        require(input.listingId.isNotBlank()) { "A package needs a non-blank listingId" }
+        require(input.rooms.isNotEmpty()) { "A package needs at least one room" }
+        require(input.sensorOrientation in intArrayOf(0, 90, 180, 270)) { "Invalid sensor orientation" }
+        val manifest = linkedMapOf<String, Any?>(
+            "schemaVersion" to VideoSpec.SCHEMA_VERSION,
+            "captureId" to input.captureId,
+            "listingId" to input.listingId,
+            "device" to linkedMapOf("model" to input.deviceModel, "os" to "android", "osVersion" to input.osVersion),
+            "video" to linkedMapOf(
+                "file" to VideoSpec.VIDEO_FILE,
+                "width" to VideoSpec.WIDTH,
+                "height" to VideoSpec.HEIGHT,
+                "fps" to VideoSpec.FPS,
+                "startedAtNs" to input.startedAtNs,
+                "framesFile" to VideoSpec.FRAMES_FILE,
+                "timestampSource" to input.timestampSource,
+                "sensorOrientation" to input.sensorOrientation,
+            ),
+            "sensors" to linkedMapOf("file" to VideoSpec.SENSORS_FILE, "rateHz" to VideoSpec.SENSOR_RATE_HZ),
+            "rooms" to input.rooms.map {
+                linkedMapOf("id" to it.id, "name" to it.name, "fromNs" to it.fromNs, "toNs" to it.toNs)
+            },
+        )
+        // The reference is optional: the key is absent when the agent skipped it.
+        input.reference?.let { manifest["reference"] = it.toMap() }
+        return manifest
+    }
+}
+
+sealed class VideoPackageOutcome {
+    data class Built(val sizeBytes: Long) : VideoPackageOutcome()
+
+    /** The ZIP was above the limit and was removed. */
+    data class TooLarge(val sizeBytes: Long) : VideoPackageOutcome()
+}
+
+object VideoPackageBuilder {
+    /**
+     * Writes manifest, frames and sensors next to the recorded `video.mp4` in [workDir] and zips the
+     * directory into [target]. A ZIP above [maxBytes] is deleted and reported, never returned.
+     */
+    fun build(
+        workDir: File,
+        target: File,
+        manifest: Map<String, Any?>,
+        frames: FrameLog,
+        sensors: SensorLog,
+        maxBytes: Long = VideoCaptureLimits.MAX_PACKAGE_BYTES,
+    ): VideoPackageOutcome {
+        require(File(workDir, VideoSpec.VIDEO_FILE).isFile) { "${VideoSpec.VIDEO_FILE} is missing" }
+        File(workDir, VideoSpec.MANIFEST_FILE).writeText(JsonWriter.write(manifest))
+        writeLines(File(workDir, VideoSpec.FRAMES_FILE), frames.lines())
+        writeLines(File(workDir, VideoSpec.SENSORS_FILE), sensors.lines())
+        target.parentFile?.mkdirs()
+        PackageZip.zipDirectory(workDir, target)
+        val size = target.length()
+        if (size > maxBytes) {
+            target.delete()
+            return VideoPackageOutcome.TooLarge(size)
+        }
+        return VideoPackageOutcome.Built(size)
+    }
+
+    private fun writeLines(file: File, lines: List<String>) {
+        file.bufferedWriter().use { out -> lines.forEach { out.write(it); out.write("\n") } }
+    }
+}
+
+/** What `roomforge/video_capture` returns to Dart (outcome `captured`, `cancelled` or `error`). */
+object VideoCaptureResult {
+    const val ERROR_CAMERA_PERMISSION_DENIED = "camera_permission_denied"
+    const val ERROR_PACKAGE_TOO_LARGE = "package_too_large"
+    const val ERROR_RECORDING_FAILED = "recording_failed"
+
+    fun captured(
+        zipPath: String,
+        captureId: String,
+        sizeBytes: Long,
+        frameCount: Int,
+        rooms: List<VideoRoom>,
+        hasReference: Boolean,
+        durationMs: Long,
+        reachedTimeLimit: Boolean,
+        timestampSource: String,
+    ): Map<String, Any?> = linkedMapOf(
+        "outcome" to "captured",
+        "capturePackage" to linkedMapOf(
+            "zipPath" to zipPath,
+            "captureId" to captureId,
+            "sizeBytes" to sizeBytes,
+            "keyframeCount" to frameCount,
+            "droppedKeyframes" to 0,
+            "failedKeyframes" to 0,
+            "rooms" to rooms.map { linkedMapOf("id" to it.id, "name" to it.name) },
+        ),
+        "hasReference" to hasReference,
+        "durationMs" to durationMs,
+        "reachedTimeLimit" to reachedTimeLimit,
+        "timestampSource" to timestampSource,
+    )
+
+    fun cancelled(): Map<String, Any?> = linkedMapOf("outcome" to "cancelled")
+
+    fun error(code: String, message: String): Map<String, Any?> =
+        linkedMapOf("outcome" to "error", "code" to code, "message" to message)
+}
+
+// endregion

@@ -1,5 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- F07: live camera preview for ARCore capture only; no video is recorded and no frame is saved. -->
+    <!-- F07: camera for the ARCore capture preview and for the video walkthrough (VideoCaptureActivity),
+         which records video.mp4 with no audio track. RECORD_AUDIO is deliberately not requested. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- F14: map tiles and the API need network access in release builds. -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -36,6 +37,12 @@
             android:name=".ar.ArCaptureActivity"
             android:exported="false"
             android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode" />
+        <activity
+            android:name=".video.VideoCaptureActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode" />
         <meta-data

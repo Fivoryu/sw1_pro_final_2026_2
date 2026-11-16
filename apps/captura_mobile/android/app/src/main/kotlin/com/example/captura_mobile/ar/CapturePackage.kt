@@ -282,8 +282,10 @@ object PackageZip {
         try {
             ZipOutputStream(FileOutputStream(temporary)).use { zip ->
                 for (name in ordered) {
-                    // JPEG and PNG are already compressed: store them quickly, deflate only the manifest.
-                    zip.setLevel(if (name.endsWith(".json")) Deflater.DEFAULT_COMPRESSION else Deflater.NO_COMPRESSION)
+                    // JPEG, PNG and MP4 are already compressed: store them quickly, deflate only the text
+                    // files (manifest.json and the .jsonl logs of the video package).
+                    val text = name.endsWith(".json") || name.endsWith(".jsonl")
+                    zip.setLevel(if (text) Deflater.DEFAULT_COMPRESSION else Deflater.NO_COMPRESSION)
                     zip.putNextEntry(ZipEntry(name))
                     File(dir, name).inputStream().use { it.copyTo(zip) }
                     zip.closeEntry()
