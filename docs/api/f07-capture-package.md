@@ -151,6 +151,9 @@ Usa el flujo vigente de la API de capturas, sin cambios (ver «API» en la parte
 
 ## Compatibilidad entre esquemas `1` y `2`
 
+> **Implementado en backend (T4):** no hay código nuevo; el backend ya cumple este contrato porque trata el ZIP como opaco. Límite de 150 MiB sobre el ZIP (`422` al registrar), mismo mensaje de cola para ambos esquemas y retención de 30 días desde la subida o al aceptar, fijados por `backend/tests/test_reconstruction_v2.py`. El rechazo de `schemaVersion` desconocido ocurre en `worker3d`, no en el backend.
+
+
 - El esquema se identifica por `manifest.json` → `schemaVersion`.
 - Un paquete `1` (ARCore) y uno `2` (video) son formatos distintos y no se convierten entre sí; ningún campo del esquema `1` se reinterpreta en el `2`.
 - `reconstruct.py` y su worker siguen consumiendo el esquema `1` sin cambios; la reconstrucción desde video convive con ellos y consume solo el esquema `2`.
