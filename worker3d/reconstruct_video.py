@@ -1210,7 +1210,7 @@ def reconstruct_video(
                     name=fit.name,
                     corners=corners,
                     height=height,
-                    height_source="ceiling_plane" if measured else "assumed",
+                    height_source="estimated" if measured else "assumed",
                     measured=measured,
                 )
             )

@@ -567,7 +567,7 @@ def test_floor_walls_and_ceiling_are_fitted_and_scaled_by_a_floor_reference(tmp_
     scene = result.scene_draft
     assert wall_lengths(scene) == [3.15, 3.15, 4.15, 4.15]  # centre line = room + wall thickness
     assert {w["height"] for w in scene["walls"]} == {2.5}
-    assert {w["heightSource"] for w in scene["walls"]} == {"ceiling_plane"}
+    assert {w["heightSource"] for w in scene["walls"]} == {"estimated"}
     assert scene["unit"] == "meters"
     assert not any("Sin medida de referencia" in w for w in result.warnings)
 
