@@ -14,7 +14,7 @@ class ReferenceRectTest {
     private val quad = listOf(p(0.30, 0.30), p(0.60, 0.30), p(0.60, 0.5975), p(0.30, 0.5975))
 
     @Test fun orientStartsOnTheLongSide() {
-        val corners = ReferenceRect.orient(quad, 0.297, 0.210)
+        val corners = ReferenceRect.orient(quad, 0.297, 0.210, 1280, 720)
         assertEquals(4, corners.size)
         assertEquals(quad[0], corners[0])
         assertEquals(quad[1], corners[1])
@@ -24,7 +24,7 @@ class ReferenceRectTest {
     @Test fun orientRotatesWhenTheLongSideIsTheOtherPair() {
         // Same rectangle listed starting on the short side: 0->1 is short (vertical), 1->2 is long.
         val tall = listOf(p(0.60, 0.30), p(0.60, 0.5975), p(0.30, 0.5975), p(0.30, 0.30))
-        val corners = ReferenceRect.orient(tall, 0.297, 0.210)
+        val corners = ReferenceRect.orient(tall, 0.297, 0.210, 1280, 720)
         assertEquals(tall[1], corners[0])
         assertEquals(tall[2], corners[1])
         assertEquals(tall[3], corners[2])
@@ -34,13 +34,24 @@ class ReferenceRectTest {
     @Test fun orientMeasuresSidesInFramePixelsNotNormalisedUnits() {
         // Normalised 0.20 x 0.30 is 256 x 216 px: the horizontal pair is the long one even though 0.30 > 0.20.
         val q = listOf(p(0.40, 0.10), p(0.60, 0.10), p(0.60, 0.40), p(0.40, 0.40))
-        val corners = ReferenceRect.orient(q, 0.297, 0.210)
+        val corners = ReferenceRect.orient(q, 0.297, 0.210, 1280, 720)
         assertEquals(q[0], corners[0])
         assertEquals(q[1], corners[1])
     }
 
+    @Test fun orientMeasuresSidesOnTheStoredFrameOfEachSize() {
+        // Normalised 0.20 x 0.30: on a 16:9 frame it is 256 x 216 px (the horizontal pair is long), on a 4:3 frame
+        // it is 288 x 324 px (the vertical pair is long). The same quad gets a different start corner.
+        val q = listOf(p(0.40, 0.10), p(0.60, 0.10), p(0.60, 0.40), p(0.40, 0.40))
+        val on169 = ReferenceRect.orient(q, 0.297, 0.210, 1280, 720)
+        assertEquals(q[0], on169[0])
+        val on43 = ReferenceRect.orient(q, 0.297, 0.210, 1440, 1080)
+        assertEquals(q[1], on43[0])
+        assertEquals(q[2], on43[1])
+    }
+
     private fun build(source: ReferenceRectSource = ReferenceRectSource.AUTO): ReferenceMark {
-        val corners = ReferenceRect.orient(quad, 0.297, 0.210)
+        val corners = ReferenceRect.orient(quad, 0.297, 0.210, 1280, 720)
         val rect = ReferenceRect.create(0.297, 0.210, corners, source)
         return ReferenceMark.create(5L, corners[0], corners[1], 0.297, "Hoja A4", ReferenceSurface.WALL, rect)
     }
@@ -93,7 +104,7 @@ class ReferenceRectTest {
     }
 
     @Test fun rejectsRectIncoherentWithMark() {
-        val corners = ReferenceRect.orient(quad, 0.297, 0.210)
+        val corners = ReferenceRect.orient(quad, 0.297, 0.210, 1280, 720)
         val rect = ReferenceRect.create(0.297, 0.210, corners, ReferenceRectSource.AUTO)
         // widthM != lengthM
         assertThrows(IllegalArgumentException::class.java) {

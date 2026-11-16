@@ -56,7 +56,7 @@ import kotlin.concurrent.thread
  * Video walkthrough capture (F07, schema 2): preview, recording with «Siguiente ambiente», and the
  * optional scale reference marked on a frozen frame at the start. No ARCore. The hardware work is
  * in [VideoRecorder] and the package logic in VideoPackage.kt. Works in the four orientations (T17): the
- * recorded frame stays the raw 1280x720 sensor image, the preview is rotated upright for display only
+ * recorded frame stays the raw sensor image in the negotiated size (4:3 preferred), the preview is rotated upright for display only
  * ([PreviewGeometry]), and the reference points and corners are mapped back to the stored frame before they
  * reach the package. The orientation is locked while a recording is in progress.
  */
@@ -100,6 +100,9 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
     private lateinit var cancelButton: TextView
     private lateinit var banners: LinearLayout
     private var sensorOrientation = 90
+
+    /** Size of the stored frame; the preferred one until the recorder negotiates it with the camera. */
+    private var videoSize = VideoSpec.PREFERRED_SIZES.first()
     private var portrait = false
     private var controlsBuilt = false
 
@@ -373,11 +376,18 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         textureView.setTransform(matrix)
     }
 
-    /** Places the rail, the chips, the reference panel and the stage by the safe insets for the current orientation. */
+    /**
+     * Places the rail, the chips, the reference panel and the stage by the safe insets for the current orientation.
+     * The whole recorded frame is always visible (letterbox, never cropped): the controls use the space it leaves.
+     * Landscape: the image sits at the left and the rail takes the rest of the width. Portrait: the image sits just
+     * above the bottom rail and the top bar (Cancelar, timer, instruction) uses the space above it.
+     */
     private fun applyLayout() {
         val margin = dp(MARGIN_DP)
-        val fit = phase == Phase.MARKING && portrait
+        val marking = phase == Phase.MARKING
         val panelHeight = (root.height * PORTRAIT_PANEL_FRACTION).toInt()
+        val rotation = imageRotation()
+        val stageParams: FrameLayout.LayoutParams
         if (portrait) {
             val railHeight = dp(PORTRAIT_RAIL_DP) + insets.bottom
             rail.layoutParams = FrameLayout.LayoutParams(match(), railHeight, Gravity.BOTTOM)
@@ -385,18 +395,33 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             referencePanel.layoutParams = FrameLayout.LayoutParams(match(), panelHeight, Gravity.BOTTOM)
             referencePanel.setPadding(insets.left + dp(12), dp(8), insets.right + dp(12), insets.bottom + dp(8))
             chipsLayer.setPadding(insets.left + margin, insets.top + margin, insets.right + margin, railHeight + margin)
+            statusText.maxWidth = Int.MAX_VALUE
+            // While marking, the image stays on top above the bottom panel; otherwise it sits on the rail.
+            stageParams = if (marking) {
+                FrameLayout.LayoutParams(match(), match(), Gravity.TOP or Gravity.CENTER_HORIZONTAL)
+                    .apply { topMargin = insets.top; bottomMargin = panelHeight }
+            } else {
+                FrameLayout.LayoutParams(match(), match(), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
+                    .apply { topMargin = insets.top + dp(TOP_BAR_DP); bottomMargin = railHeight }
+            }
         } else {
-            val railWidth = dp(RAIL_WIDTH_DP) + insets.right
+            val minRail = dp(RAIL_WIDTH_DP) + insets.right
+            val (stageWidth, _) = PreviewGeometry.stageSize(
+                rotation, videoSize.width, videoSize.height, (root.width - insets.left - minRail).coerceAtLeast(1), root.height,
+            )
+            val railWidth = maxOf(minRail, root.width - insets.left - stageWidth)
             rail.layoutParams = FrameLayout.LayoutParams(railWidth, match(), Gravity.END)
             controlsPanel.setPadding(dp(8), insets.top + margin, insets.right + dp(8), insets.bottom + margin)
             referencePanel.layoutParams = FrameLayout.LayoutParams(dp(REFERENCE_PANEL_WIDTH_DP) + insets.right, match(), Gravity.END)
             referencePanel.setPadding(dp(12), insets.top + dp(8), insets.right + dp(12), insets.bottom + dp(8))
             chipsLayer.setPadding(insets.left + margin, insets.top + margin, railWidth + margin, insets.bottom + margin)
+            // The instruction chip clears the timer chip on its left and never grows past the image.
+            statusText.maxWidth = (stageWidth - 2 * margin - dp(112) - dp(8)).coerceAtLeast(dp(160))
+            stageParams = FrameLayout.LayoutParams(match(), match(), Gravity.START or Gravity.CENTER_VERTICAL)
+                .apply { leftMargin = insets.left; rightMargin = railWidth }
         }
-        // While marking in portrait the whole frame stays visible above the bottom panel; otherwise the stage covers the window.
-        stage.layoutParams = FrameLayout.LayoutParams(match(), match(), if (fit) Gravity.TOP or Gravity.CENTER_HORIZONTAL else Gravity.CENTER)
-            .apply { if (fit) topMargin = insets.top }
-        stage.configure(imageRotation(), cover = !fit, reservedBottom = if (fit) panelHeight else 0)
+        stage.layoutParams = stageParams
+        stage.configure(rotation, videoSize.width, videoSize.height)
         markView.centeredDefault = portrait
     }
 
@@ -425,7 +450,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             chipsLayer.addView(timerChip, FrameLayout.LayoutParams(wrap(), wrap(), Gravity.TOP or Gravity.END).apply { topMargin = dp(6) })
             chipsLayer.addView(
                 statusText,
-                FrameLayout.LayoutParams(wrap(), wrap(), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(60) },
+                FrameLayout.LayoutParams(wrap(), wrap(), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(56) },
             )
         } else {
             controlsPanel.orientation = LinearLayout.VERTICAL
@@ -625,6 +650,13 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         }
     }
 
+    override fun onVideoSize(size: VideoSize) {
+        main.post {
+            videoSize = size
+            updateOrientation()
+        }
+    }
+
     override fun onPreviewReady() {
         // Nothing to do: the Grabar button is always enabled once the activity is shown.
     }
@@ -811,7 +843,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             else -> ReferenceRectSource.AUTO
         }
         try {
-            val corners = ReferenceRect.orient(quad, width, height)
+            val corners = ReferenceRect.orient(quad, width, height, videoSize.width, videoSize.height)
             val rect = ReferenceRect.create(width, height, corners, source)
             reference = ReferenceMark.create(markView.frameNs, corners[0], corners[1], width, labelInput.text.toString(), surface, rect)
         } catch (e: IllegalArgumentException) {
@@ -915,6 +947,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
                     sensorOrientation = active.sensorOrientation,
                     rooms = rooms,
                     reference = usableReference,
+                    videoSize = active.videoSize,
                 ),
             )
             val zip = File(filesDir, "capture_packages/$captureId.zip")
@@ -1046,6 +1079,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         private const val RAIL_WIDTH_DP = 112
         private const val REFERENCE_PANEL_WIDTH_DP = 300
         private const val PORTRAIT_RAIL_DP = 124
+        private const val TOP_BAR_DP = 128
         private const val SECONDARY_WIDTH_DP = 96
         private const val PORTRAIT_PANEL_FRACTION = 0.46f
         private val RED = Color.rgb(229, 57, 53)
@@ -1057,28 +1091,27 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
 }
 
 /**
- * Keeps its children at the aspect of the UPRIGHT preview image (16:9 in landscape, 9:16 in portrait) so normalised
- * taps map onto it and the picture is never stretched. By default it scales to cover the whole window (full-bleed):
- * the part beyond the screen edges is cropped from view only and the recorded video is unchanged. With
- * `cover = false` the whole image fits in the window minus `reservedBottom` (the marking panel).
+ * Keeps its children at the aspect of the UPRIGHT preview image (4:3 or 3:4 for the preferred size) so normalised
+ * taps map onto it and the picture is never stretched. The whole image always fits inside the space the parent
+ * gives it (letterbox): nothing is cropped from view, and the recorded video is unchanged.
  */
 internal class AspectFrameLayout(context: android.content.Context) : FrameLayout(context) {
     private var rotation = 0
-    private var cover = true
-    private var reservedBottom = 0
+    private var bufferWidth = VideoSpec.PREFERRED_SIZES.first().width
+    private var bufferHeight = VideoSpec.PREFERRED_SIZES.first().height
 
-    fun configure(rotation: Int, cover: Boolean, reservedBottom: Int) {
-        if (rotation == this.rotation && cover == this.cover && reservedBottom == this.reservedBottom) return
+    fun configure(rotation: Int, bufferWidth: Int, bufferHeight: Int) {
+        if (rotation == this.rotation && bufferWidth == this.bufferWidth && bufferHeight == this.bufferHeight) return
         this.rotation = rotation
-        this.cover = cover
-        this.reservedBottom = reservedBottom
+        this.bufferWidth = bufferWidth
+        this.bufferHeight = bufferHeight
         requestLayout()
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val maxW = MeasureSpec.getSize(widthMeasureSpec)
-        val maxH = (MeasureSpec.getSize(heightMeasureSpec) - reservedBottom).coerceAtLeast(1)
-        val (w, h) = PreviewGeometry.stageSize(rotation, VideoSpec.WIDTH, VideoSpec.HEIGHT, maxW, maxH, cover)
+        val maxH = MeasureSpec.getSize(heightMeasureSpec).coerceAtLeast(1)
+        val (w, h) = PreviewGeometry.stageSize(rotation, bufferWidth, bufferHeight, maxW, maxH)
         super.onMeasure(
             MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY),
@@ -1229,7 +1262,7 @@ internal class ReferenceMarkView(context: android.content.Context) : View(contex
             ReferencePoint(0.85, 0.56), ReferencePoint(0.15, 0.56),
         )
         val DEFAULT_QUAD = listOf(
-            // Left of the 300dp reference panel, which covers the right of the frame in landscape.
+            // Left of the 300dp reference panel, which may cover the right of the frame on a narrow screen.
             ReferencePoint(0.10, 0.30), ReferencePoint(0.45, 0.30),
             ReferencePoint(0.45, 0.70), ReferencePoint(0.10, 0.70),
         )

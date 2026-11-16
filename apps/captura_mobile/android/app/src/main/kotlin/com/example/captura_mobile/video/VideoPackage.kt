@@ -17,12 +17,45 @@ object VideoSpec {
     const val FRAMES_FILE = "frames.jsonl"
     const val SENSORS_FILE = "sensors.jsonl"
     const val MANIFEST_FILE = "manifest.json"
-    const val WIDTH = 1280
-    const val HEIGHT = 720
     const val FPS = 30
-    const val BITRATE_BPS = 3_000_000
     const val SENSOR_RATE_HZ = 100
+
+    /**
+     * Recording sizes in order of preference (ASSUMPTION, unmeasured). Any 4:3 size wins over 16:9 because the
+     * sensor is 4:3: the whole field of view is recorded and shown, nothing is cropped. 1280x720 stays as the
+     * last-resort fallback so phones without a 4:3 option still record.
+     */
+    val PREFERRED_SIZES = listOf(VideoSize(1440, 1080), VideoSize(1280, 960), VideoSize(1280, 720))
+
+    /** The last-resort size; it also names the failure message when the camera offers none of the sizes. */
+    val FALLBACK_SIZE: VideoSize = PREFERRED_SIZES.last()
+
+    /**
+     * Bitrate of the largest preferred size (1440x1080). ASSUMPTION, unmeasured: 5 min x 3.5 Mbps is about 131 MB,
+     * which keeps a full recording under the 150 MiB package limit with margin for the logs and the ZIP.
+     */
+    const val BITRATE_BPS = 3_500_000
+    private const val REFERENCE_PIXELS = 1440L * 1080L
+
+    /** The floor is the 3 Mbps the 1280x720 format had before; the cap keeps any size within the package limit. */
+    private const val MIN_BITRATE_BPS = 3_000_000
+    private const val MAX_BITRATE_BPS = BITRATE_BPS
+
+    /** The first of [PREFERRED_SIZES] that the camera lists for MediaRecorder; null when none is available. */
+    fun chooseVideoSize(available: Collection<VideoSize>): VideoSize? = PREFERRED_SIZES.firstOrNull { it in available }
+
+    /** Bitrate proportional to the pixel count of [size] against 1440x1080, between the floor and the cap. */
+    fun bitrateFor(size: VideoSize): Int {
+        val scaled = BITRATE_BPS.toLong() * size.width.toLong() * size.height.toLong() / REFERENCE_PIXELS
+        return scaled.coerceIn(MIN_BITRATE_BPS.toLong(), MAX_BITRATE_BPS.toLong()).toInt()
+    }
+
+    /** Message when the camera lists none of the preferred sizes. */
+    fun unsupportedSizeMessage(): String = "La cámara no graba en ${FALLBACK_SIZE.width}x${FALLBACK_SIZE.height}."
 }
+
+/** A video size in pixels (the stored frame, unrotated). */
+data class VideoSize(val width: Int, val height: Int)
 
 object VideoCaptureLimits {
     const val MAX_DURATION_NS = 5L * 60L * 1_000_000_000L
@@ -133,11 +166,17 @@ class ReferenceRect private constructor(
          * contract order. The ratio of [widthM] to [heightM] cannot decide anything the longer pair does not:
          * both candidates are the same two lengths swapped.
          */
-        fun orient(quad: List<ReferencePoint>, widthM: Double, heightM: Double): List<ReferencePoint> {
+        fun orient(
+            quad: List<ReferencePoint>,
+            widthM: Double,
+            heightM: Double,
+            frameWidth: Int,
+            frameHeight: Int,
+        ): List<ReferencePoint> {
             require(quad.size == 4) { "A rectangle needs four corners" }
             require(widthM >= heightM) { "The rectangle width must be the long side" }
             fun side(a: ReferencePoint, b: ReferencePoint) =
-                Math.hypot((a.x - b.x) * VideoSpec.WIDTH, (a.y - b.y) * VideoSpec.HEIGHT)
+                Math.hypot((a.x - b.x) * frameWidth, (a.y - b.y) * frameHeight)
             val first = side(quad[0], quad[1]) + side(quad[2], quad[3])
             val second = side(quad[1], quad[2]) + side(quad[3], quad[0])
             val shift = if (first >= second) 0 else 1
@@ -313,6 +352,8 @@ data class VideoManifestInput(
     val sensorOrientation: Int,
     val rooms: List<VideoRoom>,
     val reference: ReferenceMark?,
+    /** The negotiated size of `video.mp4` (the stored frame). */
+    val videoSize: VideoSize,
 )
 
 /** The worker rejects a reference whose frame is not in frames.jsonl or lies outside every room. */
@@ -326,6 +367,7 @@ object VideoManifestBuilder {
         require(input.listingId.isNotBlank()) { "A package needs a non-blank listingId" }
         require(input.rooms.isNotEmpty()) { "A package needs at least one room" }
         require(input.sensorOrientation in intArrayOf(0, 90, 180, 270)) { "Invalid sensor orientation" }
+        require(input.videoSize.width > 0 && input.videoSize.height > 0) { "Invalid video size" }
         val manifest = linkedMapOf<String, Any?>(
             "schemaVersion" to VideoSpec.SCHEMA_VERSION,
             "captureId" to input.captureId,
@@ -333,8 +375,8 @@ object VideoManifestBuilder {
             "device" to linkedMapOf("model" to input.deviceModel, "os" to "android", "osVersion" to input.osVersion),
             "video" to linkedMapOf(
                 "file" to VideoSpec.VIDEO_FILE,
-                "width" to VideoSpec.WIDTH,
-                "height" to VideoSpec.HEIGHT,
+                "width" to input.videoSize.width,
+                "height" to input.videoSize.height,
                 "fps" to VideoSpec.FPS,
                 "startedAtNs" to input.startedAtNs,
                 "framesFile" to VideoSpec.FRAMES_FILE,

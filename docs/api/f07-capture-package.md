@@ -34,9 +34,9 @@ sensors.jsonl    # una línea por muestra de sensor
 | Parámetro | Valor (supuesto, no medido) |
 |---|---|
 | Códec y contenedor | H.264/AVC en MP4 |
-| Resolución | 1280×720 |
+| Resolución | Negociada con la cámara: la app prefiere 1440×1080 (4:3) y cae a 1280×960 o, como último recurso, 1280×720 (16:9); el tamaño elegido queda en `video.width` y `video.height` |
 | Cuadros por segundo | 30 |
-| Tasa de bits objetivo | 3 Mbps |
+| Tasa de bits objetivo | 3,5 Mbps para 1440×1080; para los otros tamaños, proporcional a los píxeles con piso de 3 Mbps |
 | Audio | **Sin pista de audio** (privacidad) |
 | Estabilización electrónica | Desactivada cuando el dispositivo lo permita (deforma los cuadros y degrada la geometría) |
 
@@ -80,8 +80,8 @@ Una línea JSON por muestra, ordenada por `t`:
   "device": { "model": "SM-S711B", "os": "android", "osVersion": "14" },
   "video": {
     "file": "video.mp4",
-    "width": 1280,
-    "height": 720,
+    "width": 1440,
+    "height": 1080,
     "fps": 30,
     "startedAtNs": 1234567000,
     "sensorOrientation": 90,
@@ -150,7 +150,7 @@ Sin `reference`, el modelo queda **sin escala métrica** y el worker lo advierte
 
 **Diferencia conocida:** el límite de 150 MiB se mide de forma distinta según quién lo aplica. La app y el backend cuentan el tamaño del **ZIP**; `worker3d` cuenta los bytes **sin comprimir** de `video.mp4`, `frames.jsonl` y `sensors.jsonl` (no incluye `manifest.json`). No se ha unificado; un paquete puede pasar el límite del ZIP y ser rechazado por el worker.
 
-El tamaño típico de un paquete de este esquema está **sin medir**. A 3 Mbps, 5 minutos de video ocuparían del orden de 112 MiB sin contar sensores; es una cuenta aritmética sobre el valor objetivo, no una medición.
+El tamaño típico de un paquete de este esquema está **sin medir**. A 3,5 Mbps (el valor objetivo de 1440×1080), 5 minutos de video ocuparían del orden de 125 MiB (unos 131 MB) sin contar sensores; es una cuenta aritmética sobre el valor objetivo, no una medición.
 
 ## Subida
 

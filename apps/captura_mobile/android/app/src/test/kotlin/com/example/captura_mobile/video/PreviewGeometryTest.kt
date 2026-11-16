@@ -12,6 +12,19 @@ private fun assertEquals(expected: Double, actual: Double, delta: Double, messag
 
 class CaptureCropTest {
     @Test
+    fun `a 4 to 3 stream on the 4 to 3 array of the S23 FE gets the whole array`() {
+        assertEquals(CropRect(0, 0, 4080, 3060), CaptureCrop.centered(4080, 3060, 1440, 1080, 10f))
+        assertEquals(CropRect(0, 0, 4080, 3060), CaptureCrop.centered(4080, 3060, 1280, 960, 10f))
+    }
+
+    @Test
+    fun `a 4 to 3 stream on a wider array is cropped on the sides only`() {
+        val crop = assertNotNull(CaptureCrop.centered(4320, 2160, 1440, 1080, 10f))
+        assertEquals(2160, crop.height)
+        assertEquals(2880, crop.width)
+    }
+
+    @Test
     fun `the 4 to 3 array of the S23 FE gets the centred 16 to 9 band`() {
         assertEquals(CropRect(0, 382, 4080, 2678), CaptureCrop.centered(4080, 3060, 1280, 720, 10f))
     }
@@ -70,6 +83,9 @@ class CaptureCropTest {
 }
 
 class PreviewGeometryTest {
+    // The preferred 4:3 stored frame (VideoSpec.PREFERRED_SIZES.first()).
+    private val STORED_WIDTH = 1440
+    private val STORED_HEIGHT = 1080
     private val rotations = listOf(0, 90, 180, 270)
 
     @Test
@@ -86,36 +102,50 @@ class PreviewGeometryTest {
     }
 
     @Test
-    fun `the stage is 9 to 16 for a quarter turn and 16 to 9 otherwise`() {
+    fun `the stage is 3 to 4 for a quarter turn and 4 to 3 otherwise`() {
+        assertEquals(1080 to 1440, PreviewGeometry.displayedSize(90, 1440, 1080))
+        assertEquals(1080 to 1440, PreviewGeometry.displayedSize(270, 1440, 1080))
+        assertEquals(1440 to 1080, PreviewGeometry.displayedSize(0, 1440, 1080))
+        assertEquals(1440 to 1080, PreviewGeometry.displayedSize(180, 1440, 1080))
         assertEquals(720 to 1280, PreviewGeometry.displayedSize(90, 1280, 720))
-        assertEquals(720 to 1280, PreviewGeometry.displayedSize(270, 1280, 720))
-        assertEquals(1280 to 720, PreviewGeometry.displayedSize(0, 1280, 720))
-        assertEquals(1280 to 720, PreviewGeometry.displayedSize(180, 1280, 720))
     }
 
     @Test
-    fun `cover stage fills a portrait window without stretching`() {
-        val (w, h) = PreviewGeometry.stageSize(90, 1280, 720, 1080, 2340, cover = true)
-        assertTrue(w >= 1080 && h >= 2340)
-        assertEquals(2340, h)
-        assertTrue(Math.abs(w.toDouble() / h - 720.0 / 1280.0) < 0.001)
+    fun `a portrait window shows the whole 3 to 4 image full width with free height left`() {
+        val (w, h) = PreviewGeometry.stageSize(90, 1440, 1080, 1080, 2340)
+        assertEquals(1080, w)
+        assertEquals(1440, h)
+        assertTrue(2340 - h >= 900)
     }
 
     @Test
-    fun `cover stage fills a landscape window without stretching`() {
-        val (w, h) = PreviewGeometry.stageSize(0, 1280, 720, 2340, 1080, cover = true)
-        assertEquals(2340, w)
-        assertTrue(h >= 1080)
-        assertTrue(Math.abs(w.toDouble() / h - 16.0 / 9.0) < 0.001)
+    fun `a landscape window shows the whole 4 to 3 image full height with free width left`() {
+        val (w, h) = PreviewGeometry.stageSize(0, 1440, 1080, 2340, 1080)
+        assertEquals(1440, w)
+        assertEquals(1080, h)
+        assertTrue(2340 - w >= 900)
     }
 
     @Test
-    fun `fit stage stays inside the window and keeps the aspect`() {
-        val (w, h) = PreviewGeometry.stageSize(90, 1280, 720, 1080, 1200, cover = false)
+    fun `the stage never exceeds the window and keeps the aspect in every case`() {
+        for (rotation in rotations) for ((aw, ah) in listOf(1080 to 2340, 2340 to 1080, 1000 to 1000, 600 to 1500, 1500 to 600)) {
+            for ((bw, bh) in listOf(1440 to 1080, 1280 to 720)) {
+                val (w, h) = PreviewGeometry.stageSize(rotation, bw, bh, aw, ah)
+                assertTrue("fits r=$rotation $aw x $ah", w <= aw && h <= ah)
+                assertTrue(w == aw || h == ah)
+                val (dw, dh) = PreviewGeometry.displayedSize(rotation, bw, bh)
+                assertTrue(Math.abs(w.toDouble() / h - dw.toDouble() / dh) < 0.01)
+            }
+        }
+    }
+
+    @Test
+    fun `fit stage of a 16 to 9 fallback stays inside the window`() {
+        val (w, h) = PreviewGeometry.stageSize(90, 1280, 720, 1080, 1200)
         assertTrue(w <= 1080 && h <= 1200)
         assertEquals(1200, h)
         assertTrue(Math.abs(w.toDouble() / h - 720.0 / 1280.0) < 0.001)
-        val (w2, h2) = PreviewGeometry.stageSize(0, 1280, 720, 1000, 2000, cover = false)
+        val (w2, h2) = PreviewGeometry.stageSize(0, 1280, 720, 1000, 2000)
         assertEquals(1000, w2)
         assertEquals(562, h2)
     }
@@ -150,14 +180,14 @@ class PreviewGeometryTest {
 
     @Test
     fun `a portrait tap keeps real distances on the stored frame`() {
-        // Portrait S=90, R=0: rotation 90. A vertical drag of 0.5 of the display height (1280 stage px of a 9:16
-        // image) is a horizontal 0.5 of the stored width: 640 px in both frames, so the metric length survives.
+        // Portrait S=90, R=0: rotation 90. A vertical drag of 0.5 of the display height (1440 stage px of a 3:4
+        // image) is a horizontal 0.5 of the stored width: 720 px in both frames, so the metric length survives.
         val (ax, ay) = PreviewGeometry.displayToStored(90, 0.5, 0.25)
         val (bx, by) = PreviewGeometry.displayToStored(90, 0.5, 0.75)
         assertEquals(0.5, Math.abs(bx - ax), 1e-9)
         assertEquals(0.0, Math.abs(by - ay), 1e-9)
-        val storedLengthPx = Math.abs(bx - ax) * VideoSpec.WIDTH
-        val displayedLengthPx = 0.5 * 1280
+        val storedLengthPx = Math.abs(bx - ax) * STORED_WIDTH
+        val displayedLengthPx = 0.5 * 1440
         assertEquals(displayedLengthPx, storedLengthPx, 1e-9)
     }
 
@@ -185,7 +215,7 @@ class PreviewGeometryTest {
     fun `the view matrix does not stretch the picture for any rotation`() {
         // Scale of the rendered buffer along its own axes, in view pixels per buffer pixel.
         for (rotation in rotations) {
-            val (dw, dh) = PreviewGeometry.displayedSize(rotation, VideoSpec.WIDTH, VideoSpec.HEIGHT)
+            val (dw, dh) = PreviewGeometry.displayedSize(rotation, STORED_WIDTH, STORED_HEIGHT)
             val scale = 1.7
             val vw = dw * scale
             val vh = dh * scale
@@ -195,11 +225,79 @@ class PreviewGeometryTest {
             val (yx, yy) = apply(m, 0.0, vh)
             val bufferWidthOnScreen = Math.hypot(xx - x0, xy - y0)
             val bufferHeightOnScreen = Math.hypot(yx - x0, yy - y0)
-            val perPixelX = bufferWidthOnScreen / VideoSpec.WIDTH
-            val perPixelY = bufferHeightOnScreen / VideoSpec.HEIGHT
+            val perPixelX = bufferWidthOnScreen / STORED_WIDTH
+            val perPixelY = bufferHeightOnScreen / STORED_HEIGHT
             assertEquals(perPixelX, perPixelY, 1e-3, "uniform scale at r=$rotation")
             assertEquals(scale, perPixelX, 1e-3)
         }
+    }
+
+    /**
+     * Where, in buffer coordinates (0..1), the world-up direction sits for a sensor mounted at [sensorOrientation]
+     * on a phone held in the posture of [displayRotation]. Derived from the physics, not from imageRotation:
+     * natural up (device +y) lies on the buffer edge at -sensorOrientation degrees clockwise from the top edge, and
+     * turning the phone by displayRotation (counterclockwise) moves world-up by +displayRotation clockwise relative
+     * to the device. Returns the midpoint of that buffer edge.
+     */
+    private fun worldUpEdge(sensorOrientation: Int, displayRotation: Int): Pair<Double, Double> =
+        when ((((displayRotation - sensorOrientation) % 360) + 360) % 360) {
+            0 -> 0.5 to 0.0
+            90 -> 1.0 to 0.5
+            180 -> 0.5 to 1.0
+            else -> 0.0 to 0.5
+        }
+
+    @Test
+    fun `the buffer edge that holds world-up ends on the screen top for every sensor and display rotation`() {
+        for (sensor in listOf(0, 90, 180, 270)) for (display in rotations) {
+            val rotation = PreviewGeometry.imageRotation(sensor, display)
+            val (vw, vh) = if (PreviewGeometry.isQuarterTurn(rotation)) 1080f to 1440f else 1440f to 1080f
+            val m = PreviewGeometry.bufferToView(rotation, vw, vh)
+            val (ux, uy) = worldUpEdge(sensor, display)
+            val (px, py) = apply(m, ux * vw, uy * vh)
+            assertEquals(vw / 2.0, px, 1e-3, "up edge x s=$sensor d=$display")
+            assertEquals(0.0, py, 1e-3, "up edge y s=$sensor d=$display")
+            // The opposite buffer edge (world-down) ends on the bottom.
+            val (qx, qy) = apply(m, (1.0 - ux) * vw, (1.0 - uy) * vh)
+            assertEquals(vw / 2.0, qx, 1e-3, "down edge x s=$sensor d=$display")
+            assertEquals(vh.toDouble(), qy, 1e-3, "down edge y s=$sensor d=$display")
+        }
+    }
+
+    @Test
+    fun `all four buffer corners land inside the view for every rotation`() {
+        for (rotation in rotations) {
+            val (vw, vh) = if (PreviewGeometry.isQuarterTurn(rotation)) 1080f to 1440f else 1440f to 1080f
+            val m = PreviewGeometry.bufferToView(rotation, vw, vh)
+            for ((bx, by) in listOf(0.0 to 0.0, 1.0 to 0.0, 0.0 to 1.0, 1.0 to 1.0)) {
+                val (px, py) = apply(m, bx * vw, by * vh)
+                assertTrue("x r=$rotation", px >= -1e-3 && px <= vw + 1e-3)
+                assertTrue("y r=$rotation", py >= -1e-3 && py <= vh + 1e-3)
+            }
+        }
+    }
+
+    @Test
+    fun `S23 FE on the table - sensor 90, portrait screen, gravity on device +x, world-up shows on the screen right`() {
+        // Measured on the phone (accelerometer x=+9.2, y=-0.5, z=+3.1 with the screen in portrait): the phone is held
+        // on its side, so world-up is the device's right edge. With sensor 90 that is the buffer top edge, which the
+        // 90 degree turn sends to the screen's right edge: the picture is sideways on the portrait screen, as it must be.
+        val rotation = PreviewGeometry.imageRotation(90, 0)
+        assertEquals(90, rotation)
+        val m = PreviewGeometry.bufferToView(rotation, 1080f, 1440f)
+        val (x, y) = apply(m, 0.5 * 1080, 0.0)
+        assertEquals(1080.0, x, 1e-3, "world-up on the right edge")
+        assertEquals(720.0, y, 1e-3, "world-up on the right edge")
+    }
+
+    @Test
+    fun `phone held upright in portrait - sensor 90, display 0 - the device up edge ends on the screen top`() {
+        // Device +y is up: natural up sits on the buffer's left edge for sensor 90.
+        val rotation = PreviewGeometry.imageRotation(90, 0)
+        val m = PreviewGeometry.bufferToView(rotation, 1080f, 1440f)
+        val (x, y) = apply(m, 0.0, 0.5 * 1440)
+        assertEquals(540.0, x, 1e-3, "x")
+        assertEquals(0.0, y, 1e-3, "y")
     }
 
     @Test

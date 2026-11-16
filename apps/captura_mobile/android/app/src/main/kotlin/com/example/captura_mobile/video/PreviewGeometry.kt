@@ -3,7 +3,7 @@ package com.example.captura_mobile.video
 /**
  * Pure geometry of the recorder screen (F07, T17); nothing here touches Android, so it is JVM-testable.
  *
- * The stored frame (`video.mp4`) is the raw sensor image, 1280x720, unrotated. The preview shows that same
+ * The stored frame (`video.mp4`) is the raw sensor image, unrotated, in the negotiated size (4:3, or 16:9 as a fallback). The preview shows that same
  * buffer upright for whatever way the phone is held. Every coordinate that reaches the package (reference
  * points, rectangle corners) is normalised on the STORED frame; [displayToStored] converts the points the
  * agent sees and taps on the rotated display.
@@ -20,9 +20,8 @@ internal object PreviewGeometry {
         if (isQuarterTurn(rotation)) bufferHeight to bufferWidth else bufferWidth to bufferHeight
 
     /**
-     * Size of the stage (the upright image) inside a window of [availableWidth] x [availableHeight]. The aspect is
-     * always that of the upright image, never stretched: [cover] scales it to fill the window (parts are cropped
-     * from view only), otherwise the whole image fits inside it.
+     * Size of the stage (the upright image) inside a window of [availableWidth] x [availableHeight]: the whole image
+     * always fits (letterbox), never cropped and never stretched. The free space is left to the controls.
      */
     fun stageSize(
         rotation: Int,
@@ -30,12 +29,10 @@ internal object PreviewGeometry {
         bufferHeight: Int,
         availableWidth: Int,
         availableHeight: Int,
-        cover: Boolean,
     ): Pair<Int, Int> {
         val (w, h) = displayedSize(rotation, bufferWidth, bufferHeight)
-        val widthLimited = availableWidth.toLong() * h > availableHeight.toLong() * w
-        val useWidth = if (cover) widthLimited else !widthLimited
-        return if (useWidth) {
+        val widthLimited = availableWidth.toLong() * h <= availableHeight.toLong() * w
+        return if (widthLimited) {
             availableWidth to (availableWidth.toLong() * h / w).toInt()
         } else {
             (availableHeight.toLong() * w / h).toInt() to availableHeight
@@ -84,7 +81,8 @@ internal data class CropRect(val left: Int, val top: Int, val right: Int, val bo
 
 /**
  * SCALER_CROP_REGION for a stream of the given aspect: the centred sub-rectangle of the active array with that
- * aspect, so the camera crops the field of view instead of squeezing it into the stream (F07, T17).
+ * aspect, so the camera crops the field of view instead of squeezing it into the stream (F07, T17). A 4:3 stream on a
+ * 4:3 array gets the whole array (no crop); a 16:9 fallback gets the centred 16:9 band.
  */
 internal object CaptureCrop {
     /** SCALER_CROPPING_TYPE values from Camera2. */

@@ -34,6 +34,7 @@ class VideoPackageTest {
                 sensorOrientation = 90,
                 rooms = rooms,
                 reference = reference,
+                videoSize = VideoSize(1280, 720),
             ),
         )
 
@@ -234,7 +235,7 @@ class VideoPackageTest {
         listOf("", "  ").forEach { blank ->
             assertThrows(IllegalArgumentException::class.java) {
                 VideoManifestBuilder.build(
-                    VideoManifestInput("c", blank, "m", "14", 1L, "unknown", 90, listOf(VideoRoom("room-1", "S", 1L, 2L)), null),
+                    VideoManifestInput("c", blank, "m", "14", 1L, "unknown", 90, listOf(VideoRoom("room-1", "S", 1L, 2L)), null, VideoSize(1440, 1080)),
                 )
             }
         }
@@ -244,7 +245,26 @@ class VideoPackageTest {
     fun invalidSensorOrientationIsRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             VideoManifestBuilder.build(
-                VideoManifestInput("c", "l", "m", "14", 1L, "unknown", 45, listOf(VideoRoom("room-1", "S", 1L, 2L)), null),
+                VideoManifestInput("c", "l", "m", "14", 1L, "unknown", 45, listOf(VideoRoom("room-1", "S", 1L, 2L)), null, VideoSize(1440, 1080)),
+            )
+        }
+    }
+
+    @Test
+    fun manifestCarriesTheNegotiatedVideoSize() {
+        val input = VideoManifestInput(
+            "c", "l", "m", "14", 1L, "realtime", 90, listOf(VideoRoom("room-1", "S", 1L, 2L)), null, VideoSize(1440, 1080),
+        )
+        val video = map(map(JsonReader.parse(JsonWriter.write(VideoManifestBuilder.build(input))))["video"])
+        assertEquals(1440, video["width"])
+        assertEquals(1080, video["height"])
+    }
+
+    @Test
+    fun anInvalidVideoSizeIsRejected() {
+        assertThrows(IllegalArgumentException::class.java) {
+            VideoManifestBuilder.build(
+                VideoManifestInput("c", "l", "m", "14", 1L, "unknown", 90, listOf(VideoRoom("room-1", "S", 1L, 2L)), null, VideoSize(0, 1080)),
             )
         }
     }

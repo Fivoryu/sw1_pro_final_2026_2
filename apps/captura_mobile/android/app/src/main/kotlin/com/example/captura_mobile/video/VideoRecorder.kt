@@ -23,7 +23,6 @@ import android.os.HandlerThread
 import android.os.SystemClock
 import android.util.Log
 import android.util.Range
-import android.util.Size
 import android.view.Surface
 import java.io.File
 
@@ -33,8 +32,8 @@ import java.io.File
  * logic lives in VideoPackage.kt. Frame timestamps are Camera2's SENSOR_TIMESTAMP, the same
  * `elapsedRealtimeNanos` clock as the sensor events when the camera reports the realtime source.
  *
- * Recording has no audio track (privacy) and no rotation hint: `video.mp4` holds the raw 1280x720
- * sensor frames and the reference points are normalised on that same frame.
+ * Recording has no audio track (privacy) and no rotation hint: `video.mp4` holds the raw sensor frames
+ * in the negotiated size (4:3 preferred) and the reference points are normalised on that same frame.
  */
 class VideoRecorder(
     private val context: Context,
@@ -45,11 +44,19 @@ class VideoRecorder(
         /** The preview is running (called on the camera thread). */
         fun onPreviewReady()
 
+        /** The size of the stored frame was negotiated (called on the camera thread, before the preview starts). */
+        fun onVideoSize(size: VideoSize)
+
         /** The recorder started; [startedAtNs] precedes every logged frame. */
         fun onRecordingStarted(startedAtNs: Long)
 
         fun onFailure(message: String)
     }
+
+    /** The negotiated recording size; the preview buffer, crop, encoder and manifest all use it. */
+    @Volatile
+    var videoSize: VideoSize = VideoSpec.FALLBACK_SIZE
+        private set
 
     val frames = FrameLog()
     val sensors = SensorLog()
@@ -142,15 +149,17 @@ class VideoRecorder(
                 } ?: return@post fail("Este teléfono no tiene cámara trasera.")
                 val chars = manager.getCameraCharacteristics(id)
                 val map: StreamConfigurationMap? = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                val size = Size(VideoSpec.WIDTH, VideoSpec.HEIGHT)
-                if (map?.getOutputSizes(MediaRecorder::class.java)?.contains(size) != true) {
-                    return@post fail("La cámara no graba en ${VideoSpec.WIDTH}x${VideoSpec.HEIGHT}.")
-                }
+                val offered = map?.getOutputSizes(MediaRecorder::class.java).orEmpty().map { VideoSize(it.width, it.height) }
+                Log.i(TAG, "MediaRecorder sizes offered: ${offered.joinToString(" ") { "${it.width}x${it.height}" }}")
+                val size = VideoSpec.chooseVideoSize(offered) ?: return@post fail(VideoSpec.unsupportedSizeMessage())
+                Log.i(TAG, "Chosen video size: ${size.width}x${size.height}")
+                videoSize = size
+                listener.onVideoSize(size)
                 characteristics = chars
                 sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
                 timestampSource = TimestampSource.fromCamera(chars.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE))
                 previewTexture = texture
-                texture.setDefaultBufferSize(VideoSpec.WIDTH, VideoSpec.HEIGHT)
+                texture.setDefaultBufferSize(size.width, size.height)
                 previewSurface = Surface(texture)
                 manager.openCamera(id, object : CameraDevice.StateCallback() {
                     override fun onOpened(device: CameraDevice) {
@@ -240,8 +249,8 @@ class VideoRecorder(
         if (stabilisation?.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF) == true) {
             builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
         }
-        // T17: ask for the centred 16:9 band of the sensor explicitly. Without it the HAL may squeeze the full 4:3
-        // array into the 16:9 stream (anamorphic); with it, preview and recording share one undistorted field of view.
+        // T17: ask for the crop of the sensor that has the stream's aspect explicitly: the whole array for a 4:3 stream,
+        // the centred 16:9 band for the fallback. Without it the HAL may squeeze the array into the stream (anamorphic).
         cropRegionFor(chars)?.let { builder.set(CaptureRequest.SCALER_CROP_REGION, it) }
         if (lensCorrectionEnabled) applyLensCorrection(builder, chars)
         val fpsRanges = chars?.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
@@ -290,7 +299,7 @@ class VideoRecorder(
         val array = chars?.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return null
         val zoom = chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f
         // CENTER_ONLY and FREEFORM both accept a centred region, so the cropping type does not change the result.
-        val crop = CaptureCrop.centered(array.width(), array.height(), VideoSpec.WIDTH, VideoSpec.HEIGHT, zoom) ?: return null
+        val crop = CaptureCrop.centered(array.width(), array.height(), videoSize.width, videoSize.height, zoom) ?: return null
         return Rect(array.left + crop.left, array.top + crop.top, array.left + crop.right, array.top + crop.bottom)
     }
 
@@ -309,9 +318,9 @@ class VideoRecorder(
                 recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE)
                 recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 recorder.setOutputFile(File(workDir, VideoSpec.VIDEO_FILE).absolutePath)
-                recorder.setVideoEncodingBitRate(VideoSpec.BITRATE_BPS)
+                recorder.setVideoEncodingBitRate(VideoSpec.bitrateFor(videoSize))
                 recorder.setVideoFrameRate(VideoSpec.FPS)
-                recorder.setVideoSize(VideoSpec.WIDTH, VideoSpec.HEIGHT)
+                recorder.setVideoSize(videoSize.width, videoSize.height)
                 recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
                 // No audio source on purpose: the package has no audio track.
                 recorder.prepare()
