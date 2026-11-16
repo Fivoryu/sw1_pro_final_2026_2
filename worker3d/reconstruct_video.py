@@ -85,6 +85,23 @@ OBSERVED_EDGE_ANGLE = math.sin(math.radians(15))
 OBSERVED_EDGE_DISTANCE_M = 0.3
 OBSERVED_EDGE_OVERLAP_M = 0.3
 
+# Furniture (F07 T6). Heuristics, none of them measured.
+# Frames handed to the detector: evenly spaced, at most this many (CPU inference is slow).
+DETECTION_MAX_FRAMES = 40
+# Sparse points projecting inside a detection box needed to size a volume.
+MIN_VOLUME_POINTS = 8
+# Points more than this (relative to L) behind the nearest quarter of the box are the wall behind.
+VOLUME_DEPTH_BAND_REL = 0.1
+# Points this many tolerances above the floor (and below the ceiling) can belong to furniture.
+VOLUME_BAND_MARGIN_TOL = 3
+VOLUME_EDGE_PERCENTILE = 0.05
+# Sparse points at which a volume is declared fully supported (confidence 1.0).
+VOLUME_FULL_SUPPORT_POINTS = 50
+# Same texts as ``reconstruction_worker`` (the schema 1 path); a test pins that they match.
+WARNING_DETECTOR_UNAVAILABLE = "Class suggestions skipped: detector unavailable"
+WARNING_LABELING_FAILED = "Class suggestions skipped: labeling failed"
+WARNING_NO_DEPTH = "Sin profundidad: no se generaron volúmenes"
+
 Vec3 = tuple[float, float, float]
 Mat3 = tuple[Vec3, Vec3, Vec3]  # rows
 
@@ -130,6 +147,28 @@ class SparseModel:
     poses: list[CameraPose]
     points: list[SparsePoint]
     intrinsics: Intrinsics
+
+
+@dataclass(frozen=True)
+class VideoReconstructionResult(ReconstructionResult):
+    """Schema 2 result: the suggestions are built here because the frames are temporary."""
+
+    # ``volumeSuggestions`` payload (same schema as schema 1) or None; pending human review (F08.5).
+    volume_suggestions: dict[str, Any] | None = None
+
+
+# Returns (detector, model id, score threshold); raises ImportError/RuntimeError when the
+# inference runtime is not installed.
+DetectorFactory = Callable[[], tuple[Callable[..., Any], str, float]]
+
+
+def default_detector() -> tuple[Callable[..., Any], str, float]:
+    """The F08 detector, loaded lazily so this module stays standard library only."""
+    import detect
+
+    return detect.build_detector("cpu"), detect.MODEL_META["weights_id"], detect.DEFAULT_THRESHOLD
+
+
 
 
 class FrameExtractor(Protocol):
@@ -864,6 +903,116 @@ def _fit_rooms(piece: _Piece, rooms: list[dict[str, Any]], room_of_frame: dict[i
         )
 
 
+# --- Furniture volumes from detections (F07 T6) --------------------------------------------
+
+
+@dataclass
+class _Candidate:
+    """A detected object placed in a piece's aligned SfM frame (before scale and room offset)."""
+
+    room_id: str
+    x0: float
+    x1: float
+    z0: float
+    z1: float
+    height: float
+    support: int
+    label: str
+    score: float
+    frame: int
+    box: list[float]
+
+
+def _detect_frames(
+    frames: list[ExtractedFrame], detector: Callable[..., Any], threshold: float
+) -> dict[int, list[dict[str, Any]]]:
+    """Detections per sampled frame index; the sample is evenly spaced and bounded."""
+    ordered = sorted(frames, key=lambda f: f.index)
+    step = max(1, math.ceil(len(ordered) / max(1, DETECTION_MAX_FRAMES)))
+    found: dict[int, list[dict[str, Any]]] = {}
+    for frame in ordered[::step][:DETECTION_MAX_FRAMES]:
+        records, _skipped = detector([frame.path], threshold)
+        found[frame.index] = list(records[0]["detections"]) if records else []
+    return found
+
+
+def _place_detections(
+    piece: _Piece, room_of_frame: dict[int, str], detections: dict[int, list[dict[str, Any]]]
+) -> list[_Candidate]:
+    """Size each detection from the sparse points that project inside its box.
+
+    No depth map exists in a video package: the volume is the footprint and top of the points
+    the detector box covers in that frame, above the fitted floor and in front of the wall
+    behind. It is an estimate; its accuracy was not measured.
+    """
+    extent = _plan_extent(piece)
+    if extent < 1e-9:
+        return []
+    tol = PLANE_TOLERANCE_REL * extent
+    poses = {p.frame_index: p for p in piece.poses}
+    intrinsics = piece.intrinsics
+    found: list[_Candidate] = []
+    for frame, items in detections.items():
+        pose, room_id = poses.get(frame), room_of_frame.get(frame)
+        fit = piece.rooms.get(room_id) if room_id is not None else None
+        if not items or pose is None or room_id is None or fit is None or fit.floor_y is None:
+            continue
+        low = fit.floor_y + VOLUME_BAND_MARGIN_TOL * tol
+        high = fit.ceiling_y - VOLUME_BAND_MARGIN_TOL * tol if fit.ceiling_y is not None else math.inf
+        inverse = _transpose(pose.rotation)
+        projected: list[tuple[float, float, float, Vec3]] = []
+        for xyz, observers in piece.points:
+            if frame not in observers or not low <= xyz[1] <= high:
+                continue
+            x, y, z = _mv(inverse, (xyz[0] - pose.center[0], xyz[1] - pose.center[1], xyz[2] - pose.center[2]))
+            if z > 1e-9:
+                projected.append((z, intrinsics.fx * x / z + intrinsics.cx, intrinsics.fy * y / z + intrinsics.cy, xyz))
+        for item in items:
+            x1, y1, x2, y2 = item["box"]
+            inside = [(z, xyz) for z, u, v, xyz in projected if x1 <= u <= x2 and y1 <= v <= y2]
+            if len(inside) < MIN_VOLUME_POINTS:
+                continue
+            near = _percentile(sorted(z for z, _ in inside), 0.25)
+            points = [xyz for z, xyz in inside if z <= near + VOLUME_DEPTH_BAND_REL * extent]
+            if len(points) < MIN_VOLUME_POINTS:
+                continue
+            xs, zs = sorted(p[0] for p in points), sorted(p[2] for p in points)
+            top = _percentile(sorted(p[1] for p in points), 1 - VOLUME_EDGE_PERCENTILE)
+            candidate = _Candidate(
+                room_id,
+                _percentile(xs, VOLUME_EDGE_PERCENTILE),
+                _percentile(xs, 1 - VOLUME_EDGE_PERCENTILE),
+                _percentile(zs, VOLUME_EDGE_PERCENTILE),
+                _percentile(zs, 1 - VOLUME_EDGE_PERCENTILE),
+                top - fit.floor_y,
+                len(points),
+                str(item["label"]),
+                float(item["score"]),
+                frame,
+                [float(c) for c in item["box"]],
+            )
+            if min(candidate.x1 - candidate.x0, candidate.z1 - candidate.z0, candidate.height) > tol:
+                found.append(candidate)
+    return _merge_candidates(found)
+
+
+def _merge_candidates(candidates: list[_Candidate]) -> list[_Candidate]:
+    """One volume per piece of furniture: overlapping footprints keep the best-scored detection."""
+    from reconstruction_worker import MAX_SUGGESTIONS, MIN_SUGGESTION_IOU, box_iou
+
+    kept: list[_Candidate] = []
+    for candidate in sorted(candidates, key=lambda c: c.score, reverse=True):
+        footprint = [candidate.x0, candidate.z0, candidate.x1, candidate.z1]
+        if any(
+            k.room_id == candidate.room_id
+            and box_iou(footprint, [k.x0, k.z0, k.x1, k.z1]) >= MIN_SUGGESTION_IOU
+            for k in kept
+        ):
+            continue
+        kept.append(candidate)
+    return kept[:MAX_SUGGESTIONS]
+
+
 def _edge_observed(a: reconstruct.Point, b: reconstruct.Point, segments: list[reconstruct.WallSegment]) -> bool:
     length = reconstruct._dist(a, b)
     direction = reconstruct._unit(reconstruct._sub(b, a))
@@ -892,8 +1041,14 @@ def reconstruct_video(
     extractor: FrameExtractor | None = None,
     estimator: PoseEstimator | None = None,
     device_to_camera: Mat3 | None = None,
-) -> ReconstructionResult:
-    """Reconstruct an unzipped schema 2 package into a scene v2 draft plus warnings."""
+    detector_factory: DetectorFactory | None = None,
+) -> VideoReconstructionResult:
+    """Reconstruct an unzipped schema 2 package into a scene v2 draft plus warnings.
+
+    ``detector_factory`` switches furniture detection on (``None``: off, nothing changes). The
+    detector is optional: when it cannot be loaded or fails, the scene is still produced, with a
+    warning and no suggestions.
+    """
     package = load_package(package_dir)
     manifest = package.manifest
     if device_to_camera is None:
@@ -928,6 +1083,20 @@ def reconstruct_video(
     with tempfile.TemporaryDirectory(prefix="roomforge-sfm-") as scratch:
         frames = extractor.extract(package.directory / VIDEO_FILE, sorted(indices), Path(scratch) / "frames")
         models = [m for m in estimator.estimate(frames, Path(scratch) / "sfm") if m.poses and m.points]
+        # The frames live in this scratch directory: detect here, place the boxes later.
+        detections: dict[int, list[dict[str, Any]]] = {}
+        model_id = ""
+        if detector_factory is not None and models:
+            try:
+                detector, model_id, threshold = detector_factory()
+            except (ImportError, RuntimeError):
+                warnings.append(WARNING_DETECTOR_UNAVAILABLE)
+            else:
+                try:
+                    detections = _detect_frames(frames, detector, threshold)
+                except Exception:  # noqa: BLE001 - suggestions are optional; never leak the error text
+                    detections = {}
+                    warnings.append(WARNING_LABELING_FAILED)
     if not models:
         raise InvalidPackage("no camera poses could be estimated from the video")
 
@@ -995,6 +1164,9 @@ def reconstruct_video(
     scene_rooms: list[reconstruct._Room] = []
     seen: set[str] = set()
     cursor = 0.0
+    boxes: list[dict[str, Any]] = []
+    placed: list[_Candidate] = []
+    detected = sum(len(items) for items in detections.values())
     for piece in pieces:
         factor = piece.factor if piece.factor is not None else 1.0
         piece_rooms: list[reconstruct._Room] = []
@@ -1049,6 +1221,23 @@ def reconstruct_video(
         min_z = min(c[1] for r in piece_rooms for c in r.corners)
         for room in piece_rooms:
             room.corners = [(c[0] - min_x + cursor, c[1] - min_z) for c in room.corners]
+        in_scene = {r.id for r in piece_rooms}
+        for found in _place_detections(piece, room_of_frame, detections):
+            if found.room_id not in in_scene:
+                continue
+            x0, x1 = found.x0 * factor - min_x + cursor, found.x1 * factor - min_x + cursor
+            z0, z1 = found.z0 * factor - min_z, found.z1 * factor - min_z
+            boxes.append(
+                {
+                    "x": (x0 + x1) / 2,
+                    "z": (z0 + z1) / 2,
+                    "width": x1 - x0,
+                    "depth": z1 - z0,
+                    "height": found.height * factor,
+                    "confidence": round(min(1.0, found.support / VOLUME_FULL_SUPPORT_POINTS), 2),
+                }
+            )
+            placed.append(found)
         cursor += max_x - min_x + PIECE_GAP_M
         scene_rooms.extend(piece_rooms)
     for room in rooms:
@@ -1057,7 +1246,9 @@ def reconstruct_video(
     if not scene_rooms:
         raise InvalidPackage("No se pudo cerrar el contorno de ningún ambiente: " + " ".join(warnings))
 
-    builder = reconstruct._SceneBuilder(scene_rooms, [])
+    if detected and not boxes:
+        warnings.append(WARNING_NO_DEPTH)
+    builder = reconstruct._SceneBuilder(scene_rooms, boxes)
     scene = builder.build()
     warnings.extend(builder.warnings)
     warnings.append(
@@ -1067,4 +1258,25 @@ def reconstruct_video(
     warnings.append(
         "Las aberturas no se detectan automáticamente: marque las puertas y ventanas en el editor antes de publicar."
     )
-    return ReconstructionResult(scene_draft=scene, warnings=[w[:500] for w in warnings], volume_views=[])
+    suggestions: dict[str, Any] | None = None
+    if placed:
+        suggestions = {
+            "modelId": model_id,
+            "items": [
+                {
+                    "objectId": f"box-{number}",
+                    "label": found.label,
+                    "score": found.score,
+                    # frames.jsonl ``i`` counts from 0; the API wants keyframe >= 1.
+                    "keyframe": found.frame + 1,
+                    "box": found.box,
+                }
+                for number, found in enumerate(placed, start=1)
+            ],
+        }
+    return VideoReconstructionResult(
+        scene_draft=scene,
+        warnings=[w[:500] for w in warnings],
+        volume_views=[],
+        volume_suggestions=suggestions,
+    )

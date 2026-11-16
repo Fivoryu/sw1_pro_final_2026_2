@@ -45,6 +45,17 @@ WARNING_DETECTOR_UNAVAILABLE = "Class suggestions skipped: detector unavailable"
 WARNING_LABELING_FAILED = "Class suggestions skipped: labeling failed"
 
 
+def reconstruct_package(package_dir: Path) -> reconstruct.ReconstructionResult:
+    """Default reconstructor: schema 2 (video) also detects furniture; schema 1 is unchanged."""
+    if reconstruct._declared_schema_version(package_dir) == 2:
+        import reconstruct_video
+
+        return reconstruct_video.reconstruct_video(
+            package_dir, detector_factory=lambda: reconstruct_video.default_detector()
+        )
+    return reconstruct.reconstruct(package_dir)
+
+
 class DetectorUnavailable(Exception):
     """The inference runtime (torch/torchvision) is not installed in this interpreter."""
 
@@ -131,7 +142,7 @@ class ReconstructionJobWorker:
         service_token: str,
         queue: MessageQueue,
         http_client: HttpClient,
-        reconstructor: Reconstructor = reconstruct.reconstruct,
+        reconstructor: Reconstructor = reconstruct_package,
         labeler: Labeler = label_with_detector,
         claim_failure_receive_cap: int = 3,
     ) -> None:
@@ -261,6 +272,10 @@ class ReconstructionJobWorker:
         self, package_dir: Path, result: reconstruct.ReconstructionResult
     ) -> tuple[dict[str, Any] | None, list[str]]:
         """Class suggestions for the depth volumes; they never fail the job."""
+        # Schema 2 results carry their suggestions already (their frames were temporary).
+        if hasattr(result, "volume_suggestions"):
+            suggestions: dict[str, Any] | None = getattr(result, "volume_suggestions")  # noqa: B009
+            return suggestions, []
         try:
             return self._labeler(package_dir, result.volume_views), []
         except DetectorUnavailable:

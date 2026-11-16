@@ -183,6 +183,8 @@ Límites declarados: la «velocidad» es la de giro (el acelerómetro no se inte
 
 Sin cambios respecto del esquema `1` (ver «Resultado» en la parte 2): `sceneDraft` (escena v2), `warnings` en español y, cuando haya detección, `volumeSuggestions`, con las mismas reglas.
 
+Muebles del esquema `2` (F07 T6): no hay mapa de profundidad, así que `worker3d` corre el detector de F08 sobre hasta 40 cuadros muestreados y ubica cada caja con las poses estimadas y los puntos dispersos que caen dentro de ella (huella y altura del volumen sobre el piso ajustado). El resultado son volúmenes `occupancy` simples (sin clase ni precio) y `volumeSuggestions` con las mismas reglas que el esquema `1`; `keyframe` es el índice `i` de `frames.jsonl` más 1. Sin detector disponible no hay sugerencias y se agrega una advertencia; si hubo detecciones pero ningún punto las respalda, la advertencia es «Sin profundidad: no se generaron volúmenes». Las sugerencias quedan pendientes de la revisión humana de F08.5 y su exactitud no se midió.
+
 Advertencias nuevas previstas para el esquema `2`:
 
 - «Sin medida de referencia: el modelo no tiene escala métrica».
