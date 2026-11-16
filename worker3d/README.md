@@ -3,7 +3,7 @@
 Dos responsabilidades conviven acá: la reconstrucción del plano y la escena a partir del paquete de captura (F07.7) y la detección de mobiliario, que incluye el piloto y los trabajos asíncronos F08.4.
 
 1. **Reconstrucción de la captura espacial** (F07.7): implementada. La fotogrametría (Meshroom) queda excluida por decisión del plan maestro del 2026-10-19; el worker no reconstruye texturas ni mallas.
-   - Entrada: el paquete de captura v1 (`docs/api/f07-capture-package.md`), un ZIP con `manifest.json` y, si el dispositivo lo permite, profundidad y confianza en PNG.
+   - Entrada: el paquete de captura v1 (`docs/api/f07-capture-package.md`), un ZIP con `manifest.json` y, si el dispositivo lo permite, profundidad y confianza en PNG; o el paquete esquema 2 (video + sensores, ver más abajo).
    - Salida: un borrador de escena v2 (`docs/api/f06-scene-contract.md`) y una lista de advertencias en español para la agencia. Nada se publica solo.
 2. **Detección de mobiliario con IA preentrenada** (F08/F08.4): piloto de inferencia implementado y ejecutado; el procesamiento asíncrono por cola también está implementado. La API es la única escritora del estado de los trabajos.
 
@@ -31,6 +31,38 @@ Algoritmo v1:
 5. Volúmenes: proyecta la profundidad de los cuadros clave al mundo y agrupa los puntos ocupados en cajas sin clase ni precio (`source: "depth"`). Sin profundidad no genera volúmenes y lo advierte.
 6. Escena: muros sobre la línea central, muros compartidos soldados, sin aberturas (la agencia las marca en el editor).
 7. Si hay `reference`, reescala la escena y declara el factor aplicado.
+
+### Paquete esquema 2: video + sensores (F07 T5)
+
+`reconstruct.reconstruct` despacha por `schemaVersion`: `1` sigue por el camino ARCore descrito arriba, sin cambios; `2` usa `worker3d/reconstruct_video.py`; cualquier otra versión declarada se rechaza con `unsupported schemaVersion`. El contrato del paquete es el esquema `2` congelado de `docs/api/f07-capture-package.md` (ZIP con `manifest.json`, `video.mp4`, `frames.jsonl`, `sensors.jsonl`).
+
+```bash
+# Mismo comando que el esquema 1; despacha por el schemaVersion del manifiesto
+.venv/Scripts/python.exe worker3d/reconstruct.py <carpeta|paquete.zip>
+```
+
+Pasos (la lógica geométrica es solo biblioteca estándar; las herramientas externas se importan al usarlas y se pueden inyectar):
+
+1. Valida el paquete: campos del manifiesto, `frames.jsonl` (`i` consecutivo, `t` creciente), `sensors.jsonl` (ordenado por `t`, tipos `gyro|accel|gravity|mag`), intervalos de `rooms[]` sin superposición, `reference` opcional (`p1`/`p2` en 0..1 sobre el cuadro tal como está guardado, origen arriba a la izquierda, `surface` `floor|wall`, `frameNs` listado en `frames.jsonl` y dentro de un ambiente) y tamaño máximo de 150 MiB.
+2. Extrae cuadros con `ffmpeg` (aproximadamente 3 por segundo, más el cuadro de la referencia) y estima poses de cámara y puntos dispersos con `pycolmap`.
+3. Decide «arriba» con las muestras `gravity` (ejes crudos del dispositivo Android, convención de `TYPE_GRAVITY`), sincronizadas a los cuadros por `frames.jsonl`; el paso de ejes del dispositivo a los de la cámara sale de `video.sensorOrientation` (0, 90, 180 o 270, obligatorio). Sin gravedad usa la orientación de las cámaras y lo advierte. Las muestras `mag` se aceptan y se ignoran.
+4. Ajusta piso y techo (agrupaciones horizontales de puntos) y paredes (líneas en planta por RANSAC) por ambiente, usando los intervalos `rooms[]`, que son semiabiertos `[fromNs, toNs)` (un cuadro en `toNs` pertenece al ambiente siguiente). Comprueba además la gravedad contra la geometría: ajusta un plano dominante libre en la zona baja y en la alta de cada ambiente y, si su normal difiere de «arriba» más de 10°, advierte sin fallar el trabajo (la tolerancia de 10° es una heurística, no una medida).
+5. Escala métrica: intersecta los rayos de `p1`/`p2` en el cuadro `frameNs` con el plano ajustado (`surface`); escala = `lengthM` / distancia reconstruida, un solo factor por pieza reconstruida.
+6. Arma la escena v2 con los mismos ayudantes del esquema 1. Procedencia: `ceiling_plane` si se ajustó el techo, `assumed` si no. No hay muebles (T6) ni aberturas.
+
+Advertencias en español: sin medida de referencia, referencia que no pudo ubicarse, gravedad no disponible, pared sin observar entre dos esquinas, reconstrucción partida en piezas desconectadas (y la pieza sin referencia), altura supuesta, y que las medidas son estimadas sin exactitud medida.
+
+Herramientas externas opcionales, **no instaladas ni verificadas** en este repositorio ni en la máquina de desarrollo: `pycolmap` (`pip install pycolmap`) y `ffmpeg` (en el `PATH`). Sin ellas, un paquete de esquema 2 falla con `ExternalToolMissing` (reintentable, no es un paquete inválido). Los adaptadores reales (`FfmpegFrameExtractor`, `PycolmapPoseEstimator`) nunca se ejecutaron contra las herramientas; las pruebas usan un estimador falso con una habitación sintética.
+
+Diferencia conocida: el límite de 150 MiB se comprueba sobre los bytes descomprimidos de los cuatro archivos (`MAX_PACKAGE_BYTES`), mientras que la API lo aplica al ZIP subido; un ZIP muy comprimible puede pasar la API y aun así superar el límite aquí. No se cambió.
+
+Supuestos **sin medir ni confirmar en un teléfono** (se reabren con la primera grabación real, T1):
+
+- La exactitud de las medidas, el tiempo de CPU y el comportamiento en paredes lisas están **sin medir**.
+- `GRAVITY_POINTS_UP`: el vector `gravity` apunta hacia el cielo (convención de Android); falta confirmarlo en un teléfono.
+- `device_to_camera_matrix`: la relación de ejes para cada `sensorOrientation` (cámara trasera, cuadros sin rotar) está deducida, no probada con un teléfono.
+- Sin `reference` (o si no pudo ubicarse) la escena queda en unidades arbitrarias y lo advierte; el respaldo de escala (decisión D3) sigue abierto y no se inventó.
+- Las piezas desconectadas se colocan una junto a otra: su posición relativa no se conoce.
 
 ### Sugerencias de clase por volumen
 

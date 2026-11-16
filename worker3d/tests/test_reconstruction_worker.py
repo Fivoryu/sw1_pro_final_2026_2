@@ -158,7 +158,7 @@ def test_temporary_directory_is_removed_after_success_and_after_failure() -> Non
 
 
 def test_invalid_package_is_reported_as_not_retryable() -> None:
-    manifest = room_package(schemaVersion=2)
+    manifest = room_package(schemaVersion=3)
     http, queue = FakeHttpClient(package=_zip_bytes(manifest)), FakeQueue()
 
     _worker(http, queue).run_once()

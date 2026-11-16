@@ -88,6 +88,14 @@ class InvalidPackage(ValueError):
     """The package cannot be reconstructed no matter how often it is retried."""
 
 
+class ExternalToolMissing(RuntimeError):
+    """An optional external tool (ffmpeg, pycolmap) needed by the schema 2 path is not installed.
+
+    Not an :class:`InvalidPackage`: the package is fine and the job can be retried on a machine
+    that has the tool.
+    """
+
+
 @dataclass(frozen=True)
 class ReconstructionResult:
     scene_draft: dict[str, Any]
@@ -1110,9 +1118,29 @@ def _nearest_room(point: Point, samples: list[tuple[Point, str]]) -> str:
     return min(samples, key=lambda sample: _dist(sample[0], point))[1]
 
 
+def _declared_schema_version(package_dir: Path) -> Any:
+    """``schemaVersion`` of manifest.json, or None when it cannot be read (v1 reports that)."""
+    try:
+        data = json.loads((package_dir / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data.get("schemaVersion") if isinstance(data, dict) else None
+
+
 def reconstruct(package_dir: Path, *, depth_stride: int = DEPTH_PIXEL_STRIDE) -> ReconstructionResult:
-    """Reconstruct an unzipped capture package into a scene v2 draft plus agency warnings."""
+    """Reconstruct an unzipped capture package into a scene v2 draft plus agency warnings.
+
+    Dispatches on ``schemaVersion``: 1 is the ARCore package handled here, 2 is video + sensors
+    (``reconstruct_video``); any other declared version is rejected.
+    """
     package_dir = Path(package_dir)
+    version = _declared_schema_version(package_dir)
+    if version is not None and version != 1:
+        if type(version) is int and version == 2:
+            import reconstruct_video
+
+            return reconstruct_video.reconstruct_video(package_dir)
+        raise InvalidPackage(f"unsupported schemaVersion {version!r}; supported versions are 1 and 2")
     manifest = _read_manifest(package_dir)
     floor_y = float(manifest["floorY"])
     warnings: list[str] = []
@@ -1259,6 +1287,9 @@ def main(argv: list[str] | None = None) -> int:
         result = reconstruct_path(Path(args[0]))
     except InvalidPackage as error:
         print(f"invalid package: {error}", file=sys.stderr)
+        return 1
+    except ExternalToolMissing as error:
+        print(f"missing tool: {error}", file=sys.stderr)
         return 1
     print(json.dumps({"sceneDraft": result.scene_draft, "warnings": result.warnings},
                      ensure_ascii=False, indent=2))
