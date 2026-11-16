@@ -103,6 +103,14 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
 
     /** Size of the stored frame; the preferred one until the recorder negotiates it with the camera. */
     private var videoSize = VideoSpec.PREFERRED_SIZES.first()
+
+    /** Size of the preview buffer; the stage takes its aspect (same as the video's when the camera offers such a size). */
+    private var previewSize = videoSize
+
+    /** Rotation the platform already applies to the TextureView content, read from the SurfaceTexture matrix. */
+    private var measuredHint = 0
+    private val surfaceMatrix = FloatArray(16)
+    private var lastLoggedState = ""
     private var portrait = false
     private var controlsBuilt = false
 
@@ -203,7 +211,19 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
 
                 override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) = applyTextureTransform()
                 override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean = true
-                override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
+                override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
+                    // The hint can appear only after the first frame: re-apply the transform whenever it changes.
+                    try {
+                        surface.getTransformMatrix(surfaceMatrix)
+                    } catch (e: Exception) {
+                        return
+                    }
+                    val hint = PreviewGeometry.hintRotationDegrees(surfaceMatrix)
+                    if (hint != measuredHint || lastLoggedState.isEmpty()) {
+                        measuredHint = hint
+                        applyTextureTransform()
+                    }
+                }
             }
         }
         textureView.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
@@ -371,9 +391,21 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         val w = textureView.width
         val h = textureView.height
         if (w <= 0 || h <= 0) return
+        val plan = PreviewGeometry.plan(sensorOrientation, displayRotationDegrees(), measuredHint)
         val matrix = Matrix()
-        matrix.setValues(PreviewGeometry.bufferToView(imageRotation(), w.toFloat(), h.toFloat()))
+        matrix.setValues(PreviewGeometry.bufferToView(plan.remainder, w.toFloat(), h.toFloat()))
         textureView.setTransform(matrix)
+        logOrientation(plan, w, h)
+    }
+
+    /** One line per change, to verify on a device: `adb logcat -s VideoPreview`. */
+    private fun logOrientation(plan: PreviewGeometry.Plan, textureWidth: Int, textureHeight: Int) {
+        val state = "display=${displayRotationDegrees()} sensor=$sensorOrientation hint=${plan.hint} (measured $measuredHint) " +
+            "remainder=${plan.remainder} texture=${textureWidth}x$textureHeight stage=${stage.width}x${stage.height} " +
+            "matrix2x2=[${surfaceMatrix[0]}, ${surfaceMatrix[4]}; ${surfaceMatrix[1]}, ${surfaceMatrix[5]}]"
+        if (state == lastLoggedState) return
+        lastLoggedState = state
+        Log.i(PREVIEW_TAG, state)
     }
 
     /**
@@ -407,7 +439,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         } else {
             val minRail = dp(RAIL_WIDTH_DP) + insets.right
             val (stageWidth, _) = PreviewGeometry.stageSize(
-                rotation, videoSize.width, videoSize.height, (root.width - insets.left - minRail).coerceAtLeast(1), root.height,
+                rotation, previewSize.width, previewSize.height, (root.width - insets.left - minRail).coerceAtLeast(1), root.height,
             )
             val railWidth = maxOf(minRail, root.width - insets.left - stageWidth)
             rail.layoutParams = FrameLayout.LayoutParams(railWidth, match(), Gravity.END)
@@ -421,7 +453,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
                 .apply { leftMargin = insets.left; rightMargin = railWidth }
         }
         stage.layoutParams = stageParams
-        stage.configure(rotation, videoSize.width, videoSize.height)
+        stage.configure(rotation, previewSize.width, previewSize.height)
         markView.centeredDefault = portrait
     }
 
@@ -653,6 +685,14 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
     override fun onVideoSize(size: VideoSize) {
         main.post {
             videoSize = size
+            previewSize = size
+            updateOrientation()
+        }
+    }
+
+    override fun onPreviewSize(size: VideoSize) {
+        main.post {
+            previewSize = size
             updateOrientation()
         }
     }
@@ -1073,6 +1113,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         private const val SURFACE_FLOOR_ID = 9101
         private const val SURFACE_WALL_ID = 9102
         private const val TAG = "RoomForgeVideo"
+        private const val PREVIEW_TAG = "VideoPreview"
         private const val DETECTION_MAX_WIDTH = 1280
         private const val RECT_NOT_FOUND = "No encontré el objeto; ajustá las esquinas o marcalo a mano"
         private const val MARGIN_DP = 16

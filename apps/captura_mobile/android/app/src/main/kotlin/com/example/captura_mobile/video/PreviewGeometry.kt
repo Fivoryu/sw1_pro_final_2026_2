@@ -15,6 +15,46 @@ internal object PreviewGeometry {
 
     fun isQuarterTurn(rotation: Int): Boolean = rotation == 90 || rotation == 270
 
+    /**
+     * Clockwise rotation (0, 90, 180, 270) that the platform already applies to the buffer when it renders the
+     * TextureView, read from SurfaceTexture.getTransformMatrix (column-major 4x4). The vertical flip that GL textures
+     * carry is ignored, and so are the crop scale and translate terms: only the direction of the first column of the
+     * 2x2 block counts. Identity with the flip gives 0, the ROT_90 matrix (0,-1,-1,0) gives 90.
+     */
+    fun hintRotationDegrees(matrix: FloatArray): Int {
+        if (matrix.size < 6) return 0
+        val a = matrix[0].toDouble()
+        val b = matrix[1].toDouble()
+        if (Math.hypot(a, b) < 1e-6) return 0
+        val degrees = Math.toDegrees(Math.atan2(-b, a))
+        return ((Math.round(degrees / 90.0).toInt() * 90) % 360 + 360) % 360
+    }
+
+    /** Extra clockwise rotation the view must apply on top of what the platform already did (the hint). */
+    fun remainderRotation(sensorOrientation: Int, displayRotationDegrees: Int, hint: Int): Int =
+        (((imageRotation(sensorOrientation, displayRotationDegrees) - hint) % 360) + 360) % 360
+
+    /**
+     * Guards the sign convention of a measured quarter-turn hint: a pre-rotated buffer must show the hint equal to the
+     * upright rotation, so a measured quarter turn that equals its opposite is the same thing read the other way round.
+     */
+    fun effectiveHint(measured: Int, sensorOrientation: Int, displayRotationDegrees: Int): Int {
+        val up = imageRotation(sensorOrientation, displayRotationDegrees)
+        return if (isQuarterTurn(up) && measured == (360 - up) % 360) up else measured
+    }
+
+    /** What the screen needs for one posture: the real geometry (independent of the hint) and the view remainder. */
+    data class Plan(val uprightRotation: Int, val hint: Int, val remainder: Int)
+
+    fun plan(sensorOrientation: Int, displayRotationDegrees: Int, measuredHint: Int): Plan {
+        val hint = effectiveHint(measuredHint, sensorOrientation, displayRotationDegrees)
+        return Plan(
+            uprightRotation = imageRotation(sensorOrientation, displayRotationDegrees),
+            hint = hint,
+            remainder = remainderRotation(sensorOrientation, displayRotationDegrees, hint),
+        )
+    }
+
     /** Width and height of the upright image (the buffer swaps its sides for a quarter turn). */
     fun displayedSize(rotation: Int, bufferWidth: Int, bufferHeight: Int): Pair<Int, Int> =
         if (isQuarterTurn(rotation)) bufferHeight to bufferWidth else bufferWidth to bufferHeight

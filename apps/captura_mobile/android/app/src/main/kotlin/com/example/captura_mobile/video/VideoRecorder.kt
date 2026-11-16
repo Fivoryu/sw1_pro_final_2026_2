@@ -47,6 +47,9 @@ class VideoRecorder(
         /** The size of the stored frame was negotiated (called on the camera thread, before the preview starts). */
         fun onVideoSize(size: VideoSize)
 
+        /** The size of the preview buffer (same aspect as the video when the camera offers one); the stage follows its aspect. */
+        fun onPreviewSize(size: VideoSize) = Unit
+
         /** The recorder started; [startedAtNs] precedes every logged frame. */
         fun onRecordingStarted(startedAtNs: Long)
 
@@ -159,7 +162,11 @@ class VideoRecorder(
                 sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
                 timestampSource = TimestampSource.fromCamera(chars.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE))
                 previewTexture = texture
-                texture.setDefaultBufferSize(size.width, size.height)
+                val previewOffered = map?.getOutputSizes(SurfaceTexture::class.java).orEmpty().map { VideoSize(it.width, it.height) }
+                val previewSize = choosePreviewSize(size, previewOffered) ?: size
+                Log.i(TAG, "Preview size: ${previewSize.width}x${previewSize.height} (offered ${previewOffered.joinToString(" ") { "${it.width}x${it.height}" }})")
+                listener.onPreviewSize(previewSize)
+                texture.setDefaultBufferSize(previewSize.width, previewSize.height)
                 previewSurface = Surface(texture)
                 manager.openCamera(id, object : CameraDevice.StateCallback() {
                     override fun onOpened(device: CameraDevice) {
