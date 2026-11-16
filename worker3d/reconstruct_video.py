@@ -87,15 +87,11 @@ OBSERVED_EDGE_OVERLAP_M = 0.3
 
 # Furniture (F07 T6). Heuristics, none of them measured.
 # Frames handed to the detector: evenly spaced, at most this many (CPU inference is slow).
-# reference.rect (F07 T16): both are ASSUMPTIONS, not measured values.
-RECT_SCALE_DISAGREEMENT_MAX = 0.08  # width- and height-based scales may differ by this fraction
-CORNER_REFINE_MAX_SHIFT = 0.01  # normalised; a refined corner moving further is discarded
-RECT_CORNER_TOLERANCE = 1e-6  # corners[0]/[1] must equal p1/p2 up to JSON round-trip noise
+DETECTION_MAX_FRAMES = 40
 # reference.rect (F07 T16): the first two are ASSUMPTIONS, not measured values.
 RECT_SCALE_DISAGREEMENT_MAX = 0.08  # width- and height-based scales may differ by this fraction
 CORNER_REFINE_MAX_SHIFT = 0.01  # normalised; a refined corner moving further is discarded
 RECT_CORNER_TOLERANCE = 1e-6  # corners[0]/[1] must equal p1/p2 up to JSON round-trip noise
-DETECTION_MAX_FRAMES = 40
 # Sparse points projecting inside a detection box needed to size a volume.
 MIN_VOLUME_POINTS = 8
 # Points more than this (relative to L) behind the nearest quarter of the box are the wall behind.
