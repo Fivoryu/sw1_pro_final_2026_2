@@ -27,7 +27,9 @@ ListingApprovalStatus = Literal["draft", "pending", "approved", "rejected"]
 # StrictInt | StrictFloat preserves integer-valued coordinates from the fixture.
 SceneNumber = StrictInt | StrictFloat
 # Optional provenance declared by the F07 spatial capture; "assumed" means not measured.
-SceneWallHeightSource = Literal["ceiling_plane", "wall_point", "manual", "assumed"]
+SceneWallHeightSource = Literal[
+    "ceiling_plane", "wall_point", "manual", "assumed", "estimated"
+]
 SceneObjectSource = Literal["depth", "manual"]
 
 
