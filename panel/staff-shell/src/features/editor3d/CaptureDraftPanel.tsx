@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listCaptures, type CaptureReview, type CaptureStatus } from "../../application/captureReviewApi";
 import { StaffListingsApiError } from "../../application/staffListingsApi";
+import { pendingEstimates, splitCaptureWarnings } from "../../application/captureWarnings";
 import type { SceneDocument } from "../../application/sceneContract";
 import "./CaptureDraftPanel.css";
 
@@ -77,9 +78,7 @@ export function CaptureDraftPanel({
         <p>{STATUS[capture.status] ?? capture.status}</p>
         {capture.status === "failed"
           ? <p>Motivo: {capture.failureReason ?? "No se informó un motivo."}</p> : null}
-        {capture.status === "completed" && capture.warnings.length > 0
-          ? <ul aria-label={`Advertencias de ${capture.captureId}`}>
-            {capture.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul> : null}
+        {capture.status === "completed" ? <CaptureNotes capture={capture} /> : null}
         {capture.status === "completed" && capture.sceneDraft
           ? loadedCaptureId === capture.captureId
             ? <p>Borrador cargado en el editor: guarda la escena para aceptarlo.</p>
@@ -90,4 +89,23 @@ export function CaptureDraftPanel({
       </li>)}
     </ul>
   </section>;
+}
+
+function CaptureNotes({ capture }: { capture: CaptureReview }) {
+  const { scale, other } = splitCaptureWarnings(capture.warnings);
+  const pending = capture.sceneDraft ? pendingEstimates(capture.sceneDraft) : [];
+  return <>
+    {scale.length > 0
+      ? <ul aria-label={`Advertencias de escala de ${capture.captureId}`} className="capture-draft__scale">
+        {scale.map((warning, index) => <li key={index}>{warning}</li>)}</ul> : null}
+    {other.length > 0
+      ? <ul aria-label={`Advertencias de ${capture.captureId}`}>
+        {other.map((warning, index) => <li key={index}>{warning}</li>)}</ul> : null}
+    {pending.length > 0 ? <>
+      <p>Medidas estimadas pendientes de confirmar (no fueron medidas; no las tomes como exactas):</p>
+      <ul aria-label={`Medidas estimadas pendientes de ${capture.captureId}`}>
+        {pending.map((estimate) => <li key={estimate.wallId}>
+          Altura del muro {estimate.wallId}: {estimate.height.toFixed(2).replace(".", ",")} m (estimada)</li>)}
+      </ul></> : null}
+  </>;
 }

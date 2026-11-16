@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import { listCaptures, type CaptureReview } from "../../application/captureReviewApi";
@@ -84,4 +84,29 @@ it("refreshes on request and when refreshKey changes", async () => {
   view.rerender(<CaptureDraftPanel accessToken="token" agencyId="agency-1" listingId="listing-1"
     disabled={false} onLoadDraft={onLoadDraft} refreshKey={1} />);
   await waitFor(() => expect(screen.getByText(/Aceptada/)).toBeInTheDocument());
+});
+
+it("separates scale warnings and lists the assumed measures still pending confirmation, read-only", async () => {
+  const draft = { ...DEFAULT_SCENE_DOCUMENT,
+    walls: DEFAULT_SCENE_DOCUMENT.walls.map((wall, i) => ({ ...wall, heightSource: i === 0 ? "assumed" as const : "manual" as const })) };
+  listed({ ...base, status: "completed", sceneDraft: draft, warnings: [
+    "Sin medida de referencia: el modelo no tiene escala métrica. Las medidas están en unidades arbitrarias y no deben tomarse como metros.",
+    "Pared sin observar entre A y B"] });
+  open();
+  const scale = await screen.findByRole("list", { name: "Advertencias de escala de cap-1" });
+  expect(scale).toHaveTextContent(/Sin medida de referencia/);
+  expect(screen.getByRole("list", { name: "Advertencias de cap-1" })).toHaveTextContent("Pared sin observar");
+  const pending = screen.getByRole("list", { name: "Medidas estimadas pendientes de cap-1" });
+  expect(pending).toHaveTextContent(/wall-north/);
+  expect(pending).toHaveTextContent(/2,40 m/);
+  expect(pending.querySelectorAll("li")).toHaveLength(1);
+  expect(within(pending).queryByRole("button")).toBeNull();
+});
+
+it("shows no estimate section when nothing is pending", async () => {
+  listed({ ...base, status: "completed", sceneDraft: DEFAULT_SCENE_DOCUMENT });
+  open();
+  await screen.findByText(/Completada/);
+  expect(screen.queryByText(/Medidas estimadas/)).toBeNull();
+  expect(screen.queryByRole("list", { name: /Advertencias/ })).toBeNull();
 });
