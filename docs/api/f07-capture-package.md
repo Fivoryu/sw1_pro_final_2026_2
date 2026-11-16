@@ -166,6 +166,19 @@ Usa el flujo vigente de la API de capturas, sin cambios (ver «API» en la parte
 - Incluir elementos con textura (cuadros, marcos, zócalos): las paredes lisas son el caso difícil del SfM.
 - Filmar la referencia de escala al inicio del recorrido.
 
+## Guía en vivo durante la grabación (S8)
+
+La app muestra un aviso a la vez sobre la vista previa. Los avisos son **solo en vivo**: no se guardan en el paquete ni cambian el esquema `2`. Prioridad: movimiento brusco, poca luz, giro rápido, cierre del recorrido. Cada aviso se mantiene 2 s después de que su condición termina. La lógica está en `CaptureGuidance.kt` (función pura, con pruebas JVM).
+
+| Aviso | Señal | Umbral (supuesto, no medido) |
+| --- | --- | --- |
+| Movimiento brusco | Magnitud del giroscopio suavizada (constante de tiempo 0,3 s) | 2,0 rad/s |
+| Giro rápido («velocidad») | Misma señal | 0,8 rad/s |
+| Poca luz | `SENSOR_SENSITIVITY` (ISO) de Camera2 | 1600 o más durante 15 capturas seguidas (~0,5 s) |
+| Cerrar el recorrido | Rumbo integrado del giroscopio sobre el eje de la gravedad | Tras 60 s, con 300° de giro acumulado y el rumbo neto de vuelta a una vuelta completa (±30°); se sugiere una sola vez |
+
+Límites declarados: la «velocidad» es la de giro (el acelerómetro no se integra a velocidad de marcha porque deriva); el cierre se basa en el rumbo, no en la posición, así que puede avisar sin que el agente esté cerca del inicio. **«Pared faltante» no se implementa**: el contrato no define una señal de sensor para detectarla (queda como pendiente abierto; el worker ya advierte «Pared sin observar» al reconstruir). Ningún umbral fue medido; el piloto T1 puede reabrirlos.
+
 ## Salida de `worker3d`
 
 Sin cambios respecto del esquema `1` (ver «Resultado» en la parte 2): `sceneDraft` (escena v2), `warnings` en español y, cuando haya detección, `volumeSuggestions`, con las mismas reglas.

@@ -70,6 +70,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
     private lateinit var markView: ReferenceMarkView
     private lateinit var statusText: TextView
     private lateinit var warningText: TextView
+    private lateinit var hintText: TextView
     private lateinit var timerText: TextView
     private lateinit var recordButton: Button
     private lateinit var nextRoomButton: Button
@@ -88,6 +89,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             val now = SystemClock.elapsedRealtimeNanos()
             val elapsedS = ((now - startedAtNs) / 1_000_000_000L).coerceAtLeast(0)
             timerText.text = String.format(Locale.ROOT, "%02d:%02d", elapsedS / 60, elapsedS % 60)
+            showGuidance(now)
             if (VideoCaptureLimits.reachedTimeLimit(startedAtNs, now)) {
                 finishRecording(reachedTimeLimit = true)
                 return
@@ -136,6 +138,12 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             setPadding(dp(8), dp(4), dp(8), dp(4))
             visibility = View.GONE
         }
+        hintText = TextView(this).apply {
+            setTextColor(Color.BLACK)
+            setBackgroundColor(Color.argb(220, 255, 255, 255))
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            visibility = View.GONE
+        }
         timerText = TextView(this).apply {
             setTextColor(Color.WHITE)
             setBackgroundColor(Color.argb(140, 0, 0, 0))
@@ -146,6 +154,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             addView(textureView, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             addView(markView, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             addView(warningText, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START))
+            addView(hintText, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
             addView(timerText, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END))
         }
 
@@ -292,6 +301,13 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
 
     // region recording
 
+    /** Live hint (S8) over the preview; only while recording, hidden while the reference is marked. */
+    private fun showGuidance(nowNs: Long) {
+        val hint = if (phase == Phase.RECORDING) recorder?.guidance?.current(nowNs) else null
+        hintText.text = hint?.message.orEmpty()
+        hintText.visibility = if (hint == null) View.GONE else View.VISIBLE
+    }
+
     private fun startRecording() {
         val active = recorder ?: run {
             toast("La cámara todavía no está lista.")
@@ -389,6 +405,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         if (phase != Phase.RECORDING && phase != Phase.MARKING) return
         phase = Phase.FINISHING
         main.removeCallbacks(tick)
+        hintText.visibility = View.GONE
         statusText.text = "Guardando el recorrido…"
         controlsPanel.visibility = View.VISIBLE
         referencePanel.visibility = View.GONE

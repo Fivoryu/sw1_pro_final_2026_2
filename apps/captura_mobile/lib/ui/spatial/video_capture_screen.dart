@@ -39,6 +39,16 @@ class VideoCaptureScreen extends StatelessWidget {
                     'La referencia es opcional, pero sin ella el modelo '
                     'quedará sin escala métrica.',
               ),
+              const SizedBox(height: 12),
+              _Notice(
+                key: const ValueKey('video-guidance-hint'),
+                icon: Icons.tips_and_updates_outlined,
+                text:
+                    'Mientras grabás verás avisos sobre la imagen: movimiento '
+                    'brusco o giro rápido, poca luz y, al volver cerca del '
+                    'inicio, una sugerencia de cerrar el recorrido. Son '
+                    'orientativos y no se guardan.',
+              ),
               const SizedBox(height: 16),
               FilledButton.icon(
                 key: const ValueKey('start-video-button'),

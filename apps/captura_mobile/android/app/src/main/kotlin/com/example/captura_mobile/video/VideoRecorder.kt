@@ -12,6 +12,7 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.StreamConfigurationMap
 import android.media.MediaRecorder
@@ -52,6 +53,9 @@ class VideoRecorder(
     val frames = FrameLog()
     val sensors = SensorLog()
 
+    /** Live hints (S8) computed from the same sensor and capture data; never written to the package. */
+    val guidance = CaptureGuidance()
+
     /** Sensor timestamp of the latest frame; 0 until one arrives. */
     @Volatile
     var lastFrameNs: Long = 0L
@@ -91,10 +95,19 @@ class VideoRecorder(
                 Sensor.TYPE_MAGNETIC_FIELD -> SensorKind.MAG
                 else -> return
             }
+            if (event.values.size >= 3) feedGuidance(kind, event)
             if (event.values.size >= 3) sensors.add(event.timestamp, kind, event.values[0], event.values[1], event.values[2])
         }
 
         override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) = Unit
+    }
+
+    private fun feedGuidance(kind: SensorKind, event: SensorEvent) {
+        when (kind) {
+            SensorKind.GYRO -> guidance.onGyro(event.timestamp, event.values[0], event.values[1], event.values[2])
+            SensorKind.GRAVITY -> guidance.onGravity(event.values[0], event.values[1], event.values[2])
+            else -> Unit
+        }
     }
 
     private val frameCallback = object : CameraCaptureSession.CaptureCallback() {
@@ -108,7 +121,11 @@ class VideoRecorder(
             if (recording) frames.add(timestamp)
         }
 
-        override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) = Unit
+        override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+            if (!recording) return
+            val iso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: return
+            guidance.onExposure(result.get(CaptureResult.SENSOR_TIMESTAMP) ?: lastFrameNs, iso)
+        }
     }
 
     // region preview

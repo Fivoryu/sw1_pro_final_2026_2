@@ -75,6 +75,10 @@ void main() {
       capture: capture,
       uploads: _uploads(session!),
     );
+    // Tall enough that the whole list is built, now that it has one more card.
+    tester.view.physicalSize = const Size(1080, 3000);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       MaterialApp(home: VideoCaptureScreen(controller: controller)),
     );
@@ -90,6 +94,28 @@ void main() {
     expect(find.byKey(const ValueKey('video-message')), findsOneWidget);
     expect(find.byKey(const ValueKey('video-warning')), findsOneWidget);
     expect(find.textContaining('sin escala métrica'), findsWidgets);
+  });
+
+  testWidgets('the screen explains the live guidance shown while recording', (
+    tester,
+  ) async {
+    final session = await tester.runAsync(_session);
+    final controller = VideoCaptureController(
+      listingId: 'listing-1',
+      capture: FakeVideoCapture(),
+      uploads: _uploads(session!),
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: VideoCaptureScreen(controller: controller)),
+    );
+
+    final hint = find.byKey(const ValueKey('video-guidance-hint'));
+    expect(hint, findsOneWidget);
+    expect(find.textContaining('poca luz'), findsOneWidget);
+    expect(find.textContaining('cerrar el recorrido'), findsOneWidget);
+    // T7a behavior still holds: the reference hint and start button remain.
+    expect(find.byKey(const ValueKey('video-reference-hint')), findsOneWidget);
+    expect(find.byKey(const ValueKey('start-video-button')), findsOneWidget);
   });
 
   testWidgets('the spatial screen offers the video walkthrough beside the '
