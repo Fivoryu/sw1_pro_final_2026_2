@@ -10,6 +10,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.SurfaceTexture
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -92,6 +93,12 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
     private lateinit var presetSpinner: Spinner
     private lateinit var lengthInput: EditText
     private lateinit var labelInput: EditText
+    private lateinit var shortSideInput: EditText
+    private lateinit var referenceHint: TextView
+    private lateinit var detectStatus: TextView
+    private lateinit var modeButton: Button
+    private lateinit var repeatPointsButton: Button
+    private var detectToken = 0
     private lateinit var surfaceGroup: RadioGroup
 
     private val tick = object : Runnable {
@@ -395,18 +402,21 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             )
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                    // A preset only fills the fields; the agent can edit the length and label afterwards.
-                    val preset = presets.getOrNull(position) ?: return
-                    lengthInput.setText(preset.lengthM.toString())
-                    labelInput.setText(preset.label.substringBefore(" ("))
-                    surfaceGroup.check(if (preset.surface == ReferenceSurface.FLOOR) SURFACE_FLOOR_ID else SURFACE_WALL_ID)
+                    // A preset only fills the fields; the agent can edit the sizes and label afterwards.
+                    presets.getOrNull(position)?.let { applyPreset(it) }
                 }
 
                 override fun onNothingSelected(parent: AdapterView<*>?) = Unit
             }
         }
         lengthInput = EditText(this).apply {
-            hint = "Largo real entre los dos puntos (m)"
+            hint = "Lado largo real (m)"
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.LTGRAY)
+        }
+        shortSideInput = EditText(this).apply {
+            hint = "Lado corto real (m)"
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
             setTextColor(Color.WHITE)
             setHintTextColor(Color.LTGRAY)
@@ -422,19 +432,22 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             addView(RadioButton(this@VideoCaptureActivity).apply { id = SURFACE_WALL_ID; text = "Apoyado en la pared"; setTextColor(Color.WHITE) })
             check(SURFACE_WALL_ID)
         }
-        val hint = TextView(this).apply {
-            setTextColor(Color.WHITE); textSize = 12f
-            text = "Tocá los dos extremos del objeto sobre la imagen congelada. La grabación sigue."
-        }
+        referenceHint = TextView(this).apply { setTextColor(Color.WHITE); textSize = 12f }
+        detectStatus = TextView(this).apply { setTextColor(Color.rgb(255, 213, 79)); textSize = 12f }
+        modeButton = button("Marcar a mano") { toggleReferenceMode() }
+        repeatPointsButton = button("Repetir puntos") { markView.clearPoints() }
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(hint)
+            addView(referenceHint)
+            addView(detectStatus)
             addView(presetSpinner)
             addView(lengthInput)
+            addView(shortSideInput)
             addView(labelInput)
             addView(surfaceGroup)
-            addView(button("Confirmar referencia", filled = true) { confirmReference() }, LinearLayout.LayoutParams(match(), wrap()).apply { topMargin = dp(2) })
-            addView(button("Repetir puntos") { markView.clearPoints() }, LinearLayout.LayoutParams(match(), wrap()).apply { topMargin = dp(2) })
+            addView(button("Confirmar", filled = true) { confirmReference() }, LinearLayout.LayoutParams(match(), wrap()).apply { topMargin = dp(2) })
+            addView(modeButton, LinearLayout.LayoutParams(match(), wrap()).apply { topMargin = dp(2) })
+            addView(repeatPointsButton, LinearLayout.LayoutParams(match(), wrap()).apply { topMargin = dp(2) })
             addView(button("Seguir sin referencia") { endReference() }, LinearLayout.LayoutParams(match(), wrap()).apply { topMargin = dp(2) })
         }
         return ScrollView(this).apply { addView(panel) }
@@ -547,11 +560,122 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         chipsLayer.visibility = View.GONE
         referencePanel.visibility = View.VISIBLE
         presetSpinner.setSelection(0)
-        lengthInput.setText(ReferencePresets.ALL[0].lengthM.toString())
-        labelInput.setText(ReferencePresets.ALL[0].label.substringBefore(" ("))
+        // The first preset (A4) has both sides: start in rectangle mode and detect.
+        markView.mode = ReferenceMarkView.Mode.POINTS
+        applyPreset(ReferencePresets.ALL[0])
     }
 
+    /** Fills the size fields from [preset]; a preset with both sides detects a rectangle, the others mark by hand. */
+    private fun applyPreset(preset: ReferencePreset) {
+        lengthInput.setText(preset.lengthM.toString())
+        shortSideInput.setText(preset.otherSideM?.toString() ?: "")
+        labelInput.setText(preset.label.substringBefore(" ("))
+        surfaceGroup.check(if (preset.surface == ReferenceSurface.FLOOR) SURFACE_FLOOR_ID else SURFACE_WALL_ID)
+        if (phase != Phase.MARKING) return
+        if (preset.otherSideM != null) {
+            if (markView.mode != ReferenceMarkView.Mode.RECT) setReferenceMode(ReferenceMarkView.Mode.RECT)
+            else if (!markView.moved) runDetection()
+        } else {
+            setReferenceMode(ReferenceMarkView.Mode.POINTS)
+        }
+    }
+
+    private fun toggleReferenceMode() {
+        setReferenceMode(if (markView.mode == ReferenceMarkView.Mode.RECT) ReferenceMarkView.Mode.POINTS else ReferenceMarkView.Mode.RECT)
+    }
+
+    private fun setReferenceMode(mode: ReferenceMarkView.Mode) {
+        markView.mode = mode
+        val rect = mode == ReferenceMarkView.Mode.RECT
+        shortSideInput.visibility = if (rect) View.VISIBLE else View.GONE
+        repeatPointsButton.visibility = if (rect) View.GONE else View.VISIBLE
+        modeButton.text = if (rect) "Marcar a mano" else "Detectar el objeto"
+        lengthInput.hint = if (rect) "Lado largo real (m)" else "Largo real entre los dos puntos (m)"
+        if (rect) {
+            referenceHint.text = "Arrastrá las esquinas hasta que coincidan con el objeto y tocá Confirmar. La grabación sigue."
+            markView.clearPoints()
+            runDetection()
+        } else {
+            detectToken++
+            detectStatus.text = ""
+            referenceHint.text = "Tocá los dos extremos del objeto sobre la imagen congelada. La grabación sigue."
+        }
+    }
+
+    /** Looks for the rectangle off the UI thread; a newer call or leaving the screen discards a late result. */
+    private fun runDetection() {
+        val frame = markView.frameBitmap ?: return
+        val ratio = parseMeters(lengthInput)?.let { long -> parseMeters(shortSideInput)?.let { short -> maxOf(long, short) / minOf(long, short) } }
+        val token = ++detectToken
+        detectStatus.text = "Buscando el objeto…"
+        thread(name = "rect-detect") {
+            val quad = try {
+                detectRectangle(frame, ratio)
+            } catch (e: Exception) {
+                Log.w(TAG, "Rectangle detection failed", e)
+                null
+            }
+            main.post {
+                if (token != detectToken || phase != Phase.MARKING || markView.mode != ReferenceMarkView.Mode.RECT) return@post
+                markView.setQuad(quad)
+                detectStatus.text = if (quad != null) "Encontré un objeto. Revisá las esquinas." else RECT_NOT_FOUND
+            }
+        }
+    }
+
+    private fun detectRectangle(frame: Bitmap, ratio: Double?): List<ReferencePoint>? {
+        // Read the pixels without recycling the frame: the view still draws it.
+        val scaled = if (frame.width > DETECTION_MAX_WIDTH) {
+            Bitmap.createScaledBitmap(frame, DETECTION_MAX_WIDTH, maxOf(1, frame.height * DETECTION_MAX_WIDTH / frame.width), true)
+        } else frame
+        val pixels = IntArray(scaled.width * scaled.height)
+        scaled.getPixels(pixels, 0, scaled.width, 0, 0, scaled.width, scaled.height)
+        val quad = RectDetector.detect(pixels, scaled.width, scaled.height, ratio)
+        if (scaled !== frame) scaled.recycle()
+        return quad
+    }
+
+    private fun parseMeters(field: EditText): Double? =
+        field.text.toString().replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
+
     private fun confirmReference() {
+        if (markView.mode == ReferenceMarkView.Mode.RECT) confirmRectangle() else confirmPoints()
+    }
+
+    private fun confirmRectangle() {
+        val quad = markView.quad()
+        if (quad == null) {
+            toast("Esperá a que termine la búsqueda o marcá el objeto a mano.")
+            return
+        }
+        val first = parseMeters(lengthInput)
+        val second = parseMeters(shortSideInput)
+        if (first == null || second == null) {
+            toast("Ingresá el lado largo y el lado corto reales del objeto en metros.")
+            return
+        }
+        val width = maxOf(first, second)
+        val height = minOf(first, second)
+        val surface = if (surfaceGroup.checkedRadioButtonId == SURFACE_FLOOR_ID) ReferenceSurface.FLOOR else ReferenceSurface.WALL
+        val source = when {
+            !markView.detected -> ReferenceRectSource.MANUAL
+            markView.moved -> ReferenceRectSource.ADJUSTED
+            else -> ReferenceRectSource.AUTO
+        }
+        try {
+            val corners = ReferenceRect.orient(quad, width, height)
+            val rect = ReferenceRect.create(width, height, corners, source)
+            reference = ReferenceMark.create(markView.frameNs, corners[0], corners[1], width, labelInput.text.toString(), surface, rect)
+        } catch (e: IllegalArgumentException) {
+            toast("Las cuatro esquinas no forman un rectángulo. Ajustalas o marcá a mano.")
+            return
+        }
+        warningText.visibility = View.GONE
+        referenceButton.visibility = View.GONE
+        endReference()
+    }
+
+    private fun confirmPoints() {
         val points = markView.points()
         if (points == null) {
             toast("Tocá los dos extremos del objeto sobre la imagen.")
@@ -577,6 +701,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
     private fun endReference() {
         if (phase != Phase.MARKING) return
         phase = Phase.RECORDING
+        detectToken++
         markView.visibility = View.GONE
         markView.clear()
         referencePanel.visibility = View.GONE
@@ -745,6 +870,8 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         private const val SURFACE_FLOOR_ID = 9101
         private const val SURFACE_WALL_ID = 9102
         private const val TAG = "RoomForgeVideo"
+        private const val DETECTION_MAX_WIDTH = 1280
+        private const val RECT_NOT_FOUND = "No encontré el objeto; ajustá las esquinas o marcalo a mano"
         private const val MARGIN_DP = 16
         private const val RAIL_WIDTH_DP = 112
         private const val REFERENCE_PANEL_WIDTH_DP = 300
@@ -775,30 +902,77 @@ internal class AspectFrameLayout(context: android.content.Context) : FrameLayout
     }
 }
 
-/** A frozen frame on which the agent taps the two ends of the reference object. */
+/**
+ * A frozen frame for the scale reference. In [Mode.RECT] it shows a quadrilateral (detected or default) with four
+ * draggable corner handles; in [Mode.POINTS], the manual fallback, the agent taps the two ends of the object.
+ * Coordinates are kept normalised to 0..1 on the frame, which is the view because the stage is 16:9.
+ */
 internal class ReferenceMarkView(context: android.content.Context) : View(context) {
+    enum class Mode { RECT, POINTS }
+
+    private val density = resources.displayMetrics.density
     private var frame: Bitmap? = null
     var frameNs: Long = 0L
         private set
+    val frameBitmap: Bitmap? get() = frame
+    var mode: Mode = Mode.RECT
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    /** True when the current quad came from the detector (even if the agent moved it afterwards). */
+    var detected = false
+        private set
+
+    /** True once the agent dragged a corner. */
+    var moved = false
+        private set
+
+    private var quadPoints: List<ReferencePoint>? = null
+    private var dragging = -1
     private val taps = ArrayList<Pair<Float, Float>>(2)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = 4f; color = Color.YELLOW }
+    private val quadStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3f * density; color = Color.rgb(0, 229, 255) }
+    private val quadFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = Color.argb(45, 0, 229, 255) }
+    private val handleFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = Color.WHITE }
+    private val handleRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3f * density; color = Color.rgb(0, 229, 255) }
 
     fun show(bitmap: Bitmap, frameNs: Long) {
         frame = bitmap
         this.frameNs = frameNs
         taps.clear()
+        quadPoints = null
+        detected = false
+        moved = false
+        dragging = -1
         invalidate()
     }
 
     fun clear() {
         frame = null
         taps.clear()
+        quadPoints = null
+        detected = false
+        moved = false
+        dragging = -1
     }
 
     fun clearPoints() {
         taps.clear()
         invalidate()
     }
+
+    /** Puts the detector's [detectedQuad], or a centred default the agent can drag when nothing was found. */
+    fun setQuad(detectedQuad: List<ReferencePoint>?) {
+        detected = detectedQuad != null
+        moved = false
+        quadPoints = detectedQuad ?: DEFAULT_QUAD
+        invalidate()
+    }
+
+    /** The four corners, normalised, or null before the detection ended. */
+    fun quad(): List<ReferencePoint>? = quadPoints
 
     /** The two ends normalised to 0..1 on the frame, or null until both were tapped. */
     fun points(): Pair<ReferencePoint, ReferencePoint>? {
@@ -810,17 +984,63 @@ internal class ReferenceMarkView(context: android.content.Context) : View(contex
 
     override fun onDraw(canvas: Canvas) {
         frame?.let { canvas.drawBitmap(it, null, android.graphics.Rect(0, 0, width, height), null) }
-        taps.forEach { canvas.drawCircle(it.first, it.second, 14f, paint) }
-        if (taps.size == 2) canvas.drawLine(taps[0].first, taps[0].second, taps[1].first, taps[1].second, paint)
+        if (mode == Mode.POINTS) {
+            taps.forEach { canvas.drawCircle(it.first, it.second, 14f, paint) }
+            if (taps.size == 2) canvas.drawLine(taps[0].first, taps[0].second, taps[1].first, taps[1].second, paint)
+            return
+        }
+        val q = quadPoints ?: return
+        val path = Path()
+        q.forEachIndexed { i, p ->
+            val x = (p.x * width).toFloat()
+            val y = (p.y * height).toFloat()
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        path.close()
+        canvas.drawPath(path, quadFill)
+        canvas.drawPath(path, quadStroke)
+        q.forEach {
+            canvas.drawCircle((it.x * width).toFloat(), (it.y * height).toFloat(), 11f * density, handleFill)
+            canvas.drawCircle((it.x * width).toFloat(), (it.y * height).toFloat(), 11f * density, handleRing)
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (mode == Mode.RECT) return onRectTouch(event)
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             if (taps.size == 2) taps.clear()
             taps.add(event.x to event.y)
             invalidate()
-            return true
         }
         return true
+    }
+
+    private fun onRectTouch(event: MotionEvent): Boolean {
+        val q = quadPoints ?: return true
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                // 30dp radius: a 60dp target, above the 48dp minimum; the closest handle wins.
+                val reach = HANDLE_TOUCH_RADIUS_DP * density
+                fun distance(i: Int) = Math.hypot(q[i].x * width - event.x.toDouble(), q[i].y * height - event.y.toDouble())
+                dragging = q.indices.minByOrNull { distance(it) }?.takeIf { distance(it) <= reach } ?: -1
+            }
+            MotionEvent.ACTION_MOVE -> if (dragging >= 0 && width > 0 && height > 0) {
+                val target = ReferencePoint.fromPixels(event.x, event.y, width.toFloat(), height.toFloat())
+                quadPoints = q.mapIndexed { i, p -> if (i == dragging) target else p }
+                moved = true
+                invalidate()
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> dragging = -1
+        }
+        return true
+    }
+
+    private companion object {
+        const val HANDLE_TOUCH_RADIUS_DP = 30f
+        val DEFAULT_QUAD = listOf(
+            // Left of the 300dp reference panel, which covers the right of the frame in landscape.
+            ReferencePoint(0.10, 0.30), ReferencePoint(0.45, 0.30),
+            ReferencePoint(0.45, 0.70), ReferencePoint(0.10, 0.70),
+        )
     }
 }

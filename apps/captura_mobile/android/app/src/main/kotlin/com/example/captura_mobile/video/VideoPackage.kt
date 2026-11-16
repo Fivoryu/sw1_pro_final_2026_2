@@ -67,6 +67,85 @@ data class ReferencePoint(val x: Double, val y: Double) {
     }
 }
 
+/** Where the corners of a [ReferenceRect] came from (docs/api/f07-capture-package.md, `reference.rect.source`). */
+enum class ReferenceRectSource(val wireName: String) {
+    /** Detected by the app and confirmed untouched. */
+    AUTO("auto"),
+
+    /** Detected, then corrected by hand. */
+    ADJUSTED("adjusted"),
+
+    /** The four corners were placed by hand without a detection. */
+    MANUAL("manual"),
+}
+
+/**
+ * A rectangle of known real sides on the reference frame (optional `reference.rect`). The invariants are
+ * the frozen contract: `widthM >= heightM`, four corners in 0..1, and the ring starts on the long side
+ * (`corners[0]`->`corners[1]` is `widthM`, `corners[1]`->`corners[2]` is `heightM`).
+ */
+class ReferenceRect private constructor(
+    val widthM: Double,
+    val heightM: Double,
+    val corners: List<ReferencePoint>,
+    val source: ReferenceRectSource,
+) {
+    fun toMap(): Map<String, Any?> = linkedMapOf(
+        "widthM" to widthM,
+        "heightM" to heightM,
+        "corners" to corners.map { it.toMap() },
+        "source" to source.wireName,
+    )
+
+    companion object {
+        /** @throws IllegalArgumentException when any contract invariant is broken. */
+        fun create(widthM: Double, heightM: Double, corners: List<ReferencePoint>, source: ReferenceRectSource): ReferenceRect {
+            require(widthM.isFinite() && widthM > 0.0) { "The rectangle width must be a positive number" }
+            require(heightM.isFinite() && heightM > 0.0) { "The rectangle height must be a positive number" }
+            require(widthM >= heightM) { "The rectangle width must be the long side" }
+            require(corners.size == 4) { "A rectangle needs four corners" }
+            require(corners.all { it.x.isFinite() && it.y.isFinite() && it.x in 0.0..1.0 && it.y in 0.0..1.0 }) {
+                "The rectangle corners must lie inside the frame"
+            }
+            require(corners.toSet().size == 4) { "The rectangle corners must be four different points" }
+            require(isConvexRing(corners)) { "The rectangle corners must form a convex ring" }
+            return ReferenceRect(widthM, heightM, corners.toList(), source)
+        }
+
+        /** True when the four points, in order, turn the same way at every corner (no bow-tie, no dent). */
+        fun isConvexRing(corners: List<ReferencePoint>): Boolean {
+            if (corners.size != 4) return false
+            var sign = 0
+            for (i in 0 until 4) {
+                val a = corners[i]
+                val b = corners[(i + 1) % 4]
+                val c = corners[(i + 2) % 4]
+                val cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)
+                val s = if (cross > 0.0) 1 else if (cross < 0.0) -1 else return false
+                if (sign == 0) sign = s else if (sign != s) return false
+            }
+            return true
+        }
+
+        /**
+         * Rotates the consecutive [quad] so that it starts on the pair of opposite sides that matches the long
+         * side (the longer pair, measured in frame pixels, not in normalised units) and returns the corners in
+         * contract order. The ratio of [widthM] to [heightM] cannot decide anything the longer pair does not:
+         * both candidates are the same two lengths swapped.
+         */
+        fun orient(quad: List<ReferencePoint>, widthM: Double, heightM: Double): List<ReferencePoint> {
+            require(quad.size == 4) { "A rectangle needs four corners" }
+            require(widthM >= heightM) { "The rectangle width must be the long side" }
+            fun side(a: ReferencePoint, b: ReferencePoint) =
+                Math.hypot((a.x - b.x) * VideoSpec.WIDTH, (a.y - b.y) * VideoSpec.HEIGHT)
+            val first = side(quad[0], quad[1]) + side(quad[2], quad[3])
+            val second = side(quad[1], quad[2]) + side(quad[3], quad[0])
+            val shift = if (first >= second) 0 else 1
+            return List(4) { quad[(shift + it) % 4] }
+        }
+    }
+}
+
 /** An object of known length the agent marked on frame [frameNs]. */
 class ReferenceMark private constructor(
     val frameNs: Long,
@@ -75,8 +154,9 @@ class ReferenceMark private constructor(
     val lengthM: Double,
     val label: String,
     val surface: ReferenceSurface,
+    val rect: ReferenceRect? = null,
 ) {
-    fun toMap(): Map<String, Any?> = linkedMapOf(
+    fun toMap(): Map<String, Any?> = linkedMapOf<String, Any?>(
         "kind" to "object",
         "label" to label,
         "lengthM" to lengthM,
@@ -84,7 +164,7 @@ class ReferenceMark private constructor(
         "frameNs" to frameNs,
         "p1" to p1.toMap(),
         "p2" to p2.toMap(),
-    )
+    ).also { map -> rect?.let { map["rect"] = it.toMap() } }
 
     companion object {
         /** @throws IllegalArgumentException for a non-positive length or two identical ends. */
@@ -95,21 +175,29 @@ class ReferenceMark private constructor(
             lengthM: Double,
             label: String,
             surface: ReferenceSurface,
+            rect: ReferenceRect? = null,
         ): ReferenceMark {
             require(lengthM.isFinite() && lengthM > 0.0) { "The reference length must be a positive number" }
             require(p1 != p2) { "The two ends of the reference must be different points" }
-            return ReferenceMark(frameNs, p1, p2, lengthM, label.trim().ifEmpty { "Objeto" }, surface)
+            if (rect != null) {
+                require(rect.widthM == lengthM) { "The rectangle width must equal the reference length" }
+                require(rect.corners[0] == p1 && rect.corners[1] == p2) { "The rectangle must start at p1 and p2" }
+            }
+            return ReferenceMark(frameNs, p1, p2, lengthM, label.trim().ifEmpty { "Objeto" }, surface, rect)
         }
     }
 }
 
-/** Known sizes offered to the agent; the length stays editable and a free value is always allowed. */
-data class ReferencePreset(val label: String, val lengthM: Double, val surface: ReferenceSurface)
+/**
+ * Known sizes offered to the agent; the length stays editable and a free value is always allowed. [otherSideM] is the
+ * short side of a rectangular object; without it the preset is 2-point manual only (a door, say).
+ */
+data class ReferencePreset(val label: String, val lengthM: Double, val surface: ReferenceSurface, val otherSideM: Double? = null)
 
 object ReferencePresets {
     val ALL = listOf(
-        ReferencePreset("Hoja A4 (lado largo)", 0.297, ReferenceSurface.WALL),
-        ReferencePreset("Tarjeta (lado largo)", 0.0856, ReferenceSurface.WALL),
+        ReferencePreset("Hoja A4 (lado largo)", 0.297, ReferenceSurface.WALL, otherSideM = 0.210),
+        ReferencePreset("Tarjeta (lado largo)", 0.0856, ReferenceSurface.WALL, otherSideM = 0.05398),
         ReferencePreset("Puerta estándar (alto)", 2.0, ReferenceSurface.FLOOR),
     )
 }
