@@ -14,6 +14,12 @@ abstract interface class StaffCredentialStore {
 
   Future<void> saveCsrfToken(String csrfToken);
 
+  /// Id of the account the stored session belongs to. It is not a secret; it
+  /// only selects whose local data the offline mode may show.
+  Future<String?> readOwnerId();
+
+  Future<void> saveOwnerId(String ownerId);
+
   Future<void> clear();
 }
 
@@ -24,6 +30,7 @@ class SecureStaffCredentialStore implements StaffCredentialStore {
 
   static const String refreshCookieKey = 'roomforge.staff.refresh_cookie';
   static const String csrfTokenKey = 'roomforge.staff.csrf_token';
+  static const String ownerIdKey = 'roomforge.staff.owner_id';
 
   final FlutterSecureStorage _storage;
 
@@ -50,8 +57,19 @@ class SecureStaffCredentialStore implements StaffCredentialStore {
       _storage.write(key: csrfTokenKey, value: csrfToken);
 
   @override
+  Future<String?> readOwnerId() async {
+    final value = await _storage.read(key: ownerIdKey);
+    return (value == null || value.isEmpty) ? null : value;
+  }
+
+  @override
+  Future<void> saveOwnerId(String ownerId) =>
+      _storage.write(key: ownerIdKey, value: ownerId);
+
+  @override
   Future<void> clear() async {
     await _storage.delete(key: refreshCookieKey);
     await _storage.delete(key: csrfTokenKey);
+    await _storage.delete(key: ownerIdKey);
   }
 }

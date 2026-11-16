@@ -51,6 +51,9 @@ class CaptureUploadController extends ChangeNotifier {
 
   static const String noSessionMessage =
       'Tu cuenta no tiene una sesión activa. Volvé a ingresar.';
+  static const String _offlineSessionMessage =
+      'Modo sin conexión. El recorrido queda guardado en el teléfono y se '
+      'envía cuando vuelva la red y se renueve tu sesión.';
   static const String _offlineMessage =
       'Sin conexión. El recorrido quedó guardado en el teléfono; se vuelve '
       'a intentar cuando tengas red.';
@@ -93,7 +96,9 @@ class CaptureUploadController extends ChangeNotifier {
   /// Completes when the current run (if any) finished.
   Future<void> get idle => _running ?? Future<void>.value();
 
-  String? get _ownerId => _session.account?.id;
+  /// The signed-in account, or the one of the stored session while the app
+  /// is offline, so recordings can be queued without network.
+  String? get _ownerId => _session.ownerId;
 
   @override
   void dispose() {
@@ -161,7 +166,11 @@ class CaptureUploadController extends ChangeNotifier {
       final owner = _ownerId;
       final credentials = _credentials();
       if (owner == null || credentials == null) {
-        _message = noSessionMessage;
+        // Offline mode has no access token on purpose: nothing is sent until
+        // the session is renewed with network.
+        _message = _session.isOffline
+            ? _offlineSessionMessage
+            : noSessionMessage;
         return;
       }
       _message = null;

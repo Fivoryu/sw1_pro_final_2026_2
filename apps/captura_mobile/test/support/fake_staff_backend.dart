@@ -6,10 +6,15 @@ import 'package:http/testing.dart';
 
 /// In-memory stand-in for the keychain-backed credential store.
 class InMemoryStaffCredentialStore implements StaffCredentialStore {
-  InMemoryStaffCredentialStore({this.refreshCookie, this.csrfToken});
+  InMemoryStaffCredentialStore({
+    this.refreshCookie,
+    this.csrfToken,
+    this.ownerId,
+  });
 
   String? refreshCookie;
   String? csrfToken;
+  String? ownerId;
 
   @override
   Future<String?> readRefreshCookie() async =>
@@ -33,9 +38,18 @@ class InMemoryStaffCredentialStore implements StaffCredentialStore {
   }
 
   @override
+  Future<String?> readOwnerId() async => ownerId;
+
+  @override
+  Future<void> saveOwnerId(String ownerId) async {
+    this.ownerId = ownerId;
+  }
+
+  @override
   Future<void> clear() async {
     refreshCookie = null;
     csrfToken = null;
+    ownerId = null;
   }
 }
 

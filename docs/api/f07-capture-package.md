@@ -325,3 +325,13 @@ La API es la única que escribe el estado; los leases vencidos se recuperan por 
 - Los cuadros muestran el interior del inmueble: son privados de la agencia, nunca públicos.
 - Se borran del almacenamiento cuando la agencia acepta la escena generada, o a los **30 días** desde la subida si nadie la revisa, lo que ocurra primero. Hasta entonces se pueden reprocesar.
 - El `sceneDraft` y el `manifest.json` sin imágenes se conservan como registro de la captura.
+
+## Grabar sin conexión (S10)
+
+La app de captura permite grabar sin red y enviar después, con un modo acotado:
+
+- **Entrada**: solo al abrir la app sin red **con una sesión ya guardada** en el teléfono (cookie de renovación, CSRF e id de cuenta en el almacén seguro). Sin sesión guardada se muestra el acceso de siempre.
+- **Qué permite**: lista local de los inmuebles ya descargados (solo id y una etiqueta «ciudad · zona», por cuenta), grabar el recorrido de uno de ellos y ver la cola de envíos pendientes. No muestra ni edita otros datos del servidor y no hay token de acceso: ninguna llamada autenticada sale en este estado.
+- **Envío**: el paquete queda en el teléfono y en la cola. Al volver la red («Reintentar conexión») se hace la renovación real de la sesión; solo entonces la cola se envía sola. Si la renovación es rechazada (no una falla de red), la sesión y la caché local se descartan como siempre y los paquetes en cola **no se borran**.
+- **Cierre de sesión**: borra la sesión guardada, el id de cuenta y la caché de inmuebles. Cambiar de cuenta también borra la caché anterior.
+- **Sin límite de vigencia**: este modo no impone un plazo de acceso sin conexión; queda como decisión abierta del dueño del producto.
