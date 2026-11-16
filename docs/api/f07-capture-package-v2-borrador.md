@@ -1,7 +1,6 @@
 # Paquete de captura F07 v2 (borrador) → worker3d
 
-> **Estado:** borrador de la dirección **aprobada** el 2026-10-23 por el dueño del repositorio (plan maestro §F07, «Decisión 2026-10-23»). Todavía no está congelado ni implementado: `docs/api/f07-capture-package.md` (esquema `1`) sigue siendo el contrato del código existente hasta que este documento se congele como `schemaVersion: 2`.
-> Todo valor marcado «por definir» o «por validar» no está decidido ni medido.
+> **Estado:** **sustituido el 2026-11-15** por la sección del esquema `2` de `docs/api/f07-capture-package.md`, que es el contrato vigente. Este borrador se conserva solo como registro histórico; sus valores «por definir» quedaron resueltos (como supuestos no medidos) en el documento vigente.
 
 ## Propósito
 
