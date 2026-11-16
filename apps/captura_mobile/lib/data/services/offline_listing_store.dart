@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -45,6 +46,11 @@ class FileOfflineListingStore implements OfflineListingStore {
 
   static final _safeId = RegExp(r'^[A-Za-z0-9_-]{1,128}$');
 
+  /// Tail of the in-process write chain of each owner, so read-modify-write
+  /// cycles of one owner never overlap.
+  final _tails = <String, Future<void>>{};
+  int _writeCounter = 0;
+
   @override
   Future<List<OfflineListing>> read(String ownerId) async {
     final file = await _file(ownerId);
@@ -70,6 +76,23 @@ class FileOfflineListingStore implements OfflineListingStore {
     List<OfflineListing> listings,
   ) async {
     final file = await _file(ownerId);
+    final previous = _tails[ownerId] ?? Future<void>.value();
+    final run = previous.then((_) => _writeLocked(file, bucket, listings));
+    // The chain keeps going after a failed write; the caller still sees it.
+    final tail = run.then<void>((_) {}, onError: (Object _) {});
+    _tails[ownerId] = tail;
+    try {
+      await run;
+    } finally {
+      if (identical(_tails[ownerId], tail)) unawaited(_tails.remove(ownerId));
+    }
+  }
+
+  Future<void> _writeLocked(
+    File file,
+    String bucket,
+    List<OfflineListing> listings,
+  ) async {
     await file.parent.create(recursive: true);
     Map<String, List<OfflineListing>> buckets;
     try {
@@ -78,7 +101,7 @@ class FileOfflineListingStore implements OfflineListingStore {
       buckets = {};
     }
     buckets[bucket] = listings;
-    final temporary = File('${file.path}.tmp');
+    final temporary = File('${file.path}.${_writeCounter++}.tmp');
     await temporary.writeAsString(
       jsonEncode({
         for (final entry in buckets.entries)
