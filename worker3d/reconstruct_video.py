@@ -87,6 +87,14 @@ OBSERVED_EDGE_OVERLAP_M = 0.3
 
 # Furniture (F07 T6). Heuristics, none of them measured.
 # Frames handed to the detector: evenly spaced, at most this many (CPU inference is slow).
+# reference.rect (F07 T16): both are ASSUMPTIONS, not measured values.
+RECT_SCALE_DISAGREEMENT_MAX = 0.08  # width- and height-based scales may differ by this fraction
+CORNER_REFINE_MAX_SHIFT = 0.01  # normalised; a refined corner moving further is discarded
+RECT_CORNER_TOLERANCE = 1e-6  # corners[0]/[1] must equal p1/p2 up to JSON round-trip noise
+# reference.rect (F07 T16): the first two are ASSUMPTIONS, not measured values.
+RECT_SCALE_DISAGREEMENT_MAX = 0.08  # width- and height-based scales may differ by this fraction
+CORNER_REFINE_MAX_SHIFT = 0.01  # normalised; a refined corner moving further is discarded
+RECT_CORNER_TOLERANCE = 1e-6  # corners[0]/[1] must equal p1/p2 up to JSON round-trip noise
 DETECTION_MAX_FRAMES = 40
 # Sparse points projecting inside a detection box needed to size a volume.
 MIN_VOLUME_POINTS = 8
@@ -295,7 +303,50 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
             _room_index_at(ordered, reference["frameNs"]) is not None,
             "reference.frameNs must fall inside a room interval",
         )
+        if reference.get("rect") is not None:
+            _validate_rect(reference)
     return manifest
+
+
+def _is_convex_quad(points: list[tuple[float, float]]) -> bool:
+    """True for a non-degenerate convex quadrilateral (all turns the same way, none flat)."""
+    turns = []
+    for i in range(4):
+        (ax, ay), (bx, by), (cx, cy) = points[i], points[(i + 1) % 4], points[(i + 2) % 4]
+        turns.append((bx - ax) * (cy - by) - (by - ay) * (cx - bx))
+    return all(t > 1e-9 for t in turns) or all(t < -1e-9 for t in turns)
+
+
+def _validate_rect(reference: dict[str, Any]) -> None:
+    """Check ``reference.rect`` against the frozen contract (docs/api/f07-capture-package.md)."""
+    rect = reference["rect"]
+    where = "reference.rect"
+    require = reconstruct._require
+    require(isinstance(rect, dict), f"{where} must be an object or absent")
+    for key in ("widthM", "heightM"):
+        require(reconstruct._is_number(rect.get(key)) and rect[key] > 0, f"{where}.{key} must be positive")
+    require(
+        math.isclose(rect["widthM"], reference["lengthM"], rel_tol=1e-6, abs_tol=1e-9),
+        f"{where}.widthM must equal reference.lengthM",
+    )
+    require(rect["heightM"] <= rect["widthM"], f"{where}.heightM must not exceed widthM")
+    require(
+        rect.get("source") in ("auto", "adjusted", "manual"),
+        f"{where}.source must be auto, adjusted or manual",
+    )
+    corners = rect.get("corners")
+    require(isinstance(corners, list) and len(corners) == 4, f"{where}.corners must hold four points")
+    for index, corner in enumerate(corners):
+        _validate_point(corner, f"{where}.corners[{index}]")
+    for index, key in ((0, "p1"), (1, "p2")):
+        require(
+            all(abs(corners[index][k] - reference[key][k]) <= RECT_CORNER_TOLERANCE for k in ("x", "y")),
+            f"{where}.corners[{index}] must equal reference.{key}",
+        )
+    require(
+        _is_convex_quad([(c["x"], c["y"]) for c in corners]),
+        f"{where}.corners must form a non-degenerate convex quadrilateral",
+    )
 
 
 def _room_index_at(ordered_rooms: list[dict[str, Any]], t: int) -> int | None:
@@ -686,29 +737,116 @@ def _hit_wall(origin: Vec3, direction: Vec3, wall: _WallLine) -> tuple[Vec3, flo
     return hit, overflow
 
 
+def _plane_hits(
+    points: list[dict[str, float]], pose: CameraPose, intrinsics: Intrinsics, fit: _RoomFit, surface: str
+) -> list[Vec3] | None:
+    """Intersections of the rays of ``points`` with the fitted plane, or None when any misses it."""
+    rays = [_pixel_ray(point, pose, intrinsics) for point in points]
+    if surface == "floor":
+        if fit.floor_y is None:
+            return None
+        floor_hits = [_hit_floor(o, d, fit.floor_y) for o, d in rays]
+        return None if any(h is None for h in floor_hits) else floor_hits  # type: ignore[return-value]
+    best: tuple[float, list[Vec3]] | None = None
+    for wall in fit.walls:
+        found = [_hit_wall(o, d, wall) for o, d in rays]
+        if any(f is None for f in found):
+            continue
+        score = sum(f[1] for f in found if f is not None)
+        if best is None or score < best[0]:
+            best = (score, [f[0] for f in found if f is not None])
+    return best[1] if best else None
+
+
 def reference_scale(
     reference: dict[str, Any], pose: CameraPose, intrinsics: Intrinsics, fit: _RoomFit
 ) -> float | None:
     """Factor that turns SfM units into metres, or None when the rays do not reach the plane."""
-    rays = [_pixel_ray(reference[k], pose, intrinsics) for k in ("p1", "p2")]
-    if reference["surface"] == "floor":
-        if fit.floor_y is None:
-            return None
-        hits = [_hit_floor(o, d, fit.floor_y) for o, d in rays]
-    else:
-        best: tuple[float, list[Vec3]] | None = None
-        for wall in fit.walls:
-            found = [_hit_wall(o, d, wall) for o, d in rays]
-            if any(f is None for f in found):
-                continue
-            score = sum(f[1] for f in found if f is not None)
-            if best is None or score < best[0]:
-                best = (score, [f[0] for f in found if f is not None])
-        hits = best[1] if best else [None, None]  # type: ignore[list-item]
-    if hits[0] is None or hits[1] is None:
+    hits = _plane_hits([reference["p1"], reference["p2"]], pose, intrinsics, fit, reference["surface"])
+    if hits is None:
         return None
     distance = math.dist(hits[0], hits[1])
     return None if distance < 1e-9 else float(reference["lengthM"]) / distance
+
+
+def rect_scale(
+    rect: dict[str, Any],
+    corners: list[dict[str, float]],
+    surface: str,
+    pose: CameraPose,
+    intrinsics: Intrinsics,
+    fit: _RoomFit,
+) -> tuple[float, bool] | None:
+    """Scale from a reference rectangle: ``(factor, estimates_disagree)``, or None on a miss.
+
+    The width (corners 0-1) and the height (corners 1-2) each give a scale on the same plane. When
+    they differ by more than ``RECT_SCALE_DISAGREEMENT_MAX`` the long side wins; otherwise the
+    length-weighted mean is used.
+    """
+    hits = _plane_hits(corners, pose, intrinsics, fit, surface)
+    if hits is None:
+        return None
+    d_w, d_h = math.dist(hits[0], hits[1]), math.dist(hits[1], hits[2])
+    if d_w < 1e-9 or d_h < 1e-9:
+        return None
+    width, height = float(rect["widthM"]), float(rect["heightM"])
+    s_w, s_h = width / d_w, height / d_h
+    if abs(s_w - s_h) / max(s_w, s_h) > RECT_SCALE_DISAGREEMENT_MAX:
+        return s_w, True
+    return (width * s_w + height * s_h) / (width + height), False
+
+
+WARNING_RECT_INCONSISTENT = (
+    "La medida de referencia es inconsistente: el ancho y el alto del objeto dan escalas que "
+    "difieren más del 8 %; el objeto pudo estar inclinado o mal detectado. Se usó el lado largo."
+)
+
+# Takes the reference frame image and the 4 normalised corners; returns 4 refined corners.
+CornerRefiner = Callable[[Path, list[dict[str, float]]], list[dict[str, float]]]
+
+
+def default_corner_refiner(frame: Path, corners: list[dict[str, float]]) -> list[dict[str, float]]:
+    """Sub-pixel corner refinement with OpenCV ``cornerSubPix``, when OpenCV and numpy exist.
+
+    Without them the corners come back unchanged and nothing is reported. WARNING: the OpenCV body
+    has never been run against a real image (neither library is installed in the test
+    environment); its accuracy gain is unmeasured and ``CORNER_REFINE_MAX_SHIFT`` is an assumption.
+    """
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return corners
+    gray = cv2.imread(str(frame), cv2.IMREAD_GRAYSCALE)
+    if gray is None:
+        return corners
+    height, width = gray.shape[:2]
+    points = np.array([[c["x"] * width, c["y"] * height] for c in corners], dtype=np.float32)
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.01)
+    refined = cv2.cornerSubPix(gray, points.reshape(-1, 1, 2), (7, 7), (-1, -1), criteria)
+    return [{"x": float(x) / width, "y": float(y) / height} for x, y in refined.reshape(-1, 2).tolist()]
+
+
+def refine_rect_corners(
+    frame: Path, corners: list[dict[str, float]], refiner: CornerRefiner | None = None
+) -> list[dict[str, float]]:
+    """Apply an optional refiner defensively: a failure, a malformed answer, a move larger than
+    ``CORNER_REFINE_MAX_SHIFT`` or a non-convex result keeps the original corners."""
+    try:
+        refined = (refiner or default_corner_refiner)(frame, corners)
+        points = [(float(c["x"]), float(c["y"])) for c in refined]
+    except Exception:  # noqa: BLE001 - refinement is optional; never fail the reconstruction
+        return corners
+    if len(points) != 4 or not all(math.isfinite(v) and 0 <= v <= 1 for p in points for v in p):
+        return corners
+    if any(
+        max(abs(p[0] - c["x"]), abs(p[1] - c["y"])) > CORNER_REFINE_MAX_SHIFT
+        for p, c in zip(points, corners, strict=True)
+    ):
+        return corners
+    if not _is_convex_quad(points):
+        return corners
+    return [{"x": x, "y": y} for x, y in points]
 
 
 # --- Adapters (external tools, imported lazily) --------------------------------------------
@@ -1051,6 +1189,7 @@ def reconstruct_video(
     estimator: PoseEstimator | None = None,
     device_to_camera: Mat3 | None = None,
     detector_factory: DetectorFactory | None = None,
+    corner_refiner: CornerRefiner | None = None,
 ) -> VideoReconstructionResult:
     """Reconstruct an unzipped schema 2 package into a scene v2 draft plus warnings.
 
@@ -1092,6 +1231,13 @@ def reconstruct_video(
     with tempfile.TemporaryDirectory(prefix="roomforge-sfm-") as scratch:
         frames = extractor.extract(package.directory / VIDEO_FILE, sorted(indices), Path(scratch) / "frames")
         models = [m for m in estimator.estimate(frames, Path(scratch) / "sfm") if m.poses and m.points]
+        # Optional sub-pixel refinement of the reference rectangle (the frame lives in scratch).
+        rect_corners: list[dict[str, float]] | None = None
+        if reference is not None and reference.get("rect") is not None:
+            rect_corners = reference["rect"]["corners"]
+            reference_frame = next((f for f in frames if f.index == reference_index), None)
+            if reference_frame is not None:
+                rect_corners = refine_rect_corners(reference_frame.path, rect_corners, corner_refiner)
         # The frames live in this scratch directory: detect here, place the boxes later.
         detections: dict[int, list[dict[str, Any]]] = {}
         model_id = ""
@@ -1144,7 +1290,18 @@ def reconstruct_video(
             pose = next((p for p in piece.poses if p.frame_index == reference_index), None)
             if pose is None or room_id not in piece.rooms:
                 continue
-            piece.factor = reference_scale(reference, pose, piece.intrinsics, piece.rooms[room_id])
+            fit = piece.rooms[room_id]
+            piece.factor = None
+            if rect_corners is not None:
+                estimate = rect_scale(
+                    reference["rect"], rect_corners, reference["surface"], pose, piece.intrinsics, fit
+                )
+                if estimate is not None:
+                    piece.factor = estimate[0]
+                    if estimate[1] and WARNING_RECT_INCONSISTENT not in warnings:
+                        warnings.append(WARNING_RECT_INCONSISTENT)
+            if piece.factor is None:  # no rect, or its corners miss the plane: use the two points
+                piece.factor = reference_scale(reference, pose, piece.intrinsics, fit)
             scaled = piece.factor is not None
         if not scaled:
             warnings.append(

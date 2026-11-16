@@ -30,7 +30,7 @@ Algoritmo v1:
 4. Altura: plano de techo menos piso (`ceiling_plane`, medida) o 2,40 m con procedencia `assumed` y advertencia; una altura supuesta nunca se presenta como medida.
 5. Volúmenes: proyecta la profundidad de los cuadros clave al mundo y agrupa los puntos ocupados en cajas sin clase ni precio (`source: "depth"`). Sin profundidad no genera volúmenes y lo advierte.
 6. Escena: muros sobre la línea central, muros compartidos soldados, sin aberturas (la agencia las marca en el editor).
-7. Si hay `reference`, reescala la escena y declara el factor aplicado.
+7. Si hay `reference`, reescala la escena y declara el factor aplicado. Con `reference.rect` (opcional) valida sus invariantes (`widthM == lengthM`, `corners[0]`/`[1]` = `p1`/`p2`, cuadrilátero convexo en 0..1, `heightM <= widthM`, `source` auto|adjusted|manual; si no, paquete inválido) y calcula dos escalas (ancho y alto) sobre el mismo plano: si difieren más del 8 % (supuesto, no medido) advierte y usa el lado largo; si no, promedia ponderando por longitud. Si las esquinas no alcanzan el plano, vuelve a la escala de `p1`/`p2`. Si OpenCV y numpy están instalados refina las esquinas a subpíxel (`cornerSubPix`, máximo 0,01 normalizado de desplazamiento, supuesto); sin ellos usa las esquinas tal cual. Ese refinado **no se probó con una imagen real** ni con OpenCV: solo con un refinador simulado.
 
 ### Paquete esquema 2: video + sensores (F07 T5)
 
