@@ -86,6 +86,7 @@ class VideoRecorder(
     private var previewSurface: Surface? = null
     private var mediaRecorder: MediaRecorder? = null
     private var released = false
+    private var lensCorrectionEnabled = true
 
     private val sensorListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
@@ -197,7 +198,15 @@ class VideoRecorder(
                         }
                         session = configured
                         try {
-                            configured.setRepeatingRequest(buildRequest(device, template, surfaces), frameCallback, cameraHandler)
+                            try {
+                                configured.setRepeatingRequest(buildRequest(device, template, surfaces), frameCallback, cameraHandler)
+                            } catch (e: Exception) {
+                                // T18: if the HAL rejects the lens-correction request, retry once without it.
+                                if (!lensCorrectionEnabled) throw e
+                                Log.w(TAG, "Request with lens correction rejected, retrying without it", e)
+                                lensCorrectionEnabled = false
+                                configured.setRepeatingRequest(buildRequest(device, template, surfaces), frameCallback, cameraHandler)
+                            }
                             onConfigured(configured)
                         } catch (e: Exception) {
                             Log.e(TAG, "Repeating request failed", e)
@@ -234,11 +243,47 @@ class VideoRecorder(
         // T17: ask for the centred 16:9 band of the sensor explicitly. Without it the HAL may squeeze the full 4:3
         // array into the 16:9 stream (anamorphic); with it, preview and recording share one undistorted field of view.
         cropRegionFor(chars)?.let { builder.set(CaptureRequest.SCALER_CROP_REGION, it) }
+        if (lensCorrectionEnabled) applyLensCorrection(builder, chars)
         val fpsRanges = chars?.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
         if (fpsRanges?.contains(Range(VideoSpec.FPS, VideoSpec.FPS)) == true) {
             builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(VideoSpec.FPS, VideoSpec.FPS))
         }
         return builder.build()
+    }
+
+    /**
+     * T18: ask for the best lens distortion correction the device lists, so the preview and the video look like the
+     * vendor camera (straight lines stay straight). Only public API: standard key, or the Samsung vendor key found by
+     * name among the advertised request keys. Missing keys or errors leave the request untouched.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun applyLensCorrection(builder: CaptureRequest.Builder, chars: CameraCharacteristics?) {
+        if (chars == null) return
+        try {
+            val standard = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                chars.get(CameraCharacteristics.DISTORTION_CORRECTION_AVAILABLE_MODES)?.toList()
+            } else {
+                null
+            }
+            val vendorRequestKey = chars.availableCaptureRequestKeys.firstOrNull { it.name == LensCorrection.VENDOR_REQUEST_KEY }
+            val vendorModes = chars.keys.firstOrNull { it.name == LensCorrection.VENDOR_MODES_KEY }
+                ?.let { (chars.get(it as CameraCharacteristics.Key<Any>) as? IntArray)?.toList() }
+            val support = LensCorrectionSupport(Build.VERSION.SDK_INT, standard, vendorRequestKey != null, vendorModes)
+            Log.i(TAG, "Lens correction support: $support")
+            when (val choice = LensCorrection.choose(support)) {
+                is LensCorrectionChoice.Standard ->
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        builder.set(CaptureRequest.DISTORTION_CORRECTION_MODE, choice.mode)
+                    }
+                is LensCorrectionChoice.Vendor ->
+                    if (vendorRequestKey != null) {
+                        builder.set(vendorRequestKey as CaptureRequest.Key<Int>, choice.mode)
+                    }
+                null -> Unit
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Lens correction unavailable, keeping the default request", e)
+        }
     }
 
     private fun cropRegionFor(chars: CameraCharacteristics?): Rect? {
