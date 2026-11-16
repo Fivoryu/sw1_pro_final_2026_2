@@ -760,6 +760,41 @@ def test_ffmpeg_is_invoked_without_audio_or_autorotation_and_frames_are_mapped_b
     assert "-noautorotate" in calls[0] and "-an" in calls[0]
 
 
+def test_ffmpeg_input_is_restricted_to_local_files_and_the_mp4_demuxer(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    def runner(command: list[str], **_: Any) -> Any:
+        calls.append(command)
+        out = Path(command[-1]).parent
+        (out / "000001.jpg").write_bytes(b"jpg")
+        return type("Done", (), {"returncode": 0, "stderr": b""})()
+
+    rv.FfmpegFrameExtractor(which=lambda _n: "ffmpeg", runner=runner).extract(
+        tmp_path / "video.mp4", [0], tmp_path
+    )
+
+    command = calls[0]
+    at = command.index("-i")
+    assert command[command.index("-protocol_whitelist") + 1] == "file"
+    assert command.index("-protocol_whitelist") < at
+    assert command[command.index("-f") + 1] == "mov"  # the MP4 family demuxer
+    assert command.index("-f") < at
+
+
+def test_fewer_decoded_frames_than_requested_is_a_retryable_runtime_error(tmp_path: Path) -> None:
+    def runner(command: list[str], **_: Any) -> Any:
+        out = Path(command[-1]).parent
+        for k in range(2):
+            (out / f"{k + 1:06d}.jpg").write_bytes(b"jpg")
+        return type("Done", (), {"returncode": 0, "stderr": b""})()
+
+    extractor = rv.FfmpegFrameExtractor(which=lambda _n: "ffmpeg", runner=runner)
+
+    with pytest.raises(RuntimeError, match="2 of 3") as info:
+        extractor.extract(tmp_path / "video.mp4", [0, 10, 25], tmp_path)
+    assert not isinstance(info.value, reconstruct.InvalidPackage)
+
+
 def test_a_failing_ffmpeg_is_a_retryable_runtime_error(tmp_path: Path) -> None:
     def runner(command: list[str], **_: Any) -> Any:
         return type("Done", (), {"returncode": 1, "stderr": b"boom"})()

@@ -739,6 +739,10 @@ class FfmpegFrameExtractor:
         script.write_text("select=" + "+".join(f"eq(n\\,{i})" for i in ordered), encoding="utf-8")
         command = [
             executable, "-hide_banner", "-loglevel", "error",
+            # The container is sniffed from content, not the extension: pin local files and the
+            # MP4 demuxer so a crafted "video.mp4" (HLS/concat playlist) cannot read other files
+            # or fetch URLs.
+            "-protocol_whitelist", "file", "-f", "mov",
             "-noautorotate", "-i", str(video), "-an",
             "-filter_script:v", str(script), "-vsync", "0", "-qscale:v", "2",
             str(out_dir / "%06d.jpg"),
@@ -750,7 +754,12 @@ class FfmpegFrameExtractor:
         produced = sorted(out_dir.glob("*.jpg"))
         if not produced:
             raise RuntimeError("ffmpeg produced no frames")
-        return [ExtractedFrame(i, p) for i, p in zip(ordered, produced, strict=False)]
+        if len(produced) != len(ordered):
+            raise RuntimeError(
+                f"ffmpeg produced {len(produced)} of {len(ordered)} requested frames; "
+                "frames.jsonl does not match video.mp4"
+            )
+        return [ExtractedFrame(i, p) for i, p in zip(ordered, produced, strict=True)]
 
 
 class PycolmapPoseEstimator:
