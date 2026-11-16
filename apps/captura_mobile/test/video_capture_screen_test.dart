@@ -96,6 +96,25 @@ void main() {
     expect(find.textContaining('sin escala métrica'), findsWidgets);
   });
 
+  testWidgets('the intro says the app detects the reference and no longer asks '
+      'to mark two ends', (tester) async {
+    final session = await tester.runAsync(_session);
+    final controller = VideoCaptureController(
+      listingId: 'listing-1',
+      capture: FakeVideoCapture(),
+      uploads: _uploads(session!),
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: VideoCaptureScreen(controller: controller)),
+    );
+
+    expect(find.textContaining('detecta el objeto'), findsOneWidget);
+    expect(find.textContaining('confirmás o ajustás'), findsOneWidget);
+    expect(find.textContaining('a mano'), findsOneWidget);
+    expect(find.textContaining('vertical u horizontal'), findsOneWidget);
+    expect(find.textContaining('marcá sus dos extremos'), findsNothing);
+  });
+
   testWidgets('the screen explains the live guidance shown while recording', (
     tester,
   ) async {

@@ -1,6 +1,7 @@
 package com.example.captura_mobile.video
 
 import android.content.Context
+import android.graphics.Rect
 import android.graphics.SurfaceTexture
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -230,11 +231,22 @@ class VideoRecorder(
         if (stabilisation?.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF) == true) {
             builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
         }
+        // T17: ask for the centred 16:9 band of the sensor explicitly. Without it the HAL may squeeze the full 4:3
+        // array into the 16:9 stream (anamorphic); with it, preview and recording share one undistorted field of view.
+        cropRegionFor(chars)?.let { builder.set(CaptureRequest.SCALER_CROP_REGION, it) }
         val fpsRanges = chars?.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
         if (fpsRanges?.contains(Range(VideoSpec.FPS, VideoSpec.FPS)) == true) {
             builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(VideoSpec.FPS, VideoSpec.FPS))
         }
         return builder.build()
+    }
+
+    private fun cropRegionFor(chars: CameraCharacteristics?): Rect? {
+        val array = chars?.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return null
+        val zoom = chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f
+        // CENTER_ONLY and FREEFORM both accept a centred region, so the cropping type does not change the result.
+        val crop = CaptureCrop.centered(array.width(), array.height(), VideoSpec.WIDTH, VideoSpec.HEIGHT, zoom) ?: return null
+        return Rect(array.left + crop.left, array.top + crop.top, array.left + crop.right, array.top + crop.bottom)
     }
 
     // endregion
@@ -349,7 +361,20 @@ class VideoRecorder(
         }
     }
 
-    private companion object {
-        const val TAG = "RoomForgeVideo"
+    companion object {
+        private const val TAG = "RoomForgeVideo"
+
+        /** SENSOR_ORIENTATION of the back camera (needs no permission); 90 when it cannot be read. */
+        fun backCameraSensorOrientation(context: Context): Int = try {
+            val manager = context.getSystemService(CameraManager::class.java)
+            manager.cameraIdList
+                .map { manager.getCameraCharacteristics(it) }
+                .firstOrNull { it.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK }
+                ?.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: DEFAULT_SENSOR_ORIENTATION
+        } catch (e: Exception) {
+            DEFAULT_SENSOR_ORIENTATION
+        }
+
+        private const val DEFAULT_SENSOR_ORIENTATION = 90
     }
 }

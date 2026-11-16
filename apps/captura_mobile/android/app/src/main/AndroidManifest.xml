@@ -42,7 +42,7 @@
         <activity
             android:name=".video.VideoCaptureActivity"
             android:exported="false"
-            android:screenOrientation="landscape"
+            android:screenOrientation="fullUser"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode" />
         <meta-data

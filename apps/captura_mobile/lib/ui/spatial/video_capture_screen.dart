@@ -25,10 +25,13 @@ class VideoCaptureScreen extends StatelessWidget {
               Text(
                 'Grabá un recorrido por el inmueble. No hace falta una cinta '
                 'métrica: al empezar, encuadrá un objeto de tamaño conocido '
-                '(una hoja A4, una tarjeta, una puerta) y marcá sus dos '
-                'extremos. Durante el recorrido tocá «Siguiente ambiente» '
-                'cada vez que pases a otro ambiente. La grabación se corta '
-                'a los 5 minutos y no lleva audio.',
+                '(una hoja A4, una tarjeta, una puerta). La app detecta el '
+                'objeto y vos confirmás o ajustás sus esquinas; si no lo '
+                'encuentra, podés marcarlo a mano. Podés grabar con el '
+                'teléfono en vertical u horizontal. Durante el recorrido '
+                'tocá «Siguiente ambiente» cada vez que pases a otro '
+                'ambiente. La grabación se corta a los 5 minutos y no lleva '
+                'audio.',
                 style: theme.textTheme.bodyLarge,
               ),
               const SizedBox(height: 12),

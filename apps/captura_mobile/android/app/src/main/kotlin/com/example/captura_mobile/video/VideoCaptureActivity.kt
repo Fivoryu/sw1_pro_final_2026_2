@@ -4,16 +4,19 @@ import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.SurfaceTexture
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -23,6 +26,7 @@ import android.text.InputType
 import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.Surface
 import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
@@ -51,8 +55,10 @@ import kotlin.concurrent.thread
 /**
  * Video walkthrough capture (F07, schema 2): preview, recording with «Siguiente ambiente», and the
  * optional scale reference marked on a frozen frame at the start. No ARCore. The hardware work is
- * in [VideoRecorder] and the package logic in VideoPackage.kt. Landscape only: the recorded frame
- * is 1280x720 and the preview and reference taps use that same orientation.
+ * in [VideoRecorder] and the package logic in VideoPackage.kt. Works in the four orientations (T17): the
+ * recorded frame stays the raw 1280x720 sensor image, the preview is rotated upright for display only
+ * ([PreviewGeometry]), and the reference points and corners are mapped back to the stored frame before they
+ * reach the package. The orientation is locked while a recording is in progress.
  */
 class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
 
@@ -89,7 +95,23 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
     private lateinit var chipsLayer: FrameLayout
     private var cancelDialog: AlertDialog? = null
     private lateinit var controlsPanel: LinearLayout
-    private lateinit var referencePanel: ScrollView
+    private lateinit var referencePanel: LinearLayout
+    private lateinit var root: FrameLayout
+    private lateinit var cancelButton: TextView
+    private lateinit var banners: LinearLayout
+    private var sensorOrientation = 90
+    private var portrait = false
+    private var controlsBuilt = false
+
+    /** Clockwise rotation of the frozen frame that was shown for marking; converts taps to the stored frame. */
+    private var markRotation = 0
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+        override fun onDisplayRemoved(displayId: Int) = Unit
+        override fun onDisplayChanged(displayId: Int) {
+            main.post { updateOrientation() }
+        }
+    }
     private lateinit var presetSpinner: Spinner
     private lateinit var lengthInput: EditText
     private lateinit var labelInput: EditText
@@ -123,7 +145,9 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         listingId = intent.getStringExtra(EXTRA_LISTING_ID)
         timeline = RoomTimeline(intent.getStringExtra(EXTRA_FIRST_ROOM_NAME).orEmpty())
         workDir = File(cacheDir, "video_work/$captureId").also { it.mkdirs() }
+        sensorOrientation = VideoRecorder.backCameraSensorOrientation(applicationContext)
         buildUi()
+        getSystemService(DisplayManager::class.java).registerDisplayListener(displayListener, main)
         if (listingId.isNullOrBlank()) {
             finishWithResult(
                 VideoCaptureResult.error(VideoCaptureResult.ERROR_RECORDING_FAILED, "Falta la publicación del recorrido."),
@@ -174,10 +198,13 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
                     openPreviewWhenPermitted()
                 }
 
-                override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) = Unit
+                override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) = applyTextureTransform()
                 override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean = true
                 override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
             }
+        }
+        textureView.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) applyTextureTransform()
         }
         markView = ReferenceMarkView(this).apply { visibility = View.GONE }
         stage = AspectFrameLayout(this).apply {
@@ -238,7 +265,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             .apply { visibility = View.GONE }
         nextRoomButton = railButton(R.drawable.ic_video_next_room, "Siguiente ambiente") { nextRoom() }
             .apply { visibility = View.GONE }
-        val cancelButton = TextView(this).apply {
+        cancelButton = TextView(this).apply {
             text = "Cancelar"
             setTextColor(Color.WHITE)
             textSize = 13f
@@ -252,17 +279,8 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             isClickable = true
             setOnClickListener { cancelCapture() }
         }
-        controlsPanel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            addView(cancelButton, LinearLayout.LayoutParams(wrap(), wrap()))
-            addView(View(this@VideoCaptureActivity), LinearLayout.LayoutParams(0, 0, 1f))
-            addView(referenceButton, railItemParams())
-            addView(nextRoomButton, railItemParams())
-            addView(View(this@VideoCaptureActivity), LinearLayout.LayoutParams(0, 0, 1f))
-            addView(recordButton, railItemParams())
-            addView(stopButton, railItemParams())
-        }
+        // The children of the rail and of the chips layer are placed by buildControls() for the current orientation.
+        controlsPanel = LinearLayout(this)
         // The rail runs to the window edge so its scrim also covers the navigation bar; its content is inset.
         rail = FrameLayout(this).apply {
             setBackgroundColor(RAIL_SCRIM)
@@ -271,63 +289,166 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         referencePanel = buildReferencePanel().apply { setBackgroundColor(Color.argb(225, 0, 0, 0)) }.also { it.visibility = View.GONE }
 
         // Overlay for the chips and banners, kept inside the safe area plus a 16dp margin and clear of the rail.
-        chipsLayer = FrameLayout(this).apply {
-            addView(timerChip, FrameLayout.LayoutParams(wrap(), wrap(), Gravity.TOP or Gravity.START))
-            addView(
-                statusText,
-                FrameLayout.LayoutParams(wrap(), wrap(), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
-                    leftMargin = dp(112)
-                    rightMargin = dp(8)
-                },
-            )
-            val banners = LinearLayout(this@VideoCaptureActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(hintText, LinearLayout.LayoutParams(wrap(), wrap()).apply { topMargin = dp(8) })
-                addView(warningText, LinearLayout.LayoutParams(wrap(), wrap()).apply { topMargin = dp(8) })
-            }
-            addView(banners, FrameLayout.LayoutParams(wrap(), wrap(), Gravity.BOTTOM or Gravity.START))
+        chipsLayer = FrameLayout(this)
+        banners = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(hintText, LinearLayout.LayoutParams(wrap(), wrap()).apply { topMargin = dp(8) })
+            addView(warningText, LinearLayout.LayoutParams(wrap(), wrap()).apply { topMargin = dp(8) })
         }
 
-        val root = FrameLayout(this).apply {
+        root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(stage, FrameLayout.LayoutParams(match(), match(), Gravity.CENTER))
             addView(chipsLayer, FrameLayout.LayoutParams(match(), match()))
             addView(rail, FrameLayout.LayoutParams(dp(RAIL_WIDTH_DP), match(), Gravity.END))
             addView(referencePanel, FrameLayout.LayoutParams(dp(REFERENCE_PANEL_WIDTH_DP), match(), Gravity.END))
         }
-        root.setOnApplyWindowInsetsListener { _, insets ->
-            applySafeInsets(insets)
-            insets
+        root.setOnApplyWindowInsetsListener { _, windowInsets ->
+            readInsets(windowInsets)
+            updateOrientation()
+            windowInsets
+        }
+        root.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) updateOrientation()
         }
         setContentView(root)
         root.requestApplyInsets()
     }
 
-    /** Pads the chipsLayer, the rail and the reference panel by the system bars and the display cutout. */
-    private fun applySafeInsets(insets: WindowInsets) {
-        val left: Int
-        val top: Int
-        val right: Int
-        val bottom: Int
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
-            left = safe.left; top = safe.top; right = safe.right; bottom = safe.bottom
+    private class SafeInsets(val left: Int, val top: Int, val right: Int, val bottom: Int)
+
+    private var insets = SafeInsets(0, 0, 0, 0)
+
+    /** Reads the system bars and the display cutout; the layout is padded by them in [applyLayout]. */
+    private fun readInsets(windowInsets: WindowInsets) {
+        insets = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val safe = windowInsets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            SafeInsets(safe.left, safe.top, safe.right, safe.bottom)
         } else {
             @Suppress("DEPRECATION")
-            run {
-                left = insets.systemWindowInsetLeft; top = insets.systemWindowInsetTop
-                right = insets.systemWindowInsetRight; bottom = insets.systemWindowInsetBottom
-            }
+            SafeInsets(
+                windowInsets.systemWindowInsetLeft, windowInsets.systemWindowInsetTop,
+                windowInsets.systemWindowInsetRight, windowInsets.systemWindowInsetBottom,
+            )
         }
+    }
+
+    private fun displayRotationDegrees(): Int {
+        @Suppress("DEPRECATION")
+        return when (windowManager.defaultDisplay.rotation) {
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        }
+    }
+
+    /** Clockwise rotation that makes the raw sensor frame upright for the way the phone is held now. */
+    private fun imageRotation(): Int = PreviewGeometry.imageRotation(sensorOrientation, displayRotationDegrees())
+
+    /**
+     * Re-lays the screen for how the phone is held: portrait or landscape controls, the preview stage in the upright
+     * aspect and the texture matrix. Called when the window size, the insets or the display rotation change (a turn
+     * between the two portraits or the two landscapes keeps the window size, so the display listener calls it too).
+     */
+    private fun updateOrientation() {
+        if (!::root.isInitialized || root.width <= 0 || root.height <= 0) return
+        val nowPortrait = root.height > root.width
+        if (!controlsBuilt || nowPortrait != portrait) {
+            portrait = nowPortrait
+            controlsBuilt = true
+            buildControls()
+        }
+        applyLayout()
+        applyTextureTransform()
+    }
+
+    /** Rotates the raw sensor buffer upright inside the stage (the stage already has the upright aspect). */
+    private fun applyTextureTransform() {
+        val w = textureView.width
+        val h = textureView.height
+        if (w <= 0 || h <= 0) return
+        val matrix = Matrix()
+        matrix.setValues(PreviewGeometry.bufferToView(imageRotation(), w.toFloat(), h.toFloat()))
+        textureView.setTransform(matrix)
+    }
+
+    /** Places the rail, the chips, the reference panel and the stage by the safe insets for the current orientation. */
+    private fun applyLayout() {
         val margin = dp(MARGIN_DP)
-        val railWidth = dp(RAIL_WIDTH_DP) + right
-        rail.layoutParams = (rail.layoutParams as FrameLayout.LayoutParams).apply { width = railWidth }
-        controlsPanel.setPadding(dp(8), top + margin, right + dp(8), bottom + margin)
-        referencePanel.layoutParams = (referencePanel.layoutParams as FrameLayout.LayoutParams).apply {
-            width = dp(REFERENCE_PANEL_WIDTH_DP) + right
+        val fit = phase == Phase.MARKING && portrait
+        val panelHeight = (root.height * PORTRAIT_PANEL_FRACTION).toInt()
+        if (portrait) {
+            val railHeight = dp(PORTRAIT_RAIL_DP) + insets.bottom
+            rail.layoutParams = FrameLayout.LayoutParams(match(), railHeight, Gravity.BOTTOM)
+            controlsPanel.setPadding(insets.left + dp(8), dp(8), insets.right + dp(8), insets.bottom + dp(8))
+            referencePanel.layoutParams = FrameLayout.LayoutParams(match(), panelHeight, Gravity.BOTTOM)
+            referencePanel.setPadding(insets.left + dp(12), dp(8), insets.right + dp(12), insets.bottom + dp(8))
+            chipsLayer.setPadding(insets.left + margin, insets.top + margin, insets.right + margin, railHeight + margin)
+        } else {
+            val railWidth = dp(RAIL_WIDTH_DP) + insets.right
+            rail.layoutParams = FrameLayout.LayoutParams(railWidth, match(), Gravity.END)
+            controlsPanel.setPadding(dp(8), insets.top + margin, insets.right + dp(8), insets.bottom + margin)
+            referencePanel.layoutParams = FrameLayout.LayoutParams(dp(REFERENCE_PANEL_WIDTH_DP) + insets.right, match(), Gravity.END)
+            referencePanel.setPadding(dp(12), insets.top + dp(8), insets.right + dp(12), insets.bottom + dp(8))
+            chipsLayer.setPadding(insets.left + margin, insets.top + margin, railWidth + margin, insets.bottom + margin)
         }
-        referencePanel.setPadding(dp(12), top + dp(8), right + dp(12), bottom + dp(8))
-        chipsLayer.setPadding(left + margin, top + margin, railWidth + margin, bottom + margin)
+        // While marking in portrait the whole frame stays visible above the bottom panel; otherwise the stage covers the window.
+        stage.layoutParams = FrameLayout.LayoutParams(match(), match(), if (fit) Gravity.TOP or Gravity.CENTER_HORIZONTAL else Gravity.CENTER)
+            .apply { if (fit) topMargin = insets.top }
+        stage.configure(imageRotation(), cover = !fit, reservedBottom = if (fit) panelHeight else 0)
+        markView.centeredDefault = portrait
+    }
+
+    private fun detach(view: View) {
+        (view.parent as? ViewGroup)?.removeView(view)
+    }
+
+    /** Builds the control rail and the chips for the current orientation (the same views, placed differently). */
+    private fun buildControls() {
+        listOf(cancelButton, referenceButton, nextRoomButton, recordButton, stopButton, timerChip, statusText, banners).forEach(::detach)
+        controlsPanel.removeAllViews()
+        chipsLayer.removeAllViews()
+        if (portrait) {
+            // Bottom rail: the record or stop button is centred and primary; the secondary actions sit beside it.
+            controlsPanel.orientation = LinearLayout.HORIZONTAL
+            controlsPanel.gravity = Gravity.CENTER_VERTICAL
+            fun slot(vararg views: View, width: Int = wrap()) = FrameLayout(this).apply {
+                views.forEach { addView(it, FrameLayout.LayoutParams(width, wrap(), Gravity.CENTER)) }
+            }
+            controlsPanel.addView(slot(referenceButton, width = dp(SECONDARY_WIDTH_DP)), LinearLayout.LayoutParams(0, wrap(), 1f))
+            controlsPanel.addView(slot(recordButton, stopButton), LinearLayout.LayoutParams(0, wrap(), 1f))
+            controlsPanel.addView(slot(nextRoomButton, width = dp(SECONDARY_WIDTH_DP)), LinearLayout.LayoutParams(0, wrap(), 1f))
+            cancelButton.background = rounded(SCRIM, 16)
+            cancelButton.setPadding(dp(10), 0, dp(14), 0)
+            chipsLayer.addView(cancelButton, FrameLayout.LayoutParams(wrap(), wrap(), Gravity.TOP or Gravity.START))
+            chipsLayer.addView(timerChip, FrameLayout.LayoutParams(wrap(), wrap(), Gravity.TOP or Gravity.END).apply { topMargin = dp(6) })
+            chipsLayer.addView(
+                statusText,
+                FrameLayout.LayoutParams(wrap(), wrap(), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(60) },
+            )
+        } else {
+            controlsPanel.orientation = LinearLayout.VERTICAL
+            controlsPanel.gravity = Gravity.CENTER_HORIZONTAL
+            cancelButton.background = null
+            cancelButton.setPadding(0, 0, 0, 0)
+            controlsPanel.addView(cancelButton, LinearLayout.LayoutParams(wrap(), wrap()))
+            controlsPanel.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
+            controlsPanel.addView(referenceButton, railItemParams())
+            controlsPanel.addView(nextRoomButton, railItemParams())
+            controlsPanel.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
+            controlsPanel.addView(recordButton, railItemParams())
+            controlsPanel.addView(stopButton, railItemParams())
+            chipsLayer.addView(timerChip, FrameLayout.LayoutParams(wrap(), wrap(), Gravity.TOP or Gravity.START))
+            chipsLayer.addView(
+                statusText,
+                FrameLayout.LayoutParams(wrap(), wrap(), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+                    leftMargin = dp(112)
+                    rightMargin = dp(8)
+                },
+            )
+        }
+        chipsLayer.addView(banners, FrameLayout.LayoutParams(wrap(), wrap(), Gravity.BOTTOM or Gravity.START))
     }
 
     private fun railItemParams() = LinearLayout.LayoutParams(match(), wrap()).apply {
@@ -392,7 +513,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         setOnClickListener { onClick() }
     }
 
-    private fun buildReferencePanel(): ScrollView {
+    private fun buildReferencePanel(): LinearLayout {
         val presets = ReferencePresets.ALL
         presetSpinner = Spinner(this).apply {
             adapter = ArrayAdapter(
@@ -445,12 +566,31 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             addView(shortSideInput)
             addView(labelInput)
             addView(surfaceGroup)
-            addView(button("Confirmar", filled = true) { confirmReference() }, LinearLayout.LayoutParams(match(), wrap()).apply { topMargin = dp(2) })
-            addView(modeButton, LinearLayout.LayoutParams(match(), wrap()).apply { topMargin = dp(2) })
-            addView(repeatPointsButton, LinearLayout.LayoutParams(match(), wrap()).apply { topMargin = dp(2) })
-            addView(button("Seguir sin referencia") { endReference() }, LinearLayout.LayoutParams(match(), wrap()).apply { topMargin = dp(2) })
         }
-        return ScrollView(this).apply { addView(panel) }
+        // The buttons stay fixed under the scrolling fields so Confirmar and Marcar a mano are always reachable.
+        fun cell() = LinearLayout.LayoutParams(0, wrap(), 1f).apply { marginEnd = dp(4); marginStart = dp(4); topMargin = dp(2) }
+        val footer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(
+                LinearLayout(this@VideoCaptureActivity).apply {
+                    addView(button("Confirmar", filled = true) { confirmReference() }, cell())
+                    addView(modeButton, cell())
+                },
+                LinearLayout.LayoutParams(match(), wrap()),
+            )
+            addView(
+                LinearLayout(this@VideoCaptureActivity).apply {
+                    addView(repeatPointsButton, cell())
+                    addView(button("Seguir sin referencia") { endReference() }, cell())
+                },
+                LinearLayout.LayoutParams(match(), wrap()),
+            )
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(ScrollView(this@VideoCaptureActivity).apply { addView(panel) }, LinearLayout.LayoutParams(match(), 0, 1f))
+            addView(footer, LinearLayout.LayoutParams(match(), wrap()))
+        }
     }
 
     // endregion
@@ -513,6 +653,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             return
         }
         recordButton.isEnabled = false
+        lockOrientation()
         active.startRecording()
     }
 
@@ -554,11 +695,14 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             return
         }
         phase = Phase.MARKING
+        // The frame is the view-oriented bitmap (upright); remember how it relates to the stored frame.
+        markRotation = imageRotation()
         markView.show(frame, frameNs)
         markView.visibility = View.VISIBLE
         rail.visibility = View.GONE
         chipsLayer.visibility = View.GONE
         referencePanel.visibility = View.VISIBLE
+        updateOrientation()
         presetSpinner.setSelection(0)
         // The first preset (A4) has both sides: start in rectangle mode and detect.
         markView.mode = ReferenceMarkView.Mode.POINTS
@@ -638,12 +782,16 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
     private fun parseMeters(field: EditText): Double? =
         field.text.toString().replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
 
+    /** Maps a point on the upright marking view to the stored (unrotated) frame, which is what the package holds. */
+    private fun toStored(point: ReferencePoint): ReferencePoint =
+        PreviewGeometry.displayToStored(markRotation, point.x, point.y).let { (x, y) -> ReferencePoint(x, y) }
+
     private fun confirmReference() {
         if (markView.mode == ReferenceMarkView.Mode.RECT) confirmRectangle() else confirmPoints()
     }
 
     private fun confirmRectangle() {
-        val quad = markView.quad()
+        val quad = markView.quad()?.map(::toStored)
         if (quad == null) {
             toast("Esperá a que termine la búsqueda o marcá el objeto a mano.")
             return
@@ -688,7 +836,9 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         }
         val surface = if (surfaceGroup.checkedRadioButtonId == SURFACE_FLOOR_ID) ReferenceSurface.FLOOR else ReferenceSurface.WALL
         try {
-            reference = ReferenceMark.create(markView.frameNs, points.first, points.second, length, labelInput.text.toString(), surface)
+            reference = ReferenceMark.create(
+                markView.frameNs, toStored(points.first), toStored(points.second), length, labelInput.text.toString(), surface,
+            )
         } catch (e: IllegalArgumentException) {
             toast("Los dos extremos tienen que ser puntos distintos.")
             return
@@ -707,6 +857,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         referencePanel.visibility = View.GONE
         rail.visibility = View.VISIBLE
         chipsLayer.visibility = View.VISIBLE
+        updateOrientation()
     }
 
     // endregion
@@ -723,6 +874,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         chipsLayer.visibility = View.VISIBLE
         referencePanel.visibility = View.GONE
         markView.visibility = View.GONE
+        updateOrientation()
         listOf(referenceButton, nextRoomButton, stopButton).forEach {
             it.isEnabled = false
             it.alpha = 0.4f
@@ -821,6 +973,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         if (phase == Phase.DONE) return
         phase = Phase.DONE
         main.removeCallbacks(tick)
+        unlockOrientation()
         cancelDialog?.dismiss()
         cancelDialog = null
         recorder?.release()
@@ -848,7 +1001,9 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
     }
 
     override fun onDestroy() {
+        getSystemService(DisplayManager::class.java).unregisterDisplayListener(displayListener)
         if (phase != Phase.DONE) {
+            unlockOrientation()
             main.removeCallbacks(tick)
             recorder?.release()
             recorder = null
@@ -858,6 +1013,21 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
     }
 
     // endregion
+
+    /** Keeps the layout from reflowing mid-recording: pins the orientation the phone is held in right now. */
+    private fun lockOrientation() {
+        requestedOrientation = when (displayRotationDegrees()) {
+            90 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            180 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+            270 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+            else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+    }
+
+    /** Back to the manifest behaviour: follow the sensor in all four orientations unless the user locked rotation. */
+    private fun unlockOrientation() {
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+    }
 
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 
@@ -875,6 +1045,9 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         private const val MARGIN_DP = 16
         private const val RAIL_WIDTH_DP = 112
         private const val REFERENCE_PANEL_WIDTH_DP = 300
+        private const val PORTRAIT_RAIL_DP = 124
+        private const val SECONDARY_WIDTH_DP = 96
+        private const val PORTRAIT_PANEL_FRACTION = 0.46f
         private val RED = Color.rgb(229, 57, 53)
         private val SCRIM = Color.argb(150, 0, 0, 0)
         private val RAIL_SCRIM = Color.argb(170, 0, 0, 0)
@@ -884,17 +1057,28 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
 }
 
 /**
- * Keeps its children at the 16:9 of the recorded frame so normalised taps map onto it, scaled to cover the
- * whole window (full-bleed): the part of the frame beyond the screen edges is cropped from view only, the
- * recorded video is unchanged.
+ * Keeps its children at the aspect of the UPRIGHT preview image (16:9 in landscape, 9:16 in portrait) so normalised
+ * taps map onto it and the picture is never stretched. By default it scales to cover the whole window (full-bleed):
+ * the part beyond the screen edges is cropped from view only and the recorded video is unchanged. With
+ * `cover = false` the whole image fits in the window minus `reservedBottom` (the marking panel).
  */
 internal class AspectFrameLayout(context: android.content.Context) : FrameLayout(context) {
+    private var rotation = 0
+    private var cover = true
+    private var reservedBottom = 0
+
+    fun configure(rotation: Int, cover: Boolean, reservedBottom: Int) {
+        if (rotation == this.rotation && cover == this.cover && reservedBottom == this.reservedBottom) return
+        this.rotation = rotation
+        this.cover = cover
+        this.reservedBottom = reservedBottom
+        requestLayout()
+    }
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val maxW = MeasureSpec.getSize(widthMeasureSpec)
-        val maxH = MeasureSpec.getSize(heightMeasureSpec)
-        val widthLimited = maxW * VideoSpec.HEIGHT > maxH * VideoSpec.WIDTH
-        val w = if (widthLimited) maxW else maxH * VideoSpec.WIDTH / VideoSpec.HEIGHT
-        val h = if (widthLimited) maxW * VideoSpec.HEIGHT / VideoSpec.WIDTH else maxH
+        val maxH = (MeasureSpec.getSize(heightMeasureSpec) - reservedBottom).coerceAtLeast(1)
+        val (w, h) = PreviewGeometry.stageSize(rotation, VideoSpec.WIDTH, VideoSpec.HEIGHT, maxW, maxH, cover)
         super.onMeasure(
             MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY),
@@ -905,7 +1089,7 @@ internal class AspectFrameLayout(context: android.content.Context) : FrameLayout
 /**
  * A frozen frame for the scale reference. In [Mode.RECT] it shows a quadrilateral (detected or default) with four
  * draggable corner handles; in [Mode.POINTS], the manual fallback, the agent taps the two ends of the object.
- * Coordinates are kept normalised to 0..1 on the frame, which is the view because the stage is 16:9.
+ * Coordinates are kept normalised to 0..1 on the frame as displayed (upright); the activity maps them to the stored frame.
  */
 internal class ReferenceMarkView(context: android.content.Context) : View(context) {
     enum class Mode { RECT, POINTS }
@@ -924,6 +1108,9 @@ internal class ReferenceMarkView(context: android.content.Context) : View(contex
     /** True when the current quad came from the detector (even if the agent moved it afterwards). */
     var detected = false
         private set
+
+    /** With a bottom panel (portrait) the whole frame is visible, so the fallback quad sits in its middle. */
+    var centeredDefault = false
 
     /** True once the agent dragged a corner. */
     var moved = false
@@ -967,7 +1154,7 @@ internal class ReferenceMarkView(context: android.content.Context) : View(contex
     fun setQuad(detectedQuad: List<ReferencePoint>?) {
         detected = detectedQuad != null
         moved = false
-        quadPoints = detectedQuad ?: DEFAULT_QUAD
+        quadPoints = detectedQuad ?: if (centeredDefault) CENTERED_QUAD else DEFAULT_QUAD
         invalidate()
     }
 
@@ -1037,6 +1224,10 @@ internal class ReferenceMarkView(context: android.content.Context) : View(contex
 
     private companion object {
         const val HANDLE_TOUCH_RADIUS_DP = 30f
+        val CENTERED_QUAD = listOf(
+            ReferencePoint(0.15, 0.36), ReferencePoint(0.85, 0.36),
+            ReferencePoint(0.85, 0.56), ReferencePoint(0.15, 0.56),
+        )
         val DEFAULT_QUAD = listOf(
             // Left of the 300dp reference panel, which covers the right of the frame in landscape.
             ReferencePoint(0.10, 0.30), ReferencePoint(0.45, 0.30),
