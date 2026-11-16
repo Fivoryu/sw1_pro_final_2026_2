@@ -539,6 +539,27 @@ describe("AgencyReviewQueue", () => {
       expect(getListingScene).toHaveBeenCalledWith("volatile-access", "agency-1", "listing-1");
     });
 
+    it("notes the walls whose height was only estimated from the video", async () => {
+      const user = userEvent.setup();
+      const scene = capturedScene();
+      scene.walls = scene.walls.map((wall, index) => ({
+        ...wall,
+        heightSource: index === 0 ? "estimated" : "manual",
+      }));
+      vi.mocked(listAgencyListings).mockResolvedValue(page([listing()]));
+      vi.mocked(getListingScene).mockResolvedValue(scene);
+      renderQueue();
+
+      await openDetail(user, listing());
+
+      expect(
+        await screen.findByText(
+          `Altura estimada desde el video (sin confirmar) en 1 de ${scene.walls.length} muros.`,
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/Altura supuesta/)).not.toBeInTheDocument();
+    });
+
     it("says when the listing has no scene yet", async () => {
       const user = userEvent.setup();
       vi.mocked(listAgencyListings).mockResolvedValue(page([listing()]));
