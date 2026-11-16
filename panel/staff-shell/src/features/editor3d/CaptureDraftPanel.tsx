@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listCaptures, type CaptureReview, type CaptureStatus } from "../../application/captureReviewApi";
 import { StaffListingsApiError } from "../../application/staffListingsApi";
-import { pendingEstimates, splitCaptureWarnings } from "../../application/captureWarnings";
+import { pendingEstimates, splitCaptureWarnings, type PendingEstimate } from "../../application/captureWarnings";
 import type { SceneDocument } from "../../application/sceneContract";
 import "./CaptureDraftPanel.css";
 
@@ -14,6 +14,10 @@ interface Props {
   refreshKey?: number;
   loadedCaptureId?: string | null;
   onLoadDraft: (captureId: string, draft: SceneDocument) => void;
+  /** The scene the editor holds; once the draft is loaded, pending measures are read from it. */
+  scene?: SceneDocument;
+  /** Confirms a pending wall height as manual, optionally correcting it (meters). */
+  onConfirmMeasure?: (wallId: string, height?: number) => void;
 }
 
 const STATUS: Record<CaptureStatus, string> = {
@@ -36,6 +40,7 @@ function message(error: unknown): string {
 
 export function CaptureDraftPanel({
   accessToken, agencyId, listingId, disabled, refreshKey = 0, loadedCaptureId = null, onLoadDraft,
+  scene, onConfirmMeasure,
 }: Props) {
   const [captures, setCaptures] = useState<CaptureReview[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -78,7 +83,9 @@ export function CaptureDraftPanel({
         <p>{STATUS[capture.status] ?? capture.status}</p>
         {capture.status === "failed"
           ? <p>Motivo: {capture.failureReason ?? "No se informó un motivo."}</p> : null}
-        {capture.status === "completed" ? <CaptureNotes capture={capture} /> : null}
+        {capture.status === "completed" ? <CaptureNotes capture={capture}
+          editable={loadedCaptureId === capture.captureId && scene !== undefined && onConfirmMeasure !== undefined}
+          scene={scene} onConfirmMeasure={onConfirmMeasure} /> : null}
         {capture.status === "completed" && capture.sceneDraft
           ? loadedCaptureId === capture.captureId
             ? <p>Borrador cargado en el editor: guarda la escena para aceptarlo.</p>
@@ -91,9 +98,18 @@ export function CaptureDraftPanel({
   </section>;
 }
 
-function CaptureNotes({ capture }: { capture: CaptureReview }) {
+interface NotesProps {
+  capture: CaptureReview;
+  editable: boolean;
+  scene?: SceneDocument;
+  onConfirmMeasure?: (wallId: string, height?: number) => void;
+}
+
+function CaptureNotes({ capture, editable, scene, onConfirmMeasure }: NotesProps) {
   const { scale, other } = splitCaptureWarnings(capture.warnings);
-  const pending = capture.sceneDraft ? pendingEstimates(capture.sceneDraft) : [];
+  // Once loaded, the editor scene is the source: confirmed measures leave the list.
+  const source = editable && scene ? scene : capture.sceneDraft;
+  const pending = source ? pendingEstimates(source) : [];
   return <>
     {scale.length > 0
       ? <ul aria-label={`Advertencias de escala de ${capture.captureId}`} className="capture-draft__scale">
@@ -105,7 +121,38 @@ function CaptureNotes({ capture }: { capture: CaptureReview }) {
       <p>Medidas estimadas pendientes de confirmar (no fueron medidas; no las tomes como exactas):</p>
       <ul aria-label={`Medidas estimadas pendientes de ${capture.captureId}`}>
         {pending.map((estimate) => <li key={estimate.wallId}>
-          Altura del muro {estimate.wallId}: {estimate.height.toFixed(2).replace(".", ",")} m (estimada)</li>)}
+          Altura del muro {estimate.wallId}: {estimate.height.toFixed(2).replace(".", ",")} m
+          {estimate.source === "estimated" ? " (estimada desde el video)" : " (no medida)"}
+          {editable && onConfirmMeasure
+            ? <PendingMeasureActions estimate={estimate} onConfirm={onConfirmMeasure} /> : null}</li>)}
       </ul></> : null}
   </>;
+}
+
+function PendingMeasureActions({ estimate, onConfirm }: {
+  estimate: PendingEstimate;
+  onConfirm: (wallId: string, height?: number) => void;
+}) {
+  const [value, setValue] = useState("");
+  const [invalid, setInvalid] = useState(false);
+  function correct() {
+    const height = Number(value.trim().replace(",", "."));
+    if (value.trim() === "" || !Number.isFinite(height) || height <= 0) {
+      setInvalid(true);
+      return;
+    }
+    setInvalid(false);
+    onConfirm(estimate.wallId, height);
+  }
+  return <span className="capture-draft__measure-actions">
+    {" "}
+    <button className="review-button review-button--secondary" type="button"
+      onClick={() => onConfirm(estimate.wallId, undefined)}>Confirmar</button>
+    <input type="text" inputMode="decimal" value={value}
+      aria-label={`Altura corregida del muro ${estimate.wallId} (m)`}
+      onChange={(event) => { setValue(event.target.value); setInvalid(false); }} />
+    <button className="review-button review-button--secondary" type="button"
+      onClick={correct}>Corregir y confirmar</button>
+    {invalid ? <span role="alert">La altura debe ser un número mayor que cero (en metros).</span> : null}
+  </span>;
 }

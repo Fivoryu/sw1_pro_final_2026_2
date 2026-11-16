@@ -25,6 +25,7 @@ import {
 } from "../../application/sceneContract";
 import { SceneViewer } from "./SceneViewer";
 import { FurnitureReviewPanel } from "./FurnitureReviewPanel";
+import { confirmWallMeasure } from "../../application/captureWarnings";
 import { CaptureDraftPanel } from "./CaptureDraftPanel";
 
 interface SceneEditorProps {
@@ -826,7 +827,9 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
         {showCaptures ? <CaptureDraftPanel key={`${agencyId}:${selectedListingId}`}
           accessToken={accessToken} agencyId={agencyId} listingId={selectedListingId}
           disabled={!sceneReady || isSaving || furnitureBusy} refreshKey={captureRefresh}
-          loadedCaptureId={loadedCaptureId} onLoadDraft={handleLoadDraft} /> : null}
+          loadedCaptureId={loadedCaptureId} onLoadDraft={handleLoadDraft}
+          scene={scene}
+          onConfirmMeasure={(wallId, height) => handleEdit((document) => confirmWallMeasure(document, wallId, height))} /> : null}
         {showFurniture ? <FurnitureReviewPanel key={`${agencyId}:${selectedListingId}`}
           accessToken={accessToken} agencyId={agencyId} listingId={selectedListingId}
           disabled={!sceneReady || !hasSavedScene || isDirty || isSaving}

@@ -13,7 +13,7 @@ export interface SceneDimensions {
   depth: number;
 }
 
-export type SceneWallHeightSource = "ceiling_plane" | "wall_point" | "manual" | "assumed";
+export type SceneWallHeightSource = "ceiling_plane" | "wall_point" | "manual" | "assumed" | "estimated";
 
 export type SceneObjectSource = "depth" | "manual";
 
@@ -24,7 +24,10 @@ export interface SceneWall {
   height: number;
   thickness: number;
   color?: string;
-  /** F07 capture provenance of `height`; `assumed` means it was not measured. */
+  /**
+   * F07 capture provenance of `height`; `assumed` and `estimated` mean it was not measured
+   * (estimated = derived from video) until the agent confirms it as `manual`.
+   */
   heightSource?: SceneWallHeightSource;
 }
 

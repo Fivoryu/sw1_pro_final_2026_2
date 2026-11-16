@@ -110,3 +110,45 @@ it("shows no estimate section when nothing is pending", async () => {
   expect(screen.queryByText(/Medidas estimadas/)).toBeNull();
   expect(screen.queryByRole("list", { name: /Advertencias/ })).toBeNull();
 });
+
+const estimatedScene = {
+  ...DEFAULT_SCENE_DOCUMENT,
+  walls: DEFAULT_SCENE_DOCUMENT.walls.map((wall, i) => ({ ...wall,
+    heightSource: i === 0 ? "estimated" as const : i === 1 ? "assumed" as const : "manual" as const })),
+};
+
+it("once loaded, lists estimated and assumed walls from the editor scene and confirms one as manual", async () => {
+  const onConfirmMeasure = vi.fn();
+  listed({ ...base, status: "completed", sceneDraft: estimatedScene });
+  const user = userEvent.setup();
+  open({ loadedCaptureId: "cap-1", scene: estimatedScene, onConfirmMeasure });
+  const pending = await screen.findByRole("list", { name: "Medidas estimadas pendientes de cap-1" });
+  expect(pending.querySelectorAll("li")).toHaveLength(2);
+  expect(pending).toHaveTextContent(/estimada desde el video/);
+  expect(pending).toHaveTextContent(/no medida/);
+  await user.click(within(pending).getAllByRole("button", { name: "Confirmar" })[0] as HTMLElement);
+  expect(onConfirmMeasure).toHaveBeenCalledWith("wall-north", undefined);
+});
+
+it("corrects a pending height with a valid positive number and rejects invalid ones", async () => {
+  const onConfirmMeasure = vi.fn();
+  listed({ ...base, status: "completed", sceneDraft: estimatedScene });
+  const user = userEvent.setup();
+  open({ loadedCaptureId: "cap-1", scene: estimatedScene, onConfirmMeasure });
+  const input = await screen.findByLabelText("Altura corregida del muro wall-north (m)");
+  await user.type(input, "0");
+  await user.click(screen.getAllByRole("button", { name: "Corregir y confirmar" })[0] as HTMLElement);
+  expect(onConfirmMeasure).not.toHaveBeenCalled();
+  expect(screen.getByRole("alert")).toHaveTextContent(/mayor que cero/);
+  await user.clear(input);
+  await user.type(input, "2,65");
+  await user.click(screen.getAllByRole("button", { name: "Corregir y confirmar" })[0] as HTMLElement);
+  expect(onConfirmMeasure).toHaveBeenCalledWith("wall-north", 2.65);
+});
+
+it("does not offer confirmation while the draft is not loaded (T8 behavior)", async () => {
+  listed({ ...base, status: "completed", sceneDraft: estimatedScene });
+  open({ scene: DEFAULT_SCENE_DOCUMENT, onConfirmMeasure: vi.fn() });
+  const pending = await screen.findByRole("list", { name: "Medidas estimadas pendientes de cap-1" });
+  expect(within(pending).queryByRole("button")).toBeNull();
+});

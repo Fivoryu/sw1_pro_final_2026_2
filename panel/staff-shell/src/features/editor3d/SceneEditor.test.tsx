@@ -273,6 +273,22 @@ describe("SceneEditor capture drafts", () => {
     expect(acceptCapture).not.toHaveBeenCalled();
   });
 
+  it("confirms an estimated wall height in the editor scene as manual, without saving", async () => {
+    const user = userEvent.setup();
+    const estimated: SceneDocument = { ...draft,
+      walls: draft.walls.map((wall, i) => i === 0 ? { ...wall, heightSource: "estimated" as const } : wall) };
+    vi.mocked(listCaptures).mockResolvedValue([{ ...completed, sceneDraft: estimated }]);
+    render(<SceneEditor accessToken="volatile-access" agencyId="agency-1" />);
+    await chooseListing(user);
+    await user.click(screen.getByRole("button", { name: "Capturas reconstruidas" }));
+    await user.click(await screen.findByRole("button", { name: "Cargar borrador en el editor" }));
+    await waitFor(() => expect(documentInViewer().walls[0].heightSource).toBe("estimated"));
+    await user.click(await screen.findByRole("button", { name: "Confirmar" }));
+    await waitFor(() => expect(documentInViewer().walls[0].heightSource).toBe("manual"));
+    expect(documentInViewer().walls[0].height).toBe(2.4);
+    expect(putListingScene).not.toHaveBeenCalled();
+  });
+
   it("asks for confirmation before replacing unsaved edits and keeps them when declined", async () => {
     const user = userEvent.setup();
     const button = await openPanel(user);
