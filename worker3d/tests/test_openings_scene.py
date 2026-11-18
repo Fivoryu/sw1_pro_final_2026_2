@@ -76,17 +76,15 @@ def test_a_recognised_door_lands_on_its_wall_with_proportional_size(
 
     doors = [o for o in scene["openings"] if o["type"] == "door"]
     assert len(doors) == 1
-    # The door is on the east wall of "Estar": the vertical wall with the greatest x of that room.
+    # The door is on the wall the two rooms share: the rooms touch, so it is one wall for both,
+    # as long as the part they have in common (the 2.0 deep side of "Cuarto").
     walls = {w["id"]: w for w in scene["walls"]}
-    east = max(
-        (walls[i] for i in scene["rooms"][0]["wallIds"] if walls[i]["start"]["x"] == walls[i]["end"]["x"]),
-        key=lambda w: w["start"]["x"],
-    )
-    assert doors[0]["wallId"] == east["id"]
-    wall = east
+    assert doors[0]["wallId"] in set(scene["rooms"][0]["wallIds"]) & set(scene["rooms"][1]["wallIds"])
+    wall = walls[doors[0]["wallId"]]
+    assert wall["start"]["x"] == pytest.approx(wall["end"]["x"], abs=0.01)  # a vertical wall
     length = math.dist((wall["start"]["x"], wall["start"]["z"]), (wall["end"]["x"], wall["end"]["z"]))
-    # 0.9 wide door on a 3.0 wall; 2.0 high door in a room 4.0 wide: ratios, never metres.
-    assert doors[0]["width"] / length == pytest.approx(0.3, abs=0.07)
+    # 0.9 wide door on a 2.0 wall; 2.0 high door in a room 4.0 wide: ratios, never metres.
+    assert doors[0]["width"] / length == pytest.approx(0.45, abs=0.07)
     estar_width = P._room_boxes(scene)["Estar"][0]
     assert doors[0]["height"] / estar_width == pytest.approx(0.5, abs=0.1)
     assert 0.0 < doors[0]["position"] < 1.0
@@ -123,9 +121,8 @@ def test_a_window_has_no_crossing_so_it_is_marked_estimated_and_keeps_its_sill(t
     scene, _ = _scene(tmp_path, 1.0, window)
 
     windows = [o for o in scene["openings"] if o["type"] == "window"]
-    # Both rooms see the opening through their own wall: in this synthetic model the two walls sit
-    # side by side instead of being welded, so each room reports it.
-    assert windows
+    # Both rooms see the opening, and the wall they share is welded: it is reported once.
+    assert len(windows) == 1
     assert all(w["source"] == "estimated" for w in windows)
     # sill 0.9 under a 1.0 high window: the ratio survives the plan scale, never metres
     assert windows[0]["sillHeight"] / windows[0]["height"] == pytest.approx(0.9, abs=0.2)

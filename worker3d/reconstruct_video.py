@@ -82,6 +82,8 @@ CEILING_SEARCH_FRACTION = 0.6  # ceiling: strongest cluster in the highest 40 %
 MIN_CEILING_SEPARATION_TOL = 10  # in tolerances: a "ceiling" must be clearly above the floor
 WALL_BAND_MARGIN_TOL = 4  # wall points keep this many tolerances away from floor and ceiling
 PIECE_GAP_M = 1.0  # plan gap left between disconnected pieces in the scene
+# Weld the wall that touching rooms of one connected reconstruction share (see reconstruct._snap_shared_walls).
+SNAP_SHARED_WALLS = True
 # Longest wall of the largest room in a proportional plan (plan units, not meters).
 PROPORTIONAL_NOMINAL_SIDE = 5.0
 OBSERVED_EDGE_ANGLE = math.sin(math.radians(15))
@@ -1469,7 +1471,7 @@ def reconstruct_video(
     boxes: list[dict[str, Any]] = []
     placed: list[_Candidate] = []
     detected = sum(len(items) for items in detections.values())
-    for piece in pieces:
+    for piece_number, piece in enumerate(pieces):
         factor = piece.factor if piece.factor is not None else 1.0
         piece_rooms: list[reconstruct._Room] = []
         crossings = _room_crossings(piece, room_of_frame, factor)
@@ -1527,6 +1529,7 @@ def reconstruct_video(
                     openings=_room_openings(
                         piece, fit, room_id, corners, height, factor, room_of_frame, opening_boxes, crossings
                     ),
+                    group=piece_number,
                 )
             )
         if not piece_rooms:
@@ -1563,7 +1566,7 @@ def reconstruct_video(
 
     if detected and not boxes:
         warnings.append(WARNING_NO_DEPTH)
-    builder = reconstruct._SceneBuilder(scene_rooms, boxes)
+    builder = reconstruct._SceneBuilder(scene_rooms, boxes, snap_shared_walls=SNAP_SHARED_WALLS)
     scene = builder.build()
     scene["scale"] = {"mode": "metric" if metric else "proportional"}
     warnings.extend(builder.warnings)

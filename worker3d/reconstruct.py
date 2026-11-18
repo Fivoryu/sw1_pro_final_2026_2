@@ -59,6 +59,11 @@ OCCUPANCY_COLOR = "#9e9e9e"
 DUPLICATE_WALL_ANGLE_DEG = 3.0
 DUPLICATE_WALL_DISTANCE_M = 0.3
 DUPLICATE_WALL_OVERLAP_M = 0.2
+# Welding the wall two touching rooms share (opt-in, see ``_SceneBuilder``). Their centre lines
+# may differ by up to this much, because each room's face comes from its own observations.
+SHARED_WALL_MAX_GAP_M = 0.3
+# The overlap along the wall must cover at least this share of the shorter of the two edges.
+SHARED_WALL_MIN_OVERLAP_REL = 0.3
 
 # Heights. Same default as the capture app's editor (RoomHeight.assumedDefault), so a room
 # without a ceiling reading gets the same assumed height wherever it is produced.
@@ -656,6 +661,8 @@ class _Room:
     # Recognised doors and windows: {"edge", "position", "width", "height", "sill", "kind", "estimated"}
     # with ``edge`` the index of the contour edge and ``position`` 0..1 along it.
     openings: list[dict[str, Any]] = field(default_factory=list)
+    # Rooms only share a wall with rooms of the same group (one connected reconstruction).
+    group: int = 0
 
     def centerline(self) -> list[Point]:
         """Interior contour offset outwards by half the wall thickness (miter joints), in mm."""
@@ -687,17 +694,92 @@ class _WallRecord:
     height_source: str
 
 
+def _edge_gap(a: Point, b: Point, c: Point, d: Point) -> tuple[float, Point] | None:
+    """How far the line c-d lies beyond a-b (along a-b's outward normal), if it is the same wall.
+
+    The same wall means anti-parallel (two counter-clockwise rooms traverse it in opposite
+    directions), no further than ``SHARED_WALL_MAX_GAP_M`` and overlapping along most of the
+    shorter edge. Returns the signed gap and a-b's outward normal.
+    """
+    length = _dist(a, b)
+    other = _dist(c, d)
+    if length < 1e-9 or other < 1e-9:
+        return None
+    u, v = _unit(_sub(b, a)), _unit(_sub(d, c))
+    if _dot(u, v) >= 0 or abs(_cross(u, v)) > math.sin(math.radians(DUPLICATE_WALL_ANGLE_DEG)):
+        return None
+    normal = (u[1], -u[0])
+    gap = (_dot(_sub(c, a), normal) + _dot(_sub(d, a), normal)) / 2
+    if abs(gap) > SHARED_WALL_MAX_GAP_M:
+        return None
+    t0, t1 = _dot(_sub(c, a), u), _dot(_sub(d, a), u)
+    overlap = min(length, max(t0, t1)) - max(0.0, min(t0, t1))
+    if overlap < SHARED_WALL_MIN_OVERLAP_REL * min(length, other):
+        return None
+    return gap, normal
+
+
+def _translate_edge(polygon: list[Point], edge: int, shift: Point) -> None:
+    """Move one edge by ``shift``; its ends slide along the neighbouring edges."""
+    count = len(polygon)
+    start, end = polygon[edge], polygon[(edge + 1) % count]
+    direction = _unit(_sub(end, start))
+    anchor = _add(start, shift)
+
+    def meet(vertex: Point, neighbour: Point) -> Point:
+        along = _sub(vertex, neighbour)
+        denominator = _cross(along, direction)
+        if abs(denominator) < 1e-9:
+            return _add(vertex, shift)
+        t = _cross(_sub(anchor, neighbour), direction) / denominator
+        return _add(neighbour, _scale(along, t))
+
+    new_start = meet(start, polygon[(edge - 1) % count])
+    new_end = meet(end, polygon[(edge + 2) % count])
+    polygon[edge] = (_round(new_start[0], 3), _round(new_start[1], 3))
+    polygon[(edge + 1) % count] = (_round(new_end[0], 3), _round(new_end[1], 3))
+
+
+def _snap_shared_walls(rooms: list[_Room], centerlines: list[list[Point]]) -> None:
+    """Make the centre lines of the wall two touching rooms share coincide, in place.
+
+    Each of the two lines moves half the gap towards the other, so neither room gives up more than
+    half of it. Every edge is matched at most once, the closest pairs first.
+    """
+    matches: list[tuple[float, int, int, int, int, Point]] = []
+    for i, j in itertools.combinations(range(len(rooms)), 2):
+        if rooms[i].group != rooms[j].group:
+            continue
+        for ei, a in enumerate(centerlines[i]):
+            b = centerlines[i][(ei + 1) % len(centerlines[i])]
+            for ej, c in enumerate(centerlines[j]):
+                found = _edge_gap(a, b, c, centerlines[j][(ej + 1) % len(centerlines[j])])
+                if found is not None:
+                    matches.append((abs(found[0]), i, ei, j, ej, _scale(found[1], found[0] / 2)))
+    used: set[tuple[int, int]] = set()
+    for _, i, ei, j, ej, shift in sorted(matches):
+        if (i, ei) in used or (j, ej) in used:
+            continue
+        used.update({(i, ei), (j, ej)})
+        _translate_edge(centerlines[i], ei, shift)
+        _translate_edge(centerlines[j], ej, _scale(shift, -1.0))
+
+
 class _SceneBuilder:
-    def __init__(self, rooms: list[_Room], boxes: list[dict[str, Any]]) -> None:
+    def __init__(self, rooms: list[_Room], boxes: list[dict[str, Any]], snap_shared_walls: bool = False) -> None:
         self.rooms = rooms
         self.boxes = boxes
+        self.snap_shared_walls = snap_shared_walls
         self.warnings: list[str] = []
         self._vertices: list[Point] = []
         self._walls: list[_WallRecord] = []
         self._by_endpoints: dict[tuple[int, int], int] = {}
 
     def build(self) -> dict[str, Any]:
-        indexes = [[self._weld(v) for v in room.centerline()] for room in self.rooms]
+        centerlines = [room.centerline() for room in self.rooms]
+        if self.snap_shared_walls:
+            _snap_shared_walls(self.rooms, centerlines)
+        indexes = [[self._weld(v) for v in line] for line in centerlines]
         room_documents: list[dict[str, Any]] = []
         chains: list[list[list[int]]] = []
         for room, vertex_indexes in zip(self.rooms, indexes, strict=True):
