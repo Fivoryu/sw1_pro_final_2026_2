@@ -230,10 +230,10 @@ def write_v2(
 
 
 def run(
-    directory: Path, models: list[rv.SparseModel], extractor: FakeExtractor | None = None
+    directory: Path, models: list[rv.SparseModel], extractor: FakeExtractor | None = None, **options: Any
 ) -> reconstruct.ReconstructionResult:
     return rv.reconstruct_video(
-        directory, extractor=extractor or FakeExtractor(), estimator=FakeEstimator(models)
+        directory, extractor=extractor or FakeExtractor(), estimator=FakeEstimator(models), **options
     )
 
 

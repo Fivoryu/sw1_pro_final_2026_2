@@ -130,7 +130,7 @@ def build_detector(model_key: str = "owlv2", min_score: float = MIN_SCORE) -> Op
     require_permissive(model.license)
     try:
         torch, transformers = _import_torch()
-        from PIL import Image  # noqa: PLC0415 - optional, only needed with the model
+        from PIL import Image  # optional, only needed with the model
     except ImportError as error:
         raise ExternalToolMissing(
             f"El reconocimiento de puertas necesita torch, transformers y Pillow ({error}). "
