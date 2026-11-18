@@ -40,6 +40,11 @@ export interface SceneOpeningV2 {
   height: number;
   type: "door" | "window";
   sillHeight?: number;
+  /**
+   * F07: `estimated` when a capture recognised the opening with a single signal; the agent
+   * clears it by confirming. Absent for openings drawn by hand.
+   */
+  source?: "estimated";
 }
 
 export interface SceneRoomV2 {

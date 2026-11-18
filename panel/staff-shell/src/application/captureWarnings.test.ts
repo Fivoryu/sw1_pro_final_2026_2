@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { DEFAULT_SCENE_DOCUMENT, type SceneDocument } from "./sceneContract";
-import { confirmWallMeasure, pendingEstimates, splitCaptureWarnings } from "./captureWarnings";
+import { confirmOpening, confirmWallMeasure, pendingEstimates, pendingOpenings, splitCaptureWarnings } from "./captureWarnings";
 
 it("separates the scale warnings emitted by worker3d from the other warnings", () => {
   const scale = [
@@ -47,4 +47,31 @@ it("confirms a measure as manual keeping its height, or corrects it", () => {
   for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
     expect(confirmWallMeasure(scene, id, bad)).toBe(scene);
   }
+});
+
+const door = { id: "door-1", wallId: "wall-north", position: 0.5, width: 0.9, height: 2, type: "door" as const };
+const sceneWithOpenings: SceneDocument = {
+  ...DEFAULT_SCENE_DOCUMENT,
+  openings: [
+    { ...door, source: "estimated" as const },
+    { ...door, id: "window-1", type: "window" as const, sillHeight: 0.9, source: "estimated" as const },
+    { ...door, id: "door-2" },
+  ],
+};
+
+it("lists only the openings the capture recognised with a single signal", () => {
+  expect(pendingOpenings(sceneWithOpenings).map(({ openingId, type, wallId }) => [openingId, type, wallId])).toEqual([
+    ["door-1", "door", "wall-north"],
+    ["window-1", "window", "wall-north"],
+  ]);
+  expect(pendingOpenings(DEFAULT_SCENE_DOCUMENT)).toEqual([]);
+});
+
+it("confirms an opening by clearing its estimated mark and touches nothing else", () => {
+  const confirmed = confirmOpening(sceneWithOpenings, "door-1");
+  expect(confirmed.openings[0]).toEqual(door);
+  expect("source" in (confirmed.openings[0] as object)).toBe(false);
+  expect(confirmed.openings[1]).toBe(sceneWithOpenings.openings[1]);
+  expect(confirmed.openings[2]).toBe(sceneWithOpenings.openings[2]);
+  expect(confirmOpening(sceneWithOpenings, "missing")).toBe(sceneWithOpenings);
 });

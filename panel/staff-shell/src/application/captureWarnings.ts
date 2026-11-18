@@ -25,6 +25,33 @@ export function splitCaptureWarnings(warnings: string[]): CaptureWarningGroups {
   return groups;
 }
 
+export interface PendingOpening {
+  openingId: string;
+  wallId: string;
+  type: "door" | "window";
+}
+
+/** Openings a capture recognised with a single signal that the agent has not confirmed. */
+export function pendingOpenings(scene: SceneDocument): PendingOpening[] {
+  return scene.openings.flatMap((opening) =>
+    opening.source === "estimated"
+      ? [{ openingId: opening.id, wallId: opening.wallId, type: opening.type }]
+      : []);
+}
+
+/** The agent confirms a recognised opening: its estimated mark is removed, nothing else changes. */
+export function confirmOpening(scene: SceneDocument, openingId: string): SceneDocument {
+  if (!scene.openings.some((opening) => opening.id === openingId && opening.source !== undefined)) return scene;
+  return {
+    ...scene,
+    openings: scene.openings.map((opening) => {
+      if (opening.id !== openingId) return opening;
+      const { source: _source, ...confirmed } = opening;
+      return confirmed;
+    }),
+  };
+}
+
 /** Measures recorded as estimated or assumed (not measured) that the agent has not confirmed. */
 export function pendingEstimates(scene: SceneDocument): PendingEstimate[] {
   return scene.walls.flatMap((wall) =>

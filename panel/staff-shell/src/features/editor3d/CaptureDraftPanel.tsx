@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listCaptures, type CaptureReview, type CaptureStatus } from "../../application/captureReviewApi";
 import { StaffListingsApiError } from "../../application/staffListingsApi";
-import { pendingEstimates, splitCaptureWarnings, type PendingEstimate } from "../../application/captureWarnings";
+import { pendingEstimates, pendingOpenings, splitCaptureWarnings, type PendingEstimate } from "../../application/captureWarnings";
 import { isProportional, type SceneDocument } from "../../application/sceneContract";
 import "./CaptureDraftPanel.css";
 
@@ -18,6 +18,8 @@ interface Props {
   scene?: SceneDocument;
   /** Confirms a pending wall height as manual, optionally correcting it (meters). */
   onConfirmMeasure?: (wallId: string, height?: number) => void;
+  /** Confirms a recognised opening (its estimated mark is cleared). */
+  onConfirmOpening?: (openingId: string) => void;
 }
 
 const STATUS: Record<CaptureStatus, string> = {
@@ -40,7 +42,7 @@ function message(error: unknown): string {
 
 export function CaptureDraftPanel({
   accessToken, agencyId, listingId, disabled, refreshKey = 0, loadedCaptureId = null, onLoadDraft,
-  scene, onConfirmMeasure,
+  scene, onConfirmMeasure, onConfirmOpening,
 }: Props) {
   const [captures, setCaptures] = useState<CaptureReview[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -84,8 +86,9 @@ export function CaptureDraftPanel({
         {capture.status === "failed"
           ? <p>Motivo: {capture.failureReason ?? "No se informó un motivo."}</p> : null}
         {capture.status === "completed" ? <CaptureNotes capture={capture}
-          editable={loadedCaptureId === capture.captureId && scene !== undefined && onConfirmMeasure !== undefined}
-          scene={scene} onConfirmMeasure={onConfirmMeasure} /> : null}
+          editable={loadedCaptureId === capture.captureId && scene !== undefined
+            && (onConfirmMeasure !== undefined || onConfirmOpening !== undefined)}
+          scene={scene} onConfirmMeasure={onConfirmMeasure} onConfirmOpening={onConfirmOpening} /> : null}
         {capture.status === "completed" && capture.sceneDraft
           ? loadedCaptureId === capture.captureId
             ? <p>Borrador cargado en el editor: guarda la escena para aceptarlo.</p>
@@ -103,13 +106,15 @@ interface NotesProps {
   editable: boolean;
   scene?: SceneDocument;
   onConfirmMeasure?: (wallId: string, height?: number) => void;
+  onConfirmOpening?: (openingId: string) => void;
 }
 
-function CaptureNotes({ capture, editable, scene, onConfirmMeasure }: NotesProps) {
+function CaptureNotes({ capture, editable, scene, onConfirmMeasure, onConfirmOpening }: NotesProps) {
   const { scale, other } = splitCaptureWarnings(capture.warnings);
   // Once loaded, the editor scene is the source: confirmed measures leave the list.
   const source = editable && scene ? scene : capture.sceneDraft;
   const pending = source ? pendingEstimates(source) : [];
+  const openings = source ? pendingOpenings(source) : [];
   const proportional = source ? isProportional(source) : false;
   return <>
     {scale.length > 0
@@ -128,6 +133,15 @@ function CaptureNotes({ capture, editable, scene, onConfirmMeasure }: NotesProps
           {estimate.source === "estimated" ? " (estimada desde el video)" : " (no medida)"}
           {editable && onConfirmMeasure
             ? <PendingMeasureActions estimate={estimate} onConfirm={onConfirmMeasure} proportional={proportional} /> : null}</li>)}
+      </ul></> : null}
+    {openings.length > 0 ? <>
+      <p>Aberturas reconocidas desde el video que faltan confirmar (revisa su posición en el editor):</p>
+      <ul aria-label={`Aberturas reconocidas pendientes de ${capture.captureId}`}>
+        {openings.map((opening) => <li key={opening.openingId}>
+          {opening.type === "door" ? "Puerta" : "Ventana"} {opening.openingId} en el muro {opening.wallId} (reconocida desde el video)
+          {editable && onConfirmOpening
+            ? <>{" "}<button className="review-button review-button--secondary" type="button"
+              onClick={() => onConfirmOpening(opening.openingId)}>Confirmar</button></> : null}</li>)}
       </ul></> : null}
   </>;
 }

@@ -142,3 +142,37 @@ def test_a_failing_opening_detector_does_not_break_the_scene(tmp_path: Path) -> 
 
     assert scene["openings"] == []
     assert any("puertas" in w.lower() for w in warnings)
+
+
+def _scored_detector(boxes, scores):
+    """A detector that goes through the real door-versus-lookalike decision of ``openings``."""
+    import openings
+
+    def detect(path: Path):
+        frame = int(path.stem)
+        if frame not in boxes:
+            return []
+        verdict = openings.classify(scores)
+        return [(boxes[frame], *verdict)] if verdict else []
+
+    return detect
+
+
+def _scores(door: float, wardrobe: float) -> dict[str, float]:
+    return {"a door": door, "a window": 0.0, "an archway": 0.0, "a wardrobe": wardrobe, "a mirror": 0.0}
+
+
+def test_a_wardrobe_that_looks_like_a_door_never_reaches_the_scene(tmp_path: Path) -> None:
+    scene, _ = _scene(
+        tmp_path, 1.0, lambda model, scale: _scored_detector(_door_boxes(model, scale, 1.0, 1.9), _scores(0.45, 0.42))
+    )
+
+    assert scene["openings"] == []
+
+
+def test_the_same_box_with_a_clear_door_score_does_reach_the_scene(tmp_path: Path) -> None:
+    scene, _ = _scene(
+        tmp_path, 1.0, lambda model, scale: _scored_detector(_door_boxes(model, scale, 1.0, 1.9), _scores(0.8, 0.2))
+    )
+
+    assert [o["type"] for o in scene["openings"]] == ["door"]
