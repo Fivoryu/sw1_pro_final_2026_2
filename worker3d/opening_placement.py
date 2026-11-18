@@ -119,6 +119,11 @@ def place_detection(
     return best[1] if best else None
 
 
+def _weighted(group: list[Placement], field: str) -> float:
+    total = sum(p.score for p in group) or 1.0
+    return sum(getattr(p, field) * p.score for p in group) / total
+
+
 def merge_views(placements: list[Placement]) -> list[Placement]:
     """One opening per physical door or window: views of it from several frames are averaged."""
     groups: list[list[Placement]] = []
@@ -135,18 +140,13 @@ def merge_views(placements: list[Placement]) -> list[Placement]:
             groups.append([placement])
     merged: list[Placement] = []
     for group in groups:
-        total = sum(p.score for p in group) or 1.0
-
-        def mean(field: str) -> float:
-            return sum(getattr(p, field) * p.score for p in group) / total
-
         merged.append(
             dataclasses.replace(
                 group[0],
-                position=mean("position"),
-                width=mean("width"),
-                height=mean("height"),
-                sill=mean("sill"),
+                position=_weighted(group, "position"),
+                width=_weighted(group, "width"),
+                height=_weighted(group, "height"),
+                sill=_weighted(group, "sill"),
                 score=max(p.score for p in group),
                 views=len(group),
             )
