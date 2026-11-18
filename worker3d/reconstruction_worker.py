@@ -14,7 +14,7 @@ import logging
 import os
 import tempfile
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -45,13 +45,45 @@ WARNING_DETECTOR_UNAVAILABLE = "Class suggestions skipped: detector unavailable"
 WARNING_LABELING_FAILED = "Class suggestions skipped: labeling failed"
 
 
+# Pilot switches, both off unless set. Door recognition needs torch, transformers and Pillow on the
+# worker machine; the stage cache keeps the sparse reconstruction and the door model's raw output on
+# disk so a threshold can be tried again without paying for them twice. Neither is for production.
+OPENING_DETECTION_ENV = "ROOMFORGE_OPENING_DETECTION"
+STAGE_CACHE_ENV = "ROOMFORGE_STAGE_CACHE_DIR"
+OPENING_DETECTION_MODELS = ("owlv2",)  # the only one with a backend; Grounding DINO is pinned but not built
+_OFF = {"", "off", "0", "false", "no"}
+
+
+def pilot_options(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
+    """Keyword arguments for ``reconstruct_video`` that the environment switches on."""
+    import openings
+    import reconstruct_video
+
+    environ = os.environ if environ is None else environ
+    options: dict[str, Any] = {}
+    cache = None
+    directory = environ.get(STAGE_CACHE_ENV, "").strip()
+    if directory:
+        cache = reconstruct_video.make_stage_cache(Path(directory))
+        options["stage_cache"] = cache
+    model = environ.get(OPENING_DETECTION_ENV, "").strip().lower()
+    if model not in _OFF:
+        if model not in OPENING_DETECTION_MODELS:
+            raise ValueError(
+                f"{OPENING_DETECTION_ENV}={model!r} is not supported; use one of {', '.join(OPENING_DETECTION_MODELS)} or off"
+            )
+        # Built when the pipeline asks, so a missing runtime becomes a warning, not a failed job.
+        options["opening_detector"] = lambda: openings.build_detector(model, cache=cache)
+    return options
+
+
 def reconstruct_package(package_dir: Path) -> reconstruct.ReconstructionResult:
     """Default reconstructor: schema 2 (video) also detects furniture; schema 1 is unchanged."""
     if reconstruct._declared_schema_version(package_dir) == 2:
         import reconstruct_video
 
         return reconstruct_video.reconstruct_video(
-            package_dir, detector_factory=lambda: reconstruct_video.default_detector()
+            package_dir, detector_factory=lambda: reconstruct_video.default_detector(), **pilot_options()
         )
     return reconstruct.reconstruct(package_dir)
 
