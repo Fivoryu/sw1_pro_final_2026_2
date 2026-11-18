@@ -117,6 +117,9 @@ class ListingMetrics(BaseModel):
     draft: int = 0
     in_review: int = 0
     published: int = 0
+    approved_unpublished: int = 0
+    rejected: int = 0
+    total: int = 0
 
 class ReservationMetrics(BaseModel):
     pending: int = 0

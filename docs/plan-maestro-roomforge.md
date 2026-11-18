@@ -119,7 +119,7 @@ Esa evidencia cubre servicios de desarrollo, no API, panel, IA ni contratos. En 
 | F11 — Despliegue en AWS | F02 | ⬜ Pendiente | No se verificó despliegue en AWS; sólo existe el stack local con Floci. | ☐ Libre |
 | F12 — Calidad, seguridad y recuperación | transversal | 🟡 Parcial | CI con cuatro jobs en verde, suite backend más Flutter/panel, Pyright y Ruff sin diagnósticos nuevos frente a la línea base, y verificación real de la cadena de migraciones contra PostgreSQL. Límite: faltan pruebas integradas entre superficies, E2E de la trayectoria crítica, matriz de los siete criterios con mediciones y ensayo de fallos. | ☐ Libre |
 | F13 — Evidencia académica y entrega | F12 | 🟡 Parcial | `docs/avance/` registra seis historias con verificación técnica y mantiene los casos académicos pendientes visibles; CP-001 y CP-002 cuentan con evidencia en `docs/scrum/sprint-1/evidencia/`. Límite: sin guion de demostración, sin evidencia integral y sin inventario final de recursos. | ☐ Libre |
-| F14 — Pulido profesional | según subfase | ⬜ Pendiente | Sin implementación integrada; el alcance proviene del benchmark de productos comparables registrado en la sección F14 y sus issues de GitHub (ver §1.4.5). | ☐ Libre |
+| F14 — Pulido profesional | según subfase | 🟡 Parcial | F14.4 (dashboard) integrada con los PR #73 y #86 y completada en `feat/f14-dashboard-hardening`; F14.5 a F14.8 integradas con los PR #79, #80, #81 y #83, con verificaciones pendientes descritas en cada subfase; F14.1 a F14.3 sin implementación. El alcance proviene del benchmark de productos comparables registrado en la sección F14 y sus issues de GitHub (ver §1.4.5). | ☐ Libre |
 
 **Nota de interpretación:** F03 en el cuadro histórico de §1.4 figura como subconjunto backend, F04–F05 y F09 como no integrados y F02 como parcial; esas filas describen el corte de 2026-09-26 y no deben leerse como estado actual. Actualizar este cuadro tras cada merge y conservar §1.4 sin ediciones.
 
@@ -260,7 +260,7 @@ Las superficies son las rutas que existen hoy (corte 2026-09-30). Una fase que n
 | F11 | [#30](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/30) cuenta y primer servicio, [#31](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/31) S3/SQS, [#32](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/32) publicación integral | — |
 | F12 | [#33](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/33) matriz de criterios, [#34](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/34) ensayo de fallos | — |
 | F13 | [#35](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/35) demo y cierre | — |
-| F14 | [#36](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/36) tour panorámicas, [#37](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/37) captura guiada, [#38](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/38) favoritos, [#39](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/39) dashboard | — |
+| F14 | [#36](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/36) captura guiada, [#37](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/37) dashboard, [#38](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/38) favoritos, [#39](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/39) tour panorámicas | — |
 
 ### 1.5 Restricciones
 
@@ -1049,6 +1049,12 @@ No se presenta esta lista como certificación ISO. Los umbrales de FPS, respuest
 - **Referencias:** CRMs de agencia (Gmore, GREM, IRM365) — métricas mínimas del equipo.
 - **Depende de:** F04, F05 y F09 (datos existentes). Solo consulta.
 - **Aceptación:** el administrador ve métricas consistentes con la base, sin exponer datos de otra agencia (aislamiento F03.3).
+- **Estado (2026-11-17, rama `feat/f14-dashboard-hardening` sobre lo integrado en los PR #73 y #86):** implementada; la issue #37 queda lista para cerrar al integrar esta rama.
+  - **Ruta y autorización:** `GET /api/v1/staff/agencies/{agency_id}/metrics` solo para el `agency_admin` de la agencia. El agente, otra agencia y el `platform_admin` reciben `403`; sin sesión de personal, `401`.
+  - **Métricas:** inmuebles por estado, incluidos rechazados y aprobados sin publicar, con total igual a la suma de los grupos; cotizaciones vigentes; reservas por estado. El panel muestra error y reintento.
+  - **Documentación:** contrato en `docs/api/f14-dashboard.md`; registro en `odd/tasks/f14-dashboard.md`.
+  - **Evidencia:** suite backend 1114 aprobadas / 16 omitidas, Ruff y Pyright sin errores; panel 288/288 y build.
+  - **Límite:** sin prueba contra PostgreSQL real; la consulta usa columnas e índices existentes.
 
 > **Subfases F14.5–F14.8 (agregadas el 2026-11-12 por decisión del dueño del repositorio; F14.5 y F14.6 ya implementadas, F14.7 en curso, F14.8 sin implementación):** issues #76 (F14.5), #75 (F14.6), #77 (F14.7) y #78 (F14.8). El detalle acordado está en los documentos `odd/tasks/f14-*.md` que cada subfase cita; como las demás de F14, no son requisito de entrega de §7.1.
 
