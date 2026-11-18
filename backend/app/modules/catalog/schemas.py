@@ -112,9 +112,16 @@ class SceneObject(SceneContractModel):
     confidence: Annotated[SceneNumber, Field(ge=0, le=1)] | None = None
 
 
+class SceneScale(SceneContractModel):
+    # "proportional": coordinates keep ratios but are not real meters (no reference).
+    mode: Literal["metric", "proportional"]
+
+
 class ListingSceneDocument(SceneContractModel):
     version: Literal["2.0"]
     unit: Literal["meters"]
+    # Absent in scenes written before F07 proportional plans: read those as metric.
+    scale: SceneScale | None = None
     walls: list[SceneWall]
     openings: list[SceneOpening]
     rooms: list[SceneRoom]

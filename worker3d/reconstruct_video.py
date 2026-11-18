@@ -81,6 +81,8 @@ CEILING_SEARCH_FRACTION = 0.6  # ceiling: strongest cluster in the highest 40 %
 MIN_CEILING_SEPARATION_TOL = 10  # in tolerances: a "ceiling" must be clearly above the floor
 WALL_BAND_MARGIN_TOL = 4  # wall points keep this many tolerances away from floor and ceiling
 PIECE_GAP_M = 1.0  # plan gap left between disconnected pieces in the scene
+# Longest wall of the largest room in a proportional plan (plan units, not meters).
+PROPORTIONAL_NOMINAL_SIDE = 5.0
 OBSERVED_EDGE_ANGLE = math.sin(math.radians(15))
 OBSERVED_EDGE_DISTANCE_M = 0.3
 OBSERVED_EDGE_OVERLAP_M = 0.3
@@ -1304,24 +1306,44 @@ def reconstruct_video(
                 f"La medida de referencia «{reference['label']}» no pudo ubicarse sobre "
                 f"{'el piso' if reference['surface'] == 'floor' else 'una pared'} ajustado; no se aplicó."
             )
+    # One scale for the whole walkthrough: metric only when every piece got a factor, otherwise
+    # every piece stays in the same arbitrary unit so ratios and connections remain comparable.
+    metric = scaled and all(piece.factor is not None for piece in pieces)
+    if scaled and not metric:
+        for piece in pieces:
+            piece.factor = None
+        warnings.append(
+            "La referencia solo pudo aplicarse a una parte de las piezas: se descartó para no mezclar "
+            "escalas y el plano quedó proporcional."
+        )
+    if not metric:
+        # Arbitrary SfM units would trip the metric thresholds of the shared builder (minimum room
+        # area, weld tolerance, wall thickness). One factor for the whole walkthrough brings the
+        # largest room to a nominal size; ratios and relative sizes between rooms are untouched.
+        extent = max(
+            (
+                max(max(p[0] for p in line.points) - min(p[0] for p in line.points),
+                    max(p[2] for p in line.points) - min(p[2] for p in line.points))
+                for piece in pieces
+                for fit in piece.rooms.values()
+                for line in fit.walls
+                if line.points
+            ),
+            default=0.0,
+        )
+        if extent > 0:
+            for piece in pieces:
+                piece.factor = PROPORTIONAL_NOMINAL_SIDE / extent
     if not scaled:
         warnings.append(
-            "Sin medida de referencia: el modelo no tiene escala métrica. Las medidas están en "
-            "unidades arbitrarias y no deben tomarse como metros."
+            "Sin medida de referencia: el plano es proporcional. Conserva las razones entre anchos, "
+            "largos, alturas y ambientes, pero sus valores no son metros ni deben usarse para superficies."
         )
     if len(pieces) > 1:
         warnings.append(
             f"La reconstrucción quedó partida en {len(pieces)} piezas desconectadas: no se conoce la "
             "posición relativa de sus ambientes y se colocaron una junto a otra."
         )
-        if scaled:
-            for piece in pieces:
-                if piece.factor is None:
-                    names = ", ".join(f"«{r.name}»" for r in piece.rooms.values())
-                    warnings.append(
-                        f"La pieza con {names} quedó sin medida de referencia: su escala no es métrica "
-                        "ni coincide con la del resto."
-                    )
 
     scene_rooms: list[reconstruct._Room] = []
     seen: set[str] = set()
@@ -1412,6 +1434,7 @@ def reconstruct_video(
         warnings.append(WARNING_NO_DEPTH)
     builder = reconstruct._SceneBuilder(scene_rooms, boxes)
     scene = builder.build()
+    scene["scale"] = {"mode": "metric" if metric else "proportional"}
     warnings.extend(builder.warnings)
     warnings.append(
         "Las medidas son estimadas a partir del video y los sensores; su exactitud no se midió. "

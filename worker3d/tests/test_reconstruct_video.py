@@ -587,14 +587,25 @@ def test_the_reference_on_a_wall_intersects_the_fitted_wall_plane(tmp_path: Path
     assert wall_lengths(result.scene_draft) == [3.15, 3.15, 4.15, 4.15]
 
 
+def test_with_a_reference_the_scene_is_marked_metric(tmp_path: Path) -> None:
+    model = make_model((0.0, 0.0, 4.0, 3.0))
+    package = write_v2(tmp_path / "p", v2_manifest(reference=floor_reference(model)), sensors=gravity_lines([model]))
+
+    result = run(package, [model])
+
+    assert result.scene_draft["scale"] == {"mode": "metric"}
+
+
 def test_without_a_reference_the_model_is_flagged_as_unscaled(tmp_path: Path) -> None:
     package, model = single_room(tmp_path)
 
     result = run(package, [model])
 
-    assert any(w.startswith("Sin medida de referencia: el modelo no tiene escala métrica") for w in result.warnings)
-    # 0.4 is the arbitrary SfM scale of the synthetic model: nothing metric was applied.
-    assert wall_lengths(result.scene_draft)[0] == pytest.approx(3 * 0.4 + 0.15, abs=0.02)
+    assert any(w.startswith("Sin medida de referencia: el plano es proporcional") for w in result.warnings)
+    assert result.scene_draft["scale"] == {"mode": "proportional"}
+    # Nothing metric was applied: the 4x3 room is brought to a nominal 5-unit long side with one
+    # factor, so the short side is 3/4 of it (plus the fixed wall thickness).
+    assert wall_lengths(result.scene_draft)[0] == pytest.approx(3.75 + 0.15, abs=0.02)
 
 
 def test_a_reference_that_misses_the_plane_is_reported_and_not_applied(tmp_path: Path) -> None:
@@ -644,7 +655,7 @@ def test_a_missing_ceiling_gives_an_assumed_height(tmp_path: Path) -> None:
     assert any("supuesta" in w for w in result.warnings)
 
 
-def test_a_split_reconstruction_flags_the_piece_without_reference(tmp_path: Path) -> None:
+def test_a_split_reconstruction_stays_proportional_when_the_reference_reaches_one_piece(tmp_path: Path) -> None:
     first = make_model((0.0, 0.0, 4.0, 3.0))
     second = make_model((0.0, 0.0, 3.0, 3.0), first_frame=8, scale=0.7, shift=(-4.0, 1.0, 2.0))
     manifest = v2_manifest(
@@ -662,8 +673,10 @@ def test_a_split_reconstruction_flags_the_piece_without_reference(tmp_path: Path
     scene = result.scene_draft
     assert [r["name"] for r in scene["rooms"]] == ["Estar", "Cuarto"]
     assert any("partida en 2 piezas" in w for w in result.warnings)
-    assert any("Cuarto" in w and "sin medida de referencia" in w.lower() for w in result.warnings)
-    assert not any(w.startswith("Sin medida de referencia: el modelo") for w in result.warnings)
+    # One scale for the whole walkthrough: a reference that reaches only one piece is not applied.
+    assert scene["scale"] == {"mode": "proportional"}
+    assert any("solo pudo aplicarse a una parte de las piezas" in w for w in result.warnings)
+    assert not any(w.startswith("Sin medida de referencia") for w in result.warnings)
 
 
 def test_every_result_declares_the_measures_as_estimates_and_stays_within_the_warning_cap(
