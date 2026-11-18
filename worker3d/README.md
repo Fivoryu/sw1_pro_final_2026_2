@@ -191,7 +191,7 @@ python worker3d/tests/bench_synthetic.py --cases 30 --seed 1 --decoys --set open
 
 **Preparar el piloto físico.**
 
-1. En la máquina del worker: `pip install torch transformers pillow` (junto con `ffmpeg` y `pycolmap`, que el pipeline de video ya necesita). Los pesos de OWLv2 se descargan de Hugging Face en el primer uso, así que esa corrida necesita red.
+1. En la máquina del worker: `pip install torch transformers pillow scipy` (`scipy` lo pide el procesador de imágenes de OWLv2; sin él el modelo no carga) (junto con `ffmpeg` y `pycolmap`, que el pipeline de video ya necesita). Los pesos de OWLv2 se descargan de Hugging Face en el primer uso, así que esa corrida necesita red. Primera ejecución real (un dibujo de puerta, CPU de esta máquina): carga 24 s y 7,5 s por cuadro; con 24 cuadros por grabación son unos 3 minutos la primera vez y nada las siguientes gracias a la caché. Detectó la puerta dibujada con la caja correcta (0,40 a 0,60 de ancho de la imagen), lo que valida la conversión de cajas, pero no mide la exactitud con puertas reales.
 2. `export ROOMFORGE_OPENING_DETECTION=owlv2 ROOMFORGE_STAGE_CACHE_DIR=$HOME/.cache/roomforge-stages` y levantar el worker.
 3. Grabar un cuarto con una puerta conocida y medir a mano su ancho y su alto. La primera corrida es la lenta; repetirla con el mismo paquete reutiliza la reconstrucción y la salida del modelo.
 4. Si falta `torch`, `transformers` o `Pillow`, la escena sale igual con la advertencia de que no se reconocieron puertas.
