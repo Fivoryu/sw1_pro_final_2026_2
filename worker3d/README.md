@@ -29,7 +29,7 @@ Algoritmo v1:
 3. Propone el contorno de cada ambiente con las mismas reglas que la app de captura; un ambiente que no cierra contorno se omite con una advertencia.
 4. Altura: plano de techo menos piso (`ceiling_plane`, medida) o 2,40 m con procedencia `assumed` y advertencia; una altura supuesta nunca se presenta como medida.
 5. Volúmenes: proyecta la profundidad de los cuadros clave al mundo y agrupa los puntos ocupados en cajas sin clase ni precio (`source: "depth"`). Sin profundidad no genera volúmenes y lo advierte.
-6. Escena: muros sobre la línea central, muros compartidos soldados, sin aberturas (la agencia las marca en el editor).
+6. Escena: muros sobre la línea central, muros compartidos soldados, sin aberturas (la agencia las marca en el editor). En el esquema 2 hay reconocimiento opcional de puertas y ventanas (ver más abajo).
 7. Si hay `reference`, reescala la escena y declara el factor aplicado. Con `reference.rect` (opcional) valida sus invariantes (`widthM == lengthM`, `corners[0]`/`[1]` = `p1`/`p2`, cuadrilátero convexo en 0..1, `heightM <= widthM`, `source` auto|adjusted|manual; si no, paquete inválido) y calcula dos escalas (ancho y alto) sobre el mismo plano: si difieren más del 8 % (supuesto, no medido) advierte y usa el lado largo; si no, promedia ponderando por longitud. Si las esquinas no alcanzan el plano, vuelve a la escala de `p1`/`p2`. Si OpenCV y numpy están instalados refina las esquinas a subpíxel (`cornerSubPix`, máximo 0,01 normalizado de desplazamiento, supuesto); sin ellos usa las esquinas tal cual. Ese refinado **no se probó con una imagen real** ni con OpenCV: solo con un refinador simulado.
 
 ### Paquete esquema 2: video + sensores (F07 T5)
@@ -144,3 +144,18 @@ Evidencia: `docs/ai/f08-bitacora-piloto.md`, `docs/ai/f08-revision-manual.json`,
 5. **Revisión asistida.** La revisión manual del piloto la hizo el agente sobre las planchas, no una persona. No sustituye la validación humana.
 6. **Peso del servicio.** La imagen pesa 1.40 GB y el proceso 541 MB de RSS: no convive con el contenedor de la API en una instancia pequeña.
 7. **Revisión humana separada del worker.** F08.4 no modifica inventario ni escena. F08.5 se implementa en la API y el editor del panel mediante el [contrato de revisión humana](../docs/api/f08-furniture-review.md): una persona aporta medidas/precio/posición, confirma o descarta y vincula repetidos a un extra ya colocado. F06 v2 ya está integrada; no existe el bloqueo histórico por aquella rama. El avance local y sus comprobaciones se registran en `odd/tasks/f08-human-confirmation.md`, sin presumir integración en `main`. F08.6 se difiere expresamente: no se ejecutó ajuste fino ni un experimento nuevo de modelos.
+
+### Reconocimiento de puertas y ventanas (esquema 2, opcional)
+
+`reconstruct_video(..., opening_detector=fábrica)` reconoce puertas y ventanas en los cuadros. Sin la fábrica no cambia nada y `openings` sale vacío. Cada pieza vive en un módulo propio:
+
+| Pieza | Ruta |
+|---|---|
+| Decisión puerta/ventana frente a clóset, espejo y arco; guardia de licencia; modelo OWLv2 | `worker3d/openings.py` |
+| Colocación de la caja sobre el muro con las poses de cámara | `worker3d/opening_placement.py` |
+
+- El modelo es abierto (OWLv2 base, Apache-2.0; alternativa fijada: Grounding DINO tiny ONNX). Necesita `torch`, `transformers` y `Pillow`, que **no** son dependencias del worker: si faltan, la escena sale igual con una advertencia. Solo se aceptan pesos con licencia permisiva declarada en su ficha.
+- Una caja cuenta como puerta solo si le gana al clóset y al espejo por un margen y si se apoya en el piso del muro donde cae. Ancho, alto y posición salen de la geometría de la cámara, en las unidades del plano: no hay medidas inventadas.
+- Segunda señal: la cámara cruza de un ambiente al siguiente cerca de la puerta. Con las dos señales la abertura sale sin marca; con una sola (y toda ventana) sale con `source: "estimated"` y el panel pide confirmarla.
+- **No se probó con imágenes reales ni con los pesos del modelo**: las pruebas usan un detector simulado con una geometría conocida solo por la prueba. Los umbrales (`MIN_SCORE`, `MIN_MARGIN`, `CROSSING_RADIUS_REL`, `FLOOR_CONTACT_REL`) son supuestos y la velocidad en CPU no se midió; el piloto físico debe medirlos.
+- Los ambientes de una misma reconstrucción comparten un único eje dominante para que sus muros paralelos no se desvíen entre sí (`dominant_axis` en `reconstruct.py`).
