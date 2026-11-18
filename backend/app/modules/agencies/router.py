@@ -338,11 +338,10 @@ def get_metrics(
 ) -> AgencyMetricsResponse:
     """
     Returns aggregated metrics for the agency (listings, quotes, reservations).
-    F03.3 Isolation: Staff can only query metrics for their own agency.
+    F14.4: only the agency_admin of this agency; agents, other agencies and the
+    platform_admin get 403 (F03.3 isolation, platform metrics are out of scope).
     """
-    # Cumplimiento estricto F03.3: Solo el personal de esta agencia (o platform_admin) puede ver las métricas
-    if staff["role"] != "platform_admin" and staff["tenant_id"] != agency_id:
-        raise HTTPException(status_code=403, detail="Not authorized for this agency")
+    _require_same_tenant_agency_admin(staff, agency_id)
 
     session_factory: sessionmaker[Session] = request.app.state.session_factory
     clock = request.app.state.clock

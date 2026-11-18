@@ -212,22 +212,36 @@ def get_agency_metrics(
         # 1. Métricas de Inmuebles (Listings)
         # La base guarda draft/pending/approved/rejected y la publicación va aparte en
         # is_published, así que se traducen a las tarjetas del panel:
-        #   draft -> draft, pending -> in_review, approved + is_published -> published.
+        #   draft -> draft, pending -> in_review, approved + is_published -> published,
+        #   approved sin publicar -> approved_unpublished, rejected -> rejected.
+        # Cada inmueble cae en exactamente una tarjeta, así que su suma es el total.
         listing_counts = (
             session.query(Listing.approval_status, Listing.is_published, func.count(Listing.id))
             .filter(Listing.agency_id == agency_id)
             .group_by(Listing.approval_status, Listing.is_published)
             .all()
         )
-        l_metrics = {"draft": 0, "in_review": 0, "published": 0}
+        l_metrics = {
+            "draft": 0,
+            "in_review": 0,
+            "published": 0,
+            "approved_unpublished": 0,
+            "rejected": 0,
+            "total": 0,
+        }
         for status, is_published, count in listing_counts:
             status_str = getattr(status, "value", str(status)).lower()
+            l_metrics["total"] += count
             if status_str == "draft":
                 l_metrics["draft"] += count
             elif status_str == "pending":
                 l_metrics["in_review"] += count
             elif status_str == "approved" and is_published:
                 l_metrics["published"] += count
+            elif status_str == "approved":
+                l_metrics["approved_unpublished"] += count
+            elif status_str == "rejected":
+                l_metrics["rejected"] += count
 
         # 2. Cotizaciones Activas (Quotes)
         active_quotes = (
