@@ -1,0 +1,34 @@
+# F07 — Reconocer puertas y regularizar la geometría del plano
+Objetivo: que la generación sea lo más exacta posible sin pedir tamaños ni medidas, reconociendo puertas con un modelo abierto y regularizando la geometría. Rama: `feat/f07-openings-regularization` (desde `feat/f07-video-capture` en `32c5038`); entrega: seis tareas; estrategia de entrega: `ask-on-risk`, PR encadenado sobre los planos proporcionales. Pruebas: pytest de `worker3d` y `backend`, Vitest del panel; piloto físico separado.
+
+## Specs
+
+- **S1 — Regularizar sin medidas.** «Sin necesidad de poner tamaños o mediciones». Los ambientes de una misma reconstrucción conectada comparten un único eje dominante, de modo que sus muros paralelos no se desvían unos grados entre sí (cada ambiente calculaba su propio eje). Las esquinas quedan en ángulo exacto cuando la desviación es pequeña (ya ocurría dentro de un ambiente). Las tolerancias absolutas no se tocan: en modo proporcional todo se normaliza a un tamaño nominal, así que ya son invariantes a la escala (L6). Un ambiente realmente no ortogonal conserva su ángulo. El resultado no cambia con la escala del SfM ni con el modo métrico/proporcional.
+- **S2 — Puertas por reconocimiento.** «Pero no se puede capturar reconociendo la puerta?» «No sería mejor de tener alguna manera de reconocer una puerta ya sea por puntos o algo así?» El worker reconoce puertas (y ventanas) en los fotogramas con un modelo abierto, las proyecta sobre el muro con las poses de cámara y obtiene posición y ancho/alto en las unidades del plano, sin inventar medidas.
+- **S3 — Combinar ambas.** «Podemos combinar ambas, que dicho modelo sea abierto.» La visión propone la puerta; la geometría la confirma con tres señales: apoyo en el piso sobre un muro, cruce de la cámara entre ambientes y hueco en el plano de pared. Con las señales coincidentes se emite sin marca; con una sola, marcada como estimada para revisión humana.
+- **S4 — Distinguir la puerta.** «Además que distingue una puerta del resto de elementos de una habitación?» Se piden varias descripciones a la vez (puerta, ventana, clóset, espejo, arco); un recuadro cuenta como puerta solo si le gana a clóset y espejo por un margen. Sin pesos con licencia permisiva (Apache-2.0, MIT, BSD, CC0), el modelo no se carga (guardia de licencia existente).
+- **S5 — Modelo.** Principal: OWLv2 base (Apache-2.0). Alternativa: Grounding DINO tiny ONNX int8 (Apache-2.0). Descartados por licencia: YOLO-World (GPL-3.0), SegFormer (no comercial). Supuesto: tiempos de CPU sin medir; se limita a pocos fotogramas.
+- **S6 — Contrato aditivo.** `openings` deja de salir siempre vacío; cada abertura puede llevar un campo opcional de procedencia (estimada/confirmada) y el panel permite confirmarla o corregirla, igual que las alturas estimadas. Los lectores viejos siguen funcionando.
+- **S7 — Prueba independiente.** Escenas sintéticas con una puerta y con un clóset: la puerta aparece en el muro correcto y proporcional; el clóset no. Misma salida con SfM a distintas escalas. La precisión del modelo con imágenes reales queda sin medir hasta el piloto físico.
+
+## Tasks
+
+| ID | Specs | Ruta | Estado | Commit |
+| --- | --- | --- | --- | --- |
+| T1 | S1 | inline | hecho (RED observado, 5 pruebas verdes, suite del worker 249+13) | ver commit de T1 |
+| T2 | S2, S4, S5 | inline | pendiente | — |
+| T3 | S2, S3 | inline | pendiente | — |
+| T4 | S6 | inline | pendiente | — |
+| T5 | S6 | inline | pendiente | — |
+| T6 | S7 | inline | pendiente | — |
+
+Riesgo por tarea: T2 nombra el ítem 5 (dependencias nuevas), T4 el ítem 3 solo si cambia el contrato público (campo opcional aditivo, no lo es).
+
+## Log
+
+- L1 (2026-11-18, usuario): «Que mas crees que podemos añadir para que la generación sea lo más exacta posible? Sin necesidad de poner tamaños o mediciones»; «Vamooooos».
+- L2 (usuario): «Pero no se puede capturar reconociendo la puerta?» «No sería mejor de tener alguna manera de reconocer una puerta ya sea por puntos o algo así?»
+- L3 (usuario): «Podemos combinar ambas, que dicho modelo sea abierto.» «Además que distingue una puerta del resto de elementos de una habitación?» Luego «Dale» a crear el ODD con OWLv2 principal y Grounding DINO alternativa.
+- L4 (mapa): ambos caminos terminan en `_SceneBuilder.build()` (`reconstruct.py:682`); `openings` sale `[]` (`:704`) y `unit` fijo en meters. El detector actual es COCO y no tiene puertas (`detect.py:34`). Los paquetes de video no traen profundidad. Ya existe snap de 12° al eje dominante y soldadura de esquinas (`reconstruct.py:46`, `493-513`); falta hacerlos relativos y alinear entre ambientes. Constantes absolutas: WELD 0.03, thickness 0.15, MIN_WALL 0.3, DUPLICATE 0.3/0.2, OBSERVED_EDGE 0.3, PIECE_GAP 1.0; la altura asumida 2.4 queda sin escalar en modo proporcional.
+- L5 (investigación): licencias leídas de las fichas; tiempos y precisión puerta/clóset sin medir.
+- L6 (T1, hallazgo): al leer `propose_contour` se vio que las tolerancias absolutas ya son invariantes a la escala en modo proporcional (la normalización global lleva todo a 5.0), por lo que S1 se reescribió: el aporte real es el eje común por pieza conectada. Implementado `dominant_axis` y el parámetro `axis` de `propose_contour`; `reconstruct_video` pasa el eje de la pieza a todos sus ambientes. RED: 3 pruebas fallaron por `axis` inexistente. No se alinean aún los desfases de muros compartidos entre ambientes: la soldadura de 0.03 ya los une cuando coinciden; queda como límite. Riesgo: ninguno (parámetro opcional, comportamiento previo intacto: prueba «sin eje dado»).

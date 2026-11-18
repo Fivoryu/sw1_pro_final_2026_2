@@ -482,22 +482,35 @@ def _too_few_walls(count: int) -> ProposalFailed:
     )
 
 
-def propose_contour(
-    walls: list[tuple[Point, Point]], floors: list[list[Point]], trajectory: list[Point]
-) -> ProposedContour | ProposalFailed:
-    """Room contour from observed wall segments; rooms are assumed to have mostly square corners."""
-    walls = [w for w in walls if _dist(w[0], w[1]) >= MIN_WALL_LENGTH_M]
-    if len(walls) < 3:
-        return _too_few_walls(len(walls))
-
-    # Dominant axis: length-weighted circular mean of 4*theta (period of 90 degrees).
+def dominant_axis(walls: list[tuple[Point, Point]]) -> float:
+    """Length-weighted circular mean of 4*theta (period of 90 degrees), in radians."""
     sum_sin = sum_cos = 0.0
     for start, end in walls:
         d = _sub(end, start)
         theta = math.atan2(d[1], d[0])
         sum_sin += _len(d) * math.sin(4 * theta)
         sum_cos += _len(d) * math.cos(4 * theta)
-    axis = math.atan2(sum_sin, sum_cos) / 4
+    return math.atan2(sum_sin, sum_cos) / 4
+
+
+def propose_contour(
+    walls: list[tuple[Point, Point]],
+    floors: list[list[Point]],
+    trajectory: list[Point],
+    axis: float | None = None,
+) -> ProposedContour | ProposalFailed:
+    """Room contour from observed wall segments; rooms are assumed to have mostly square corners.
+
+    ``axis`` is the dominant direction to snap to. Rooms that share coordinates (one connected
+    reconstruction) pass the same axis so their walls stay parallel; without it the room uses
+    its own.
+    """
+    walls = [w for w in walls if _dist(w[0], w[1]) >= MIN_WALL_LENGTH_M]
+    if len(walls) < 3:
+        return _too_few_walls(len(walls))
+
+    if axis is None:
+        axis = dominant_axis(walls)
 
     lines: list[_Line] = []
     quarter = math.pi / 2
