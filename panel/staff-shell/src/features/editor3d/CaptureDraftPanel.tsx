@@ -127,13 +127,14 @@ function CaptureNotes({ capture, editable, scene, onConfirmMeasure }: NotesProps
             : `Altura del muro ${estimate.wallId}: ${estimate.height.toFixed(2).replace(".", ",")} m`}
           {estimate.source === "estimated" ? " (estimada desde el video)" : " (no medida)"}
           {editable && onConfirmMeasure
-            ? <PendingMeasureActions estimate={estimate} onConfirm={onConfirmMeasure} /> : null}</li>)}
+            ? <PendingMeasureActions estimate={estimate} onConfirm={onConfirmMeasure} proportional={proportional} /> : null}</li>)}
       </ul></> : null}
   </>;
 }
 
-function PendingMeasureActions({ estimate, onConfirm }: {
+function PendingMeasureActions({ estimate, onConfirm, proportional }: {
   estimate: PendingEstimate;
+  proportional: boolean;
   onConfirm: (wallId: string, height?: number) => void;
 }) {
   const [value, setValue] = useState("");
@@ -152,10 +153,10 @@ function PendingMeasureActions({ estimate, onConfirm }: {
     <button className="review-button review-button--secondary" type="button"
       onClick={() => onConfirm(estimate.wallId, undefined)}>Confirmar</button>
     <input type="text" inputMode="decimal" value={value}
-      aria-label={`Altura corregida del muro ${estimate.wallId} (m)`}
+      aria-label={`Altura corregida del muro ${estimate.wallId}${proportional ? "" : " (m)"}`}
       onChange={(event) => { setValue(event.target.value); setInvalid(false); }} />
     <button className="review-button review-button--secondary" type="button"
       onClick={correct}>Corregir y confirmar</button>
-    {invalid ? <span role="alert">La altura debe ser un número mayor que cero (en metros).</span> : null}
+    {invalid ? <span role="alert">La altura debe ser un número mayor que cero{proportional ? "" : " (en metros)"}.</span> : null}
   </span>;
 }

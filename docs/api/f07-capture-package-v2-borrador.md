@@ -60,7 +60,7 @@ Una línea JSON por muestra, ordenada por `t`:
 | Campo | Regla |
 |---|---|
 | `rooms[]` | El agente marca con «Siguiente ambiente» el instante de cambio; cada ambiente cubre un intervalo del video. Los intervalos no se superponen. |
-| `reference` | Opcional pero recomendada: sin una medida real el modelo queda **sin escala métrica**, y el worker lo advierte. |
+| `reference` | Opcional pero recomendada: sin ella el plano resultante es **proporcional** (conserva razones y conexiones, no son metros; `scale.mode = "proportional"` en la escena) y el worker lo advierte. |
 | intrínsecos de cámara | No se envían: el SfM los estima. Si el sistema operativo expone la distancia focal, puede añadirse como pista (por definir). |
 
 ## Recomendaciones de captura (por validar en el piloto)
@@ -72,7 +72,7 @@ Una línea JSON por muestra, ordenada por `t`:
 
 ## Salida de `worker3d`
 
-Sin cambios respecto del esquema `1`: `sceneDraft` (escena v2), `warnings` en español y, cuando haya detección, `volumeSuggestions`, con las mismas reglas de `docs/api/f07-capture-package.md` (§Resultado). Las advertencias nuevas previstas: «Sin medida de referencia: el modelo no tiene escala métrica», «Pared sin observar entre…», «Gravedad no disponible: no se distinguió piso de techo».
+Sin cambios respecto del esquema `1`: `sceneDraft` (escena v2), `warnings` en español y, cuando haya detección, `volumeSuggestions`, con las mismas reglas de `docs/api/f07-capture-package.md` (§Resultado). Las advertencias nuevas previstas: «Sin medida de referencia: el plano es proporcional», «Pared sin observar entre…», «Gravedad no disponible: no se distinguió piso de techo».
 
 ## Privacidad y retención
 

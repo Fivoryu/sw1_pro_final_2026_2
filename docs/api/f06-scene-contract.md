@@ -59,6 +59,12 @@ un documento sin ellos sigue siendo válido, y cuando no se envían tampoco apar
   - `assumed`: altura supuesta; **no fue medida** y no debe presentarse como medición.
   - `estimated`: altura derivada del video por la reconstrucción; es una estimación que el agente
     aún no confirmó y no debe presentarse como medición; al confirmarla pasa a `manual`.
+- `scale.mode` (nivel superior del documento): `metric` o `proportional`. Un plano
+  **proporcional** conserva razones y conexiones, pero sus valores **no son metros**: no debe
+  rotularse en metros ni usarse para calcular superficies. La ausencia de `scale` significa
+  `metric` (documentos anteriores y escenas con referencia calibrada). `unit` sigue siendo
+  `"meters"` para los lectores existentes. Un valor distinto de los admitidos se rechaza con
+  `422 scene_invalid`.
 - `objects[].source`: procedencia del volumen; `depth` (extraído de datos de profundidad durante el
   recorrido) o `manual` (ubicado a mano).
 - `objects[].confidence`: número en [0, 1] con la confianza declarada por la captura.

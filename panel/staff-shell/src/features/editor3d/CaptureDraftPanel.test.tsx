@@ -170,6 +170,19 @@ it("corrects a pending height with a valid positive number and rejects invalid o
   expect(onConfirmMeasure).toHaveBeenCalledWith("wall-north", 2.65);
 });
 
+it("does not ask for meters when correcting a height in a proportional plan", async () => {
+  const proportionalScene = { ...estimatedScene, scale: { mode: "proportional" as const } };
+  const onConfirmMeasure = vi.fn();
+  listed({ ...base, status: "completed", sceneDraft: proportionalScene });
+  const user = userEvent.setup();
+  open({ loadedCaptureId: "cap-1", scene: proportionalScene, onConfirmMeasure });
+  const input = await screen.findByLabelText("Altura corregida del muro wall-north");
+  await user.type(input, "0");
+  await user.click(screen.getAllByRole("button", { name: "Corregir y confirmar" })[0] as HTMLElement);
+  expect(screen.getByRole("alert")).toHaveTextContent("La altura debe ser un número mayor que cero.");
+  expect(screen.getByRole("alert")).not.toHaveTextContent(/metros/);
+});
+
 it("does not offer confirmation while the draft is not loaded (T8 behavior)", async () => {
   listed({ ...base, status: "completed", sceneDraft: estimatedScene });
   open({ scene: DEFAULT_SCENE_DOCUMENT, onConfirmMeasure: vi.fn() });
