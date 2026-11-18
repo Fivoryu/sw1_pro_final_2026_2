@@ -79,6 +79,9 @@ class SceneOpening(SceneContractModel):
     height: Annotated[SceneNumber, Field(gt=0)]
     type: Literal["door", "window"]
     sill_height: Annotated[SceneNumber, Field(ge=0)] = Field(default=0, alias="sillHeight")
+    # F07: set to "estimated" when a capture recognised the opening with a single signal; the
+    # reviewer clears it by confirming. Absent for openings drawn by a person.
+    source: Literal["estimated"] | None = None
 
     @model_validator(mode="before")
     @classmethod
