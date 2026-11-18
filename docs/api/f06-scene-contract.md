@@ -40,6 +40,10 @@ Reglas del documento v1:
   opcional por muro.
 - `openings[]`: `type` es `door` o `window`; `position` ∈ [0,1] medido desde `start` del muro y
   centrado en ese punto; `width`/`height` > 0; `sillHeight` ≥ 0 (ventanas, default 0.9).
+- `openings[].source` (opcional): `"estimated"` cuando la captura por video reconoció la abertura con una sola señal
+  (visión sin cruce de cámara) y falta que una persona la confirme; se quita al confirmar y no se
+  envía en aberturas dibujadas a mano. Cualquier otro valor se rechaza con `422`. Los lectores que no lo
+  conocen pueden ignorarlo.
   `wallId` debe referenciar un muro del mismo documento.
 - `rooms[]` (complemento): `wallIds` con al menos 3 ids distintos que forman un ciclo; el polígono
   se deriva encadenando los extremos de esos muros en orden. `name` y `color` opcionales.
