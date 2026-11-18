@@ -42,6 +42,7 @@ from typing import Any, Protocol
 import opening_placement
 import reconstruct
 from reconstruct import ExternalToolMissing, InvalidPackage, ReconstructionResult
+from stage_cache import StageCache, fingerprint
 
 # --- Frozen package limits (S9) and heuristics (none of them measured) ----------------------
 
@@ -1338,6 +1339,27 @@ def _meters(point: reconstruct.Point) -> str:
     return f"({point[0]:.2f} m; {point[1]:.2f} m)"
 
 
+def make_stage_cache(directory: Path) -> StageCache:
+    """A stage cache that may hold the sparse reconstruction types of this module."""
+    return StageCache(directory, allowed=[SparseModel, CameraPose, SparsePoint, Intrinsics])
+
+
+def _sparse_key(package: VideoPackage, reference_index: int | None, estimator: PoseEstimator) -> str:
+    """What the sparse reconstruction depends on: the video, its frame list and how frames are picked.
+
+    The sensors are left out on purpose: they only matter once the model is aligned to gravity.
+    """
+    video = package.manifest["video"]
+    parts = (
+        fingerprint([package.directory / VIDEO_FILE, package.directory / FRAMES_FILE]),
+        f"fps={video['fps']}",
+        f"extract={EXTRACT_FPS}",
+        f"reference={reference_index}",
+        f"estimator={type(estimator).__module__}.{type(estimator).__qualname__}",
+    )
+    return "|".join(parts)
+
+
 def reconstruct_video(
     package_dir: Path,
     *,
@@ -1347,13 +1369,16 @@ def reconstruct_video(
     detector_factory: DetectorFactory | None = None,
     corner_refiner: CornerRefiner | None = None,
     opening_detector: OpeningDetectorFactory | None = None,
+    stage_cache: StageCache | None = None,
 ) -> VideoReconstructionResult:
     """Reconstruct an unzipped schema 2 package into a scene v2 draft plus warnings.
 
     ``detector_factory`` switches furniture detection on (``None``: off, nothing changes). The
     detector is optional: when it cannot be loaded or fails, the scene is still produced, with a
     warning and no suggestions. ``opening_detector`` does the same for doors and windows: it
-    returns a function that, given an image, answers ``[(box, kind, score)]``.
+    returns a function that, given an image, answers ``[(box, kind, score)]``. ``stage_cache``
+    keeps the sparse reconstruction between runs of the same recording: with a hit, neither the
+    frame extractor nor the pose estimator runs unless a later stage needs the images.
     """
     package = load_package(package_dir)
     manifest = package.manifest
@@ -1387,13 +1412,29 @@ def reconstruct_video(
         indices.add(reference_index)
 
     with tempfile.TemporaryDirectory(prefix="roomforge-sfm-") as scratch:
-        frames = extractor.extract(package.directory / VIDEO_FILE, sorted(indices), Path(scratch) / "frames")
-        models = [m for m in estimator.estimate(frames, Path(scratch) / "sfm") if m.poses and m.points]
+        extracted: list[ExtractedFrame] | None = None
+
+        def get_frames() -> list[ExtractedFrame]:
+            # Extracted once, and only when a stage actually needs the images.
+            nonlocal extracted
+            if extracted is None:
+                extracted = extractor.extract(package.directory / VIDEO_FILE, sorted(indices), Path(scratch) / "frames")
+            return extracted
+
+        def estimate_models() -> list[SparseModel]:
+            return [m for m in estimator.estimate(get_frames(), Path(scratch) / "sfm") if m.poses and m.points]
+
+        if stage_cache is None:
+            models = estimate_models()
+        else:
+            models = stage_cache.fetch(
+                "sfm", _sparse_key(package, reference_index, estimator), estimate_models, keep=bool
+            )
         # Optional sub-pixel refinement of the reference rectangle (the frame lives in scratch).
         rect_corners: list[dict[str, float]] | None = None
         if reference is not None and reference.get("rect") is not None:
             rect_corners = reference["rect"]["corners"]
-            reference_frame = next((f for f in frames if f.index == reference_index), None)
+            reference_frame = next((f for f in get_frames() if f.index == reference_index), None)
             if reference_frame is not None:
                 rect_corners = refine_rect_corners(reference_frame.path, rect_corners, corner_refiner)
         # The frames live in this scratch directory: detect here, place the boxes later.
@@ -1406,7 +1447,7 @@ def reconstruct_video(
                 warnings.append(WARNING_DETECTOR_UNAVAILABLE)
             else:
                 try:
-                    detections = _detect_frames(frames, detector, threshold)
+                    detections = _detect_frames(get_frames(), detector, threshold)
                 except Exception:  # noqa: BLE001 - suggestions are optional; never leak the error text
                     detections = {}
                     warnings.append(WARNING_LABELING_FAILED)
@@ -1418,7 +1459,7 @@ def reconstruct_video(
             except (ImportError, RuntimeError):
                 warnings.append(WARNING_OPENINGS_UNAVAILABLE)
             else:
-                ordered = sorted(frames, key=lambda f: f.index)
+                ordered = sorted(get_frames(), key=lambda f: f.index)
                 step = max(1, math.ceil(len(ordered) / OPENING_MAX_FRAMES))
                 try:
                     for frame in ordered[::step][:OPENING_MAX_FRAMES]:

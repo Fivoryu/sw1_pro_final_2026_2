@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from reconstruct import ExternalToolMissing
+from stage_cache import StageCache, fingerprint
 
 # One prompt per thing a doorway can be confused with. "an archway" is a passage without a leaf.
 DOOR, WINDOW = "a door", "a window"
@@ -34,6 +35,9 @@ _LOOKALIKES = (WARDROBE, MIRROR)
 MIN_SCORE = 0.25
 MIN_MARGIN = 0.1
 DUPLICATE_IOU = 0.5
+# The raw model output keeps every box whose best prompt reaches this probability, so a stored
+# result can still answer to any minimum score at or above it.
+RAW_FLOOR = 0.05
 
 # Weights must come with a permissive license. The check reads the license declared by the
 # model card; it does not audit the data the model was trained on.
@@ -71,14 +75,16 @@ def require_permissive(license_id: str) -> None:
         raise LicenseNotPermitted(f"license {license_id!r} is not permissive; the model is not loaded")
 
 
-def classify(scores: dict[str, float]) -> tuple[str, float] | None:
+def classify(
+    scores: dict[str, float], min_score: float = MIN_SCORE, min_margin: float = MIN_MARGIN
+) -> tuple[str, float] | None:
     """The kind of opening a box is, or ``None`` when it is not clearly one."""
     winner = max(scores, key=lambda prompt: scores[prompt])
     kind = _KIND_OF.get(winner)
-    if kind is None or scores[winner] < MIN_SCORE:
+    if kind is None or scores[winner] < min_score:
         return None
     rival = max((scores.get(prompt, 0.0) for prompt in _LOOKALIKES), default=0.0)
-    if scores[winner] - rival < MIN_MARGIN:
+    if scores[winner] - rival < min_margin:
         return None
     return kind, scores[winner]
 
@@ -114,18 +120,65 @@ def unpad_box(box: tuple[float, float, float, float], width: int, height: int) -
 
 # Detects the openings of one image: file -> detections without a frame number.
 OpeningDetector = Callable[[Path], list[tuple[Box, str, float]]]
+# What the model says about one image, before any decision: every box with its probability per prompt.
+RawBoxes = list[tuple[Box, dict[str, float]]]
+Scorer = Callable[[Path], RawBoxes]
+
+
+def decide(raw: RawBoxes, min_score: float = MIN_SCORE, min_margin: float = MIN_MARGIN) -> list[tuple[Box, str, float]]:
+    """The openings among raw boxes. Pure: changing a threshold never needs the model again."""
+    found: list[tuple[Box, str, float]] = []
+    for box, scores in raw:
+        verdict = classify(scores, min_score, min_margin)
+        if verdict is not None:
+            found.append((box, verdict[0], verdict[1]))
+    return found
+
+
+def detector_from(
+    scorer: Scorer,
+    model_key: str,
+    min_score: float = MIN_SCORE,
+    min_margin: float = MIN_MARGIN,
+    cache: StageCache | None = None,
+) -> OpeningDetector:
+    """A per-image detector over a raw scorer, optionally remembering what the model said.
+
+    The stored value is the raw output keyed by the image bytes, the model and the prompts, so
+    the thresholds are applied on every call and can change without running the model again.
+    """
+    if min_score < RAW_FLOOR:
+        raise ValueError(f"minimum score {min_score} is below the {RAW_FLOOR} that raw results keep")
+    repo = MODELS[model_key].repo
+
+    def detect(image_path: Path) -> list[tuple[Box, str, float]]:
+        if cache is None:
+            raw = scorer(image_path)
+        else:
+            key = f"{repo}|{'|'.join(PROMPTS)}|{fingerprint([image_path])}"
+            raw = cache.fetch("raw-openings", key, lambda: scorer(image_path))
+        return decide(raw, min_score, min_margin)
+
+    return detect
 
 
 def _import_torch() -> tuple[Any, Any]:
     return importlib.import_module("torch"), importlib.import_module("transformers")
 
 
-def build_detector(model_key: str = "owlv2", min_score: float = MIN_SCORE) -> OpeningDetector:
+def build_detector(
+    model_key: str = "owlv2",
+    min_score: float = MIN_SCORE,
+    min_margin: float = MIN_MARGIN,
+    cache: StageCache | None = None,
+) -> OpeningDetector:
     """Load the open-vocabulary model once and return a per-image detector.
 
     Not exercised against the real weights in this repository: the interface is pinned by tests
     with simulated models, and its accuracy on real doors is unmeasured.
     """
+    if model_key != "owlv2":
+        raise ValueError(f"{model_key!r} is pinned in MODELS but has no backend yet; use 'owlv2'")
     model = MODELS[model_key]
     require_permissive(model.license)
     try:
@@ -140,18 +193,17 @@ def build_detector(model_key: str = "owlv2", min_score: float = MIN_SCORE) -> Op
     processor = transformers.Owlv2Processor.from_pretrained(model.repo)
     network = transformers.Owlv2ForObjectDetection.from_pretrained(model.repo).eval()
 
-    def detect(image_path: Path) -> list[tuple[Box, str, float]]:
+    def score(image_path: Path) -> RawBoxes:
         image = Image.open(image_path).convert("RGB")
         inputs = processor(text=[list(PROMPTS)], images=image, return_tensors="pt")
         with torch.no_grad():
             output = network(**inputs)
         probabilities = torch.sigmoid(output.logits[0]).tolist()  # boxes x prompts
         boxes = output.pred_boxes[0].tolist()
-        found: list[tuple[Box, str, float]] = []
+        raw: RawBoxes = []
         for raw_box, row in zip(boxes, probabilities, strict=True):
-            verdict = classify(dict(zip(PROMPTS, row, strict=True)))
-            if verdict is not None and verdict[1] >= min_score:
-                found.append((unpad_box(tuple(raw_box), image.width, image.height), verdict[0], verdict[1]))
-        return found
+            if max(row) >= RAW_FLOOR:
+                raw.append((unpad_box(tuple(raw_box), image.width, image.height), dict(zip(PROMPTS, row, strict=True))))
+        return raw
 
-    return detect
+    return detector_from(score, model_key, min_score, min_margin, cache)
