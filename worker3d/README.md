@@ -155,7 +155,45 @@ Evidencia: `docs/ai/f08-bitacora-piloto.md`, `docs/ai/f08-revision-manual.json`,
 | Colocación de la caja sobre el muro con las poses de cámara | `worker3d/opening_placement.py` |
 
 - El modelo es abierto (OWLv2 base, Apache-2.0; alternativa fijada: Grounding DINO tiny ONNX). Necesita `torch`, `transformers` y `Pillow`, que **no** son dependencias del worker: si faltan, la escena sale igual con una advertencia. Solo se aceptan pesos con licencia permisiva declarada en su ficha.
-- Una caja cuenta como puerta solo si le gana al clóset y al espejo por un margen y si se apoya en el piso del muro donde cae. Ancho, alto y posición salen de la geometría de la cámara, en las unidades del plano: no hay medidas inventadas.
+- Una caja cuenta como puerta solo si le gana al clóset y al espejo por un margen y si se apoya en el piso del muro donde cae. Ancho, alto y posición salen de la geometría de la cámara, en las unidades del plano: no hay medidas inventadas. Como el recuadro del detector es una caja envolvente, la abertura se ajusta como rectángulo sobre el plano del muro (también en vistas oblicuas), no con rayos por las esquinas de la caja.
 - Segunda señal: la cámara cruza de un ambiente al siguiente cerca de la puerta. Con las dos señales la abertura sale sin marca; con una sola (y toda ventana) sale con `source: "estimated"` y el panel pide confirmarla.
 - **No se probó con imágenes reales ni con los pesos del modelo**: las pruebas usan un detector simulado con una geometría conocida solo por la prueba. Los umbrales (`MIN_SCORE`, `MIN_MARGIN`, `CROSSING_RADIUS_REL`, `FLOOR_CONTACT_REL`) son supuestos y la velocidad en CPU no se midió; el piloto físico debe medirlos.
 - Los ambientes de una misma reconstrucción comparten un único eje dominante para que sus muros paralelos no se desvíen entre sí (`dominant_axis` en `reconstruct.py`).
+
+### Medir sin piloto y no repetir etapas caras (esquema 2)
+
+| Pieza | Ruta |
+|---|---|
+| Banco sintético con verdad conocida | `worker3d/tests/bench_synthetic.py` |
+| Caché en disco de etapas caras | `worker3d/stage_cache.py` |
+
+**Banco sintético.** Genera pares de ambientes conectados con una puerta o ventana de geometría conocida solo por el banco (y, con `--decoys`, un clóset que puntúa casi como puerta), corre `reconstruct_video` con cámaras y detector simulados y compara la escena con la verdad. Los errores son razones o fracciones del muro, nunca metros.
+
+```bash
+python worker3d/tests/bench_synthetic.py --cases 30 --seed 1 --point-noise 0.02 --pixel-noise 3 --decoys
+python worker3d/tests/bench_synthetic.py --cases 30 --seed 1 --decoys --set openings.MIN_MARGIN=0.05 --out corrida.json
+```
+
+`--outliers 0.05` reemplaza ese porcentaje de la nube por puntos sueltos; `--pose-rot-noise 2` y `--pose-pos-noise 0.05` desvían las cámaras (grados y metros); la gravedad del sensor sigue siendo la verdadera.
+
+`--set modulo.CONSTANTE=valor` (repetible) cambia un umbral del worker solo durante la corrida, de modo que dos configuraciones se comparan sobre los mismos casos. Funciona con constantes que se leen al ejecutar (`opening_placement.*`, `openings.MIN_SCORE`/`MIN_MARGIN` dentro del banco); en producción esos umbrales se pasan a `build_detector(min_score=…, min_margin=…)`.
+
+**Qué dice y qué no.** Dice si la geometría y la fusión recuperan un cuarto conocido con el ruido que se elija. No dice cómo se comporta el modelo de puertas ni el teléfono sobre una grabación real: la nube, las poses y las cajas son simuladas. El historial de hallazgos y correcciones está en `odd/tasks/f07-banco-sintetico-y-cache.md` (L4 a L11). Los muros que comparten dos ambientes de una misma reconstrucción se sueldan (`SNAP_SHARED_WALLS`, `reconstruct._snap_shared_walls`): una puerta compartida sale una sola vez. El costo medido es que cada ambiente cede hasta la mitad de la diferencia entre el espesor real de la pared y los 0.15 que se supone (≈ 1 % de error de razón con paredes de 30 cm).
+
+**Margen frente al ruido (medido en el banco, no en un teléfono).** Con hasta ~30 % de puntos atípicos el plano se mantiene (error de razón < 0,06; la posición de la abertura se degrada desde 30 %); con 40 % se rompe. Los puntos aislados se descartan antes de ajustar (`remove_stray_points`). Rotaciones de cámara de 4° y desvíos de 15 cm no pierden puertas, pero la posición de la abertura pierde hasta 6 % y 14 % del largo del muro; la palanca que lo reduce es ver cada abertura en más cuadros (con todos los cuadros baja a 7 %). Ponderar las vistas por distancia y ángulo se probó y no mejoró nada medible. Cuánto ruido mete un teléfono real sigue sin medirse. Se corrigieron tres causas halladas así (detección de planos con bins vacíos, control de altura en metros dentro de planos proporcionales, paredes fantasma); ver el ODD, L17 a L31.
+
+**Caché por etapas.** `reconstruct_video(..., stage_cache=make_stage_cache(directorio))` guarda la reconstrucción dispersa por huella del video y de la lista de cuadros (no de los sensores). Con la caché llena no se ejecutan ni `ffmpeg` ni el estimador, salvo que otra etapa pida las imágenes (puertas, mobiliario, rectángulo de referencia). `openings.build_detector(..., cache=…)` guarda la salida cruda del modelo por contenido de imagen; la decisión puerta/clóset se aplica después, así que cambiar `MIN_SCORE`, `MIN_MARGIN` no vuelve a correr el modelo (el mínimo no puede bajar de `RAW_FLOOR`, 0.05).
+
+- La caché es una comodidad local: una entrada ausente, dañada o con clases no permitidas se recalcula y no se ejecuta código de ella. No sube a ningún servicio y no debe compartirse entre máquinas de personas distintas.
+- Un resultado de reconstrucción vacío no se guarda.
+- Si cambia la forma de lo guardado, se sube `CACHE_VERSION` en `stage_cache.py`.
+- `reconstruction_worker.py` los activa solo por entorno (apagados por defecto; sin ellos la llamada al pipeline de video es idéntica a antes): `ROOMFORGE_OPENING_DETECTION=owlv2` y `ROOMFORGE_STAGE_CACHE_DIR=<carpeta>`. Un valor no soportado (por ejemplo `grounding-dino`, que está fijado pero sin backend) es un error de configuración.
+
+**Preparar el piloto físico.**
+
+1. En la máquina del worker: `pip install torch transformers pillow` (junto con `ffmpeg` y `pycolmap`, que el pipeline de video ya necesita). Los pesos de OWLv2 se descargan de Hugging Face en el primer uso, así que esa corrida necesita red.
+2. `export ROOMFORGE_OPENING_DETECTION=owlv2 ROOMFORGE_STAGE_CACHE_DIR=$HOME/.cache/roomforge-stages` y levantar el worker.
+3. Grabar un cuarto con una puerta conocida y medir a mano su ancho y su alto. La primera corrida es la lenta; repetirla con el mismo paquete reutiliza la reconstrucción y la salida del modelo.
+4. Si falta `torch`, `transformers` o `Pillow`, la escena sale igual con la advertencia de que no se reconocieron puertas.
+5. Los umbrales (`MIN_SCORE`, `MIN_MARGIN` en `openings.py`; `FLOOR_CONTACT_REL` y compañía en `opening_placement.py`) son supuestos: ajustarlos con la salida cruda ya guardada, y contrastar el resultado con el banco sintético (`--set`).
+6. Mirar en la escena: qué aberturas salieron con `source: "estimated"`, cuáles faltan y cuáles sobran, y cuánto tardó el modelo por cuadro (no está medido).
