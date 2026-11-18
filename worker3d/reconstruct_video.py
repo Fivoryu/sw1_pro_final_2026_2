@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+import opening_placement
 import reconstruct
 from reconstruct import ExternalToolMissing, InvalidPackage, ReconstructionResult
 
@@ -107,6 +108,17 @@ VOLUME_FULL_SUPPORT_POINTS = 50
 WARNING_DETECTOR_UNAVAILABLE = "Class suggestions skipped: detector unavailable"
 WARNING_LABELING_FAILED = "Class suggestions skipped: labeling failed"
 WARNING_NO_DEPTH = "Sin profundidad: no se generaron volúmenes"
+WARNING_OPENINGS_UNAVAILABLE = (
+    "Reconocimiento de puertas no disponible en esta máquina: marque las puertas y ventanas en el editor."
+)
+WARNING_OPENINGS_FAILED = (
+    "Reconocimiento de puertas falló: no se generaron aberturas; márquelas en el editor."
+)
+# Frames sampled for door recognition (the model is slow on CPU; assumed bound, not measured).
+OPENING_MAX_FRAMES = 24
+# A door counts as crossed when the camera moved between two rooms within this share of the plan
+# extent of it (assumed, relative so that it holds in metric and proportional plans).
+CROSSING_RADIUS_REL = 0.3
 
 Vec3 = tuple[float, float, float]
 Mat3 = tuple[Vec3, Vec3, Vec3]  # rows
@@ -1158,6 +1170,94 @@ def _merge_candidates(candidates: list[_Candidate]) -> list[_Candidate]:
     return kept[:MAX_SUGGESTIONS]
 
 
+OpeningDetectorFactory = Callable[[], Callable[[Path], list[tuple[Any, str, float]]]]
+
+
+def _room_crossings(
+    piece: _Piece, room_of_frame: dict[int, str], factor: float
+) -> list[tuple[str, str, reconstruct.Point]]:
+    """Where the camera went from one room to the next: probably through a door."""
+    ordered = sorted((p for p in piece.poses if p.frame_index in room_of_frame), key=lambda p: p.frame_index)
+    found: list[tuple[str, str, reconstruct.Point]] = []
+    for before, after in itertools.pairwise(ordered):
+        a, b = room_of_frame[before.frame_index], room_of_frame[after.frame_index]
+        if a != b:
+            found.append(
+                (
+                    a,
+                    b,
+                    (
+                        (before.center[0] + after.center[0]) / 2 * factor,
+                        (before.center[2] + after.center[2]) / 2 * factor,
+                    ),
+                )
+            )
+    return found
+
+
+def _room_openings(
+    piece: _Piece,
+    fit: _RoomFit,
+    room_id: str,
+    corners: list[reconstruct.Point],
+    height: float,
+    factor: float,
+    room_of_frame: dict[int, str],
+    opening_boxes: dict[int, list[tuple[Any, str, float]]],
+    crossings: list[tuple[str, str, reconstruct.Point]],
+) -> list[dict[str, Any]]:
+    """Doors and windows recognised from this room's frames, placed on its contour.
+
+    A door whose position matches a crossing of the camera into another room has two signals
+    (vision and trajectory); every other opening has one and is marked estimated for review.
+    """
+    if not opening_boxes or fit.floor_y is None:
+        return []
+    intrinsics = piece.intrinsics
+    poses = {p.frame_index: p for p in piece.poses}
+    placements: list[opening_placement.Placement] = []
+    for frame, items in opening_boxes.items():
+        pose = poses.get(frame)
+        if pose is None or room_of_frame.get(frame) != room_id:
+            continue
+        camera = opening_placement.Camera(
+            frame,
+            (pose.center[0] * factor, pose.center[1] * factor, pose.center[2] * factor),
+            pose.rotation,
+            intrinsics.width,
+            intrinsics.height,
+            intrinsics.fx,
+            intrinsics.fy,
+            intrinsics.cx,
+            intrinsics.cy,
+        )
+        for box, kind, score in items:
+            placed = opening_placement.place_detection(corners, fit.floor_y * factor, height, camera, box, kind, score)
+            if placed is not None:
+                placements.append(placed)
+    radius = CROSSING_RADIUS_REL * _plan_extent(piece) * factor
+    result: list[dict[str, Any]] = []
+    for found in opening_placement.merge_views(placements):
+        a, b = corners[found.edge], corners[(found.edge + 1) % len(corners)]
+        centre = (a[0] + (b[0] - a[0]) * found.position, a[1] + (b[1] - a[1]) * found.position)
+        crossed = found.kind == "door" and any(
+            room_id in (first, second) and reconstruct._dist(centre, point) <= radius
+            for first, second, point in crossings
+        )
+        result.append(
+            {
+                "edge": found.edge,
+                "position": found.position,
+                "width": found.width,
+                "height": found.height,
+                "sill": found.sill,
+                "kind": found.kind,
+                "estimated": not crossed,
+            }
+        )
+    return result
+
+
 def _edge_observed(a: reconstruct.Point, b: reconstruct.Point, segments: list[reconstruct.WallSegment]) -> bool:
     length = reconstruct._dist(a, b)
     direction = reconstruct._unit(reconstruct._sub(b, a))
@@ -1188,12 +1288,14 @@ def reconstruct_video(
     device_to_camera: Mat3 | None = None,
     detector_factory: DetectorFactory | None = None,
     corner_refiner: CornerRefiner | None = None,
+    opening_detector: OpeningDetectorFactory | None = None,
 ) -> VideoReconstructionResult:
     """Reconstruct an unzipped schema 2 package into a scene v2 draft plus warnings.
 
     ``detector_factory`` switches furniture detection on (``None``: off, nothing changes). The
     detector is optional: when it cannot be loaded or fails, the scene is still produced, with a
-    warning and no suggestions.
+    warning and no suggestions. ``opening_detector`` does the same for doors and windows: it
+    returns a function that, given an image, answers ``[(box, kind, score)]``.
     """
     package = load_package(package_dir)
     manifest = package.manifest
@@ -1250,6 +1352,22 @@ def reconstruct_video(
                 except Exception:  # noqa: BLE001 - suggestions are optional; never leak the error text
                     detections = {}
                     warnings.append(WARNING_LABELING_FAILED)
+        # Door recognition runs here too, while the frames exist.
+        opening_boxes: dict[int, list[tuple[Any, str, float]]] = {}
+        if opening_detector is not None and models:
+            try:
+                recognise = opening_detector()
+            except (ImportError, RuntimeError):
+                warnings.append(WARNING_OPENINGS_UNAVAILABLE)
+            else:
+                ordered = sorted(frames, key=lambda f: f.index)
+                step = max(1, math.ceil(len(ordered) / OPENING_MAX_FRAMES))
+                try:
+                    for frame in ordered[::step][:OPENING_MAX_FRAMES]:
+                        opening_boxes[frame.index] = list(recognise(frame.path))
+                except Exception:  # noqa: BLE001 - optional; never leak the error text
+                    opening_boxes = {}
+                    warnings.append(WARNING_OPENINGS_FAILED)
     if not models:
         raise InvalidPackage("no camera poses could be estimated from the video")
 
@@ -1354,6 +1472,7 @@ def reconstruct_video(
     for piece in pieces:
         factor = piece.factor if piece.factor is not None else 1.0
         piece_rooms: list[reconstruct._Room] = []
+        crossings = _room_crossings(piece, room_of_frame, factor)
         room_segments = {
             room_id: [
                 s
@@ -1405,6 +1524,9 @@ def reconstruct_video(
                     height=height,
                     height_source="estimated" if measured else "assumed",
                     measured=measured,
+                    openings=_room_openings(
+                        piece, fit, room_id, corners, height, factor, room_of_frame, opening_boxes, crossings
+                    ),
                 )
             )
         if not piece_rooms:
@@ -1449,9 +1571,15 @@ def reconstruct_video(
         "Las medidas son estimadas a partir del video y los sensores; su exactitud no se midió. "
         "Verifíquelas en el editor antes de publicar."
     )
-    warnings.append(
-        "Las aberturas no se detectan automáticamente: marque las puertas y ventanas en el editor antes de publicar."
-    )
+    if scene["openings"]:
+        warnings.append(
+            "Las puertas y ventanas se reconocieron en el video: revise su posición en el editor; "
+            "las marcadas como estimadas tienen una sola señal."
+        )
+    else:
+        warnings.append(
+            "No se reconocieron puertas ni ventanas: marque las aberturas en el editor antes de publicar."
+        )
     suggestions: dict[str, Any] | None = None
     if placed:
         suggestions = {

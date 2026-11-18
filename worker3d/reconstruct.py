@@ -26,6 +26,7 @@ Every threshold below is a heuristic chosen for v1, not a measured tolerance.
 
 from __future__ import annotations
 
+import itertools
 import json
 import math
 import shutil
@@ -652,6 +653,9 @@ class _Room:
     height: float
     height_source: str  # contract value: ceiling_plane | assumed
     measured: bool
+    # Recognised doors and windows: {"edge", "position", "width", "height", "sill", "kind", "estimated"}
+    # with ``edge`` the index of the contour edge and ``position`` 0..1 along it.
+    openings: list[dict[str, Any]] = field(default_factory=list)
 
     def centerline(self) -> list[Point]:
         """Interior contour offset outwards by half the wall thickness (miter joints), in mm."""
@@ -695,10 +699,14 @@ class _SceneBuilder:
     def build(self) -> dict[str, Any]:
         indexes = [[self._weld(v) for v in room.centerline()] for room in self.rooms]
         room_documents: list[dict[str, Any]] = []
+        chains: list[list[list[int]]] = []
         for room, vertex_indexes in zip(self.rooms, indexes, strict=True):
             wall_ids: list[str] = []
+            room_chains: list[list[int]] = []
+            chains.append(room_chains)
             for i, a in enumerate(vertex_indexes):
                 chain = self._split_edge(a, vertex_indexes[(i + 1) % len(vertex_indexes)])
+                room_chains.append(chain)
                 for k in range(len(chain) - 1):
                     wall = self._wall_for(chain[k], chain[k + 1], room)
                     wall_id = self._walls[wall].id
@@ -713,8 +721,7 @@ class _SceneBuilder:
             "version": "2.0",
             "unit": "meters",
             "walls": [self._wall_json(w) for w in self._walls],
-            # Openings are not detected in v1; the agency marks them in the editor.
-            "openings": [],
+            "openings": self._openings(chains),
             "rooms": room_documents,
             "objects": self._objects(),
         }
@@ -722,6 +729,54 @@ class _SceneBuilder:
         self._duplicate_wall_warnings()
         self._overlap_warnings()
         return document
+
+    def _openings(self, chains: list[list[list[int]]]) -> list[dict[str, Any]]:
+        """Recognised openings placed on the wall piece that holds their centre.
+
+        Rooms that share a wall each see its door: the same physical opening is emitted once.
+        """
+        result: list[dict[str, Any]] = []
+        seen: list[tuple[int, float, float]] = []  # wall index, canonical centre, wall length
+        counts = {"door": 0, "window": 0}
+        for room, room_chains in zip(self.rooms, chains, strict=True):
+            for opening in room.openings:
+                chain = room_chains[opening["edge"]]
+                points = [self._vertices[v] for v in chain]
+                cumulative = [0.0]
+                for a, b in itertools.pairwise(points):
+                    cumulative.append(cumulative[-1] + _dist(a, b))
+                if cumulative[-1] <= 0:
+                    continue
+                target = opening["position"] * cumulative[-1]
+                k = next((i for i in range(len(chain) - 1) if target <= cumulative[i + 1]), len(chain) - 2)
+                length = cumulative[k + 1] - cumulative[k]
+                if length <= 0:
+                    continue
+                wall = self._by_endpoints[(min(chain[k], chain[k + 1]), max(chain[k], chain[k + 1]))]
+                record = self._walls[wall]
+                half = min(opening["width"], 0.95 * length) / 2 / length
+                along = min(max((target - cumulative[k]) / length, half), 1 - half)
+                canonical = along if (chain[k], chain[k + 1]) == (record.start, record.end) else 1 - along
+                if any(w == wall and abs(c - canonical) * length < 0.5 * opening["width"] for w, c, _ in seen):
+                    continue
+                seen.append((wall, canonical, length))
+                kind = opening["kind"]
+                counts[kind] += 1
+                sill = min(opening["sill"], 0.9 * record.height)
+                item: dict[str, Any] = {
+                    "id": f"{kind}-{counts[kind]}",
+                    "wallId": record.id,
+                    "position": _round(canonical, 4),
+                    "width": _round(min(opening["width"], 0.95 * length), 3),
+                    "height": _round(max(min(opening["height"], record.height - sill), 0.01), 3),
+                    "type": kind,
+                }
+                if kind == "window":
+                    item["sillHeight"] = _round(sill, 3)
+                if opening.get("estimated"):
+                    item["source"] = "estimated"
+                result.append(item)
+        return result
 
     def _weld(self, point: Point) -> int:
         for i, vertex in enumerate(self._vertices):
