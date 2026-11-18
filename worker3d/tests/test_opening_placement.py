@@ -6,8 +6,8 @@ under test gets the pixel boxes and the camera poses, never the expected numbers
 
 from __future__ import annotations
 
-import pytest
 import opening_placement as op
+import pytest
 
 WIDTH, HEIGHT, FOCAL = 640.0, 480.0, 500.0
 # Camera looks along +z with world y up: camera x is world -x, camera y (down) is world -y.
@@ -109,3 +109,74 @@ def test_two_different_doors_on_one_wall_stay_apart() -> None:
     merged = op.merge_views([first, second])
 
     assert len(merged) == 2
+
+
+# --- oblique views: the detector's box is the bounding box of a quadrilateral -----------------
+
+
+def _unit(v):
+    n = sum(c * c for c in v) ** 0.5
+    return tuple(c / n for c in v)
+
+
+def _cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def looking_at(center, target) -> op.Camera:
+    """A camera at ``center`` aimed at ``target``, with camera x right, y down, z forward and world y up."""
+    forward = _unit(tuple(t - c for t, c in zip(target, center, strict=True)))
+    right = _unit(_cross(forward, (0.0, 1.0, 0.0)))
+    down = _cross(forward, right)
+    rotation = tuple((right[r], down[r], forward[r]) for r in range(3))  # columns right, down, forward
+    return op.Camera(0, center, rotation, WIDTH, HEIGHT, FOCAL, FOCAL, WIDTH / 2, HEIGHT / 2)
+
+
+def project(cam: op.Camera, point) -> tuple[float, float]:
+    rel = tuple(p - c for p, c in zip(point, cam.center, strict=True))
+    x, y, z = (sum(cam.rotation[r][i] * rel[r] for r in range(3)) for i in range(3))
+    return cam.fx * x / z + cam.cx, cam.fy * y / z + cam.cy
+
+
+def bounding_box(cam: op.Camera, x_left: float, x_right: float, bottom: float, top: float):
+    corners = [project(cam, (x, y, 3.0)) for x in (x_left, x_right) for y in (bottom, top)]
+    us, vs = [c[0] for c in corners], [c[1] for c in corners]
+    assert 0 < min(us) and max(us) < WIDTH and 0 < min(vs) and max(vs) < HEIGHT, "the opening must be in frame"
+    return (min(us) / WIDTH, min(vs) / HEIGHT, max(us) / WIDTH, max(vs) / HEIGHT)
+
+
+@pytest.mark.parametrize(
+    ("origin", "aim"),
+    [
+        ((0.3, 1.4, 0.3), (2.0, 1.2, 3.0)),  # from the left corner, pitched slightly down
+        ((3.7, 1.4, 0.4), (2.0, 1.0, 3.0)),  # from the right corner, pitched down more
+        ((0.6, 1.4, 0.5), (2.2, 1.2, 3.0)),  # strongly oblique
+    ],
+)
+def test_a_door_seen_obliquely_is_placed_as_exactly_as_one_seen_head_on(origin, aim) -> None:
+    cam = looking_at(origin, aim)
+
+    found = place(cam, bounding_box(cam, 1.5, 2.4, 0.0, 2.0))
+
+    assert found is not None
+    assert found.position == pytest.approx(2.05 / 4.0, abs=0.01)
+    assert found.width == pytest.approx(0.9, abs=0.02)
+    assert found.height == pytest.approx(2.0, abs=0.03)
+    assert found.sill == pytest.approx(0.0, abs=0.03)
+
+
+def test_a_window_seen_obliquely_keeps_its_sill_and_height() -> None:
+    cam = looking_at((0.4, 1.4, 0.4), (2.0, 1.3, 3.0))
+
+    found = place(cam, bounding_box(cam, 1.0, 2.0, 0.9, 1.9), kind="window")
+
+    assert found is not None
+    assert found.sill == pytest.approx(0.9, abs=0.03)
+    assert found.height == pytest.approx(1.0, abs=0.03)
+    assert found.width == pytest.approx(1.0, abs=0.03)
+
+
+def test_an_oblique_box_that_floats_is_still_not_a_door() -> None:
+    cam = looking_at((0.3, 1.4, 0.3), (2.0, 1.2, 3.0))
+
+    assert place(cam, bounding_box(cam, 1.5, 2.4, 0.9, 2.1)) is None
