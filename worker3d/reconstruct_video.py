@@ -75,6 +75,15 @@ MIN_PLANE_POINTS = 10
 MIN_WALL_POINTS = 10
 MIN_WALL_SPAN_REL = 0.15
 MAX_WALL_LINES = 12
+# Walls come out strongest first: one with less than this share of the strongest wall's points is
+# what stray points add up to, not a wall (assumed; the synthetic bench is where it can be tuned).
+MIN_WALL_SUPPORT_REL = 0.15
+# Isolated points: one whose nearest neighbours are this many times further than is typical in the
+# cloud belongs to no surface (assumed; tune it with the synthetic bench).
+STRAY_NEIGHBOURS = 4
+STRAY_MIN_POINTS = 20
+STRAY_DISTANCE_FACTOR = 2.5
+STRAY_SEARCH_RINGS = 2
 RANSAC_ITERATIONS = 200
 RANSAC_SAMPLE = 3000
 FLOOR_SEARCH_FRACTION = 0.4  # floor: strongest cluster in the lowest 40 % of the height range
@@ -615,7 +624,9 @@ def horizontal_planes(ys: list[float], tol: float) -> tuple[float | None, float 
         return bins[b - 1] + bins[b] + bins[b + 1]
 
     clusters: list[tuple[float, int]] = []
-    for b in sorted(bins):
+    # Every bin counts as a window centre, empty ones too: the true maximum of a dense bin that has
+    # a few stray points two bins away sits on an empty bin.
+    for b in range(min(bins) - 1, max(bins) + 2):
         s = score(b)
         if s >= MIN_PLANE_POINTS and s >= score(b - 1) and s >= score(b + 1):
             members = [y for y in ordered if b - 1 <= math.floor(y / tol) <= b + 1]
@@ -699,7 +710,7 @@ def wall_lines(points: list[Vec3], tol: float, min_span: float) -> list[_WallLin
         (px, pz), (ux, uz) = _fit_line(inliers)
         normal = (-uz, ux)
         inliers = [p for p in remaining if abs((p[0] - px) * normal[0] + (p[2] - pz) * normal[1]) <= tol]
-        if len(inliers) < MIN_WALL_POINTS:
+        if len(inliers) < MIN_WALL_POINTS or (lines and len(inliers) < MIN_WALL_SUPPORT_REL * len(lines[0].points)):
             break
         ts = [(p[0] - px) * ux + (p[2] - pz) * uz for p in inliers]
         if max(ts) - min(ts) < min_span:
@@ -713,6 +724,50 @@ def wall_lines(points: list[Vec3], tol: float, min_span: float) -> list[_WallLin
         taken = {id(p) for p in inliers}
         remaining = [p for p in remaining if id(p) not in taken]
     return lines
+
+
+def remove_stray_points(points: list[Vec3], neighbours: int = STRAY_NEIGHBOURS) -> list[Vec3]:
+    """Drop the points that sit far from every other one.
+
+    Stray points (SfM outliers) do not form surfaces, but a line through the middle of a room can
+    still collect more of them than a short real wall has points, and win a RANSAC vote. A point is
+    a stray when the mean distance to its nearest neighbours exceeds ``STRAY_DISTANCE_FACTOR`` times
+    the median of the cloud. Everything is relative to the cloud itself, so it holds in any unit.
+    Small clouds are returned untouched.
+    """
+    count = len(points)
+    if count < max(STRAY_MIN_POINTS, 2 * neighbours):
+        return points
+    spans = [max(p[i] for p in points) - min(p[i] for p in points) for i in range(3)]
+    lows = [min(p[i] for p in points) for i in range(3)]
+    area = 2 * (spans[0] * spans[1] + spans[1] * spans[2] + spans[0] * spans[2])
+    cell = 2.0 * math.sqrt(max(area, 1e-18) / count)  # about twice the spacing of a surface cloud
+    grid: dict[tuple[int, int, int], list[int]] = {}
+    keys = []
+    for index, p in enumerate(points):
+        key = (int((p[0] - lows[0]) // cell), int((p[1] - lows[1]) // cell), int((p[2] - lows[2]) // cell))
+        keys.append(key)
+        grid.setdefault(key, []).append(index)
+
+    reach = STRAY_SEARCH_RINGS * cell
+    spread: list[float] = []
+    for index, p in enumerate(points):
+        kx, ky, kz = keys[index]
+        near: list[float] = []
+        for dx in range(-STRAY_SEARCH_RINGS, STRAY_SEARCH_RINGS + 1):
+            for dy in range(-STRAY_SEARCH_RINGS, STRAY_SEARCH_RINGS + 1):
+                for dz in range(-STRAY_SEARCH_RINGS, STRAY_SEARCH_RINGS + 1):
+                    for other in grid.get((kx + dx, ky + dy, kz + dz), ()):
+                        if other != index:
+                            near.append(math.dist(p, points[other]))
+        near.sort()
+        nearest = near[:neighbours]
+        # fewer neighbours than asked within reach: the missing ones are at least ``reach`` away
+        nearest += [reach] * (neighbours - len(nearest))
+        spread.append(sum(nearest) / neighbours)
+    ordered = sorted(spread)
+    limit = STRAY_DISTANCE_FACTOR * ordered[len(ordered) // 2]
+    return [p for p, d in zip(points, spread, strict=True) if d <= limit]
 
 
 # --- Metric scale from the reference -------------------------------------------------------
@@ -1027,6 +1082,7 @@ def _fit_rooms(piece: _Piece, rooms: list[dict[str, Any]], room_of_frame: dict[i
         points = by_room.get(room["id"])
         if not points:
             continue
+        points = remove_stray_points(points)
         floor_y, ceiling_y = horizontal_planes([p[1] for p in points], tol)
         low = (
             floor_y + WALL_BAND_MARGIN_TOL * tol
@@ -1514,7 +1570,7 @@ def reconstruct_video(
                     )
             measured = fit.floor_y is not None and fit.ceiling_y is not None
             height = (fit.ceiling_y - fit.floor_y) * factor if measured else reconstruct.ASSUMED_ROOM_HEIGHT_M  # type: ignore[operator]
-            if measured and piece.factor is not None:
+            if measured and metric:  # a proportional plan has no metres to compare against
                 low, high = reconstruct.PLAUSIBLE_CEILING_HEIGHT_M
                 if not low <= height <= high:
                     height, measured = reconstruct.ASSUMED_ROOM_HEIGHT_M, False
