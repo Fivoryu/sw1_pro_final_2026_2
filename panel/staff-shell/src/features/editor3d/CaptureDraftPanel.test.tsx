@@ -189,3 +189,31 @@ it("does not offer confirmation while the draft is not loaded (T8 behavior)", as
   const pending = await screen.findByRole("list", { name: "Medidas estimadas pendientes de cap-1" });
   expect(within(pending).queryByRole("button")).toBeNull();
 });
+
+const sceneWithEstimatedDoor = {
+  ...DEFAULT_SCENE_DOCUMENT,
+  openings: [
+    { id: "door-1", wallId: "wall-north", position: 0.5, width: 0.9, height: 2, type: "door" as const, source: "estimated" as const },
+    { id: "door-2", wallId: "wall-north", position: 0.2, width: 0.9, height: 2, type: "door" as const },
+  ],
+};
+
+it("lists the recognised openings pending confirmation and confirms one", async () => {
+  const onConfirmOpening = vi.fn();
+  listed({ ...base, status: "completed", sceneDraft: sceneWithEstimatedDoor });
+  const user = userEvent.setup();
+  open({ loadedCaptureId: "cap-1", scene: sceneWithEstimatedDoor, onConfirmOpening });
+  const pending = await screen.findByRole("list", { name: "Aberturas reconocidas pendientes de cap-1" });
+  expect(pending.querySelectorAll("li")).toHaveLength(1);
+  expect(pending).toHaveTextContent(/Puerta door-1 en el muro wall-north/);
+  expect(pending).toHaveTextContent(/reconocida desde el video/);
+  await user.click(within(pending).getByRole("button", { name: "Confirmar" }));
+  expect(onConfirmOpening).toHaveBeenCalledWith("door-1");
+});
+
+it("shows no opening section when none is pending", async () => {
+  listed({ ...base, status: "completed", sceneDraft: DEFAULT_SCENE_DOCUMENT });
+  open();
+  await screen.findByText(/Completada/);
+  expect(screen.queryByText(/Aberturas reconocidas/)).toBeNull();
+});
