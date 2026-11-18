@@ -1354,19 +1354,28 @@ def reconstruct_video(
     for piece in pieces:
         factor = piece.factor if piece.factor is not None else 1.0
         piece_rooms: list[reconstruct._Room] = []
-        for room_id, fit in piece.rooms.items():
-            if room_id in seen:
-                warnings.append(f"«{fit.name}» aparece en más de una pieza desconectada; se usó la primera.")
-                continue
-            segments = [
+        room_segments = {
+            room_id: [
                 s
                 for line in fit.walls
                 if (s := reconstruct.fit_wall_segment([(p[0] * factor, p[1] * factor, p[2] * factor) for p in line.points]))
             ]
+            for room_id, fit in piece.rooms.items()
+        }
+        # Rooms of one connected reconstruction share coordinates, so they share one dominant axis:
+        # walls that are parallel in the house stay parallel instead of drifting a few degrees apart.
+        every_wall = [(s.start, s.end) for items in room_segments.values() for s in items]
+        piece_axis = reconstruct.dominant_axis(every_wall) if every_wall else None
+        for room_id, fit in piece.rooms.items():
+            if room_id in seen:
+                warnings.append(f"«{fit.name}» aparece en más de una pieza desconectada; se usó la primera.")
+                continue
+            segments = room_segments[room_id]
             proposal = reconstruct.propose_contour(
                 [(s.start, s.end) for s in segments],
                 [[(x * factor, z * factor) for x, z in fit.floor_xz]],
                 [(x * factor, z * factor) for x, z in fit.cameras_xz],
+                axis=piece_axis,
             )
             if isinstance(proposal, reconstruct.ProposalFailed):
                 warnings.append(f"«{fit.name}» no se incluyó en la escena. {proposal.message}")
