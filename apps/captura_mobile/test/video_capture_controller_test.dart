@@ -83,7 +83,7 @@ void main() {
     await h.uploads.idle;
 
     expect(h.controller.status, VideoCaptureStatus.sent);
-    expect(h.controller.warning, contains('sin escala métrica'));
+    expect(h.controller.warning, contains('plano será proporcional'));
   });
 
   test('a package above 150 MiB is refused and never queued', () async {

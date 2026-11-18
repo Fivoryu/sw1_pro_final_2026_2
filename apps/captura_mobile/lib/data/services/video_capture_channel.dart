@@ -24,8 +24,8 @@ class VideoCaptured extends VideoCaptureResult {
   /// The local ZIP; `keyframeCount` is the number of frames in `frames.jsonl`.
   final CapturePackageInfo package;
 
-  /// Whether the agent marked a scale reference. Without one the model has no
-  /// metric scale.
+  /// Whether the agent marked a scale reference. Without one the plan is
+  /// proportional (no real measurements).
   final bool hasReference;
   final Duration duration;
 

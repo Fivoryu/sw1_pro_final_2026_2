@@ -39,8 +39,8 @@ class VideoCaptureScreen extends StatelessWidget {
                 key: const ValueKey('video-reference-hint'),
                 icon: Icons.straighten,
                 text:
-                    'La referencia es opcional, pero sin ella el modelo '
-                    'quedará sin escala métrica.',
+                    'La referencia es opcional: sin ella el plano será '
+                    'proporcional, sin medidas reales.',
               ),
               const SizedBox(height: 12),
               _Notice(

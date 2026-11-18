@@ -93,7 +93,7 @@ void main() {
     expect(capture.listingIds, ['listing-1']);
     expect(find.byKey(const ValueKey('video-message')), findsOneWidget);
     expect(find.byKey(const ValueKey('video-warning')), findsOneWidget);
-    expect(find.textContaining('sin escala métrica'), findsWidgets);
+    expect(find.textContaining('plano será proporcional'), findsWidgets);
   });
 
   testWidgets('the intro says the app detects the reference and no longer asks '

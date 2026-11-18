@@ -28,8 +28,8 @@ class VideoCaptureController extends ChangeNotifier {
 
   /// Shown whenever the walkthrough has no scale reference (S5).
   static const String noReferenceWarning =
-      'Sin objeto de referencia el modelo quedará sin escala métrica: las '
-      'medidas no serán reales hasta que alguien las corrija.';
+      'Sin objeto de referencia el plano será proporcional: conserva las '
+      'proporciones entre ambientes, pero no tendrá medidas reales.';
 
   static const String _timeLimitMessage =
       'La grabación se cortó a los 5 minutos.';
