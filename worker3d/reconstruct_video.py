@@ -42,6 +42,7 @@ from typing import Any, Protocol
 import opening_placement
 import reconstruct
 from reconstruct import ExternalToolMissing, InvalidPackage, ReconstructionResult
+from stage_cache import StageCache, fingerprint
 
 # --- Frozen package limits (S9) and heuristics (none of them measured) ----------------------
 
@@ -75,6 +76,15 @@ MIN_PLANE_POINTS = 10
 MIN_WALL_POINTS = 10
 MIN_WALL_SPAN_REL = 0.15
 MAX_WALL_LINES = 12
+# Walls come out strongest first: one with less than this share of the strongest wall's points is
+# what stray points add up to, not a wall (assumed; the synthetic bench is where it can be tuned).
+MIN_WALL_SUPPORT_REL = 0.15
+# Isolated points: one whose nearest neighbours are this many times further than is typical in the
+# cloud belongs to no surface (assumed; tune it with the synthetic bench).
+STRAY_NEIGHBOURS = 4
+STRAY_MIN_POINTS = 20
+STRAY_DISTANCE_FACTOR = 2.5
+STRAY_SEARCH_RINGS = 2
 RANSAC_ITERATIONS = 200
 RANSAC_SAMPLE = 3000
 FLOOR_SEARCH_FRACTION = 0.4  # floor: strongest cluster in the lowest 40 % of the height range
@@ -82,6 +92,8 @@ CEILING_SEARCH_FRACTION = 0.6  # ceiling: strongest cluster in the highest 40 %
 MIN_CEILING_SEPARATION_TOL = 10  # in tolerances: a "ceiling" must be clearly above the floor
 WALL_BAND_MARGIN_TOL = 4  # wall points keep this many tolerances away from floor and ceiling
 PIECE_GAP_M = 1.0  # plan gap left between disconnected pieces in the scene
+# Weld the wall that touching rooms of one connected reconstruction share (see reconstruct._snap_shared_walls).
+SNAP_SHARED_WALLS = True
 # Longest wall of the largest room in a proportional plan (plan units, not meters).
 PROPORTIONAL_NOMINAL_SIDE = 5.0
 OBSERVED_EDGE_ANGLE = math.sin(math.radians(15))
@@ -613,7 +625,9 @@ def horizontal_planes(ys: list[float], tol: float) -> tuple[float | None, float 
         return bins[b - 1] + bins[b] + bins[b + 1]
 
     clusters: list[tuple[float, int]] = []
-    for b in sorted(bins):
+    # Every bin counts as a window centre, empty ones too: the true maximum of a dense bin that has
+    # a few stray points two bins away sits on an empty bin.
+    for b in range(min(bins) - 1, max(bins) + 2):
         s = score(b)
         if s >= MIN_PLANE_POINTS and s >= score(b - 1) and s >= score(b + 1):
             members = [y for y in ordered if b - 1 <= math.floor(y / tol) <= b + 1]
@@ -697,7 +711,7 @@ def wall_lines(points: list[Vec3], tol: float, min_span: float) -> list[_WallLin
         (px, pz), (ux, uz) = _fit_line(inliers)
         normal = (-uz, ux)
         inliers = [p for p in remaining if abs((p[0] - px) * normal[0] + (p[2] - pz) * normal[1]) <= tol]
-        if len(inliers) < MIN_WALL_POINTS:
+        if len(inliers) < MIN_WALL_POINTS or (lines and len(inliers) < MIN_WALL_SUPPORT_REL * len(lines[0].points)):
             break
         ts = [(p[0] - px) * ux + (p[2] - pz) * uz for p in inliers]
         if max(ts) - min(ts) < min_span:
@@ -711,6 +725,50 @@ def wall_lines(points: list[Vec3], tol: float, min_span: float) -> list[_WallLin
         taken = {id(p) for p in inliers}
         remaining = [p for p in remaining if id(p) not in taken]
     return lines
+
+
+def remove_stray_points(points: list[Vec3], neighbours: int = STRAY_NEIGHBOURS) -> list[Vec3]:
+    """Drop the points that sit far from every other one.
+
+    Stray points (SfM outliers) do not form surfaces, but a line through the middle of a room can
+    still collect more of them than a short real wall has points, and win a RANSAC vote. A point is
+    a stray when the mean distance to its nearest neighbours exceeds ``STRAY_DISTANCE_FACTOR`` times
+    the median of the cloud. Everything is relative to the cloud itself, so it holds in any unit.
+    Small clouds are returned untouched.
+    """
+    count = len(points)
+    if count < max(STRAY_MIN_POINTS, 2 * neighbours):
+        return points
+    spans = [max(p[i] for p in points) - min(p[i] for p in points) for i in range(3)]
+    lows = [min(p[i] for p in points) for i in range(3)]
+    area = 2 * (spans[0] * spans[1] + spans[1] * spans[2] + spans[0] * spans[2])
+    cell = 2.0 * math.sqrt(max(area, 1e-18) / count)  # about twice the spacing of a surface cloud
+    grid: dict[tuple[int, int, int], list[int]] = {}
+    keys = []
+    for index, p in enumerate(points):
+        key = (int((p[0] - lows[0]) // cell), int((p[1] - lows[1]) // cell), int((p[2] - lows[2]) // cell))
+        keys.append(key)
+        grid.setdefault(key, []).append(index)
+
+    reach = STRAY_SEARCH_RINGS * cell
+    spread: list[float] = []
+    for index, p in enumerate(points):
+        kx, ky, kz = keys[index]
+        near: list[float] = []
+        for dx in range(-STRAY_SEARCH_RINGS, STRAY_SEARCH_RINGS + 1):
+            for dy in range(-STRAY_SEARCH_RINGS, STRAY_SEARCH_RINGS + 1):
+                for dz in range(-STRAY_SEARCH_RINGS, STRAY_SEARCH_RINGS + 1):
+                    for other in grid.get((kx + dx, ky + dy, kz + dz), ()):
+                        if other != index:
+                            near.append(math.dist(p, points[other]))
+        near.sort()
+        nearest = near[:neighbours]
+        # fewer neighbours than asked within reach: the missing ones are at least ``reach`` away
+        nearest += [reach] * (neighbours - len(nearest))
+        spread.append(sum(nearest) / neighbours)
+    ordered = sorted(spread)
+    limit = STRAY_DISTANCE_FACTOR * ordered[len(ordered) // 2]
+    return [p for p, d in zip(points, spread, strict=True) if d <= limit]
 
 
 # --- Metric scale from the reference -------------------------------------------------------
@@ -1025,6 +1083,7 @@ def _fit_rooms(piece: _Piece, rooms: list[dict[str, Any]], room_of_frame: dict[i
         points = by_room.get(room["id"])
         if not points:
             continue
+        points = remove_stray_points(points)
         floor_y, ceiling_y = horizontal_planes([p[1] for p in points], tol)
         low = (
             floor_y + WALL_BAND_MARGIN_TOL * tol
@@ -1280,6 +1339,27 @@ def _meters(point: reconstruct.Point) -> str:
     return f"({point[0]:.2f} m; {point[1]:.2f} m)"
 
 
+def make_stage_cache(directory: Path) -> StageCache:
+    """A stage cache that may hold the sparse reconstruction types of this module."""
+    return StageCache(directory, allowed=[SparseModel, CameraPose, SparsePoint, Intrinsics])
+
+
+def _sparse_key(package: VideoPackage, reference_index: int | None, estimator: PoseEstimator) -> str:
+    """What the sparse reconstruction depends on: the video, its frame list and how frames are picked.
+
+    The sensors are left out on purpose: they only matter once the model is aligned to gravity.
+    """
+    video = package.manifest["video"]
+    parts = (
+        fingerprint([package.directory / VIDEO_FILE, package.directory / FRAMES_FILE]),
+        f"fps={video['fps']}",
+        f"extract={EXTRACT_FPS}",
+        f"reference={reference_index}",
+        f"estimator={type(estimator).__module__}.{type(estimator).__qualname__}",
+    )
+    return "|".join(parts)
+
+
 def reconstruct_video(
     package_dir: Path,
     *,
@@ -1289,13 +1369,16 @@ def reconstruct_video(
     detector_factory: DetectorFactory | None = None,
     corner_refiner: CornerRefiner | None = None,
     opening_detector: OpeningDetectorFactory | None = None,
+    stage_cache: StageCache | None = None,
 ) -> VideoReconstructionResult:
     """Reconstruct an unzipped schema 2 package into a scene v2 draft plus warnings.
 
     ``detector_factory`` switches furniture detection on (``None``: off, nothing changes). The
     detector is optional: when it cannot be loaded or fails, the scene is still produced, with a
     warning and no suggestions. ``opening_detector`` does the same for doors and windows: it
-    returns a function that, given an image, answers ``[(box, kind, score)]``.
+    returns a function that, given an image, answers ``[(box, kind, score)]``. ``stage_cache``
+    keeps the sparse reconstruction between runs of the same recording: with a hit, neither the
+    frame extractor nor the pose estimator runs unless a later stage needs the images.
     """
     package = load_package(package_dir)
     manifest = package.manifest
@@ -1329,13 +1412,29 @@ def reconstruct_video(
         indices.add(reference_index)
 
     with tempfile.TemporaryDirectory(prefix="roomforge-sfm-") as scratch:
-        frames = extractor.extract(package.directory / VIDEO_FILE, sorted(indices), Path(scratch) / "frames")
-        models = [m for m in estimator.estimate(frames, Path(scratch) / "sfm") if m.poses and m.points]
+        extracted: list[ExtractedFrame] | None = None
+
+        def get_frames() -> list[ExtractedFrame]:
+            # Extracted once, and only when a stage actually needs the images.
+            nonlocal extracted
+            if extracted is None:
+                extracted = extractor.extract(package.directory / VIDEO_FILE, sorted(indices), Path(scratch) / "frames")
+            return extracted
+
+        def estimate_models() -> list[SparseModel]:
+            return [m for m in estimator.estimate(get_frames(), Path(scratch) / "sfm") if m.poses and m.points]
+
+        if stage_cache is None:
+            models = estimate_models()
+        else:
+            models = stage_cache.fetch(
+                "sfm", _sparse_key(package, reference_index, estimator), estimate_models, keep=bool
+            )
         # Optional sub-pixel refinement of the reference rectangle (the frame lives in scratch).
         rect_corners: list[dict[str, float]] | None = None
         if reference is not None and reference.get("rect") is not None:
             rect_corners = reference["rect"]["corners"]
-            reference_frame = next((f for f in frames if f.index == reference_index), None)
+            reference_frame = next((f for f in get_frames() if f.index == reference_index), None)
             if reference_frame is not None:
                 rect_corners = refine_rect_corners(reference_frame.path, rect_corners, corner_refiner)
         # The frames live in this scratch directory: detect here, place the boxes later.
@@ -1348,7 +1447,7 @@ def reconstruct_video(
                 warnings.append(WARNING_DETECTOR_UNAVAILABLE)
             else:
                 try:
-                    detections = _detect_frames(frames, detector, threshold)
+                    detections = _detect_frames(get_frames(), detector, threshold)
                 except Exception:  # noqa: BLE001 - suggestions are optional; never leak the error text
                     detections = {}
                     warnings.append(WARNING_LABELING_FAILED)
@@ -1360,7 +1459,7 @@ def reconstruct_video(
             except (ImportError, RuntimeError):
                 warnings.append(WARNING_OPENINGS_UNAVAILABLE)
             else:
-                ordered = sorted(frames, key=lambda f: f.index)
+                ordered = sorted(get_frames(), key=lambda f: f.index)
                 step = max(1, math.ceil(len(ordered) / OPENING_MAX_FRAMES))
                 try:
                     for frame in ordered[::step][:OPENING_MAX_FRAMES]:
@@ -1469,7 +1568,7 @@ def reconstruct_video(
     boxes: list[dict[str, Any]] = []
     placed: list[_Candidate] = []
     detected = sum(len(items) for items in detections.values())
-    for piece in pieces:
+    for piece_number, piece in enumerate(pieces):
         factor = piece.factor if piece.factor is not None else 1.0
         piece_rooms: list[reconstruct._Room] = []
         crossings = _room_crossings(piece, room_of_frame, factor)
@@ -1512,7 +1611,7 @@ def reconstruct_video(
                     )
             measured = fit.floor_y is not None and fit.ceiling_y is not None
             height = (fit.ceiling_y - fit.floor_y) * factor if measured else reconstruct.ASSUMED_ROOM_HEIGHT_M  # type: ignore[operator]
-            if measured and piece.factor is not None:
+            if measured and metric:  # a proportional plan has no metres to compare against
                 low, high = reconstruct.PLAUSIBLE_CEILING_HEIGHT_M
                 if not low <= height <= high:
                     height, measured = reconstruct.ASSUMED_ROOM_HEIGHT_M, False
@@ -1527,6 +1626,7 @@ def reconstruct_video(
                     openings=_room_openings(
                         piece, fit, room_id, corners, height, factor, room_of_frame, opening_boxes, crossings
                     ),
+                    group=piece_number,
                 )
             )
         if not piece_rooms:
@@ -1563,7 +1663,7 @@ def reconstruct_video(
 
     if detected and not boxes:
         warnings.append(WARNING_NO_DEPTH)
-    builder = reconstruct._SceneBuilder(scene_rooms, boxes)
+    builder = reconstruct._SceneBuilder(scene_rooms, boxes, snap_shared_walls=SNAP_SHARED_WALLS)
     scene = builder.build()
     scene["scale"] = {"mode": "metric" if metric else "proportional"}
     warnings.extend(builder.warnings)
