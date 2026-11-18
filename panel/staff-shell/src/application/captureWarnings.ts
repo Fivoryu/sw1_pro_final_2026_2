@@ -15,7 +15,7 @@ export interface PendingEstimate {
 }
 
 // Texts emitted by worker3d/reconstruct_video.py when the scale could not be anchored.
-const SCALE_WARNING = /medida de referencia|escala m[eé]trica|unidades arbitrarias/i;
+const SCALE_WARNING = /medida de referencia|escala m[eé]trica|unidades arbitrarias|proporcional/i;
 
 export function splitCaptureWarnings(warnings: string[]): CaptureWarningGroups {
   const groups: CaptureWarningGroups = { scale: [], other: [] };

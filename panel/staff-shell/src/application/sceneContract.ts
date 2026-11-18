@@ -64,6 +64,8 @@ export interface SceneObject {
 export interface SceneDocument {
   version: "2.0";
   unit: "meters";
+  /** Absent in older scenes, which are metric. `proportional`: keeps ratios, not real meters. */
+  scale?: { mode: "metric" | "proportional" };
   walls: SceneWall[];
   openings: SceneOpeningV2[];
   rooms: SceneRoomV2[];
@@ -204,3 +206,8 @@ export const DEFAULT_SCENE_DOCUMENT: SceneDocument = {
     },
   ],
 };
+
+/** A proportional plan keeps ratios and connections but its values are not real meters. */
+export function isProportional(scene: Pick<SceneDocument, "scale">): boolean {
+  return scene.scale?.mode === "proportional";
+}

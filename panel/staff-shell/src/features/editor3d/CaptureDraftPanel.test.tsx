@@ -103,6 +103,30 @@ it("separates scale warnings and lists the assumed measures still pending confir
   expect(within(pending).queryByRole("button")).toBeNull();
 });
 
+function withAssumedHeight(scale?: { mode: "metric" | "proportional" }) {
+  return { ...DEFAULT_SCENE_DOCUMENT, ...(scale ? { scale } : {}),
+    walls: DEFAULT_SCENE_DOCUMENT.walls.map((wall, i) => ({ ...wall,
+      heightSource: i === 0 ? "assumed" as const : "manual" as const })) };
+}
+
+it("does not label heights as meters in a proportional plan", async () => {
+  listed({ ...base, status: "completed", sceneDraft: withAssumedHeight({ mode: "proportional" }) });
+  open();
+  const pending = await screen.findByRole("list", { name: "Medidas estimadas pendientes de cap-1" });
+  expect(pending).toHaveTextContent(/Altura relativa del muro wall-north: 2,40 \(unidades del plano, no metros\)/);
+  expect(pending).not.toHaveTextContent(/2,40 m/);
+});
+
+it("keeps the metric height label for calibrated and older scenes", async () => {
+  for (const scale of [{ mode: "metric" as const }, undefined]) {
+    listed({ ...base, status: "completed", sceneDraft: withAssumedHeight(scale) });
+    const { unmount } = open();
+    const pending = await screen.findByRole("list", { name: "Medidas estimadas pendientes de cap-1" });
+    expect(pending).toHaveTextContent(/Altura del muro wall-north: 2,40 m/);
+    unmount();
+  }
+});
+
 it("shows no estimate section when nothing is pending", async () => {
   listed({ ...base, status: "completed", sceneDraft: DEFAULT_SCENE_DOCUMENT });
   open();

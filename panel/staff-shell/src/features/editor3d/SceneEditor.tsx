@@ -17,6 +17,7 @@ import {
 } from "../../application/staffListingsApi";
 import {
   DEFAULT_SCENE_DOCUMENT,
+  isProportional,
   roomPolygon,
   type SceneDocument,
   type SceneOpeningV2,
@@ -695,7 +696,9 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
         </span>
         <h2 id="scene-editor-heading">Editor de escenas</h2>
         <p className="scene-editor__intro">
-          Ajusta el plano en metros; los cambios se reflejan en el visor 3D y solo se guardan cuando
+          {isProportional(scene)
+            ? "Ajusta el plano proporcional (sin medidas reales); los cambios"
+            : "Ajusta el plano en metros; los cambios"} se reflejan en el visor 3D y solo se guardan cuando
           confirmas la acción.
         </p>
       </div>

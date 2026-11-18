@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listCaptures, type CaptureReview, type CaptureStatus } from "../../application/captureReviewApi";
 import { StaffListingsApiError } from "../../application/staffListingsApi";
 import { pendingEstimates, splitCaptureWarnings, type PendingEstimate } from "../../application/captureWarnings";
-import type { SceneDocument } from "../../application/sceneContract";
+import { isProportional, type SceneDocument } from "../../application/sceneContract";
 import "./CaptureDraftPanel.css";
 
 interface Props {
@@ -110,6 +110,7 @@ function CaptureNotes({ capture, editable, scene, onConfirmMeasure }: NotesProps
   // Once loaded, the editor scene is the source: confirmed measures leave the list.
   const source = editable && scene ? scene : capture.sceneDraft;
   const pending = source ? pendingEstimates(source) : [];
+  const proportional = source ? isProportional(source) : false;
   return <>
     {scale.length > 0
       ? <ul aria-label={`Advertencias de escala de ${capture.captureId}`} className="capture-draft__scale">
@@ -121,7 +122,9 @@ function CaptureNotes({ capture, editable, scene, onConfirmMeasure }: NotesProps
       <p>Medidas estimadas pendientes de confirmar (no fueron medidas; no las tomes como exactas):</p>
       <ul aria-label={`Medidas estimadas pendientes de ${capture.captureId}`}>
         {pending.map((estimate) => <li key={estimate.wallId}>
-          Altura del muro {estimate.wallId}: {estimate.height.toFixed(2).replace(".", ",")} m
+          {proportional
+            ? `Altura relativa del muro ${estimate.wallId}: ${estimate.height.toFixed(2).replace(".", ",")} (unidades del plano, no metros)`
+            : `Altura del muro ${estimate.wallId}: ${estimate.height.toFixed(2).replace(".", ",")} m`}
           {estimate.source === "estimated" ? " (estimada desde el video)" : " (no medida)"}
           {editable && onConfirmMeasure
             ? <PendingMeasureActions estimate={estimate} onConfirm={onConfirmMeasure} /> : null}</li>)}
