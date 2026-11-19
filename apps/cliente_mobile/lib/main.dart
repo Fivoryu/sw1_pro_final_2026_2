@@ -20,6 +20,7 @@ import 'ui/features/notifications/notifications_screen.dart';
 import 'ui/features/reservations/customer_reservations_screen.dart';
 
 import 'ui/theme/andean_theme.dart';
+import 'ui/theme/editorial_surfaces.dart';
 
 /// Backend used by the running app. Override it per environment with
 /// `--dart-define=ROOMFORGE_API_BASE_URL=https://host`.
@@ -83,6 +84,7 @@ class RoomForgeApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
+    debugShowCheckedModeBanner: false,
     title: 'RoomForge',
     theme: andeanTheme(),
     home: CustomerShell(
@@ -180,10 +182,13 @@ class _CustomerShellState extends State<CustomerShell> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
+    backgroundColor: EditorialColors.canvas,
     appBar: AppBar(
+      backgroundColor: EditorialColors.canvas,
+      surfaceTintColor: Colors.transparent,
       title: const Text('RoomForge', style: AndeanTypography.headlineLg),
       titleSpacing: 20,
-      toolbarHeight: 72,
+      toolbarHeight: 64,
       actions: [
         if (_notifications != null)
           ListenableBuilder(
@@ -224,8 +229,10 @@ class _CustomerShellState extends State<CustomerShell> {
       ],
     ),
     bottomNavigationBar: NavigationBar(
-      height: 76,
+      height: 72,
       elevation: 0,
+      backgroundColor: EditorialColors.paper,
+      indicatorColor: EditorialColors.sand,
       selectedIndex: _selectedIndex,
       onDestinationSelected: (index) => setState(() => _selectedIndex = index),
       destinations: const [

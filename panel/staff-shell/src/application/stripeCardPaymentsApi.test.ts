@@ -20,7 +20,7 @@ describe("Stripe card-payment staff API", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const url = await createStripeConnectOnboardingLink("staff-token", "agency/one");
+    const url = await createStripeConnectOnboardingLink("staff-token", "agency/one", "finance@example.test");
     await getStripeConnectStatus("staff-token", "agency/one");
 
     expect(url).toBe("https://connect.stripe.com/test-link");
@@ -29,7 +29,8 @@ describe("Stripe card-payment staff API", () => {
     );
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       method: "POST",
-      headers: { Authorization: "Bearer staff-token" },
+      headers: { Authorization: "Bearer staff-token", "Content-Type": "application/json" },
+      body: JSON.stringify({ contact_email: "finance@example.test" }),
     });
     expect(fetchMock.mock.calls[1][0]).toBe(
       "/api/v1/staff/agencies/agency%2Fone/stripe/connect",

@@ -64,6 +64,8 @@ class QuoteSnapshot {
     required this.monthlyTotal,
     required this.createdAt,
     required this.expiresAt,
+    this.displayOneTimeTotal,
+    this.displayMonthlyTotal,
   });
 
   factory QuoteSnapshot.fromJson(Object? json) {
@@ -77,6 +79,7 @@ class QuoteSnapshot {
         json['expires_at'] is! String) {
       throw const FormatException('Quote fields are invalid');
     }
+    final display = json['display_totals'];
     return QuoteSnapshot(
       quoteId: json['quote_id']! as String,
       listingId: json['listing_id']! as String,
@@ -89,6 +92,12 @@ class QuoteSnapshot {
       monthlyTotal: CatalogMoney.fromJson(json['monthly_total']),
       createdAt: DateTime.parse(json['created_at']! as String),
       expiresAt: DateTime.parse(json['expires_at']! as String),
+      displayOneTimeTotal: display is Map<String, Object?>
+          ? CatalogMoney.fromJson(display['one_time_total'])
+          : null,
+      displayMonthlyTotal: display is Map<String, Object?>
+          ? CatalogMoney.fromJson(display['monthly_total'])
+          : null,
     );
   }
 
@@ -101,6 +110,11 @@ class QuoteSnapshot {
   final CatalogMoney monthlyTotal;
   final DateTime createdAt;
   final DateTime expiresAt;
+  final CatalogMoney? displayOneTimeTotal;
+  final CatalogMoney? displayMonthlyTotal;
+
+  bool get supportsCardCurrency =>
+      oneTimeTotal.currency == 'BOB' || oneTimeTotal.currency == 'USD';
 }
 
 class ReservationRecord {

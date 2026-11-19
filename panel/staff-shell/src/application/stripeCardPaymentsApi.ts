@@ -1,5 +1,6 @@
 export interface StripeConnectStatus {
   agency_id: string;
+  account_exists: boolean;
   connected: boolean;
   details_submitted: boolean;
   charges_enabled: boolean;
@@ -69,10 +70,13 @@ export function getStripeConnectStatus(
 export async function createStripeConnectOnboardingLink(
   accessToken: string,
   agencyId: string,
+  contactEmail?: string,
 ): Promise<string> {
   const response = await requestJson<{ url: string }>(
     `/api/v1/staff/agencies/${encodeURIComponent(agencyId)}/stripe/connect/onboarding-link`,
-    { method: "POST", headers: headers(accessToken) },
+    contactEmail
+      ? { method: "POST", headers: headers(accessToken, true), body: JSON.stringify({ contact_email: contactEmail }) }
+      : { method: "POST", headers: headers(accessToken) },
   );
   return response.url;
 }

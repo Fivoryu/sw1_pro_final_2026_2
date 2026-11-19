@@ -147,20 +147,27 @@ def test_connect_account_request_uses_marketplace_express_transfer_payload() -> 
         result = gateway.create_connect_account(
             country="US",
             agency_id="f09-demo-agency",
+            contact_email="finance@example.test",
             idempotency_key="roomforge-connect-account-f09-demo-agency",
         )
 
     request = urlopen.call_args.args[0]
-    assert request.full_url == "https://api.stripe.com/v1/accounts"
+    assert request.full_url == "https://api.stripe.com/v2/core/accounts"
+    assert request.get_header("Stripe-version") == "2026-11-18.endive"
+    assert request.get_header("Content-type") == "application/json"
     assert request.get_method() == "POST"
     assert request.get_header("Idempotency-key") == (
         "roomforge-connect-account-f09-demo-agency"
     )
-    assert parse_qs(request.data.decode("utf-8")) == {
-        "type": ["express"],
-        "country": ["US"],
-        "capabilities[transfers][requested]": ["true"],
-        "metadata[agency_id]": ["f09-demo-agency"],
+    assert json.loads(request.data) == {
+        "contact_email": "finance@example.test",
+        "dashboard": "express",
+        "identity": {"country": "US"},
+        "defaults": {"responsibilities": {"fees_collector": "application", "losses_collector": "application"}},
+        "configuration": {
+            "recipient": {"capabilities": {"stripe_balance": {"stripe_transfers": {"requested": True}}}},
+        },
+        "metadata": {"agency_id": "f09-demo-agency"},
     }
     assert result["object"] == "account"
 
@@ -182,7 +189,7 @@ def test_connect_account_provider_error_is_logged_safely(caplog: pytest.LogCaptu
         }
     ).encode("utf-8")
     provider_error = HTTPError(
-        "https://api.stripe.com/v1/accounts",
+        "https://api.stripe.com/v2/core/accounts",
         400,
         "Bad Request",
         headers,
@@ -197,6 +204,7 @@ def test_connect_account_provider_error_is_logged_safely(caplog: pytest.LogCaptu
             gateway.create_connect_account(
                 country="US",
                 agency_id="f09-demo-agency",
+                contact_email="finance@example.test",
                 idempotency_key="roomforge-connect-account-f09-demo-agency",
             )
 
@@ -214,8 +222,104 @@ def test_connect_account_provider_error_is_logged_safely(caplog: pytest.LogCaptu
     assert "invalid_request_error" in caplog.text
     assert "parameter_invalid" in caplog.text
     assert "capabilities[transfers][requested]" in caplog.text
-    assert "req_test_diagnostics" in caplog.text
-    assert "Rejected key" in caplog.text
+    assert "req_test_diagnostics" not in caplog.text
+    assert "Rejected key" not in caplog.text
     assert "sk_test_supersecret" not in caplog.text
     assert "acct_sensitive_123" not in caplog.text
     assert "whsec_sensitive_456" not in caplog.text
+
+
+def test_connect_account_link_omits_unsupported_configurations() -> None:
+    gateway = StripeGateway("sk_test_gateway")
+    with patch("app.modules.stripe_payments.gateway.urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value.read.return_value = b'{"url":"https://stripe.test/link"}'
+        gateway.create_account_link(
+            account_id="acct_test_only",
+            refresh_url="https://roomforge.test/refresh",
+            return_url="https://roomforge.test/return",
+            idempotency_key="test-link",
+        )
+
+    request = urlopen.call_args.args[0]
+    assert request.full_url == "https://api.stripe.com/v2/core/account_links"
+    assert json.loads(request.data) == {
+        "account": "acct_test_only",
+        "use_case": {
+            "type": "account_onboarding",
+            "account_onboarding": {
+                "refresh_url": "https://roomforge.test/refresh",
+                "return_url": "https://roomforge.test/return",
+            },
+        },
+    }
+
+
+def test_payment_intent_uses_dashboard_payment_methods() -> None:
+    gateway = StripeGateway("sk_test_gateway")
+    with patch("app.modules.stripe_payments.gateway.urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value.read.return_value = b'{"id":"pi_test_gateway"}'
+        gateway.create_payment_intent(
+            amount=1000, currency="bob", reservation_id="demo", idempotency_key="demo-payment"
+        )
+
+    request = urlopen.call_args.args[0]
+    assert request.full_url == "https://api.stripe.com/v1/payment_intents"
+    assert parse_qs(request.data.decode()) == {
+        "amount": ["1000"],
+        "currency": ["bob"],
+        "transfer_group": ["demo"],
+        "metadata[reservation_id]": ["demo"],
+    }
+
+
+@pytest.mark.parametrize(
+    ("currency", "settlement_amount", "expected_key"),
+    [("bob", 85, "demo-transfer-settlement-v1"), ("usd", 1000, "demo-transfer")],
+)
+def test_transfer_uses_verified_source_settlement(
+    currency: str, settlement_amount: int, expected_key: str
+) -> None:
+    gateway = StripeGateway("sk_test_gateway")
+    with patch("app.modules.stripe_payments.gateway.urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value.read.side_effect = [
+            json.dumps({
+                "id": "ch_demo", "amount": 1000, "currency": currency,
+                "paid": True, "amount_refunded": 0,
+                "balance_transaction": {"currency": "usd", "amount": settlement_amount, "net": 52},
+            }).encode(),
+            b'{"id":"tr_demo"}',
+        ]
+        result = gateway.create_transfer(
+            amount=1000, currency=currency, destination="acct_demo",
+            source_transaction="ch_demo", reservation_id="demo", idempotency_key="demo-transfer",
+        )
+
+    lookup, transfer = (call.args[0] for call in urlopen.call_args_list)
+    assert lookup.get_method() == "GET"
+    assert lookup.full_url == "https://api.stripe.com/v1/charges/ch_demo?expand%5B%5D=balance_transaction"
+    assert lookup.get_header("Idempotency-key") is None
+    assert transfer.get_header("Idempotency-key") == expected_key
+    assert parse_qs(transfer.data.decode()) == {
+        "amount": [str(settlement_amount)], "currency": ["usd"], "destination": ["acct_demo"],
+        "source_transaction": ["ch_demo"], "transfer_group": ["demo"],
+        "metadata[reservation_id]": ["demo"],
+    }
+    assert result["id"] == "tr_demo"
+
+
+@pytest.mark.parametrize(
+    "invalid_charge", [{"amount_refunded": 1000}, {"balance_transaction": None}, {"amount": 3000}]
+)
+def test_transfer_with_unverified_settlement_never_posts(invalid_charge: dict[str, object]) -> None:
+    gateway = StripeGateway("sk_test_gateway")
+    with patch("app.modules.stripe_payments.gateway.urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value.read.return_value = json.dumps({
+            "id": "ch_demo", "amount": 1000, "currency": "bob", "paid": True, "amount_refunded": 0,
+            "balance_transaction": {"currency": "usd", "amount": 85}, **invalid_charge,
+        }).encode()
+        with pytest.raises(StripeGatewayError):
+            gateway.create_transfer(
+                amount=1000, currency="bob", destination="acct_demo", source_transaction="ch_demo",
+                reservation_id="demo", idempotency_key="demo-transfer",
+            )
+    assert urlopen.call_count == 1

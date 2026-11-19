@@ -12,10 +12,12 @@ import '../../../../domain/customer_session_controller.dart';
 import 'catalog_format.dart';
 import 'listing_photo.dart';
 import '../../chat/chat_conversation_screen.dart';
+import '../../reservations/customer_reservations_screen.dart';
 import '../../reviews/listing_reviews_section.dart';
 import '../../viewer/views/listing_viewer_screen.dart';
 import '../../viewer/views/object_hotspot_sheet.dart';
 import '../../../theme/andean_theme.dart';
+import '../../../theme/editorial_surfaces.dart';
 import '../../../theme/andean_widgets.dart';
 
 /// Public detail of one published listing.
@@ -62,6 +64,8 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
   String? _message;
   bool _loading = true;
   bool _submittingQuote = false;
+  bool _requestingReservation = false;
+  String? _activeReservationId;
   final Set<String> _selectedExtras = {};
   String _quoteCurrency = 'BOB';
   QuoteSnapshot? _quote;
@@ -73,7 +77,8 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     final session = widget.sessionController;
     if (session?.status != CustomerSessionStatus.signedIn) {
       setState(
-        () => _chatMessage = 'Iniciá sesión en Cuenta para chatear con la inmobiliaria.',
+        () => _chatMessage =
+            'Iniciá sesión en Cuenta para chatear con la inmobiliaria.',
       );
       return;
     }
@@ -119,7 +124,11 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Detalle del inmueble')),
+    backgroundColor: EditorialColors.canvas,
+    appBar: AppBar(
+      backgroundColor: EditorialColors.canvas,
+      title: const Text('Detalle del inmueble'),
+    ),
     body: Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 720),
@@ -207,14 +216,16 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
               value: _selectedExtras.contains(extra.extraId),
               title: Text(extra.name),
               subtitle: Text(chargeLabel(extra.price, listing.operation)),
-              onChanged: (selected) => setState(() {
-                if (selected == true) {
-                  _selectedExtras.add(extra.extraId);
-                } else {
-                  _selectedExtras.remove(extra.extraId);
-                }
-                _quote = null;
-              }),
+              onChanged: _submittingQuote || _requestingReservation
+                  ? null
+                  : (selected) => setState(() {
+                      if (selected == true) {
+                        _selectedExtras.add(extra.extraId);
+                      } else {
+                        _selectedExtras.remove(extra.extraId);
+                      }
+                      _quote = null;
+                    }),
             ),
         const SizedBox(height: 20),
         DropdownButtonFormField<String>(
@@ -229,72 +240,102 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
             DropdownMenuItem(value: 'USD', child: Text('USD')),
             DropdownMenuItem(value: 'USDT', child: Text('USDT')),
           ],
-          onChanged: (value) => setState(() {
-            _quoteCurrency = value ?? 'BOB';
-            _quote = null;
-          }),
+          onChanged: _submittingQuote || _requestingReservation
+              ? null
+              : (value) => setState(() {
+                  _quoteCurrency = value ?? 'BOB';
+                  _quote = null;
+                }),
         ),
         const SizedBox(height: 12),
         SizedBox(
           height: 48,
           child: FilledButton.icon(
             key: const ValueKey('create-quote'),
-            onPressed: _submittingQuote ? null : () => _createQuote(detail),
+            onPressed: _submittingQuote || _requestingReservation
+                ? null
+                : () => _createQuote(detail),
             icon: _submittingQuote
                 ? const SizedBox.square(
                     dimension: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.request_quote_outlined),
-            label: Text(_submittingQuote ? 'Cotizando…' : 'Cotizar y reservar'),
+            label: Text(
+              _submittingQuote ? 'Cotizando…' : 'Calcular cotización',
+            ),
           ),
         ),
         if (_quote case final quote?) ...[
           const SizedBox(height: 16),
           Card(
             key: const ValueKey('quote-snapshot'),
+            color: EditorialColors.paper,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+              side: const BorderSide(color: EditorialColors.line),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Cotización del servidor',
+                    'Resumen de cotización',
                     style: AndeanTypography.headlineMd,
                   ),
                   const SizedBox(height: 8),
                   for (final line in quote.lines)
                     Text(
                       '${line.kind == 'base' ? 'Precio base' : 'Opcional'}: '
-                      '${line.amount} ${line.currency} · '
+                      '${formatMoney(line.amount, line.currency)} · '
                       '${line.chargePeriod == 'monthly' ? 'mensual' : 'pago único'}',
                     ),
                   const Divider(),
-                  if (quote.oneTimeTotal.amount != '0.00')
+                  if ((quote.displayOneTimeTotal ?? quote.oneTimeTotal)
+                          .amount !=
+                      '0.00')
                     Text(
-                      'Pago único: ${quote.oneTimeTotal.amount} ${quote.oneTimeTotal.currency}',
+                      'Pago único: ${_formatTotal(quote.displayOneTimeTotal ?? quote.oneTimeTotal)}',
                     ),
-                  if (quote.monthlyTotal.amount != '0.00')
+                  if ((quote.displayMonthlyTotal ?? quote.monthlyTotal)
+                          .amount !=
+                      '0.00')
                     Text(
-                      'Total mensual: ${quote.monthlyTotal.amount} ${quote.monthlyTotal.currency}',
+                      'Total mensual: ${_formatTotal(quote.displayMonthlyTotal ?? quote.monthlyTotal)}',
+                    ),
+                  if (quote.displayOneTimeTotal != null)
+                    Text(
+                      'Importes de referencia. La reserva usa ${quote.oneTimeTotal.currency}.',
+                      style: AndeanTypography.bodySm,
                     ),
                   const SizedBox(height: 8),
-                  Text('Vence: ${quote.expiresAt.toLocal()}'),
+                  Text(
+                    'Vigente hasta ${MaterialLocalizations.of(context).formatShortDate(quote.expiresAt.toLocal())} · ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(quote.expiresAt.toLocal()))}',
+                  ),
                   if (quote.expiresAt.isBefore(DateTime.now()))
                     const Text(
                       'La cotización venció. Generá una nueva antes de reservar.',
                     ),
                   const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton(
-                      key: const ValueKey('request-reservation'),
-                      onPressed: quote.expiresAt.isBefore(DateTime.now())
-                          ? null
-                          : () => _createReservation(quote),
-                      child: const Text('Solicitar reserva'),
+                  if (_activeReservationId == null)
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        key: const ValueKey('request-reservation'),
+                        onPressed:
+                            _requestingReservation ||
+                                !quote.expiresAt.isAfter(DateTime.now())
+                            ? null
+                            : () => _createReservation(quote),
+                        child: Text(
+                          _requestingReservation
+                              ? 'Preparando reserva…'
+                              : 'Elegir cómo reservar',
+                        ),
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -302,7 +343,22 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
         ],
         if (_bookingMessage != null) ...[
           const SizedBox(height: 8),
-          Text(_bookingMessage!, key: const ValueKey('booking-message')),
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              _bookingMessage!,
+              key: const ValueKey('booking-message'),
+            ),
+          ),
+        ],
+        if (_activeReservationId != null) ...[
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            key: const ValueKey('open-reservation-follow-up'),
+            onPressed: _openReservations,
+            icon: const Icon(Icons.bookmark_outline),
+            label: const Text('Ver mi reserva'),
+          ),
         ],
         if (widget.chatApi != null) ...[
           const SizedBox(height: 12),
@@ -366,11 +422,11 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
           onObjectSelected: detail == null || widget.quoteApi == null
               ? null
               : (objectId) => showObjectHotspotSheet(
-                    context,
-                    objectId: objectId!,
-                    detail: detail,
-                    quoteApi: widget.quoteApi!,
-                  ),
+                  context,
+                  objectId: objectId!,
+                  detail: detail,
+                  quoteApi: widget.quoteApi!,
+                ),
         ),
       ),
     );
@@ -447,6 +503,17 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
   }
 
   Future<void> _createReservation(QuoteSnapshot quote) async {
+    if (_requestingReservation || !quote.expiresAt.isAfter(DateTime.now()))
+      return;
+    setState(() => _requestingReservation = true);
+    try {
+      await _chooseAndCreateReservation(quote);
+    } finally {
+      if (mounted) setState(() => _requestingReservation = false);
+    }
+  }
+
+  Future<void> _chooseAndCreateReservation(QuoteSnapshot quote) async {
     final session = widget.sessionController;
     final reservations = widget.reservationsController;
     if (session?.status != CustomerSessionStatus.signedIn) {
@@ -457,38 +524,68 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
       return;
     }
     if (reservations == null) return;
-    final paymentMethod = await showDialog<String>(
+    final paymentMethod = await showModalBottomSheet<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Elegí cómo reservar'),
-        content: const Text(
-          'La wallet y la tarjeta son alternativas separadas. La tarjeta se procesa en Stripe en modo de prueba.',
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const AndeanSectionHeading('Elegí cómo reservar'),
+              ListTile(
+                key: const ValueKey('choose-card-payment'),
+                leading: const Icon(Icons.credit_card_outlined),
+                trailing: quote.supportsCardCurrency
+                    ? const Icon(Icons.chevron_right)
+                    : null,
+                title: const Text('Tarjeta de prueba'),
+                subtitle: Text(
+                  quote.supportsCardCurrency
+                      ? 'Pagá el depósito con Stripe, sin conectar una wallet.'
+                      : 'La tarjeta solo admite depósitos en BOB o USD.',
+                ),
+                enabled: quote.supportsCardCurrency,
+                onTap: quote.supportsCardCurrency
+                    ? () => Navigator.pop(context, 'card')
+                    : null,
+              ),
+              ListTile(
+                key: const ValueKey('choose-wallet-payment'),
+                leading: const Icon(Icons.account_balance_wallet_outlined),
+                trailing: const Icon(Icons.chevron_right),
+                title: const Text('Wallet de prueba'),
+                subtitle: const Text(
+                  'Requiere una wallet vinculada. El depósito se firma desde Mis reservas.',
+                ),
+                onTap: () => Navigator.pop(context, 'wallet'),
+              ),
+            ],
+          ),
         ),
-        actions: [
-          TextButton(
-            key: const ValueKey('choose-wallet-payment'),
-            onPressed: () => Navigator.pop(context, 'wallet'),
-            child: const Text('Wallet'),
-          ),
-          FilledButton(
-            key: const ValueKey('choose-card-payment'),
-            onPressed: () => Navigator.pop(context, 'card'),
-            child: const Text('Tarjeta'),
-          ),
-        ],
       ),
     );
     if (!mounted || paymentMethod == null) return;
+    if (!quote.expiresAt.isAfter(DateTime.now())) {
+      setState(
+        () => _bookingMessage =
+            'Venció la cotización. Volvé a calcularla para reservar.',
+      );
+      return;
+    }
     if (paymentMethod == 'card') {
       final reservation = await reservations.createCardReservation(
         quote: quote,
       );
       if (!mounted) return;
       setState(() {
+        _activeReservationId = reservation?.reservationId;
         _bookingMessage = reservation == null
             ? reservations.message
             : reservations.message ??
-                  'Solicitud ${reservation.reservationId} creada. Stripe está verificando el pago.';
+                  'Solicitud guardada. Consultá el estado del depósito en Mis reservas.';
       });
       return;
     }
@@ -511,10 +608,48 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     );
     if (!mounted) return;
     setState(() {
+      _activeReservationId = reservation?.reservationId;
       _bookingMessage = reservation == null
           ? reservations.message
-          : 'Solicitud ${reservation.reservationId} creada. Estado: pendiente; vence ${reservation.decisionDeadlineAt.toLocal()}. '
-                'El depósito aún no se confirma hasta validar su transacción en cadena.';
+          : 'Solicitud guardada. Abrí Mis reservas para firmar el depósito con tu wallet.';
     });
   }
+
+  Future<void> _openReservations() async {
+    final session = widget.sessionController;
+    if (session == null) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => Scaffold(
+          backgroundColor: EditorialColors.canvas,
+          appBar: AppBar(
+            backgroundColor: EditorialColors.canvas,
+            title: const Text('Seguimiento'),
+          ),
+          body: CustomerReservationsScreen(
+            controller: widget.reservationsController,
+            sessionController: session,
+            initialReservationId: _activeReservationId,
+          ),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    final items =
+        widget.reservationsController?.reservations ??
+        const <ReservationRecord>[];
+    if (items.any(
+      (item) =>
+          item.reservationId == _activeReservationId &&
+          const {'cancelled', 'rejected', 'expired'}.contains(item.status),
+    )) {
+      setState(() {
+        _activeReservationId = null;
+        _bookingMessage = null;
+      });
+    }
+  }
+
+  String _formatTotal(CatalogMoney total) =>
+      formatMoney(total.amount, total.currency);
 }

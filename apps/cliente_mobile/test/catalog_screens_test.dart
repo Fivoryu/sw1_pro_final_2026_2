@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:cliente_mobile/data/services/customer_auth_api.dart';
 import 'package:cliente_mobile/data/services/customer_booking_api.dart';
 import 'package:cliente_mobile/data/services/customer_token_store.dart';
+import 'package:cliente_mobile/data/services/stripe_card_payment_handler.dart';
+import 'package:cliente_mobile/data/models/reservation_models.dart';
 import 'package:cliente_mobile/domain/customer_reservations_controller.dart';
 import 'package:cliente_mobile/domain/customer_session_controller.dart';
 import 'package:cliente_mobile/ui/features/reservations/customer_reservations_screen.dart';
@@ -13,6 +15,7 @@ import 'package:cliente_mobile/data/services/catalog_api.dart';
 import 'package:cliente_mobile/domain/catalog_controller.dart';
 import 'package:cliente_mobile/ui/features/catalog/views/catalog_format.dart';
 import 'package:cliente_mobile/ui/features/catalog/views/catalog_screen.dart';
+import 'package:cliente_mobile/ui/features/catalog/views/listing_detail_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -32,6 +35,19 @@ class _MemoryCustomerTokenStore implements CustomerTokenStore {
   @override
   Future<void> writeRefreshToken(String token) async {
     this.token = token;
+  }
+}
+
+class _CardSheet implements CardPaymentHandler {
+  _CardSheet(this.completed);
+
+  final bool completed;
+  int opens = 0;
+
+  @override
+  Future<bool> present(CardPaymentSession session) async {
+    opens++;
+    return completed;
   }
 }
 
@@ -118,6 +134,124 @@ void _setNarrowViewport(WidgetTester tester) {
 
 void main() {
   group('customer reservations', () {
+    testWidgets('keeps the request and explains delayed card confirmation', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final harness = _build();
+      harness.backend.seed(id: 'listing-1');
+      final session = CustomerSessionController(
+        api: CustomerAuthApi(
+          baseUrl: 'https://api.example.test',
+          client: MockClient(
+            (request) async => http.Response(
+              jsonEncode(
+                request.url.path.endsWith('/login')
+                    ? {
+                        'access_token': 'token',
+                        'refresh_token': 'refresh',
+                        'access_expires_in': 300,
+                      }
+                    : {'id': 'customer-1', 'email': 'customer@example.test'},
+              ),
+              200,
+            ),
+          ),
+        ),
+        tokenStore: _MemoryCustomerTokenStore(),
+      );
+      await session.signIn(
+        email: 'customer@example.test',
+        password: 'password',
+      );
+      final sheet = _CardSheet(true);
+      var verified = false;
+      var postCount = 0;
+      final controller = CustomerReservationsController(
+        cardPaymentHandler: sheet,
+        api: CustomerBookingApi(
+          baseUrl: 'https://api.example.test',
+          accessTokenProvider: session.obtainAccessToken,
+          client: MockClient((request) async {
+            final reservation = _reservationForUi(
+              deposited: verified,
+              paymentMethod: 'card',
+              reservationId: 'card-test',
+              decisionDeadlineAt: '2099-10-07T12:00:00Z',
+            );
+            final path = request.url.path;
+            Object? body;
+            if (path.endsWith('/quotes')) {
+              body = {
+                ...(reservation['quote_snapshot']! as Map<String, Object?>),
+                'listing_id': 'listing-1',
+                'created_at': '2026-10-06T12:00:00Z',
+                'expires_at': '2099-10-06T12:00:00Z',
+                'display_totals': {
+                  'one_time_total': {'amount': '700.00', 'currency': 'BOB'},
+                  'monthly_total': {'amount': '0.00', 'currency': 'BOB'},
+                },
+              };
+            } else if (path.endsWith('/card-payment-intent')) {
+              body = {
+                'reservation_id': 'card-test',
+                'payment_intent_id': 'pi_mock',
+                'client_secret': 'mock',
+                'publishable_key': 'pk_test_mock',
+                'amount_minor': 500,
+                'currency': 'usd',
+                'status': 'requires_payment_method',
+              };
+            } else if (request.method == 'POST') {
+              ++postCount;
+              body = reservation;
+            } else {
+              body = [reservation];
+            }
+            return http.Response(
+              jsonEncode(body),
+              request.method == 'POST' ? 201 : 200,
+            );
+          }),
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ListingDetailScreen(
+            controller: harness.controller,
+            listingId: 'listing-1',
+            reservationsController: controller,
+            sessionController: session,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await _tap(tester, find.byKey(const ValueKey('create-quote')));
+      expect(find.text('Pago único: BOB 700,00'), findsOneWidget);
+      expect(find.textContaining('La reserva usa USD'), findsOneWidget);
+      await _tap(tester, find.byKey(const ValueKey('request-reservation')));
+      await _tap(tester, find.byKey(const ValueKey('choose-card-payment')));
+      expect(postCount, 1);
+      expect(sheet.opens, 1);
+      expect(find.byKey(const ValueKey('request-reservation')), findsNothing);
+      await _tap(
+        tester,
+        find.byKey(const ValueKey('open-reservation-follow-up')),
+      );
+      expect(
+        find.textContaining('Estamos verificando el depósito'),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('deposit-card-test')), findsNothing);
+
+      verified = true;
+      await _tap(tester, find.byKey(const ValueKey('refresh-reservations')));
+      expect(find.textContaining('Depósito confirmado.'), findsOneWidget);
+      expect(find.byKey(const ValueKey('deposit-card-test')), findsNothing);
+    });
+
     testWidgets('reservations heading establishes a display-level hierarchy', (
       tester,
     ) async {
@@ -137,7 +271,10 @@ void main() {
             }
             if (request.url.path == '/api/v1/customer/auth/me') {
               return http.Response(
-                jsonEncode({'id': 'customer-1', 'email': 'customer@example.test'}),
+                jsonEncode({
+                  'id': 'customer-1',
+                  'email': 'customer@example.test',
+                }),
                 200,
               );
             }
@@ -154,9 +291,7 @@ void main() {
         api: CustomerBookingApi(
           baseUrl: 'https://api.example.test',
           accessTokenProvider: session.obtainAccessToken,
-          client: MockClient(
-            (_) async => http.Response(jsonEncode([]), 200),
-          ),
+          client: MockClient((_) async => http.Response(jsonEncode([]), 200)),
         ),
       );
       await controller.loadReservations();

@@ -617,13 +617,20 @@ def test_connect_onboarding_creates_and_scopes_agency_account(
         stripe_connect_account_country="US",
     )
 
-    response = context.client.post("/api/v1/staff/agencies/agency-one/stripe/connect/onboarding-link")
+    path = "/api/v1/staff/agencies/agency-one/stripe/connect/onboarding-link"
+    assert context.client.post(path).status_code == 422
+    assert context.client.post(path, json={"contact_email": "not-an-email"}).status_code == 422
+    response = context.client.post(path, json={"contact_email": "finance@example.test"})
 
     assert response.status_code == 200, response.text
     assert response.json() == {"url": "https://connect.stripe.test/onboarding"}
     with context.session_factory() as session:
         account = session.query(StripeConnectAccount).filter_by(agency_id="agency-one").one()
         assert account.stripe_account_id == "acct_test_agency"
+
+    assert context.client.post(path).status_code == 200
+    status = context.client.get("/api/v1/staff/agencies/agency-one/stripe/connect")
+    assert status.json()["account_exists"] is True
 
 
 def test_card_acceptance_transfers_to_connected_agency_account(
