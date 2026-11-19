@@ -1,0 +1,3 @@
+- [x] Refinar catálogo, reserva y wallet sin modificar el flujo.
+- [x] Verificar los recorridos existentes y las pantallas estrechas: 230 pruebas Flutter aprobadas, incluidas las comprobaciones de accesibilidad existentes.
+- [x] Compilar e instalar la APK de prueba en el Samsung A55 y comprobar el arranque.

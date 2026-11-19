@@ -1,0 +1,3 @@
+- [x] Revisar la cotización, la elección de medio y la transición a Mis reservas.
+- [x] Implementar mejoras y verificar la navegación y la confirmación tardía en Flutter (230 pruebas aprobadas; análisis de los archivos modificados sin incidencias).
+- [ ] Ejecutar el recorrido nativo con PaymentSheet y Stripe de prueba en Android, seguido de la confirmación por webhook y la decisión desde el panel. No se detectó un dispositivo Android durante esta revisión.
