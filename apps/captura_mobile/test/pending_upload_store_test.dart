@@ -91,7 +91,7 @@ void main() {
     );
   });
 
-  test('sets aside an unreadable record instead of discarding it', () async {
+  test('reports corrupt queue metadata and retains it for recovery', () async {
     final dir = Directory('${root.path}/capture_uploads/agent-1');
     await dir.create(recursive: true);
     await File('${dir.path}/cap-1.json').writeAsString('{not json');
@@ -99,15 +99,75 @@ void main() {
       '${dir.path}/cap-2.json',
     ).writeAsString(jsonEncode({'captureId': 'cap-2'}));
 
-    expect(await store.list('agent-1'), isEmpty);
-    expect(await File('${dir.path}/cap-1.json.corrupt').exists(), isTrue);
-    expect(await File('${dir.path}/cap-2.json.corrupt').exists(), isTrue);
+    await expectLater(store.list('agent-1'), throwsFormatException);
+    expect(await File('${dir.path}/cap-1.json').exists(), isTrue);
+    expect(await File('${dir.path}/cap-2.json').exists(), isTrue);
   });
 
   test('rejects identifiers that are not plain', () async {
     expect(() => store.save('../x', upload('cap-1')), throwsArgumentError);
     expect(() => store.delete('agent-1', '../cap'), throwsArgumentError);
   });
+
+  test(
+    'concurrent stores cannot truncate or regress the durable stage',
+    () async {
+      final other = FilePendingUploadStore(root: () async => root);
+      await Future.wait([
+        store.save('agent-1', upload('cap-1')),
+        other.save(
+          'agent-1',
+          upload('cap-1').copyWith(stage: UploadStage.completed),
+        ),
+        store.save(
+          'agent-1',
+          upload('cap-1').copyWith(stage: UploadStage.registered),
+        ),
+      ]);
+      expect((await other.list('agent-1')).single.stage, UploadStage.completed);
+      final files = await Directory(
+        '${root.path}/capture_uploads/agent-1',
+      ).list().toList();
+      expect(files.where((f) => f.path.endsWith('.tmp')), isEmpty);
+    },
+  );
+
+  test(
+    'recovers a corrupt current record from its last durable backup',
+    () async {
+      await store.save('agent-1', upload('cap-1'));
+      await store.save(
+        'agent-1',
+        upload('cap-1').copyWith(stage: UploadStage.uploaded),
+      );
+      final file = File('${root.path}/capture_uploads/agent-1/cap-1.json');
+      await file.writeAsString('{broken');
+      final restored = await store.list('agent-1');
+      expect(restored.single.captureId, 'cap-1');
+      expect(restored.single.zipPath, isNotNull);
+      expect(restored.single.stage, UploadStage.local);
+    },
+  );
+
+  for (final invalidRoot in ['[]', 'null', '42', '"string"', '{}']) {
+    test('restores backup for invalid record root $invalidRoot', () async {
+      await store.save('agent-1', upload('cap-1'));
+      await store.save(
+        'agent-1',
+        upload('cap-1').copyWith(stage: UploadStage.uploaded),
+      );
+      final file = File('${root.path}/capture_uploads/agent-1/cap-1.json');
+      await file.writeAsString(invalidRoot);
+      final restored = await store.list('agent-1');
+      expect(restored.single.captureId, 'cap-1');
+      expect(restored.single.stage, UploadStage.local);
+      final evidence = await file.parent.list().toList();
+      expect(
+        evidence.whereType<File>().any((f) => f.path.endsWith('.corrupt')),
+        isTrue,
+      );
+    });
+  }
 
   group('PendingCaptureUpload.fromJson', () {
     Map<String, Object?> valid() => upload('cap-1').toJson();

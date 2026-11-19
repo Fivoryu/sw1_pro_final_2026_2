@@ -9,8 +9,10 @@ carried in the ``X-Reconstruction-Claim-Token`` header.
 from __future__ import annotations
 
 import secrets
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
@@ -18,7 +20,7 @@ from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.modules.catalog.photo_storage import PhotoStorage
+from app.modules.catalog.photo_storage import PhotoStorage, PhotoTooLargeError
 from app.modules.catalog.photos import lock_staff_listing
 from app.modules.catalog.router import (  # pyright: ignore[reportPrivateUsage]
     _require_listing_editor,
@@ -26,7 +28,11 @@ from app.modules.catalog.router import (  # pyright: ignore[reportPrivateUsage]
     _scene_validation_detail,
 )
 from app.modules.catalog.schemas import ListingSceneDocument
-from app.modules.catalog.service import InvalidSceneIntegrityError, validate_scene_integrity
+from app.modules.catalog.models import ListingScene
+from app.modules.catalog.service import (
+    InvalidSceneIntegrityError, validate_scene_integrity, require_metric_scene, scene_etag,
+)
+from app.modules.reconstruction.package import inspect_package
 from app.modules.identity.session import ActiveStaff, get_active_staff
 from app.modules.reconstruction.job_queue import ReconstructionQueue
 from app.modules.reconstruction.models import (
@@ -109,10 +115,14 @@ def _claim_token_matches(stored: str | None, supplied: str) -> bool:
 
 
 def _capture_response(capture: ListingCapture) -> CaptureResponse:
+    draft = capture.scene_draft
+    if draft is not None and isinstance(draft.get("scale"), dict) and draft["scale"].get("mode") == "proportional":
+        # Normalize historical previews without mutating their persisted evidence on a read.
+        draft = {**draft, "unit": "arbitrary"}
     return CaptureResponse(
         captureId=capture.id,
         status=capture.status,
-        sceneDraft=capture.scene_draft,
+        sceneDraft=draft,
         warnings=list(capture.warnings or []),
         failureReason=capture.failure_reason,
     )
@@ -143,10 +153,33 @@ def register_capture(
 ) -> CaptureRegistered:
     """Register a capture (idempotent by ``captureId``) and sign its upload URL."""
     _require_listing_editor(staff, agency_id)
-    storage = _storage(request)
     settings = request.app.state.settings
     now: datetime = request.app.state.clock()
     session_factory = _session_factory(request)
+
+    # A nullable legacy checksum can be adopted only after reconciling any
+    # existing remote bytes. Storage I/O is deliberately outside row locks.
+    if body.sha256 is not None:
+        with session_factory() as session:
+            legacy = find_capture(session, agency_id=agency_id, listing_id=listing_id,
+                                  capture_id=body.capture_id)
+            legacy_key = legacy.object_key if legacy is not None and legacy.package_sha256 is None else None
+            legacy_size = legacy.size_bytes if legacy is not None else body.size_bytes
+            legacy_status = legacy.status if legacy is not None else CAPTURE_AWAITING_UPLOAD
+            if legacy is not None and (legacy_key is not None or legacy_status == CAPTURE_AWAITING_UPLOAD):
+                _require_retained(legacy, now)
+        if legacy_key is not None:
+            try:
+                existing_bytes = _storage(request).read(legacy_key, max_bytes=legacy_size)
+            except PhotoTooLargeError:
+                raise HTTPException(status_code=409, detail="Historical capture size differs") from None
+            except Exception:
+                raise HTTPException(status_code=503, detail=_STORAGE_UNAVAILABLE) from None
+            if existing_bytes is not None and (len(existing_bytes) != body.size_bytes or
+                                               hashlib.sha256(existing_bytes).hexdigest() != body.sha256):
+                raise HTTPException(status_code=409, detail="Historical capture checksum differs")
+            if existing_bytes is None and legacy_status != CAPTURE_AWAITING_UPLOAD:
+                raise HTTPException(status_code=409, detail="Historical package unavailable; local copy must be retained")
 
     def read_or_create(session: Session) -> tuple[ListingCapture, bool]:
         if lock_staff_listing(session, agency_id=agency_id, listing_id=listing_id) is None:
@@ -155,6 +188,17 @@ def register_capture(
         if existing is not None:
             if existing.agency_id != agency_id or existing.listing_id != listing_id:
                 raise HTTPException(status_code=409, detail=_CAPTURE_ID_CONFLICT)
+            if existing.status == CAPTURE_AWAITING_UPLOAD or existing.package_manifest is None:
+                _require_retained(existing, now)
+            if existing.size_bytes != body.size_bytes or (
+                body.sha256 is not None and existing.package_sha256 is not None
+                and existing.package_sha256 != body.sha256
+            ):
+                raise HTTPException(status_code=409, detail="Capture metadata differs from registration")
+            if body.sha256 is not None and existing.package_sha256 is None:
+                # Pin an expectation, not proof of delivery. /complete still verifies
+                # the remote bytes, size, manifest and checksum before acknowledgement.
+                existing.package_sha256 = body.sha256
             return existing, False
         capture = ListingCapture(
             id=body.capture_id,
@@ -162,6 +206,7 @@ def register_capture(
             listing_id=listing_id,
             object_key=capture_object_key(agency_id, listing_id, body.capture_id),
             size_bytes=body.size_bytes,
+            package_sha256=body.sha256,
             status=CAPTURE_AWAITING_UPLOAD,
             attempts=0,
             created_by=staff["id"],
@@ -177,7 +222,7 @@ def register_capture(
             capture_id, status, object_key = capture.id, capture.status, capture.object_key
     except IntegrityError:
         # Another request registered the same captureId between the read and the commit.
-        with session_factory() as session:
+        with session_factory.begin() as session:
             capture, created = read_or_create(session)
             capture_id, status, object_key = capture.id, capture.status, capture.object_key
 
@@ -187,7 +232,7 @@ def register_capture(
     expires_at: datetime | None = None
     if status == CAPTURE_AWAITING_UPLOAD:
         try:
-            upload_url = storage.presign_upload(
+            upload_url = _storage(request).presign_upload(
                 object_key, content_type=UPLOAD_CONTENT_TYPE, expires_in=UPLOAD_URL_SECONDS
             )
         except Exception:
@@ -213,26 +258,95 @@ def complete_capture_upload(
 ) -> CaptureStatusOnly:
     """Confirm the upload and enqueue the reconstruction; repeating it is a no-op."""
     _require_listing_editor(staff, agency_id)
-    queue = _queue(request)
     settings = request.app.state.settings
     now: datetime = request.app.state.clock()
     session_factory = _session_factory(request)
-    with session_factory.begin() as session:
-        capture = _require_capture(session, agency_id, listing_id, capture_id, lock=True)
-        if capture.status == CAPTURE_AWAITING_UPLOAD:
-            capture.status = CAPTURE_QUEUED
-            capture.uploaded_at = now
-            capture.enqueued_at = None
-            # Retention counts from the upload, not from the registration.
-            capture.frames_delete_after = now + timedelta(days=settings.capture_retention_days)
-        needs_publish = capture.status == CAPTURE_QUEUED and capture.enqueued_at is None
-        payload = CaptureStatusOnly(captureId=capture.id, status=capture.status)
-        job_id = capture.job_id
+    # Snapshot only scalar expectations, close the read transaction before CPU/I/O.
+    with session_factory() as session:
+        capture = _require_capture(session, agency_id, listing_id, capture_id)
+        needs_verification = (capture.status == CAPTURE_AWAITING_UPLOAD or
+                              capture.package_manifest is None or capture.package_sha256 is None)
+        if needs_verification:
+            _require_retained(capture, now)
+        expected = (capture.object_key, capture.size_bytes, capture.package_sha256)
+    verified_key: str | None = None
+    manifest: dict[str, Any] | None = None
+    digest = expected[2]
+    storage = _storage(request) if needs_verification else None
+    try:
+        if needs_verification:
+            assert storage is not None
+            try:
+                data = storage.read(expected[0], max_bytes=expected[1])
+            except PhotoTooLargeError:
+                raise HTTPException(status_code=409, detail="Uploaded capture size differs") from None
+            except Exception:
+                raise HTTPException(status_code=503, detail=_STORAGE_UNAVAILABLE) from None
+            if data is None or len(data) != expected[1]:
+                raise HTTPException(status_code=409, detail="Uploaded capture is missing or truncated")
+            digest = hashlib.sha256(data).hexdigest()
+            if expected[2] is not None and expected[2] != digest:
+                raise HTTPException(status_code=409, detail="Uploaded capture checksum differs")
+            try:
+                manifest = inspect_package(data, capture_id, listing_id)
+            except ValueError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from None
+            # Signatures for the upload key may still be valid. Workers only read a separate
+            # verified snapshot for which no PUT URL is ever issued.
+            # Request-private candidate: a losing CAS can delete it without deleting
+            # another request's committed snapshot, even for identical bytes.
+            verified_key = (expected[0] if "/verified-" in expected[0] else
+                            expected[0].rsplit("/", 1)[0] + f"/verified-{digest}-{uuid4().hex}.zip")
+            try:
+                if verified_key != expected[0]:
+                    storage.write(verified_key, data, content_type=UPLOAD_CONTENT_TYPE)
+                confirmed = storage.read(verified_key, max_bytes=expected[1])
+                if confirmed is None or hashlib.sha256(confirmed).hexdigest() != digest:
+                    raise ValueError("Verified snapshot readback differs")
+            except Exception:
+                raise HTTPException(status_code=503, detail=_STORAGE_UNAVAILABLE) from None
+        with session_factory.begin() as session:
+            capture = _require_capture(session, agency_id, listing_id, capture_id, lock=True)
+            if needs_verification:
+                _require_retained(capture, request.app.state.clock())
+            if verified_key is not None and (capture.package_manifest is None or capture.package_sha256 is None):
+                if (capture.object_key, capture.size_bytes, capture.package_sha256) != expected:
+                    raise HTTPException(status_code=409, detail="Capture changed during verification; retry")
+                capture.object_key = verified_key
+                capture.package_sha256 = digest
+                capture.package_manifest = manifest
+                if capture.status == CAPTURE_AWAITING_UPLOAD:
+                    capture.status = CAPTURE_QUEUED
+                    capture.uploaded_at = now
+                    capture.enqueued_at = None
+                    capture.frames_delete_after = now + timedelta(days=settings.capture_retention_days)
+                elif capture.status == CAPTURE_QUEUED:
+                    capture.enqueued_at = None # Republish verified legacy job, not a new execution.
+                # Historical advanced captures retain their original deadline and state.
+                committed_key = verified_key
+            else:
+                committed_key = capture.object_key
+            needs_publish = (capture.status == CAPTURE_QUEUED and capture.enqueued_at is None
+                             and capture.frames_deleted_at is None and _as_utc(capture.frames_delete_after) > now)
+            payload = CaptureStatusOnly(captureId=capture.id, status=capture.status,
+                                        uploadVerified=capture.package_manifest is not None)
+            job_id = capture.job_id
+    except Exception:
+        if storage is not None and verified_key is not None and verified_key != expected[0]:
+            storage.delete(verified_key)
+        raise
+    if storage is not None and verified_key is not None and verified_key != expected[0] and committed_key != verified_key:
+        storage.delete(verified_key)
     if needs_publish and not publish_queued_capture(
-        session_factory, queue, job_id=job_id, clock=request.app.state.clock
+        session_factory, _queue(request), job_id=job_id, clock=request.app.state.clock
     ):
         raise HTTPException(status_code=503, detail=_QUEUE_UNAVAILABLE)
     return payload
+
+
+def _require_retained(capture: ListingCapture, now: datetime) -> None:
+    if capture.frames_deleted_at is not None or _as_utc(capture.frames_delete_after) <= _as_utc(now):
+        raise HTTPException(status_code=410, detail="Capture retention expired; retain local file and register a new capture")
 
 
 @router.get("", response_model=CaptureList, response_model_by_alias=True)
@@ -278,13 +392,45 @@ def accept_capture(
     capture_id: str,
     request: Request,
     staff: ActiveStaff = Depends(get_active_staff),
+    if_match: Annotated[str | None, Header()] = None,
 ) -> CaptureResponse:
     """The agency kept the draft: schedule the frames for deletion. Idempotent."""
     _require_listing_editor(staff, agency_id)
     now: datetime = request.app.state.clock()
     with _session_factory(request).begin() as session:
+        # Same lock order as scene replacement; a concurrent editor cannot change
+        # the scene between checking evidence and shortening capture retention.
+        if lock_staff_listing(session, agency_id=agency_id, listing_id=listing_id) is None:
+            raise HTTPException(status_code=404, detail=_LISTING_NOT_FOUND)
         capture = _require_capture(session, agency_id, listing_id, capture_id, lock=True)
         if capture.status == CAPTURE_COMPLETED:
+            if capture.package_manifest is None or capture.package_sha256 is None:
+                raise HTTPException(status_code=409, detail="Verify historical package before acceptance")
+            if capture.scene_draft is None:
+                raise HTTPException(status_code=409, detail="Capture has no scene")
+            try:
+                draft = ListingSceneDocument.model_validate(capture.scene_draft)
+                require_metric_scene(draft)
+                if capture.package_manifest.get("schemaVersion") == 2 and draft.measurement is None:
+                    raise InvalidSceneIntegrityError("Historical video lacks measurement evidence")
+                # Historical video drafts have warnings but no structured scale evidence.
+                if any("unidades arbitrarias" in w or "sin medida de referencia" in w.lower()
+                       for w in capture.warnings or []):
+                    raise InvalidSceneIntegrityError("Historical capture has no verified scale")
+            except (ValidationError, InvalidSceneIntegrityError) as error:
+                raise HTTPException(status_code=409, detail=str(error)) from None
+            stored = session.get(ListingScene, listing_id)
+            if stored is None or stored.scene.get("captureId") != capture_id:
+                raise HTTPException(status_code=409, detail="Save a scene associated with this capture before acceptance")
+            if if_match is not None and if_match != scene_etag(stored.revision):
+                raise HTTPException(status_code=412, detail="Scene revision changed; reload before acceptance")
+            try:
+                persisted = ListingSceneDocument.model_validate(stored.scene)
+                require_metric_scene(persisted)
+                if stored.scene.get("measurement") != capture.scene_draft.get("measurement"):
+                    raise InvalidSceneIntegrityError("Saved measurement evidence differs from capture")
+            except (ValidationError, InvalidSceneIntegrityError) as error:
+                raise HTTPException(status_code=409, detail=str(error)) from None
             capture.status = CAPTURE_ACCEPTED
             capture.accepted_at = now
             capture.frames_delete_after = min(_as_utc(capture.frames_delete_after), now)
@@ -352,9 +498,13 @@ def claim_reconstruction_job(job_id: str, request: Request) -> ReconstructionCla
     claim_token = secrets.token_urlsafe(32)
     claim_failure: str | None = None
     with _session_factory(request).begin() as session:
+        candidate = _lock_job(session, job_id)
+        if candidate.status == CAPTURE_QUEUED and (candidate.package_manifest is None or candidate.package_sha256 is None):
+            raise HTTPException(status_code=409, detail="Verify historical package through /complete before claiming")
         claimed = (
             session.query(ListingCapture)
-            .filter(ListingCapture.job_id == job_id, ListingCapture.status == CAPTURE_QUEUED)
+            .filter(ListingCapture.job_id == job_id, ListingCapture.status == CAPTURE_QUEUED,
+                    ListingCapture.frames_deleted_at.is_(None), ListingCapture.frames_delete_after > now)
             .update(
                 {
                     ListingCapture.status: CAPTURE_PROCESSING,
@@ -367,6 +517,9 @@ def claim_reconstruction_job(job_id: str, request: Request) -> ReconstructionCla
                 synchronize_session=False,
             )
         )
+        # The proof guard loaded this row before the bulk UPDATE. Refresh its
+        # identity-map state before serializing the atomic claim result.
+        session.expire(candidate)
         capture = (
             session.query(ListingCapture).filter(ListingCapture.job_id == job_id).one_or_none()
         )
@@ -393,6 +546,12 @@ def claim_reconstruction_job(job_id: str, request: Request) -> ReconstructionCla
             status=_worker_status(capture.status),
             claim_token=claim_token if claimed else None,
             download_url=download_url,
+            capture_id=capture.id,
+            listing_id=capture.listing_id,
+            package_sha256=capture.package_sha256,
+            size_bytes=capture.size_bytes,
+            lease_seconds=settings.reconstruction_lease_seconds,
+            cache_delete_after=capture.frames_delete_after,
         )
     if claim_failure is not None:
         # The claim stays committed so the worker consumes this attempt through /fail.
@@ -402,6 +561,19 @@ def claim_reconstruction_job(job_id: str, request: Request) -> ReconstructionCla
             headers={"X-Reconstruction-Claim-Token": claim_token},
         )
     return result
+
+
+@worker_router.post("/{job_id}/renew")
+def renew_reconstruction_job(job_id: str, request: Request, claim_token: ClaimTokenHeader) -> dict[str, str]:
+    now = request.app.state.clock()
+    with _session_factory(request).begin() as session:
+        capture = _lock_job(session, job_id)
+        if (capture.status != CAPTURE_PROCESSING or
+            not _claim_token_matches(capture.claim_token, claim_token) or
+            capture.lease_expires_at is None or _as_utc(capture.lease_expires_at) <= now):
+            raise HTTPException(status_code=409, detail=_WORKER_STALE_CLAIM)
+        capture.lease_expires_at = now + timedelta(seconds=request.app.state.settings.reconstruction_lease_seconds)
+    return {"status": "running"}
 
 
 @worker_router.post(
@@ -451,6 +623,10 @@ def complete_reconstruction_job(
             return _capture_response(capture)
         if capture.status != CAPTURE_PROCESSING:
             raise HTTPException(status_code=409, detail=_WORKER_JOB_NOT_CLAIMABLE)
+        if capture.package_manifest and capture.package_manifest.get("schemaVersion") == 2 and scene.measurement is None:
+            return _scene_error_response(422, "Video reconstruction must declare measurement provenance", "scene_invalid")
+        if capture.lease_expires_at is None or _as_utc(capture.lease_expires_at) <= request.app.state.clock():
+            raise HTTPException(status_code=409, detail=_WORKER_STALE_CLAIM)
         capture.status = CAPTURE_COMPLETED
         capture.scene_draft = scene.model_dump(mode="json", by_alias=True, exclude_unset=True)
         capture.warnings = list(result.warnings)

@@ -21,8 +21,9 @@ function capturePath(agencyId: string, listingId: string, captureId: string) {
 
 async function request<T = CaptureReview>(
   token: string, url: string, method: "GET" | "POST", failure: string,
+  revision?: string,
 ): Promise<T> {
-  const response = await fetch(url, { method, headers: { Authorization: `Bearer ${token}` } });
+  const response = await fetch(url, { method, headers: { Authorization: `Bearer ${token}`, ...(revision ? { "If-Match": revision } : {}) } });
   if (!response.ok) throw new StaffListingsApiError(response.status, failure);
   return await response.json() as T;
 }
@@ -38,6 +39,6 @@ export function getCapture(token: string, agencyId: string, listingId: string, c
   return request(token, capturePath(agencyId, listingId, captureId), "GET", "No se pudo consultar la captura.");
 }
 
-export function acceptCapture(token: string, agencyId: string, listingId: string, captureId: string) {
-  return request(token, capturePath(agencyId, listingId, captureId) + "/accept", "POST", "No se pudo aceptar la captura.");
+export function acceptCapture(token: string, agencyId: string, listingId: string, captureId: string, revision?: string) {
+  return request(token, capturePath(agencyId, listingId, captureId) + "/accept", "POST", "No se pudo aceptar la captura.", revision);
 }

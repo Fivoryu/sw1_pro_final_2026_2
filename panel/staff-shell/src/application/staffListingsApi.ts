@@ -70,6 +70,11 @@ export class StaffListingsApiError extends Error {
 }
 
 const PAGE_LIMIT = 50;
+const sceneRevisions = new WeakMap<object, string>();
+
+export function sceneRevision(document: SceneDocument): string | undefined {
+  return sceneRevisions.get(document);
+}
 
 function listingsPath(agencyId: string): string {
   return `/api/v1/staff/agencies/${encodeURIComponent(agencyId)}/listings`;
@@ -103,7 +108,10 @@ async function requestJson<T>(url: string, init: RequestInit): Promise<T> {
     throw new StaffListingsApiError(response.status, message, code);
   }
 
-  return (await response.json()) as T;
+  const document = await response.json() as T;
+  const revision = response.headers?.get("ETag");
+  if (revision && document !== null && typeof document === "object") sceneRevisions.set(document, revision);
+  return document;
 }
 
 function authorizedGet(accessToken: string): RequestInit {
@@ -152,12 +160,14 @@ export function putListingScene(
   agencyId: string,
   listingId: string,
   scene: SceneDocument,
+  revision?: string | null,
 ): Promise<SceneDocument> {
   return requestJson<SceneDocument>(`${listingPath(agencyId, listingId)}/scene`, {
     method: "PUT",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
+      ...(revision === null ? { "If-None-Match": "*" } : revision ? { "If-Match": revision } : {}),
     },
     body: JSON.stringify(scene),
   });

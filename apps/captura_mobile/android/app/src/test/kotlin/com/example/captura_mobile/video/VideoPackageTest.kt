@@ -79,6 +79,7 @@ class VideoPackageTest {
         assertEquals(
             mapOf(
                 "kind" to "object", "label" to "Puerta", "lengthM" to 2.0, "surface" to "floor", "frameNs" to 150,
+                "dimensionsSource" to "user_confirmed",
                 "p1" to mapOf("x" to 0.31, "y" to 0.80), "p2" to mapOf("x" to 0.33, "y" to 0.12),
             ),
             map(json["reference"]),
@@ -180,6 +181,43 @@ class VideoPackageTest {
         timeline.nextRoom(500L)
 
         assertEquals(listOf(VideoRoom("room-1", "Sala", 100L, 500L)), timeline.finish(500L))
+    }
+
+    @Test
+    fun differentClockEpochsCannotBeClampedIntoAnEmptyRoom() {
+        val timeline = RoomTimeline("Sala")
+        timeline.start(566_864_400_119_525L) // elapsedRealtimeNanos in the rejected Redmi manifest.
+        assertThrows(IllegalArgumentException::class.java) {
+            timeline.finish(278_307_292_288_001L) // Last actual Camera2 frame + 1.
+        }
+    }
+
+    @Test
+    fun cameraClockBoundariesCoverTheRealRedmiFrameRange() {
+        val firstFrame = 278_259_529_989_000L
+        val lastFrame = 278_307_292_288_000L
+        val timeline = RoomTimeline("Sala")
+        timeline.start(firstFrame)
+        val rooms = timeline.finish(lastFrame + 1)
+        assertEquals(listOf(VideoRoom("room-1", "Sala", firstFrame, lastFrame + 1)), rooms)
+        assertTrue(firstFrame >= rooms.single().fromNs && lastFrame < rooms.single().toNs)
+    }
+
+    @Test
+    fun aSingleObservedFrameHasAHalfOpenRoomInterval() {
+        val timeline = RoomTimeline("Sala")
+        timeline.start(278_259_529_989_000L)
+        assertEquals(278_259_529_989_001L, timeline.finish(278_259_529_989_001L).single().toNs)
+    }
+
+    @Test
+    fun anEmptyFirstRoomIsRejectedBeforePackaging() {
+        val timeline = RoomTimeline("Sala")
+        timeline.start(100L)
+        assertThrows(IllegalArgumentException::class.java) { timeline.finish(100L) }
+        assertThrows(IllegalArgumentException::class.java) {
+            manifest(null, listOf(VideoRoom("room-1", "Sala", 100L, 100L)))
+        }
     }
 
     // --- S5: reference ---

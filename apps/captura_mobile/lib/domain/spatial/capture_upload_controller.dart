@@ -72,6 +72,7 @@ class CaptureUploadController extends ChangeNotifier {
 
   List<PendingCaptureUpload> _uploads = [];
   Future<void>? _running;
+  static final _activeListings = <String, Future<void>>{};
   String? _activeId;
   UploadPhase _phase = UploadPhase.idle;
   double? _progress;
@@ -99,6 +100,7 @@ class CaptureUploadController extends ChangeNotifier {
   /// The signed-in account, or the one of the stored session while the app
   /// is offline, so recordings can be queued without network.
   String? get _ownerId => _session.ownerId;
+  String? get ownerId => _ownerId;
 
   @override
   void dispose() {
@@ -113,8 +115,10 @@ class CaptureUploadController extends ChangeNotifier {
   Future<void> load() async {
     final owner = _ownerId;
     if (owner == null) return;
+    final stored = await _store.list(owner);
+    if (_ownerId != owner) return;
     _uploads = [
-      for (final upload in await _store.list(owner))
+      for (final upload in stored)
         if (upload.listingId == listingId) upload,
     ];
     _notify();
@@ -122,18 +126,29 @@ class CaptureUploadController extends ChangeNotifier {
 
   /// Saves the package on the phone and starts sending it. The same
   /// capture id is never added twice.
-  Future<void> enqueue(CapturePackageInfo package) async {
+  Future<bool> enqueue(CapturePackageInfo package) async {
     final owner = _ownerId;
     if (owner == null) {
       _message = noSessionMessage;
       _notify();
-      return;
+      return false;
     }
-    if (_uploads.any((upload) => upload.captureId == package.captureId)) {
-      unawaited(retry());
-      return;
+    final existing = _uploads
+        .where((upload) => upload.captureId == package.captureId)
+        .firstOrNull;
+    if (existing != null) {
+      if (existing.sizeBytes != package.sizeBytes ||
+          existing.sha256 != package.sha256 ||
+          (!existing.isSent && existing.zipPath != package.zipPath)) {
+        throw StateError(
+          'El captureId ya identifica otro archivo; se conservan ambas evidencias.',
+        );
+      }
+      unawaited(_scheduleRetry().catchError((Object _) {}));
+      return true;
     }
     final upload = PendingCaptureUpload(
+      sha256: package.sha256,
       captureId: package.captureId,
       listingId: listingId,
       zipPath: package.zipPath,
@@ -144,7 +159,8 @@ class CaptureUploadController extends ChangeNotifier {
     await _store.save(owner, upload);
     _uploads = [..._uploads, upload];
     _notify();
-    unawaited(retry());
+    unawaited(_scheduleRetry().catchError((Object _) {}));
+    return true;
   }
 
   /// Sends whatever is pending and refreshes the server state of what was
@@ -153,17 +169,56 @@ class CaptureUploadController extends ChangeNotifier {
   Future<void> retry() {
     final running = _running;
     if (running != null) return running;
-    // whenComplete runs after the assignment even if _run finishes at once.
-    return _running = _run().whenComplete(() {
-      _running = null;
+    return _scheduleRetry();
+  }
+
+  /// Publishes the new turn synchronously so enqueue() cannot return before
+  /// idle observes it. An enqueue during a run adds a turn after the listing's
+  /// current tail; ordinary retry() calls continue to join existing work.
+  Future<void> _scheduleRetry() {
+    final owner = _ownerId;
+    final key = '${owner ?? "none"}:$listingId';
+    final active = _activeListings[key];
+    // Reserve ownership before notifying listeners. Another controller may be
+    // uploading this listing: wait, then read its persisted result and retry
+    // anything still pending instead of joining with a stale in-memory queue.
+    late final Future<void> operation;
+    operation = Future<void>.microtask(() async {
+      if (active != null) {
+        try {
+          await active;
+        } on Object {
+          // This run independently reloads the durable queue below.
+        }
+      }
+      if (_ownerId != owner) {
+        _message = noSessionMessage;
+        return;
+      }
+      await _run();
+    }).whenComplete(() {
+      if (identical(_activeListings[key], operation)) {
+        _activeListings.remove(key);
+      }
+      if (identical(_running, operation)) _running = null;
       _notify();
     });
+    _activeListings[key] = operation;
+    _running = operation;
+    _notify();
+    return operation;
   }
 
   Future<void> _run() async {
     _notify();
     try {
       final owner = _ownerId;
+      if (owner != null) {
+        // Disk is authoritative: background recovery and other screens can
+        // advance stages or add captures while this controller is open.
+        await load();
+        if (_ownerId != owner) return;
+      }
       final credentials = _credentials();
       if (owner == null || credentials == null) {
         // Offline mode has no access token on purpose: nothing is sent until
@@ -175,6 +230,7 @@ class CaptureUploadController extends ChangeNotifier {
       }
       _message = null;
       for (final upload in List.of(_uploads)) {
+        if (_ownerId != owner || _credentials() == null) return;
         if (upload.isFinished) continue;
         _activeId = upload.captureId;
         if (upload.isSent) {
@@ -183,6 +239,12 @@ class CaptureUploadController extends ChangeNotifier {
           await _send(owner, credentials, upload);
         }
       }
+    } on StaffAuthFailure catch (failure) {
+      _message = _describe(failure);
+    } on Object {
+      _message =
+          'No se pudo leer o actualizar la cola de subidas. El recorrido y '
+          'sus registros se conservan en el teléfono. Reintentá.';
     } finally {
       _activeId = null;
       _phase = UploadPhase.idle;
@@ -199,6 +261,7 @@ class CaptureUploadController extends ChangeNotifier {
     var reregistered = false;
     try {
       while (true) {
+        if (_ownerId != owner || _credentials() == null) return;
         if (current.stage == UploadStage.local ||
             current.stage == UploadStage.registered) {
           final path = current.zipPath;
@@ -219,7 +282,26 @@ class CaptureUploadController extends ChangeNotifier {
               listingId: listingId,
               captureId: current.captureId,
               sizeBytes: current.sizeBytes,
+              sha256: current.sha256,
             );
+            if (registration.status != RemoteCaptureStatus.awaitingUpload) {
+              final status = await _api.complete(
+                accessToken: credentials.token,
+                agencyId: credentials.agencyId,
+                listingId: listingId,
+                captureId: current.captureId,
+              );
+              current = await _save(
+                owner,
+                current.copyWith(
+                  stage: UploadStage.completed,
+                  remoteStatus: status,
+                  clearUploadUrl: true,
+                  clearLastError: true,
+                ),
+              );
+              return;
+            }
             current = await _save(
               owner,
               current.copyWith(
@@ -237,12 +319,52 @@ class CaptureUploadController extends ChangeNotifier {
               // The signed URL timed out: registering again is idempotent and
               // hands out a fresh one.
               reregistered = true;
+              final fresh = await _api.register(
+                accessToken: credentials.token,
+                agencyId: credentials.agencyId,
+                listingId: listingId,
+                captureId: current.captureId,
+                sizeBytes: current.sizeBytes,
+                sha256: current.sha256,
+              );
+              if (fresh.status != RemoteCaptureStatus.awaitingUpload) {
+                // Registration alone is not a receipt. complete() verifies
+                // uploadVerified and the capture identity before we advance.
+                _setPhase(current, UploadPhase.finishing);
+                final status = await _api.complete(
+                  accessToken: credentials.token,
+                  agencyId: credentials.agencyId,
+                  listingId: listingId,
+                  captureId: current.captureId,
+                );
+                current = await _save(
+                  owner,
+                  current.copyWith(
+                    stage: UploadStage.completed,
+                    remoteStatus: status,
+                    clearUploadUrl: true,
+                    clearLastError: true,
+                  ),
+                );
+                // Retain the local ZIP, including if verification or saving fails.
+                return;
+              }
+              final renewedUrl = fresh.uploadUrl;
+              final renewedUri = renewedUrl == null
+                  ? null
+                  : Uri.tryParse(renewedUrl);
+              if (renewedUrl == null ||
+                  renewedUrl.trim().isEmpty ||
+                  renewedUri == null ||
+                  (renewedUri.hasScheme &&
+                      ((renewedUri.scheme != 'http' &&
+                              renewedUri.scheme != 'https') ||
+                          renewedUri.host.isEmpty))) {
+                throw malformedResponseFailure();
+              }
               current = await _save(
                 owner,
-                current.copyWith(
-                  stage: UploadStage.local,
-                  clearUploadUrl: true,
-                ),
+                current.copyWith(uploadUrl: renewedUrl),
               );
               continue;
             }
@@ -255,12 +377,33 @@ class CaptureUploadController extends ChangeNotifier {
             );
           case UploadStage.uploaded:
             _setPhase(current, UploadPhase.finishing);
-            final status = await _api.complete(
-              accessToken: credentials.token,
-              agencyId: credentials.agencyId,
-              listingId: listingId,
-              captureId: current.captureId,
-            );
+            RemoteCaptureStatus status;
+            try {
+              status = await _api.complete(
+                accessToken: credentials.token,
+                agencyId: credentials.agencyId,
+                listingId: listingId,
+                captureId: current.captureId,
+              );
+            } on StaffAuthFailure catch (failure) {
+              if (failure.statusCode != 409 || reregistered) rethrow;
+              final fresh = await _api.register(
+                accessToken: credentials.token,
+                agencyId: credentials.agencyId,
+                listingId: listingId,
+                captureId: current.captureId,
+                sizeBytes: current.sizeBytes,
+                sha256: current.sha256,
+              );
+              if (fresh.status != RemoteCaptureStatus.awaitingUpload) rethrow;
+              reregistered = true;
+              current = await _save(
+                owner,
+                current.copyWith(uploadUrl: fresh.uploadUrl),
+              );
+              await _upload(current);
+              continue;
+            }
             final path = current.zipPath;
             current = await _save(
               owner,
@@ -405,8 +548,15 @@ class CaptureUploadController extends ChangeNotifier {
     return status >= 400 && status < 500;
   }
 
-  String _describe(StaffAuthFailure failure) =>
-      failure.isNetworkFailure ? _offlineMessage : failure.detail;
+  String _describe(StaffAuthFailure failure) {
+    if (failure is UploadConnectionFailure) return failure.detail;
+    if (failure.isNetworkFailure) return _offlineMessage;
+    if (failure.statusCode == 401) {
+      return 'La sesión venció. Volvé a ingresar con la misma cuenta y '
+          'reintentá la subida. El recorrido sigue guardado en el teléfono.';
+    }
+    return failure.detail;
+  }
 
   ({String token, String agencyId})? _credentials() {
     final token = _session.accessToken;

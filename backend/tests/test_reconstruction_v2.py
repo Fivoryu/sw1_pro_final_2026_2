@@ -82,9 +82,13 @@ def test_schema_2_retention_runs_30_days_from_upload(ctx: Ctx) -> None:
 def test_schema_2_package_is_deleted_on_accept_keeping_the_draft(ctx: Ctx) -> None:
     job_id = _upload_and_complete(ctx, _package(2))
     token = ctx.claim(job_id).json()["claim_token"]
-    done = ctx.worker(job_id, "complete", token, {"sceneDraft": _scene(), "warnings": []})
+    scene = _scene()
+    scene["measurement"] = {"source": "sfm", "referenceConfirmed": True, "scale": "reference", "alignment": "connected", "clock": "realtime"}
+    done = ctx.worker(job_id, "complete", token, {"sceneDraft": scene, "warnings": []})
     assert done.status_code == 200, done.text
     key = ctx.row().object_key
+    saved = ctx.client.put(ctx.base().removesuffix("/captures") + "/scene", json={**scene, "captureId": _CAPTURE})
+    assert saved.status_code == 200, saved.text
     assert ctx.client.post(f"{ctx.base()}/{_CAPTURE}/accept").status_code == 200
 
     deleted = run_capture_retention_sweep(ctx.session_factory, ctx.storage, now=_T0)

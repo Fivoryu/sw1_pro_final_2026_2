@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../data/services/video_capture_channel.dart';
+import '../data/services/ar_capture_channel.dart';
 import 'spatial/capture_upload_controller.dart';
 
 /// Where the video walkthrough of one listing stands.
@@ -45,6 +46,9 @@ class VideoCaptureController extends ChangeNotifier {
   String? _message;
   String? _warning;
   bool _disposed = false;
+  CapturePackageInfo? _pendingPackage;
+  String? _pendingOwnerId;
+  CapturePackageInfo? get pendingPackage => _pendingPackage;
 
   VideoCaptureStatus get status => _status;
   String? get message => _message;
@@ -76,37 +80,92 @@ class VideoCaptureController extends ChangeNotifier {
       );
       return;
     }
+    if (_uploads.ownerId == null) {
+      _set(
+        VideoCaptureStatus.failed,
+        message: CaptureUploadController.noSessionMessage,
+      );
+      return;
+    }
+    final recordingOwner = _uploads.ownerId;
     _set(VideoCaptureStatus.recording);
-    final result = await _capture.record(
-      listingId: listingId,
-      firstRoomName: firstRoomName,
-    );
-    switch (result) {
-      case VideoCaptureCancelled():
-        _set(VideoCaptureStatus.idle);
-      case VideoCaptureFailed(:final message):
-        _set(VideoCaptureStatus.failed, message: message);
-      case VideoCaptured(
-        :final package,
-        :final hasReference,
-        :final reachedTimeLimit,
-      ):
-        if (package.sizeBytes > maxCapturePackageBytes) {
-          // The server rejects it permanently: do not queue what cannot be sent.
+    try {
+      if (_pendingPackage != null) {
+        if (_pendingOwnerId != recordingOwner) {
           _set(
             VideoCaptureStatus.failed,
-            message: MethodChannelVideoCapture.messageFor('package_too_large'),
+            message: 'La captura se conserva para su cuenta original.',
           );
           return;
         }
-        await _uploads.enqueue(package);
+        final queued = await _uploads.enqueue(_pendingPackage!);
         _set(
-          VideoCaptureStatus.sent,
-          message: reachedTimeLimit
-              ? '$_timeLimitMessage $_sentMessage'
-              : _sentMessage,
-          warning: hasReference ? null : noReferenceWarning,
+          queued ? VideoCaptureStatus.sent : VideoCaptureStatus.failed,
+          message: queued
+              ? _sentMessage
+              : CaptureUploadController.noSessionMessage,
         );
+        if (queued) _pendingPackage = null;
+        return;
+      }
+      final result = await _capture.record(
+        listingId: listingId,
+        ownerId: recordingOwner,
+        firstRoomName: firstRoomName,
+      );
+      switch (result) {
+        case VideoCaptureCancelled():
+          _set(VideoCaptureStatus.idle);
+        case VideoCaptureFailed(:final message):
+          _set(VideoCaptureStatus.failed, message: message);
+        case VideoCaptured(
+          :final package,
+          :final hasReference,
+          :final reachedTimeLimit,
+        ):
+          if (package.sizeBytes > maxCapturePackageBytes) {
+            // The server rejects it permanently: do not queue what cannot be sent.
+            _set(
+              VideoCaptureStatus.failed,
+              message: MethodChannelVideoCapture.messageFor(
+                'package_too_large',
+              ),
+            );
+            return;
+          }
+          _pendingPackage = package;
+          _pendingOwnerId = recordingOwner;
+          if (_uploads.ownerId != recordingOwner) {
+            _set(
+              VideoCaptureStatus.failed,
+              message:
+                  'La sesión cambió. La captura se conserva para su cuenta original.',
+            );
+            return;
+          }
+          if (!await _uploads.enqueue(package)) {
+            _set(
+              VideoCaptureStatus.failed,
+              message: CaptureUploadController.noSessionMessage,
+            );
+            return;
+          }
+          _pendingPackage = null;
+          _set(
+            VideoCaptureStatus.sent,
+            message: reachedTimeLimit
+                ? '$_timeLimitMessage $_sentMessage'
+                : _sentMessage,
+            warning: hasReference ? null : noReferenceWarning,
+          );
+      }
+    } on Object {
+      _set(
+        VideoCaptureStatus.failed,
+        message: _pendingPackage == null
+            ? 'No se pudo iniciar o finalizar la grabacion. Reintenta.'
+            : 'El archivo se conserva en el telefono. Reintenta para guardarlo en la cola.',
+      );
     }
   }
 }

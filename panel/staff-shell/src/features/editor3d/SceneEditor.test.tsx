@@ -273,6 +273,25 @@ describe("SceneEditor capture drafts", () => {
     expect(acceptCapture).not.toHaveBeenCalled();
   });
 
+  it("inspects an invalid draft without replacing unsaved editor geometry or persisting anything", async () => {
+    const user = userEvent.setup();
+    vi.mocked(listCaptures).mockResolvedValue([{ ...completed, sceneDraft: { ...draft, unit: "arbitrary",
+      measurement: { source: "sfm", scale: "unscaled", alignment: "disconnected", clock: "unknown", referenceConfirmed: true } } }]);
+    render(<SceneEditor accessToken="volatile-access" agencyId="agency-1" />);
+    await dragWallEndpoint(user);
+    const edited = documentInViewer();
+    expect(edited.walls[0].start).toEqual({ x: 0.2, z: 0.2 });
+    await user.click(screen.getByRole("button", { name: "Capturas reconstruidas" }));
+    await user.click(await screen.findByRole("button", { name: "Inspeccionar sin editar" }));
+    expect(screen.getByRole("button", { name: "Cargar borrador en el editor" })).toBeDisabled();
+    expect(JSON.parse(screen.getAllByTestId("scene-viewer-document")[0].textContent ?? "{}")).toEqual(edited);
+    await user.click(screen.getByRole("button", { name: "Cerrar inspección" }));
+    expect(documentInViewer()).toEqual(edited);
+    expect(screen.getByText("Hay cambios sin guardar.")).toBeVisible();
+    expect(putListingScene).not.toHaveBeenCalled();
+    expect(acceptCapture).not.toHaveBeenCalled();
+  });
+
   it("confirms an estimated wall height in the editor scene as manual, without saving", async () => {
     const user = userEvent.setup();
     const estimated: SceneDocument = { ...draft,
@@ -337,5 +356,10 @@ describe("SceneEditor capture drafts", () => {
     await user.click(screen.getByRole("button", { name: "Guardar escena" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/no se pudo aceptar la captura/i);
     expect(screen.getByText("Escena guardada.")).toBeVisible();
+    vi.mocked(acceptCapture).mockResolvedValue({ ...completed, status: "accepted" });
+    await user.click(screen.getByRole("button", { name: "Reintentar aceptación" }));
+    await waitFor(() => expect(acceptCapture).toHaveBeenCalledTimes(2));
+    expect(putListingScene).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Reintentar aceptación" })).not.toBeInTheDocument());
   });
 });

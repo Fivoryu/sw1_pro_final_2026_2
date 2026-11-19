@@ -25,3 +25,9 @@ def test_scene_scale_mode_round_trips(mode: str) -> None:
 def test_scene_scale_rejects_unknown_modes() -> None:
     with pytest.raises(ValidationError):
         ListingSceneDocument.model_validate(_scene(scale={"mode": "feet"}))
+
+
+def test_legacy_proportional_draft_is_serialized_in_arbitrary_units() -> None:
+    document = ListingSceneDocument.model_validate(_scene(scale={"mode": "proportional"}))
+    assert document.unit == "arbitrary"
+    assert document.model_dump(by_alias=True, exclude_unset=True)["unit"] == "arbitrary"

@@ -155,7 +155,7 @@ void main() {
 
     final uploads = drafts.uploadsFor('listing-1')!;
     await uploads.load();
-    final video = FakeVideoCapture()..results.add(videoCaptured());
+    final video = FakeVideoCapture()..results.add(videoCaptured(sizeBytes: 4));
     final recording = VideoCaptureController(
       listingId: 'listing-1',
       capture: video,
@@ -200,7 +200,7 @@ void main() {
     await uploads.load();
     await VideoCaptureController(
       listingId: 'listing-1',
-      capture: FakeVideoCapture()..results.add(videoCaptured()),
+      capture: FakeVideoCapture()..results.add(videoCaptured(sizeBytes: 4)),
       uploads: uploads,
     ).start();
 

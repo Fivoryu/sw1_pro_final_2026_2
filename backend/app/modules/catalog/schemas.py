@@ -30,7 +30,7 @@ SceneNumber = StrictInt | StrictFloat
 SceneWallHeightSource = Literal[
     "ceiling_plane", "wall_point", "manual", "assumed", "estimated"
 ]
-SceneObjectSource = Literal["depth", "manual"]
+SceneObjectSource = Literal["depth", "manual", "sfm_estimated"]
 
 
 class SceneContractModel(BaseModel):
@@ -120,15 +120,31 @@ class SceneScale(SceneContractModel):
     mode: Literal["metric", "proportional"]
 
 
+class SceneMeasurement(SceneContractModel):
+    source: Literal["sfm"]
+    scale: Literal["reference", "unscaled"]
+    alignment: Literal["connected", "disconnected"]
+    clock: Literal["realtime", "unknown"]
+    reference_confirmed: bool = Field(default=False, alias="referenceConfirmed", strict=True)
+
+
 class ListingSceneDocument(SceneContractModel):
     version: Literal["2.0"]
-    unit: Literal["meters"]
-    # Absent in scenes written before F07 proportional plans: read those as metric.
+    unit: Literal["meters", "arbitrary"]
+    measurement: SceneMeasurement | None = None
+    capture_id: StrictStr | None = Field(default=None, alias="captureId")
     scale: SceneScale | None = None
     walls: list[SceneWall]
     openings: list[SceneOpening]
     rooms: list[SceneRoom]
     objects: list[SceneObject]
+
+    @model_validator(mode="after")
+    def canonical_scale_unit(self) -> ListingSceneDocument:
+        # Older proportional drafts declared meters; never expose them as measurements.
+        if self.scale is not None and self.scale.mode == "proportional":
+            self.unit = "arbitrary"
+        return self
 
 
 class CatalogMoney(BaseModel):

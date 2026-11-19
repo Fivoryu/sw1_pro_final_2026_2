@@ -16,6 +16,8 @@ import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.StreamConfigurationMap
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.Handler
@@ -61,13 +63,14 @@ class VideoRecorder(
     var videoSize: VideoSize = VideoSpec.FALLBACK_SIZE
         private set
 
-    val frames = FrameLog()
+    var frames = FrameLog()
+        private set
     val sensors = SensorLog()
 
     /** Live hints (S8) computed from the same sensor and capture data; never written to the package. */
     val guidance = CaptureGuidance()
 
-    /** Sensor timestamp of the latest frame; 0 until one arrives. */
+    /** Sensor timestamp of the latest recording frame; 0 until one arrives. */
     @Volatile
     var lastFrameNs: Long = 0L
         private set
@@ -97,6 +100,13 @@ class VideoRecorder(
     private var mediaRecorder: MediaRecorder? = null
     private var released = false
     private var lensCorrectionEnabled = true
+    private var recordingSession: CameraCaptureSession? = null
+    private var recordingSequenceId: Int? = null
+    private var stopCallback: ((Boolean) -> Unit)? = null
+    private val stopTimeout = Runnable {
+        Log.e(TAG, "Camera sequence did not drain; raw recording preserved")
+        finishRecordingStop(false)
+    }
 
     private val sensorListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
@@ -129,14 +139,30 @@ class VideoRecorder(
             timestamp: Long,
             frameNumber: Long,
         ) {
-            lastFrameNs = timestamp
-            if (recording) frames.add(timestamp)
+            // Preview callbacks can still arrive after switching sessions. Record callbacks
+            // remain relevant after stopRepeating() until the sequence has drained.
+            if (session === recordingSession) {
+                lastFrameNs = timestamp
+                frames.add(timestamp)
+            }
         }
 
         override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-            if (!recording) return
+            if (!recording || session !== recordingSession) return
             val iso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: return
             guidance.onExposure(result.get(CaptureResult.SENSOR_TIMESTAMP) ?: lastFrameNs, iso)
+        }
+
+        override fun onCaptureSequenceCompleted(session: CameraCaptureSession, sequenceId: Int, frameNumber: Long) {
+            if (session === recordingSession && sequenceId == recordingSequenceId && stopCallback != null) {
+                finishRecordingStop(true)
+            }
+        }
+
+        override fun onCaptureSequenceAborted(session: CameraCaptureSession, sequenceId: Int) {
+            if (session === recordingSession && sequenceId == recordingSequenceId && stopCallback != null) {
+                finishRecordingStop(false)
+            }
         }
     }
 
@@ -201,8 +227,13 @@ class VideoRecorder(
     }
 
     @Suppress("DEPRECATION")
-    private fun createSession(surfaces: List<Surface>, template: Int, onConfigured: (CameraCaptureSession) -> Unit) {
-        val device = camera ?: return
+    private fun createSession(
+        surfaces: List<Surface>,
+        template: Int,
+        beforeRepeating: () -> Unit = {},
+        onConfigured: (CameraCaptureSession) -> Unit,
+    ) {
+        val device = camera ?: return fail("La c?mara todav?a no est? lista. Reintent?.")
         try {
             device.createCaptureSession(
                 surfaces,
@@ -214,7 +245,8 @@ class VideoRecorder(
                         }
                         session = configured
                         try {
-                            try {
+                            beforeRepeating()
+                            val sequenceId = try {
                                 configured.setRepeatingRequest(buildRequest(device, template, surfaces), frameCallback, cameraHandler)
                             } catch (e: Exception) {
                                 // T18: if the HAL rejects the lens-correction request, retry once without it.
@@ -222,6 +254,10 @@ class VideoRecorder(
                                 Log.w(TAG, "Request with lens correction rejected, retrying without it", e)
                                 lensCorrectionEnabled = false
                                 configured.setRepeatingRequest(buildRequest(device, template, surfaces), frameCallback, cameraHandler)
+                            }
+                            if (template == CameraDevice.TEMPLATE_RECORD) {
+                                recordingSession = configured
+                                recordingSequenceId = sequenceId
                             }
                             onConfigured(configured)
                         } catch (e: Exception) {
@@ -331,10 +367,14 @@ class VideoRecorder(
                 recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
                 // No audio source on purpose: the package has no audio track.
                 recorder.prepare()
-                createSession(listOf(preview, recorder.surface), CameraDevice.TEMPLATE_RECORD) {
-                    registerSensors()
-                    val startedAtNs = SystemClock.elapsedRealtimeNanos()
-                    recorder.start()
+                var startedAtNs = 0L
+                createSession(listOf(preview, recorder.surface), CameraDevice.TEMPLATE_RECORD,
+                    beforeRepeating = {
+                        registerSensors()
+                        startedAtNs = SystemClock.elapsedRealtimeNanos()
+                        // Start accepting buffers before submitting requests targeting the encoder.
+                        recorder.start()
+                    }) {
                     recording = true
                     listener.onRecordingStarted(startedAtNs)
                 }
@@ -348,28 +388,80 @@ class VideoRecorder(
     /** Stops frames, sensors and the encoder; [onStopped] says whether `video.mp4` is usable. */
     fun stopRecording(onStopped: (Boolean) -> Unit) {
         cameraHandler.post {
+            check(stopCallback == null) { "Recording stop already pending" }
+            stopCallback = onStopped
             recording = false
-            unregisterSensors()
-            var ok = true
             try {
-                session?.stopRepeating()
-                session?.abortCaptures()
+                // Do not abort/close or block this handler in MediaRecorder.stop(): in-flight
+                // frame callbacks must be delivered before validating the finalized MP4.
+                checkNotNull(recordingSession).stopRepeating()
+                cameraHandler.postDelayed(stopTimeout, 10_000L)
             } catch (e: Exception) {
                 Log.w(TAG, "Stopping the request failed", e)
+                finishRecordingStop(false)
             }
-            session?.close()
-            session = null
-            try {
-                mediaRecorder?.stop()
-            } catch (e: RuntimeException) {
-                // MediaRecorder.stop throws when it received no frames: the file is not valid.
-                Log.e(TAG, "MediaRecorder.stop failed", e)
-                ok = false
-            }
-            mediaRecorder?.release()
-            mediaRecorder = null
-            onStopped(ok)
         }
+    }
+
+    private fun finishRecordingStop(sequenceDrained: Boolean) {
+        val onStopped = stopCallback ?: return
+        stopCallback = null
+        cameraHandler.removeCallbacks(stopTimeout)
+        recordingSession = null
+        recordingSequenceId = null
+        unregisterSensors()
+        var ok = sequenceDrained
+        session?.close()
+        session = null
+        try {
+            mediaRecorder?.stop()
+        } catch (e: RuntimeException) {
+            // MediaRecorder.stop throws when it received no frames: the file is not valid.
+            Log.e(TAG, "MediaRecorder.stop failed", e)
+            ok = false
+        }
+        mediaRecorder?.release()
+        mediaRecorder = null
+        // Keep the complete callback evidence even when only a subset was encoded.
+        try {
+            CaptureRecovery.checkpoint(File(workDir, "camera_frames.jsonl"), frames.lines().joinToString("\n", postfix = "\n"))
+        } catch (e: Exception) {
+            Log.e(TAG, "Camera timeline checkpoint failed; raw recording preserved", e)
+            ok = false
+        }
+        if (ok) {
+            val extractor = MediaExtractor()
+            try {
+                extractor.setDataSource(File(workDir, VideoSpec.VIDEO_FILE).absolutePath)
+                val track = (0 until extractor.trackCount).first { extractor.getTrackFormat(it)
+                    .getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true }
+                extractor.selectTrack(track)
+                val encoded = mutableListOf<Long>()
+                while (extractor.sampleTime >= 0) {
+                    require(encoded.size < 20_000) { "MP4 frame limit exceeded" }
+                    encoded.add(extractor.sampleTime)
+                    if (!extractor.advance()) break
+                }
+                CaptureRecovery.checkpoint(File(workDir, "encoded_pts.jsonl"),
+                    encoded.mapIndexed { i, t -> """{"sample":$i,"ptsUs":$t}""" }.joinToString("\n", postfix = "\n"))
+                // Extractor order may be decode order (B frames); frames.jsonl is presentation order.
+                Log.i(TAG, "Timeline samples: Camera2=${frames.count}, MP4=${encoded.size}")
+                val matched = FrameTiming.match(frames.timestamps(), encoded.sorted())
+                frames = FrameLog().also { log -> matched.forEach { log.add(it) } }
+                lastFrameNs = matched.last()
+            } catch (e: Exception) {
+                Log.e(TAG, "MP4/camera timeline validation failed; raw recording preserved", e)
+                ok = false
+            } finally { extractor.release() }
+        }
+        try {
+            CaptureRecovery.checkpoint(File(workDir, VideoSpec.FRAMES_FILE), frames.lines().joinToString("\n", postfix = "\n"))
+            CaptureRecovery.checkpoint(File(workDir, VideoSpec.SENSORS_FILE), sensors.lines().joinToString("\n", postfix = "\n"))
+        } catch (e: Exception) {
+            Log.e(TAG, "Timeline checkpoint failed; raw recording preserved", e)
+            ok = false
+        }
+        onStopped(ok)
     }
 
     private fun newMediaRecorder(): MediaRecorder =

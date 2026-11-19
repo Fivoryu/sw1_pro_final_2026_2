@@ -1,3 +1,4 @@
+# ruff: noqa: E402  -- tests import the standalone worker after configuring sys.path.
 """``reference.rect`` (F07 T16): validation, two scale estimates and optional corner refinement.
 
 The refinement itself needs OpenCV, which is not installed here: its seam is tested with fakes and
@@ -135,15 +136,16 @@ def test_consistent_width_and_height_use_the_length_weighted_mean_without_warnin
     assert not any(PANEL_SCALE_WARNING.search(w) for w in result.warnings)
 
 
-def test_inconsistent_estimates_warn_in_spanish_and_use_the_long_side(tmp_path: Path) -> None:
+def test_inconsistent_estimates_leave_an_unscaled_draft(tmp_path: Path) -> None:
     model = T.make_model((0.0, 0.0, 4.0, 3.0))
     baseline = room_size(run_rect(tmp_path / "base", without_rect(rect_reference(model))))
 
     result = run_rect(tmp_path / "rect", rect_reference(model, height_m=0.36))  # 20 % apart
 
-    assert room_size(result) == baseline
+    assert room_size(result) != baseline
+    assert result.scene_draft["unit"] == "arbitrary"
     warnings = [w for w in result.warnings if PANEL_SCALE_WARNING.search(w)]
-    assert len(warnings) == 1 and "8 %" in warnings[0]
+    assert any("8 %" in warning for warning in warnings)
 
 
 def test_the_threshold_is_a_named_assumption() -> None:
@@ -160,7 +162,7 @@ def test_a_package_without_rect_keeps_the_previous_scale_and_warnings(tmp_path: 
     assert not any(PANEL_SCALE_WARNING.search(w) for w in result.warnings)
 
 
-def test_a_rect_that_misses_the_plane_falls_back_to_the_two_point_scale(
+def test_a_rect_that_misses_the_plane_leaves_an_unscaled_draft(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     model = T.make_model((0.0, 0.0, 4.0, 3.0))
@@ -169,8 +171,9 @@ def test_a_rect_that_misses_the_plane_falls_back_to_the_two_point_scale(
 
     result = run_rect(tmp_path / "rect", rect_reference(model, height_m=0.36))
 
-    assert room_size(result) == baseline
-    assert not any(PANEL_SCALE_WARNING.search(w) for w in result.warnings)
+    assert room_size(result) != baseline
+    assert result.scene_draft["unit"] == "arbitrary"
+    assert any(PANEL_SCALE_WARNING.search(w) for w in result.warnings)
 
 
 # --- optional corner refinement -------------------------------------------------------------

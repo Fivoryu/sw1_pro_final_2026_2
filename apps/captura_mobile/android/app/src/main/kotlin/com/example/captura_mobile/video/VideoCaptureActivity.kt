@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.media.MediaMetadataRetriever
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -74,9 +75,32 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
     private var recorder: VideoRecorder? = null
     private var texture: SurfaceTexture? = null
     private var permissionRequested = false
+    private var previewReady = false
+    private var referenceRequested = false
+    private var pendingPackage: (() -> Unit)? = null
+    private var reviewDialog: AlertDialog? = null
+    private val foreground = VideoCaptureForeground()
+    private var finalizedRooms: List<VideoRoom>? = null
+    private val startTimeout = Runnable {
+        if (phase == Phase.PREVIEW) onFailure("La camara no respondio. Cerra y reintenta la captura.")
+    }
 
     private var startedAtNs = 0L
     private var reference: ReferenceMark? = null
+    private var visualSampler: PreviewGuidanceSampler? = null
+    private var visualEnabled = true
+    private var visualStep = 0
+    private val guidedProgress = GuidedCaptureProgress()
+    private var preparationChosen = false
+    private var wantsReference = true
+    private val guidanceRoomNotes = mutableListOf<String>()
+    private var visualRoomName = "Ambiente 1"
+    private lateinit var visualStepText: TextView
+    private lateinit var guidanceConfirm: TextView
+    private lateinit var guidanceHidden: TextView
+    private lateinit var visualOverlay: ReferenceCandidateOverlay
+    private lateinit var captureSummaryText: TextView
+
 
     // views
     private lateinit var textureView: TextureView
@@ -140,7 +164,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             val now = SystemClock.elapsedRealtimeNanos()
             val elapsedS = ((now - startedAtNs) / 1_000_000_000L).coerceAtLeast(0)
             timerText.text = String.format(Locale.ROOT, "%02d:%02d", elapsedS / 60, elapsedS % 60)
-            showGuidance(now)
+            showGuidance()
             if (VideoCaptureLimits.reachedTimeLimit(startedAtNs, now)) {
                 finishRecording(reachedTimeLimit = true)
                 return
@@ -155,7 +179,9 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         captureId = UUID.randomUUID().toString()
         listingId = intent.getStringExtra(EXTRA_LISTING_ID)
         timeline = RoomTimeline(intent.getStringExtra(EXTRA_FIRST_ROOM_NAME).orEmpty())
-        workDir = File(cacheDir, "video_work/$captureId").also { it.mkdirs() }
+        visualRoomName = intent.getStringExtra(EXTRA_FIRST_ROOM_NAME)?.trim()?.takeIf { it.isNotEmpty() } ?: "Ambiente 1"
+        workDir = File(filesDir, "video_work/$captureId").also { it.mkdirs() }
+        checkpointRecovery("preview")
         sensorOrientation = VideoRecorder.backCameraSensorOrientation(applicationContext)
         buildUi()
         getSystemService(DisplayManager::class.java).registerDisplayListener(displayListener, main)
@@ -230,8 +256,10 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) applyTextureTransform()
         }
         markView = ReferenceMarkView(this).apply { visibility = View.GONE }
+        visualOverlay = ReferenceCandidateOverlay(this)
         stage = AspectFrameLayout(this).apply {
             addView(textureView, match(), match())
+            addView(visualOverlay, match(), match())
             addView(markView, match(), match())
         }
 
@@ -282,9 +310,10 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         )
 
         recordButton = circleAction(R.drawable.ic_video_record, "Grabar") { startRecording() }
+        recordButton.isEnabled = false
         stopButton = circleAction(R.drawable.ic_video_stop, "Detener y guardar") { finishRecording(reachedTimeLimit = false) }
             .apply { visibility = View.GONE }
-        referenceButton = railButton(R.drawable.ic_video_reference, "Marcar referencia") { beginReference() }
+        referenceButton = railButton(R.drawable.ic_video_reference, "Referencia inicial") { beginReference() }
             .apply { visibility = View.GONE }
         nextRoomButton = railButton(R.drawable.ic_video_next_room, "Siguiente ambiente") { nextRoom() }
             .apply { visibility = View.GONE }
@@ -313,8 +342,50 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
 
         // Overlay for the chips and banners, kept inside the safe area plus a 16dp margin and clear of the rail.
         chipsLayer = FrameLayout(this)
+        visualStepText = chip(TextView(this).apply {
+            setTextColor(Color.WHITE); textSize = 16f; maxLines = 3
+            text = "Encuadrá el objeto completo y detalles del piso o pared; medí sus lados reales en cm."
+            setOnClickListener {
+                if (phase != Phase.PREVIEW && phase != Phase.RECORDING) return@setOnClickListener
+                if (!visualEnabled) { visualEnabled = true; visualSampler?.start() }
+                renderGuidance()
+            }
+            setOnLongClickListener {
+                if (phase != Phase.PREVIEW && phase != Phase.RECORDING) return@setOnLongClickListener true
+                AlertDialog.Builder(this@VideoCaptureActivity)
+                    .setTitle("Guía visual · detalles")
+                    .setMessage(visualSampler?.summary().orEmpty() + "\n\n" + guidedProgress.summary())
+                    .setPositiveButton("Cerrar", null)
+                    .setNegativeButton(if (visualEnabled) "Desactivar guía" else "Activar guía") { _, _ ->
+                        if (!this@VideoCaptureActivity.foreground.resumed ||
+                            (phase != Phase.PREVIEW && phase != Phase.RECORDING)) return@setNegativeButton
+                        visualEnabled = !visualEnabled
+                        if (visualEnabled) visualSampler?.start() else visualSampler?.pause()
+                        visualOverlay.corners = null
+                        guidedProgress.invalidateObservation()
+                        renderGuidance()
+                    }.show()
+                true
+            }
+        }, SCRIM)
+        guidanceConfirm = chip(TextView(this).apply {
+            setTextColor(Color.WHITE); textSize = 13f; maxLines = 2
+            minHeight = dp(48)
+            visibility = View.GONE
+        }, SCRIM)
+        guidanceHidden = chip(TextView(this).apply {
+            setTextColor(Color.WHITE); textSize = 13f; minHeight = dp(48)
+            text = "Zona tapada"
+            visibility = View.GONE
+        }, SCRIM)
         banners = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            addView(visualStepText, LinearLayout.LayoutParams(wrap(), wrap()).apply { topMargin = dp(8) })
+            addView(LinearLayout(this@VideoCaptureActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(guidanceConfirm, LinearLayout.LayoutParams(0, wrap(), 1f))
+                addView(guidanceHidden, LinearLayout.LayoutParams(wrap(), wrap()).apply { leftMargin = dp(4) })
+            }, LinearLayout.LayoutParams(match(), wrap()).apply { topMargin = dp(4) })
             addView(hintText, LinearLayout.LayoutParams(wrap(), wrap()).apply { topMargin = dp(8) })
             addView(warningText, LinearLayout.LayoutParams(wrap(), wrap()).apply { topMargin = dp(8) })
         }
@@ -588,13 +659,13 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             }
         }
         lengthInput = EditText(this).apply {
-            hint = "Lado largo real (m)"
+            hint = "Lado largo real (cm)"
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
             setTextColor(Color.WHITE)
             setHintTextColor(Color.LTGRAY)
         }
         shortSideInput = EditText(this).apply {
-            hint = "Lado corto real (m)"
+            hint = "Lado corto real (cm)"
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
             setTextColor(Color.WHITE)
             setHintTextColor(Color.LTGRAY)
@@ -612,14 +683,18 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         }
         referenceHint = TextView(this).apply { setTextColor(Color.WHITE); textSize = 12f }
         detectStatus = TextView(this).apply { setTextColor(Color.rgb(255, 213, 79)); textSize = 12f }
+        captureSummaryText = TextView(this).apply { setTextColor(Color.WHITE); textSize = 12f }
         modeButton = button("Marcar a mano") { toggleReferenceMode() }
         repeatPointsButton = button("Repetir puntos") { markView.clearPoints() }
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            addView(captureSummaryText)
             addView(referenceHint)
             addView(detectStatus)
             addView(presetSpinner)
+            addView(TextView(this@VideoCaptureActivity).apply { text = "Lado largo o distancia real (cm)"; setTextColor(Color.WHITE) })
             addView(lengthInput)
+            addView(TextView(this@VideoCaptureActivity).apply { text = "Lado corto real, para rectángulos (cm)"; setTextColor(Color.WHITE) })
             addView(shortSideInput)
             addView(labelInput)
             addView(surfaceGroup)
@@ -638,7 +713,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             addView(
                 LinearLayout(this@VideoCaptureActivity).apply {
                     addView(repeatPointsButton, cell())
-                    addView(button("Seguir sin referencia") { endReference() }, cell())
+                    addView(button("Guardar sin referencia") { endReference() }, cell())
                 },
                 LinearLayout.LayoutParams(match(), wrap()),
             )
@@ -664,6 +739,11 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             return
         }
         if (recorder != null) return
+        previewReady = false
+        recordButton.isEnabled = false
+        visualStepText.text = if (wantsReference) "Primer cuadro: objeto completo y apoyo con textura."
+            else "Sin referencia · preparando la imagen estable."
+        main.postDelayed(startTimeout, 15_000)
         recorder = VideoRecorder(applicationContext, workDir, this).also { it.openPreview(surface) }
     }
 
@@ -698,7 +778,35 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
     }
 
     override fun onPreviewReady() {
-        // Nothing to do: the Grabar button is always enabled once the activity is shown.
+        main.post {
+            if (isFinishing || isDestroyed || phase == Phase.DONE) return@post
+            // Readiness can arrive while paused; retain it for onResume instead of losing it.
+            main.removeCallbacks(startTimeout); previewReady = true
+            resumePreviewGuidance()
+        }
+    }
+
+    private fun resumePreviewGuidance() {
+        if (isFinishing || isDestroyed || !foreground.canGuide(
+                previewReady, phase == Phase.PREVIEW || phase == Phase.RECORDING)) return
+        recordButton.isEnabled = phase == Phase.PREVIEW
+        if (visualSampler == null) visualSampler = PreviewGuidanceSampler(textureView, main) { feedback, quad ->
+            if (!foreground.resumed || (phase != Phase.PREVIEW && phase != Phase.RECORDING)) return@PreviewGuidanceSampler
+            if (phase == Phase.RECORDING && visualEnabled) {
+                visualStep = guidedProgress.observe(feedback, referenceCandidate = quad != null)
+                visualSampler?.step = visualStep
+                renderGuidance()
+            } else {
+                hintText.maxLines = 2
+                hintText.text = feedback.message
+                hintText.visibility = if (visualEnabled && feedback.issue != VisualIssue.NONE) View.VISIBLE else View.GONE
+            }
+            visualOverlay.rotationDegrees = PreviewGeometry.imageRotation(sensorOrientation, displayRotationDegrees())
+            visualOverlay.corners = if (visualEnabled && wantsReference) quad else null
+        }
+        visualSampler?.bufferSize = previewSize
+        if (visualEnabled) visualSampler?.start()
+        renderGuidance()
     }
 
     override fun onFailure(message: String) {
@@ -712,11 +820,48 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
 
     // region recording
 
+    private fun renderGuidance() {
+        val active = visualEnabled && foreground.resumed && phase == Phase.RECORDING
+        guidanceConfirm.visibility = View.GONE
+        guidanceHidden.visibility = View.GONE
+        if (!visualEnabled) {
+            visualStepText.text = "Guía desactivada; podés grabar y guardar."
+            hintText.visibility = View.GONE
+            return
+        }
+        if (!active) return
+        val roomRevision = guidedProgress.revision
+        guidanceHidden.visibility = View.VISIBLE
+        guidanceHidden.setOnClickListener {
+            if (foreground.resumed && phase == Phase.RECORDING && visualEnabled) {
+                guidedProgress.markHidden(roomRevision)
+                renderGuidance()
+            }
+        }
+        visualStepText.text = "${guidedProgress.state.label} · ${guidedProgress.instruction()}"
+        val confirmation = guidedProgress.confirmation()
+        if (confirmation != null) {
+            val revision = guidedProgress.revision
+            guidanceConfirm.text = confirmation
+            guidanceConfirm.visibility = View.VISIBLE
+            guidanceConfirm.setOnClickListener {
+                if (foreground.resumed && phase == Phase.RECORDING && visualEnabled) {
+                    visualStep = guidedProgress.confirm(revision)
+                    visualSampler?.step = visualStep
+                    renderGuidance()
+                }
+            }
+        }
+        val warning = guidedProgress.qualityWarning()
+        hintText.maxLines = 2
+        hintText.text = warning.orEmpty()
+        hintText.visibility = if (warning == null) View.GONE else View.VISIBLE
+    }
+
     /** Live hint (S8) over the preview; only while recording, hidden while the reference is marked. */
-    private fun showGuidance(nowNs: Long) {
-        val hint = if (phase == Phase.RECORDING) recorder?.guidance?.current(nowNs) else null
-        hintText.text = hint?.message.orEmpty()
-        hintText.visibility = if (hint == null) View.GONE else View.VISIBLE
+    private fun showGuidance() {
+        // Image guidance works without a physical gyro; sensor heading never proves coverage.
+        if (!visualEnabled) hintText.visibility = View.GONE
     }
 
     private fun startRecording() {
@@ -724,7 +869,30 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             toast("La cámara todavía no está lista.")
             return
         }
+        if (!previewReady) { toast("Espera a que la camara este lista."); return }
+        if (!preparationChosen) {
+            AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Prepará el recorrido")
+                .setMessage("Con referencia: medí los lados reales en cm y dejá margen alrededor del objeto. " +
+                    "Debe verse completo en el PRIMER fotograma, con detalles del piso o pared alrededor. " +
+                    "Después alejate despacio manteniendo esos detalles en vistas superpuestas. " +
+                    "Al guardar confirmarás sus esquinas y medidas. " +
+                    "No asumimos tamaño A4. Sin referencia no habrá metros certificados. " +
+                    "Si hay muebles, buscá bases y esquinas visibles desde otra posición.")
+                .setPositiveButton("Con objeto medido") { _, _ ->
+                    preparationChosen = true; wantsReference = true; startRecording()
+                }
+                .setNegativeButton("Sin referencia") { _, _ ->
+                    preparationChosen = true; wantsReference = false; startRecording()
+                }
+                .setNeutralButton("Volver", null).show()
+            return
+        }
         recordButton.isEnabled = false
+        statusText.text = if (wantsReference)
+            "Iniciando: objeto medido completo y apoyo con textura hasta empezar la grabación."
+        else "Iniciando: mantené la cámara estable."
+        main.postDelayed(startTimeout, 15_000)
         lockOrientation()
         active.startRecording()
     }
@@ -732,25 +900,54 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
     override fun onRecordingStarted(startedAtNs: Long) {
         main.post {
             if (phase != Phase.PREVIEW) return@post
+            main.removeCallbacks(startTimeout)
+            // This clock drives only the UI timer. Room boundaries must use
+            // Camera2 timestamps, whose epoch may differ on UNKNOWN devices.
             this.startedAtNs = startedAtNs
-            timeline.start(startedAtNs)
+            checkpointRecovery("recording")
             phase = Phase.RECORDING
+            foreground.recordingStarted()
+            referenceRequested = wantsReference
+            // A delayed Camera2 start after onStop must finalize, never restart UI in background.
+            if (!foreground.resumed) { finishRecording(false); return@post }
+            visualStep = 0
+            guidedProgress.reset(wantsReference = wantsReference)
+            visualStep = guidedProgress.step
+            visualSampler?.resetRecording(visualRoomName)
+            visualSampler?.step = visualStep
+            renderGuidance()
             recordButton.visibility = View.GONE
-            referenceButton.visibility = View.VISIBLE
+            referenceButton.visibility = if (wantsReference) View.VISIBLE else View.GONE
             nextRoomButton.visibility = View.VISIBLE
             stopButton.visibility = View.VISIBLE
             timerChip.visibility = View.VISIBLE
-            warningText.visibility = View.VISIBLE
-            statusText.text = RECORDING_INSTRUCTION
+            warningText.visibility = View.GONE
+            statusText.text = "Grabando · $visualRoomName"
             main.post(tick)
         }
     }
 
     private fun nextRoom() {
         if (phase != Phase.RECORDING) return
-        val now = recorder?.lastFrameNs?.takeIf { it > 0 } ?: SystemClock.elapsedRealtimeNanos()
-        val room = timeline.nextRoom(now)
-        if (room != null) toast("${room.name} iniciado")
+        val captured = recorder?.frames?.timestamps().orEmpty()
+        val first = captured.firstOrNull() ?: run {
+            toast("Esperá al primer cuadro de la grabación para cambiar de ambiente.")
+            return
+        }
+        if (timeline.currentId == null) timeline.start(first)
+        val room = timeline.nextRoom(captured.last())
+        if (room != null) {
+            guidanceRoomNotes.add("$visualRoomName: ${guidedProgress.summary()}")
+            visualRoomName = room.name
+            guidedProgress.reset(firstRoom = false, wantsReference = wantsReference)
+            visualStep = 1 // Only the first frame of the whole video is the scale reference.
+            visualSampler?.beginRoom(room.id, room.name)
+            visualOverlay.corners = null
+            renderGuidance()
+            statusText.text = "Grabando · $visualRoomName"
+            hintText.visibility = View.GONE
+            toast("${room.name} iniciado")
+        }
     }
 
     // endregion
@@ -758,17 +955,24 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
     // region reference (S5)
 
     private fun beginReference() {
-        val active = recorder ?: return
-        if (phase != Phase.RECORDING) return
-        val frameNs = active.lastFrameNs
-        val frame: Bitmap? = textureView.bitmap
-        if (frameNs <= 0L || frame == null) {
-            toast("Todavía no hay una imagen para marcar. Probá de nuevo.")
-            return
-        }
+        if (phase != Phase.RECORDING || !wantsReference) return
+        referenceRequested = true
+        toast("Se usa solo el primer fotograma del video. Mostrar el objeto ahora no lo agrega a ese cuadro. Si no estaba al inicio, guardá sin referencia.")
+    }
+
+    private fun showEncodedReference(frame: Bitmap, frameNs: Long) {
         phase = Phase.MARKING
+        captureSummaryText.text = "Primer fotograma real del MP4: ajustá las esquinas del objeto completo y confirmá sus medidas reales. " +
+            "El piso o pared alrededor debe aportar detalles compartidos con las siguientes vistas; detectar el objeto no verifica pose ni escala. " +
+            "Si no se ve completo, guardá sin referencia. Confirmar objeto y dimensiones no significa " +
+            "que la escala esté aplicada: Worker3D debe ubicar la referencia en la geometría reconstruida.\n\n" +
+            (guidanceRoomNotes + "$visualRoomName: ${guidedProgress.summary()}").joinToString("\n")
+        captureSummaryText.setOnClickListener {
+            if (foreground.resumed) AlertDialog.Builder(this).setTitle("Diagnóstico visual")
+                .setMessage(visualSampler?.summary().orEmpty()).setPositiveButton("Cerrar", null).show()
+        }
         // The frame is the view-oriented bitmap (upright); remember how it relates to the stored frame.
-        markRotation = imageRotation()
+        markRotation = 0 // MediaMetadataRetriever returns the stored, unrotated frame.
         markView.show(frame, frameNs)
         markView.visibility = View.VISIBLE
         rail.visibility = View.GONE
@@ -781,11 +985,13 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         applyPreset(ReferencePresets.ALL[0])
     }
 
-    /** Fills the size fields from [preset]; a preset with both sides detects a rectangle, the others mark by hand. */
+    /** Presets select the kind, never assert the real dimensions of an object. */
     private fun applyPreset(preset: ReferencePreset) {
-        lengthInput.setText(preset.lengthM.toString())
-        shortSideInput.setText(preset.otherSideM?.toString() ?: "")
-        labelInput.setText(preset.label.substringBefore(" ("))
+        // A visual rectangle/preset cannot identify the physical size of the user's sheet.
+        lengthInput.setText("")
+        shortSideInput.setText("")
+        lengthInput.hint = "Ingresá tu medida real en cm"
+        labelInput.setText(if (preset.otherSideM != null) "Rectángulo medido" else preset.label.substringBefore(" ("))
         surfaceGroup.check(if (preset.surface == ReferenceSurface.FLOOR) SURFACE_FLOOR_ID else SURFACE_WALL_ID)
         if (phase != Phase.MARKING) return
         if (preset.otherSideM != null) {
@@ -806,15 +1012,15 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         shortSideInput.visibility = if (rect) View.VISIBLE else View.GONE
         repeatPointsButton.visibility = if (rect) View.GONE else View.VISIBLE
         modeButton.text = if (rect) "Marcar a mano" else "Detectar el objeto"
-        lengthInput.hint = if (rect) "Lado largo real (m)" else "Largo real entre los dos puntos (m)"
+        lengthInput.hint = if (rect) "Lado largo real (cm)" else "Largo real entre los dos puntos (cm)"
         if (rect) {
-            referenceHint.text = "Arrastrá las esquinas hasta que coincidan con el objeto y tocá Confirmar. La grabación sigue."
+            referenceHint.text = "Arrastrá las esquinas hasta que coincidan con el objeto y tocá Confirmar. El video ya está finalizado."
             markView.clearPoints()
             runDetection()
         } else {
             detectToken++
             detectStatus.text = ""
-            referenceHint.text = "Tocá los dos extremos del objeto sobre la imagen congelada. La grabación sigue."
+            referenceHint.text = "Tocá los dos extremos del objeto sobre la imagen del video finalizado."
         }
     }
 
@@ -834,7 +1040,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             main.post {
                 if (token != detectToken || phase != Phase.MARKING || markView.mode != ReferenceMarkView.Mode.RECT) return@post
                 markView.setQuad(quad)
-                detectStatus.text = if (quad != null) "Encontré un objeto. Revisá las esquinas." else RECT_NOT_FOUND
+                detectStatus.text = if (quad != null) "Rectángulo candidato en el primer fotograma. Revisá que sea tu objeto y ajustá las esquinas." else RECT_NOT_FOUND
             }
         }
     }
@@ -852,14 +1058,26 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
     }
 
     private fun parseMeters(field: EditText): Double? =
-        field.text.toString().replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
+        field.text.toString().replace(',', '.').toDoubleOrNull()?.div(100.0)?.takeIf { it.isFinite() && it > 0.0 }
 
     /** Maps a point on the upright marking view to the stored (unrotated) frame, which is what the package holds. */
     private fun toStored(point: ReferencePoint): ReferencePoint =
         PreviewGeometry.displayToStored(markRotation, point.x, point.y).let { (x, y) -> ReferencePoint(x, y) }
 
     private fun confirmReference() {
-        if (markView.mode == ReferenceMarkView.Mode.RECT) confirmRectangle() else confirmPoints()
+        if (parseMeters(lengthInput) == null ||
+            (markView.mode == ReferenceMarkView.Mode.RECT && parseMeters(shortSideInput) == null)) {
+            toast("Ingresá las dimensiones reales medidas en centímetros.")
+            return
+        }
+        val dimensions = if (markView.mode == ReferenceMarkView.Mode.RECT)
+            "Lado largo: ${lengthInput.text} cm; lado corto: ${shortSideInput.text} cm."
+        else "Distancia entre puntos: ${lengthInput.text} cm."
+        AlertDialog.Builder(this)
+            .setMessage("Confirmá que el objeto medido aparece completo en ESTE primer fotograma y que ajustaste sus puntos o esquinas. ¿Mediste estos valores reales? $dimensions Una hoja de 27 cm no es de 29,7 cm por elegir A4. Estas son dimensiones aportadas por vos; la escala del modelo sigue pendiente de Worker3D y puede no aplicarse si no se reconstruye el apoyo del objeto.")
+            .setPositiveButton("Confirmo objeto y medidas reales") { _, _ ->
+                if (markView.mode == ReferenceMarkView.Mode.RECT) confirmRectangle() else confirmPoints()
+            }.setNegativeButton("Revisar", null).show()
     }
 
     private fun confirmRectangle() {
@@ -871,7 +1089,7 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         val first = parseMeters(lengthInput)
         val second = parseMeters(shortSideInput)
         if (first == null || second == null) {
-            toast("Ingresá el lado largo y el lado corto reales del objeto en metros.")
+            toast("Ingresá el lado largo y el lado corto reales del objeto en centímetros.")
             return
         }
         val width = maxOf(first, second)
@@ -901,9 +1119,9 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             toast("Tocá los dos extremos del objeto sobre la imagen.")
             return
         }
-        val length = lengthInput.text.toString().replace(',', '.').toDoubleOrNull()
+        val length = parseMeters(lengthInput)
         if (length == null || length <= 0.0) {
-            toast("Ingresá el largo real del objeto en metros.")
+            toast("Ingresá el largo real del objeto en centímetros.")
             return
         }
         val surface = if (surfaceGroup.checkedRadioButtonId == SURFACE_FLOOR_ID) ReferenceSurface.FLOOR else ReferenceSurface.WALL
@@ -922,6 +1140,13 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
 
     private fun endReference() {
         if (phase != Phase.MARKING) return
+        val packageNow = pendingPackage
+        if (packageNow != null) {
+            pendingPackage = null
+            phase = Phase.FINISHING
+            packageNow()
+            return
+        }
         phase = Phase.RECORDING
         detectToken++
         markView.visibility = View.GONE
@@ -938,7 +1163,17 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
 
     private fun finishRecording(reachedTimeLimit: Boolean) {
         if (phase != Phase.RECORDING && phase != Phase.MARKING) return
+        visualSampler?.pause()
+        visualOverlay.corners = null
+        pendingPackage?.let { packageNow ->
+            pendingPackage = null
+            phase = Phase.FINISHING
+            packageNow()
+            return
+        }
         phase = Phase.FINISHING
+        guidanceConfirm.visibility = View.GONE
+        guidanceHidden.visibility = View.GONE
         main.removeCallbacks(tick)
         hintText.visibility = View.GONE
         statusText.text = "Guardando el recorrido…"
@@ -952,28 +1187,111 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             it.alpha = 0.4f
         }
         val active = recorder ?: return
+        // Capture the intent on the main thread. A background-triggered stop stays interrupted
+        // even if the user returns before encoder finalization completes.
+        val requestReference = referenceRequested && foreground.canConfirmReference
         active.stopRecording { videoOk ->
-            // Runs on the camera thread; packaging is slow, so it gets its own thread.
-            thread(name = "video-package") {
-                val result = buildPackage(active, videoOk, reachedTimeLimit)
-                main.post { finishWithResult(result) }
+            if (videoOk && active.frames.count > 0) {
+                try {
+                    val captured = active.frames.timestamps()
+                    val first = captured.first()
+                    val end = captured.last() + 1
+                    if (timeline.currentId == null) timeline.start(first)
+                    val rooms = timeline.finish(end).also { finalizedRooms = it }
+                    val manifest = VideoManifestBuilder.build(VideoManifestInput(
+                        captureId = captureId, listingId = checkNotNull(listingId), deviceModel = Build.MODEL,
+                        osVersion = Build.VERSION.RELEASE, startedAtNs = first, timestampSource = active.timestampSource,
+                        sensorOrientation = active.sensorOrientation, rooms = rooms, reference = reference,
+                        videoSize = active.videoSize,
+                    ))
+                    CaptureRecovery.checkpoint(File(workDir, VideoSpec.MANIFEST_FILE), JsonWriter.write(manifest))
+                    val prototype = VideoCaptureResult.captured(File(filesDir, "capture_packages/$captureId.zip").absolutePath,
+                        captureId, 0, active.frames.count, rooms, reference != null, (end - first) / 1_000_000L,
+                        reachedTimeLimit, active.timestampSource)
+                    CaptureRecovery.checkpoint(File(filesDir, "video_recovery/$captureId.finalized.json"),
+                        JsonWriter.write(mapOf("captureId" to captureId, "ownerId" to intent.getStringExtra("ownerId"),
+                            "listingId" to listingId, "timelineValidated" to true, "result" to prototype)))
+                } catch (e: Exception) { Log.e(TAG, "Finalized recovery checkpoint failed; raw files preserved", e) }
             }
+            val packageNow = {
+                thread(name = "video-package") {
+                    val result = buildPackage(active, videoOk, reachedTimeLimit)
+                    val owner = intent.getStringExtra("ownerId")
+                    if (result["outcome"] == "captured" && owner != null) {
+                        try {
+                            val journal = File(filesDir, "capture_packages/$captureId.json")
+                            CaptureRecovery.checkpoint(journal, JsonWriter.write(mapOf("ownerId" to owner,
+                                "listingId" to listingId, "result" to result)))
+                            workDir.deleteRecursively() // ZIP and durable recovery record now exist.
+                            File(filesDir, "video_recovery/$captureId.finalized.json").delete()
+                            File(filesDir, "video_recovery/$captureId.json").delete()
+                        } catch (e: Exception) { Log.e(TAG, "Recovery journal failed; ZIP preserved", e) }
+                    }
+                    main.post { finishWithResult(result) }
+                }
+                Unit
+            }
+            val reviewOrPackage = {
+                main.post {
+                    if (!foreground.canConfirmReference || isFinishing || isDestroyed || phase != Phase.FINISHING) {
+                        packageNow()
+                    } else {
+                        pendingPackage = packageNow
+                        reviewDialog = AlertDialog.Builder(this)
+                            .setTitle("Recorrido finalizado")
+                            .setMessage((guidanceRoomNotes + "$visualRoomName: ${guidedProgress.summary()}").joinToString("\n") +
+                                "\n\nSin referencia confirmada: no habrá metros certificados. El servidor aún debe validar la geometría.")
+                            .setPositiveButton("Guardar recorrido") { _, _ -> saveFinalReview() }
+                            .setOnCancelListener { saveFinalReview() }.show()
+                    }
+                }
+                Unit
+            }
+            if (videoOk && requestReference) {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(File(workDir, VideoSpec.VIDEO_FILE).absolutePath)
+                    val bitmap = if (Build.VERSION.SDK_INT >= 28) retriever.getFrameAtIndex(0) else null
+                    if (bitmap == null) { reviewOrPackage() }
+                    else main.post {
+                        if (!foreground.canConfirmReference || isFinishing || isDestroyed || phase != Phase.FINISHING) {
+                            bitmap.recycle()
+                            packageNow()
+                        } else {
+                            pendingPackage = packageNow
+                            showEncodedReference(bitmap, active.frames.firstTimestampNs ?: startedAtNs)
+                        }
+                    }
+                } catch (e: Exception) { reviewOrPackage() }
+                finally { retriever.release() }
+            } else if (videoOk) reviewOrPackage() else packageNow()
         }
+    }
+
+    private fun saveFinalReview() {
+        if (phase != Phase.FINISHING) return
+        val packageNow = pendingPackage ?: return
+        pendingPackage = null
+        reviewDialog?.dismiss(); reviewDialog = null
+        packageNow()
     }
 
     private fun buildPackage(active: VideoRecorder, videoOk: Boolean, reachedTimeLimit: Boolean): Map<String, Any?> {
         if (!videoOk || active.frames.count == 0) {
-            workDir.deleteRecursively()
             return VideoCaptureResult.error(
                 VideoCaptureResult.ERROR_RECORDING_FAILED,
-                "No se guardó video del recorrido. Probá de nuevo con buena luz.",
+                "No se pudo finalizar o validar la sincronización del video. Los archivos disponibles se conservaron para recuperación.",
             )
         }
         return try {
-            val firstFrameNs = active.frames.firstTimestampNs ?: startedAtNs
+            val captured = active.frames.timestamps()
+            val firstFrameNs = captured.first()
             // Rooms are [from, to): +1 keeps the last frame inside the last room.
-            val endNs = maxOf(active.lastFrameNs, firstFrameNs) + 1
-            val rooms = timeline.finish(endNs)
+            val endNs = captured.last() + 1
+            val rooms = finalizedRooms ?: run {
+                if (timeline.currentId == null) timeline.start(firstFrameNs)
+                timeline.finish(endNs)
+            }
             // A reference whose frame is not logged or lies outside the rooms would make the worker reject the package.
             val usableReference = reference?.takeIf { ReferenceCoverage.isCovered(it, active.frames, rooms) }
             val manifest = VideoManifestBuilder.build(
@@ -992,7 +1310,6 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
             )
             val zip = File(filesDir, "capture_packages/$captureId.zip")
             val outcome = VideoPackageBuilder.build(workDir, zip, manifest, active.frames, active.sensors)
-            workDir.deleteRecursively()
             when (outcome) {
                 is VideoPackageOutcome.TooLarge -> VideoCaptureResult.error(
                     VideoCaptureResult.ERROR_PACKAGE_TOO_LARGE,
@@ -1008,11 +1325,11 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
                     durationMs = (endNs - firstFrameNs) / 1_000_000L,
                     reachedTimeLimit = reachedTimeLimit,
                     timestampSource = active.timestampSource,
+                    sha256 = CaptureRecovery.sha256(zip),
                 )
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Video package failed", e)
-            workDir.deleteRecursively()
+            Log.e(TAG, "Video package failed; original preserved", e)
             VideoCaptureResult.error(
                 VideoCaptureResult.ERROR_RECORDING_FAILED,
                 "No pudimos armar el paquete del recorrido (¿poco espacio en el teléfono?).",
@@ -1039,6 +1356,8 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         if (phase == Phase.FINISHING || phase == Phase.DONE) return
         main.removeCallbacks(tick)
         workDir.deleteRecursively()
+        File(filesDir, "video_recovery/$captureId.json").delete()
+        File(filesDir, "video_recovery/$captureId.finalized.json").delete()
         finishWithResult(VideoCaptureResult.cancelled())
     }
 
@@ -1049,9 +1368,10 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         unlockOrientation()
         cancelDialog?.dismiss()
         cancelDialog = null
+        reviewDialog?.dismiss(); reviewDialog = null
         recorder?.release()
         recorder = null
-        if (result["outcome"] != "captured") workDir.deleteRecursively()
+        main.removeCallbacks(startTimeout) // Failed raw recordings remain private for recovery.
         setResult(RESULT_OK, Intent().putExtra(EXTRA_RESULT_JSON, JsonWriter.write(result)))
         finish()
     }
@@ -1061,27 +1381,74 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         if (phase == Phase.MARKING) endReference() else cancelCapture()
     }
 
+    override fun onResume() {
+        super.onResume()
+        foreground.resume()
+        resumePreviewGuidance()
+    }
+
+    override fun onPause() {
+        foreground.pause()
+        guidedProgress.invalidateObservation()
+        if (::guidanceConfirm.isInitialized) guidanceConfirm.visibility = View.GONE
+        if (::guidanceHidden.isInitialized) guidanceHidden.visibility = View.GONE
+        if (::hintText.isInitialized) hintText.visibility = View.GONE
+        visualSampler?.pause()
+        if (::visualOverlay.isInitialized) visualOverlay.corners = null
+        super.onPause()
+    }
+
     override fun onStop() {
         super.onStop()
-        // The camera and the sensors stop with the app in the background: the recording would have gaps.
-        if (phase == Phase.RECORDING || phase == Phase.MARKING) {
-            main.removeCallbacks(tick)
-            workDir.deleteRecursively()
-            finishWithResult(
-                VideoCaptureResult.error(VideoCaptureResult.ERROR_RECORDING_FAILED, "La grabación se interrumpió al salir de la app."),
-            )
+        visualSampler?.pause()
+        if (::visualOverlay.isInitialized) visualOverlay.corners = null
+        foreground.stop(phase == Phase.RECORDING || (phase == Phase.MARKING && pendingPackage == null))
+        if (::workDir.isInitialized && phase != Phase.DONE) checkpointRecovery("interrupted")
+        // A stopped encoder awaiting only the optional summary can be saved in background.
+        // Consume the closure once; dismissing its old dialog later cannot package twice.
+        if (phase == Phase.FINISHING && pendingPackage != null) { saveFinalReview(); return }
+        when (CaptureRecovery.onBackground(phase == Phase.RECORDING, phase == Phase.MARKING, pendingPackage != null)) {
+            CaptureRecovery.StopAction.FINALIZE, CaptureRecovery.StopAction.PACKAGE_FINALIZED -> finishRecording(false)
+            CaptureRecovery.StopAction.PRESERVE -> Unit
         }
     }
 
+    private fun checkpointRecovery(state: String) {
+        try {
+            if (phase == Phase.MARKING) {
+                // Keep unfinished input with the recording, never as a confirmed
+                // scale reference. Packaging/restart recovery preserves this file.
+                val points = markView.points()
+                CaptureRecovery.checkpoint(File(workDir, "reference-draft.json"), JsonWriter.write(mapOf(
+                    "confirmed" to false, "frameNs" to markView.frameNs,
+                    "corners" to markView.quad()?.map { it.toMap() },
+                    "points" to points?.let { listOf(it.first.toMap(), it.second.toMap()) },
+                    "lengthInput" to lengthInput.text.toString(), "shortSideInput" to shortSideInput.text.toString(),
+                    "lengthUnit" to "cm",
+                )))
+            }
+            CaptureRecovery.checkpoint(File(filesDir, "video_recovery/$captureId.json"), JsonWriter.write(mapOf(
+                "captureId" to captureId, "listingId" to listingId,
+                "ownerId" to intent.getStringExtra("ownerId"), "state" to state,
+                "referenceConfirmed" to (reference != null),
+                "reference" to reference?.toMap(),
+                "pendingCorners" to (if (::markView.isInitialized) markView.quad()?.map { it.toMap() } else null),
+            )))
+        } catch (e: Exception) { Log.e(TAG, "Recovery checkpoint failed; original preserved", e) }
+    }
+
     override fun onDestroy() {
+        reviewDialog?.dismiss(); reviewDialog = null
+        visualSampler?.close()
         getSystemService(DisplayManager::class.java).unregisterDisplayListener(displayListener)
-        if (phase != Phase.DONE) {
+        if (phase != Phase.DONE && phase != Phase.FINISHING) {
             unlockOrientation()
             main.removeCallbacks(tick)
             recorder?.release()
             recorder = null
-            workDir.deleteRecursively()
+            // A process/lifecycle interruption must not erase the only raw recording.
         }
+        main.removeCallbacks(startTimeout)
         super.onDestroy()
     }
 
@@ -1126,9 +1493,28 @@ class VideoCaptureActivity : Activity(), VideoRecorder.Listener {
         private val RED = Color.rgb(229, 57, 53)
         private val SCRIM = Color.argb(150, 0, 0, 0)
         private val RAIL_SCRIM = Color.argb(170, 0, 0, 0)
-        private const val IDLE_INSTRUCTION = "Encuadrá un objeto de medida conocida y tocá Grabar"
-        private const val RECORDING_INSTRUCTION = "Grabando · marcá la referencia y recorré el inmueble"
+        private const val IDLE_INSTRUCTION = "Preparación · guía visual opcional"
+        private const val RECORDING_INSTRUCTION = "Grabando · mantené el objeto al inicio; después recorré el ambiente"
     }
+}
+
+/** Main-thread lifecycle state: current visibility is separate from an interrupted recording. */
+internal class VideoCaptureForeground {
+    var resumed = false
+        private set
+    private var recordingInterrupted = false
+
+    val canConfirmReference: Boolean get() = resumed && !recordingInterrupted
+    fun canGuide(previewReady: Boolean, previewOrRecording: Boolean): Boolean =
+        resumed && previewReady && previewOrRecording
+
+    fun resume() { resumed = true }
+    fun pause() { resumed = false }
+    fun stop(recording: Boolean) {
+        pause()
+        if (recording) recordingInterrupted = true
+    }
+    fun recordingStarted() { recordingInterrupted = !resumed }
 }
 
 /**

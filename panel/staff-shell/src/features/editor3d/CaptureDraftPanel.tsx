@@ -3,6 +3,7 @@ import { listCaptures, type CaptureReview, type CaptureStatus } from "../../appl
 import { StaffListingsApiError } from "../../application/staffListingsApi";
 import { pendingEstimates, pendingOpenings, splitCaptureWarnings, type PendingEstimate } from "../../application/captureWarnings";
 import { isProportional, type SceneDocument } from "../../application/sceneContract";
+import { SceneViewer } from "./SceneViewer";
 import "./CaptureDraftPanel.css";
 
 interface Props {
@@ -26,7 +27,7 @@ const STATUS: Record<CaptureStatus, string> = {
   awaiting_upload: "Esperando la subida desde el teléfono.",
   queued: "En cola: esperando para reconstruirse.",
   processing: "Procesando: la reconstrucción sigue en curso.",
-  completed: "Completada: el borrador está listo para revisar.",
+  completed: "Procesamiento terminado: borrador pendiente de revisión.",
   failed: "Fallida.",
   accepted: "Aceptada: el borrador ya fue conservado y los fotogramas se eliminarán.",
 };
@@ -47,12 +48,14 @@ export function CaptureDraftPanel({
   const [captures, setCaptures] = useState<CaptureReview[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ agencyId: string; listingId: string; capture: CaptureReview } | null>(null);
   const tokenRef = useRef(accessToken);
   tokenRef.current = accessToken;
   const requestRef = useRef(0);
 
   const refresh = useCallback(async () => {
     const request = ++requestRef.current;
+    setPreview(null);
     setBusy(true);
     setError(null);
     try {
@@ -66,6 +69,8 @@ export function CaptureDraftPanel({
   }, [agencyId, listingId]);
 
   useEffect(() => {
+    setCaptures(null);
+    setPreview(null);
     void refresh();
     // A newer request (or unmount) makes any pending answer stale.
     return () => { requestRef.current++; };
@@ -89,15 +94,33 @@ export function CaptureDraftPanel({
           editable={loadedCaptureId === capture.captureId && scene !== undefined
             && (onConfirmMeasure !== undefined || onConfirmOpening !== undefined)}
           scene={scene} onConfirmMeasure={onConfirmMeasure} onConfirmOpening={onConfirmOpening} /> : null}
+        {capture.sceneDraft && (isProportional(capture.sceneDraft) || capture.sceneDraft.measurement?.alignment === "disconnected")
+          ? <p role="alert">Borrador generado — no medible. {isProportional(capture.sceneDraft)
+            ? "Sin escala metrica aplicada: las dimensiones confirmadas no bastan para medir el modelo."
+            : "Las piezas están desconectadas: no se conoce su posición relativa."} Revisa la evidencia o usa captura manual.</p> : null}
+        {capture.status === "completed" && capture.sceneDraft
+          ? <button className="review-button review-button--secondary" type="button"
+            disabled={busy || error !== null}
+            onClick={() => setPreview({ agencyId, listingId, capture })}>Inspeccionar sin editar</button>
+          : null}
         {capture.status === "completed" && capture.sceneDraft
           ? loadedCaptureId === capture.captureId
             ? <p>Borrador cargado en el editor: guarda la escena para aceptarlo.</p>
-            : <button className="review-button" type="button" disabled={disabled}
+            : <button className="review-button" type="button" disabled={disabled || isProportional(capture.sceneDraft) || capture.sceneDraft.unit !== "meters" || capture.sceneDraft.measurement?.alignment === "disconnected" || capture.sceneDraft.measurement?.clock === "unknown" || (capture.sceneDraft.measurement !== undefined && capture.sceneDraft.measurement.referenceConfirmed !== true)}
               onClick={() => onLoadDraft(capture.captureId, capture.sceneDraft as SceneDocument)}>
               Cargar borrador en el editor</button>
           : null}
       </li>)}
     </ul>
+    {preview && preview.agencyId === agencyId && preview.listingId === listingId && !error && preview.capture.sceneDraft
+      ? <section aria-label="Inspección provisional de captura">
+        <h4>Geometría provisional · solo lectura</h4>
+        <p>Mediciones no disponibles en esta vista. La posición relativa de componentes desconectados no está verificada.
+          Inspeccionar no carga el editor, guarda ni acepta la escena. Podés usar captura manual.</p>
+        <button type="button" onClick={() => setPreview(null)}>Cerrar inspección</button>
+        <SceneViewer key={`${agencyId}/${listingId}/${preview.capture.captureId}`}
+          sceneDocument={preview.capture.sceneDraft} />
+      </section> : null}
   </section>;
 }
 

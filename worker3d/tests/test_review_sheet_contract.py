@@ -33,9 +33,13 @@ def _run_cli(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_module_imports_and_help_runs_without_pillow() -> None:
-    assert "PIL" not in sys.modules, "the contract must hold without the image library installed"
-
-    result = _run_cli("--help")
+    # A native extraction test may already have loaded Pillow in the parent process.
+    # Prove the optional dependency contract in a fresh process that cannot import it.
+    result = subprocess.run(
+        [sys.executable, "-c", "import runpy,sys; sys.modules['PIL']=None; "
+         "sys.argv=['review_sheet.py','--help']; runpy.run_path('review_sheet.py',run_name='__main__')"],
+        capture_output=True, text=True, cwd=str(WORKER3D_DIR), check=False,
+    )
 
     assert result.returncode == 0
     assert "usage" in result.stdout.lower()

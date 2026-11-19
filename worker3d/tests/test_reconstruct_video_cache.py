@@ -76,6 +76,20 @@ def test_a_change_in_the_sensors_does_not_invalidate_the_sparse_reconstruction(t
     assert estimator.calls == 0
 
 
+def test_geometry_threshold_changes_reuse_sfm_but_sampling_budget_does_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package, model = T.single_room(tmp_path / "p")
+    cache = _cache(tmp_path)
+    _run(package, model, cache)
+    monkeypatch.setattr(rv, "GRAVITY_MAX_SKEW_NS", rv.GRAVITY_MAX_SKEW_NS // 2)
+    _, _, reused = _run(package, model, cache)
+    assert reused.calls == 0
+    monkeypatch.setattr(rv, "MAX_SFM_FRAMES", rv.MAX_SFM_FRAMES + 1)
+    _, _, refreshed = _run(package, model, cache)
+    assert refreshed.calls == 1
+
+
 def test_door_recognition_still_gets_its_frames_when_the_reconstruction_is_cached(tmp_path: Path) -> None:
     package, model = T.single_room(tmp_path / "p")
     cache = _cache(tmp_path)
@@ -101,3 +115,46 @@ def test_a_failed_reconstruction_is_not_cached(tmp_path: Path) -> None:
     _, _, estimator = _run(package, model, cache)
 
     assert estimator.calls == 1
+
+
+def test_cache_keeps_native_reference_diagnostics(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    import json
+    import logging
+
+    caplog.set_level(logging.INFO, logger=rv.__name__)
+    package, model = T.single_room(tmp_path / "p")
+    cache = _cache(tmp_path)
+    first = CountingEstimator([model])
+    first.diagnostics = {"verified_matches": 17, "verified_inliers": 250, "features_median": 64,
+                         "stage_durations": {"matching": 1.25}}
+    _run(package, model, cache, estimator=first)
+    caplog.clear()
+    _run(package, model, cache, estimator=CountingEstimator([model]))
+    record = next(r.message for r in caplog.records if r.message.startswith("F07 reconstruction diagnostic:"))
+    diagnostic = json.loads(record.split(": ", 1)[1])
+    assert diagnostic["verified_matches"] == 17
+    assert diagnostic["verified_inliers"] == 250
+    assert diagnostic["native_stage_durations"] == {"matching": 1.25}
+    assert diagnostic["sfm_cache_hit"] is True
+    assert diagnostic["frames_extracted"] == 0
+    assert diagnostic["output_acceptable"] is None
+
+
+def test_cached_sfm_never_skips_timestamp_validation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class CheckedExtractor(T.FakeExtractor):
+        checks = 0
+        reject = False
+
+        def validate_timestamps(self, video, frames):
+            self.checks += 1
+            if self.reject:
+                raise rv.InvalidPackage("MP4 presentation timestamps do not agree")
+
+    monkeypatch.setattr(rv, "FfmpegFrameExtractor", CheckedExtractor)
+    package, model = T.single_room(tmp_path / "p")
+    cache, extractor = _cache(tmp_path), CheckedExtractor()
+    _run(package, model, cache, extractor=extractor)
+    extractor.reject = True
+    with pytest.raises(rv.InvalidPackage, match="presentation timestamps"):
+        _run(package, model, cache, extractor=extractor)
+    assert extractor.checks == 2

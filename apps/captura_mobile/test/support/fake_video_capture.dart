@@ -5,13 +5,16 @@ import 'package:captura_mobile/data/services/video_capture_channel.dart';
 class FakeVideoCapture implements VideoCapture {
   final List<VideoCaptureResult> results = [];
   final List<String> listingIds = [];
+  Future<void> Function()? beforeReturn;
 
   @override
   Future<VideoCaptureResult> record({
     required String listingId,
+    String? ownerId,
     String? firstRoomName,
   }) async {
     listingIds.add(listingId);
+    await beforeReturn?.call();
     return results.removeAt(0);
   }
 }

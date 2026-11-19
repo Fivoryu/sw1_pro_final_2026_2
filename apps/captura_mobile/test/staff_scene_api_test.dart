@@ -153,6 +153,47 @@ void main() {
       expect((result as SceneSaved).etag, '"5"');
     });
 
+    test(
+      'manual overwrite declares intent and captured metadata survives the DTO',
+      () async {
+        late http.Request seen;
+        final api = StaffSceneApi(
+          baseUrl: _baseUrl,
+          client: MockClient((request) async {
+            seen = request;
+            return _json(_scene, 200, etag: '"6"');
+          }),
+        );
+        await api.save(
+          accessToken: 'token',
+          agencyId: 'agency-1',
+          listingId: 'listing-1',
+          document: _scene,
+          baseEtag: '"5"',
+          manualReplacement: true,
+        );
+        expect(seen.headers['X-Scene-Intent'], 'manual-replacement');
+        expect(seen.headers['If-Match'], '"5"');
+        final captured = {
+          ..._scene,
+          'captureId': 'cap-1',
+          'measurement': {
+            'source': 'sfm',
+            'scale': 'reference',
+            'alignment': 'connected',
+            'clock': 'realtime',
+            'referenceConfirmed': true,
+          },
+        };
+        expect(sceneUploadDocument(captured)['captureId'], 'cap-1');
+        expect(
+          sceneUploadDocument(captured)['measurement'],
+          captured['measurement'],
+        );
+        expect(sceneUploadDocument(_scene).containsKey('measurement'), isFalse);
+      },
+    );
+
     test('turns a precondition failure into a conflict', () async {
       final api = StaffSceneApi(
         baseUrl: _baseUrl,

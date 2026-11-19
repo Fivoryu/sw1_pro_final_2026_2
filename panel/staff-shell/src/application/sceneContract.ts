@@ -15,7 +15,7 @@ export interface SceneDimensions {
 
 export type SceneWallHeightSource = "ceiling_plane" | "wall_point" | "manual" | "assumed" | "estimated";
 
-export type SceneObjectSource = "depth" | "manual";
+export type SceneObjectSource = "depth" | "manual" | "sfm_estimated";
 
 export interface SceneWall {
   id: string;
@@ -68,8 +68,9 @@ export interface SceneObject {
 
 export interface SceneDocument {
   version: "2.0";
-  unit: "meters";
-  /** Absent in older scenes, which are metric. `proportional`: keeps ratios, not real meters. */
+  unit: "meters" | "arbitrary";
+  measurement?: { source: "sfm"; scale: "reference" | "unscaled"; alignment: "connected" | "disconnected"; clock: "realtime" | "unknown"; referenceConfirmed?: boolean };
+  captureId?: string;
   scale?: { mode: "metric" | "proportional" };
   walls: SceneWall[];
   openings: SceneOpeningV2[];
@@ -213,6 +214,6 @@ export const DEFAULT_SCENE_DOCUMENT: SceneDocument = {
 };
 
 /** A proportional plan keeps ratios and connections but its values are not real meters. */
-export function isProportional(scene: Pick<SceneDocument, "scale">): boolean {
-  return scene.scale?.mode === "proportional";
+export function isProportional(scene: Pick<SceneDocument, "scale"> & Partial<Pick<SceneDocument, "unit" | "measurement">>): boolean {
+  return scene.unit === "arbitrary" || scene.scale?.mode === "proportional" || scene.measurement?.scale === "unscaled";
 }

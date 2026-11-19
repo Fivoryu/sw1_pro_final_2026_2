@@ -6,6 +6,7 @@ import 'package:captura_mobile/domain/spatial/capture_upload_controller.dart';
 import 'package:captura_mobile/domain/staff_session_controller.dart';
 import 'package:captura_mobile/domain/video_capture_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:captura_mobile/data/services/capture_draft_store.dart';
 
 import 'support/fake_capture_backend.dart';
 import 'support/fake_staff_backend.dart';
@@ -20,9 +21,10 @@ Future<
     FakeVideoCapture capture,
     FakeCaptureBackend backend,
     CaptureUploadController uploads,
+    StaffSessionController session,
   })
 >
-_build() async {
+_build({PendingUploadStore? store, bool login = true}) async {
   final session = StaffSessionController(
     api: StaffAuthApi(
       baseUrl: 'https://api.example.test',
@@ -31,8 +33,10 @@ _build() async {
     credentialStore: InMemoryStaffCredentialStore(),
   );
   await session.restore();
-  await session.startLogin(email: 'agent@example.test', password: 'x');
-  await session.submitCode('123456');
+  if (login) {
+    await session.startLogin(email: 'agent@example.test', password: 'x');
+    await session.submitCode('123456');
+  }
   final backend = FakeCaptureBackend();
   final uploads = CaptureUploadController(
     listingId: 'listing-1',
@@ -41,7 +45,7 @@ _build() async {
       baseUrl: 'https://api.example.test',
       client: backend.client,
     ),
-    store: InMemoryPendingUploadStore(),
+    store: store ?? InMemoryPendingUploadStore(),
     files: FakePackageFiles({_zipPath: List<int>.generate(100, (i) => i)}),
   );
   await uploads.load();
@@ -56,10 +60,69 @@ _build() async {
     capture: capture,
     backend: backend,
     uploads: uploads,
+    session: session,
   );
 }
 
+class FailingQueueStore extends InMemoryPendingUploadStore {
+  bool fail = true;
+  @override
+  Future<void> save(String ownerId, PendingCaptureUpload upload) async {
+    if (fail) throw FileSystemExceptionForTest();
+    await super.save(ownerId, upload);
+  }
+}
+
+class FileSystemExceptionForTest implements Exception {}
+
 void main() {
+  test(
+    'session loss during native recording preserves the package for its original owner',
+    () async {
+      final h = await _build();
+      h.capture.results.add(videoCaptured());
+      h.capture.beforeReturn = h.session.signOut;
+      await h.controller.start();
+      expect(h.controller.status, VideoCaptureStatus.failed);
+      expect(h.controller.pendingPackage, isNotNull);
+      expect(h.uploads.items, isEmpty);
+      expect(h.backend.requests, isEmpty);
+    },
+  );
+
+  test('missing session never reports durable delivery', () async {
+    final h = await _build(login: false);
+    h.capture.results.add(videoCaptured());
+    await h.controller.start();
+    expect(h.controller.status, VideoCaptureStatus.failed);
+    expect(h.controller.pendingPackage, isNull);
+    expect(h.capture.listingIds, isEmpty);
+    expect(h.backend.requests, isEmpty);
+  });
+  test(
+    'disk failure preserves the ZIP and retry queues it without recording again',
+    () async {
+      final store = FailingQueueStore();
+      final h = await _build(store: store);
+      h.capture.results.add(videoCaptured());
+      await h.controller.start();
+      expect(h.controller.status, VideoCaptureStatus.failed);
+      expect(h.controller.pendingPackage, isNotNull);
+      store.fail = false;
+      await h.controller.start();
+      await h.uploads.idle;
+      expect(h.controller.status, VideoCaptureStatus.sent);
+      expect(h.capture.listingIds, hasLength(1));
+    },
+  );
+  test('native channel exception leaves a recoverable UI', () async {
+    final h = await _build();
+    await h.controller
+        .start(); // Empty native script throws; controller must recover.
+    expect(h.controller.status, VideoCaptureStatus.failed);
+    expect(h.controller.busy, isFalse);
+  });
+
   test('a recording goes through the existing upload queue', () async {
     final h = await _build();
     h.capture.results.add(videoCaptured());

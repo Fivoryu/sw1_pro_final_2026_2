@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:captura_mobile/data/services/staff_auth_failure.dart';
@@ -210,6 +211,42 @@ void main() {
       expect(backend.requests, isEmpty);
     });
 
+    test(
+      'all bytes read does not confirm the PUT before its response',
+      () async {
+        final bodyReceived = Completer<void>();
+        final response = Completer<http.Response>();
+        addTearDown(() {
+          if (!response.isCompleted) response.complete(http.Response('', 200));
+        });
+        final api = StaffCaptureApi(
+          baseUrl: 'https://api.example.test',
+          client: MockClient((_) {
+            bodyReceived.complete();
+            return response.future;
+          }),
+        );
+        var bytesRead = 0;
+        var completed = false;
+        final upload = api
+            .upload(
+              uploadUrl: 'https://storage.example.test/upload/cap-1',
+              body: _bytes([1, 2, 3]),
+              length: 3,
+              onProgress: (sent) => bytesRead = sent,
+            )
+            .then((_) {
+              completed = true;
+            });
+        await bodyReceived.future;
+        expect(bytesRead, 3);
+        expect(completed, isFalse);
+        response.complete(http.Response('', 200));
+        await upload;
+        expect(completed, isTrue);
+      },
+    );
+
     test('an expired signature is a distinct failure', () async {
       final backend = FakeCaptureBackend()..expirePuts = 1;
 
@@ -233,11 +270,13 @@ void main() {
           length: 1,
         ),
         throwsA(
-          isA<StaffAuthFailure>().having(
-            (f) => f.isNetworkFailure,
-            'net',
-            true,
-          ),
+          isA<UploadConnectionFailure>()
+              .having((f) => f.isNetworkFailure, 'net', true)
+              .having(
+                (f) => f.detail,
+                'storage failure',
+                contains('almacenamiento'),
+              ),
         ),
       );
     });
@@ -273,6 +312,7 @@ void main() {
         sizeBytes: 1,
       );
 
+      backend.captures['cap-1']!.uploaded = [1];
       final first = await api.complete(
         accessToken: 't',
         agencyId: 'a',

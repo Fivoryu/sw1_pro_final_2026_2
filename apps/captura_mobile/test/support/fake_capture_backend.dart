@@ -29,6 +29,8 @@ class FakeCaptureBackend {
 
   /// `5xx` on the next `complete` calls.
   int failCompletes = 0;
+  int loseUploadsBeforeComplete = 0;
+  bool verifyCompletion = true;
 
   /// What `register` answers for a capture too large for the API.
   bool rejectRegistration = false;
@@ -109,12 +111,22 @@ class FakeCaptureBackend {
 
   http.Response _complete(FakeCapture capture) {
     completeCalls += 1;
+    if (loseUploadsBeforeComplete > 0) {
+      loseUploadsBeforeComplete--;
+      capture.uploaded = null;
+    }
     if (failCompletes > 0) {
       failCompletes -= 1;
       return _json({'detail': 'down', 'code': 'dependency_unavailable'}, 503);
     }
+    if (capture.uploaded?.length != capture.sizeBytes)
+      return _json({'detail': 'missing upload'}, 409);
     if (capture.status == 'awaiting_upload') capture.status = 'queued';
-    return _json({'captureId': capture.id, 'status': capture.status}, 202);
+    return _json({
+      'captureId': capture.id,
+      'status': capture.status,
+      'uploadVerified': verifyCompletion,
+    }, 202);
   }
 
   http.Response _status(FakeCapture capture) {
