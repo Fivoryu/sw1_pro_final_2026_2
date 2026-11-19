@@ -8,7 +8,9 @@ import '../../../../data/services/quote_api.dart';
 import '../../../../data/services/scene_api.dart';
 import '../../../../domain/catalog_controller.dart';
 import '../../../../domain/customer_reservations_controller.dart';
+import '../../../../domain/customer_favorites_controller.dart';
 import '../../../../domain/customer_session_controller.dart';
+import '../../favorites/favorite_button.dart';
 import 'catalog_format.dart';
 import 'listing_photo.dart';
 import '../../chat/chat_conversation_screen.dart';
@@ -33,7 +35,11 @@ class ListingDetailScreen extends StatefulWidget {
     this.quoteApi,
     this.chatApi,
     this.reviewsApi,
+    this.favoritesController,
   });
+
+  /// When provided, a signed-in customer marks the listing as favorite.
+  final CustomerFavoritesController? favoritesController;
 
   /// When provided, the detail offers a chat with the agency.
   final CustomerChatApi? chatApi;
@@ -119,7 +125,17 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Detalle del inmueble')),
+    appBar: AppBar(
+      title: const Text('Detalle del inmueble'),
+      actions: [
+        if (widget.favoritesController != null)
+          FavoriteButton(
+            controller: widget.favoritesController!,
+            listingId: widget.listingId,
+            listing: _detail?.listing,
+          ),
+      ],
+    ),
     body: Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 720),
