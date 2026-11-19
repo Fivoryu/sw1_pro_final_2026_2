@@ -81,6 +81,21 @@ void main() {
         'Consultando el estado…',
       );
     });
+
+    test('100 percent still waits for the storage response', () {
+      final text = captureUploadText(
+        _item(
+          _upload(stage: UploadStage.registered),
+          phase: UploadPhase.uploading,
+          progress: 1,
+        ),
+      );
+      expect(text.title, 'Esperando respuesta del almacenamiento…');
+      expect(text.detail, contains('todavía no está confirmado'));
+      expect(text.progress, 1);
+      expect(text.canRetry, isFalse);
+      expect(text.canDismiss, isFalse);
+    });
   });
 
   group('before the server has it', () {
@@ -143,7 +158,9 @@ void main() {
       final text = captureUploadText(
         _item(sent(RemoteCaptureStatus.completed)),
       );
-      expect(text.title, 'Borrador listo');
+      expect(text.title, 'Borrador generado · requiere revisión');
+      expect(text.detail, contains('medidas aún deben validarse'));
+      expect(text.detail, contains('captura manual'));
       expect(text.detail, contains('panel'));
       expect(text.canRefresh, isFalse);
       expect(text.canDismiss, isTrue);
@@ -155,7 +172,7 @@ void main() {
       );
       expect(text.title, 'La reconstrucción falló');
       expect(text.detail, contains('Sin piso detectado'));
-      expect(text.detail, contains('Volvé a capturar'));
+      expect(text.detail, contains('captura manual'));
       expect(text.canDismiss, isTrue);
     });
 
@@ -163,6 +180,73 @@ void main() {
       final text = captureUploadText(_item(sent(RemoteCaptureStatus.failed)));
       expect(text.detail, contains('no indicó el motivo'));
     });
+
+    test(
+      'classified geometry failure explains overlap and manual fallback',
+      () {
+        final text = captureUploadText(
+          _item(
+            sent(
+              RemoteCaptureStatus.failed,
+              reason:
+                  'Invalid package: F07_OVERLAP: 20/145 imágenes registradas',
+            ),
+          ),
+        );
+        expect(text.detail, contains('superpuestas'));
+        expect(text.detail, contains('20/145'));
+        expect(text.detail, contains('captura manual'));
+      },
+    );
+
+    test(
+      'runtime failure asks for technical review instead of a new recording',
+      () {
+        final text = reconstructionFailureText(
+          'F07_SFM: Falló el procesamiento SfM.',
+        );
+        expect(text, contains('revisión técnica'));
+        expect(text, contains('No necesitás grabar otra vez'));
+      },
+    );
+
+    test(
+      'missing scale and unknown clock are reported only when evidenced',
+      () {
+        final text = reconstructionFailureText(
+          'F07_OVERLAP: 9/145 vistas. '
+          'Sin referencia métrica. Reloj no verificado.',
+        );
+        expect(text, contains('dimensiones reales medidas'));
+        expect(text, contains('no pueden certificarse'));
+        expect(
+          reconstructionFailureText('F07_CONTOUR: contorno incompleto'),
+          isNot(contains('Falta una referencia')),
+        );
+      },
+    );
+
+    test(
+      'unapplied scale and disconnected pieces survive contour formatting',
+      () {
+        final text = reconstructionFailureText(
+          'Invalid package: F07_CONTOUR: No se pudo cerrar ningún ambiente. '
+          'Referencia sin escala aplicada. Piezas desconectadas. '
+          'Reloj no verificado.',
+        );
+        expect(text, contains('dimensiones aportadas no pudieron aplicarse'));
+        expect(text, contains('pared o piso de apoyo'));
+        expect(text, contains('vistas compartidas entre zonas'));
+        expect(text, contains('no pueden certificarse'));
+        expect(text, contains('captura manual'));
+        expect(text, isNot(contains('Falta una referencia')));
+        final historical = reconstructionFailureText(
+          'F07_CONTOUR: contorno incompleto',
+        );
+        expect(historical, isNot(contains('dimensiones aportadas')));
+        expect(historical, isNot(contains('posición relativa')));
+      },
+    );
 
     test('accepted', () {
       expect(

@@ -1,0 +1,13 @@
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TORCH_HOME=/cache/torch
+RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY infra/docker/inference/requirements.txt infra/docker/inference/requirements-reconstruction.txt ./
+RUN pip install --no-cache-dir -r requirements-reconstruction.txt \
+    && python -c "import imageio_ffmpeg,os; os.symlink(imageio_ffmpeg.get_ffmpeg_exe(), '/usr/local/bin/ffmpeg')"
+COPY worker3d/ /work/
+WORKDIR /work
+# Runs encoders and native feature extraction/matching, without downloading a model or capture.
+RUN python runtime_smoke.py
+ENTRYPOINT ["python", "/work/reconstruction_worker.py"]

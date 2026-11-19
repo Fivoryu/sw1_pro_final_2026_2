@@ -4,14 +4,17 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../data/services/ar_capture_channel.dart';
+import '../../data/services/video_capture_channel.dart';
 import '../../domain/spatial/capture_upload_controller.dart';
 import '../../domain/spatial/spatial.dart';
 import '../../domain/spatial_capture_controller.dart';
+import '../../domain/video_capture_controller.dart';
 import 'capture_upload_format.dart';
 import 'floor_plan_view.dart';
 import 'floorplan_trace_screen.dart';
 import 'room_editor_screen.dart';
 import 'spatial_format.dart';
+import 'video_capture_screen.dart';
 
 /// Minimum 48 dp touch target for primary actions.
 const _actionMinSize = Size.fromHeight(48);
@@ -23,9 +26,15 @@ class SpatialCaptureScreen extends StatefulWidget {
     super.key,
     required this.controller,
     this.syncBlockedReason,
+    this.videoCapture,
   });
 
   final SpatialCaptureController controller;
+
+  /// Native recorder of the video walkthrough; the production channel when
+  /// null. The walkthrough needs the upload queue, so without it the entry is
+  /// hidden.
+  final VideoCapture? videoCapture;
 
   /// Why the capture cannot be sent now (for example, a listing under review);
   /// capturing and editing on the phone stay available.
@@ -127,6 +136,23 @@ class _SpatialCaptureScreenState extends State<SpatialCaptureScreen> {
     if (message != null && mounted) _show(message);
   }
 
+  void _recordVideo() {
+    final uploads = _controller.uploads;
+    if (uploads == null) return;
+    final recording = VideoCaptureController(
+      listingId: _controller.listingId,
+      capture: widget.videoCapture ?? MethodChannelVideoCapture(),
+      uploads: uploads,
+    );
+    Navigator.of(context)
+        .push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => VideoCaptureScreen(controller: recording),
+          ),
+        )
+        .whenComplete(recording.dispose);
+  }
+
   Future<void> _connect() async {
     final message = await showDialog<String?>(
       context: context,
@@ -199,7 +225,9 @@ class _SpatialCaptureScreenState extends State<SpatialCaptureScreen> {
                 ),
                 const SizedBox(height: 16),
                 if (_controller.uploads case final uploads?
-                    when uploads.items.isNotEmpty) ...[
+                    when uploads.items.isNotEmpty ||
+                        uploads.message != null ||
+                        uploads.busy) ...[
                   _UploadsCard(uploads: uploads),
                   const SizedBox(height: 16),
                 ],
@@ -261,6 +289,18 @@ class _SpatialCaptureScreenState extends State<SpatialCaptureScreen> {
                   icon: const Icon(Icons.view_in_ar),
                   label: const Text('Capturar ambiente'),
                 ),
+                if (_controller.uploads != null) ...[
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    key: const ValueKey('record-video-button'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: _actionMinSize,
+                    ),
+                    onPressed: _controller.busy ? null : _recordVideo,
+                    icon: const Icon(Icons.videocam_outlined),
+                    label: const Text('Grabar recorrido en video'),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
                   key: const ValueKey('connect-rooms-button'),
@@ -323,6 +363,14 @@ class _UploadsCard extends StatelessWidget {
             if (uploads.message != null) ...[
               const SizedBox(height: 8),
               Text(uploads.message!),
+            ],
+            if (uploads.busy &&
+                uploads.items.every(
+                  (item) => item.phase == UploadPhase.idle,
+                )) ...[
+              const SizedBox(height: 8),
+              const Text('Revisando la cola y preparando el reintento…'),
+              const LinearProgressIndicator(),
             ],
             for (final item in uploads.items) ...[
               const SizedBox(height: 12),

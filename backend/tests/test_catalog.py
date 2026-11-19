@@ -385,6 +385,7 @@ def test_detail_has_minimal_public_schema_and_hides_private_fields(
                 "origin": None,
                 "visual_reference": None,
                 "quantity": 1,
+                "inclusion": "optional",
             }
         ],
         "photos": [],
@@ -405,6 +406,7 @@ def test_detail_has_minimal_public_schema_and_hides_private_fields(
         "origin",
         "visual_reference",
         "quantity",
+        "inclusion",
     }
 
 
@@ -1337,6 +1339,7 @@ def test_openapi_and_validation_preserve_staff_customer_namespaces(
         "origin",
         "visual_reference",
         "quantity",
+        "inclusion",
     }
 
     catalog_invalid = context.client.get("/api/v1/listings", params={"limit": 0})
@@ -2103,3 +2106,80 @@ def test_quote_rate_limit_is_atomic_under_sqlite_concurrency() -> None:
         assert sum(response.status_code == 429 for response in responses) == 2
     finally:
         engine.dispose()
+
+
+def _set_extra_inclusion(context: CatalogApiContext, extra_id: str, inclusion: str) -> None:
+    from app.modules.catalog.models import ListingExtra
+
+    with context.session_factory.begin() as session:
+        session.execute(
+            update(ListingExtra).where(ListingExtra.id == extra_id).values(inclusion=inclusion)
+        )
+
+
+def test_included_extras_are_in_every_quote_without_being_selected(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    context = catalog_api_context
+    client_app(context.client).state.clock = lambda: datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+    _seed_listing(
+        context,
+        listing_id="included-listing",
+        extras=(("extra-sofa", "Sofa", "300.00"), ("extra-lamp", "Lamp", "20.00")),
+    )
+    _set_extra_inclusion(context, "extra-sofa", "included")
+
+    response = context.client.post(
+        "/api/v1/quotes",
+        json=_quote_payload(listing_id="included-listing", offer_version=3),
+    )
+
+    assert response.status_code == 201
+    quote = response.json()
+    assert [line["extra_id"] for line in quote["lines"]] == [None, "extra-sofa"]
+    assert quote["one_time_total"] == {"amount": "100300.00", "currency": "BOB"}
+
+
+def test_selecting_an_included_extra_does_not_duplicate_its_line(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    context = catalog_api_context
+    client_app(context.client).state.clock = lambda: datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+    _seed_listing(
+        context,
+        listing_id="included-listing",
+        extras=(("extra-sofa", "Sofa", "300.00"), ("extra-lamp", "Lamp", "20.00")),
+    )
+    _set_extra_inclusion(context, "extra-sofa", "included")
+
+    response = context.client.post(
+        "/api/v1/quotes",
+        json=_quote_payload(
+            listing_id="included-listing",
+            offer_version=3,
+            selected_extra_ids=["extra-sofa", "extra-lamp"],
+        ),
+    )
+
+    assert response.status_code == 201
+    quote = response.json()
+    assert [line["extra_id"] for line in quote["lines"]] == [None, "extra-lamp", "extra-sofa"]
+    assert quote["one_time_total"] == {"amount": "100320.00", "currency": "BOB"}
+
+
+def test_public_detail_tells_which_extras_are_included_and_defaults_to_optional(
+    catalog_api_context: CatalogApiContext,
+) -> None:
+    context = catalog_api_context
+    _seed_listing(
+        context,
+        listing_id="included-detail",
+        extras=(("extra-sofa", "Sofa", "300.00"), ("extra-lamp", "Lamp", "20.00")),
+    )
+    _set_extra_inclusion(context, "extra-sofa", "included")
+
+    response = context.client.get("/api/v1/listings/included-detail")
+
+    assert response.status_code == 200
+    modes = {extra["extra_id"]: extra["inclusion"] for extra in response.json()["extras"]}
+    assert modes == {"extra-sofa": "included", "extra-lamp": "optional"}

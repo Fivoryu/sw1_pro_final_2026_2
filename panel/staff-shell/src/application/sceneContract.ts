@@ -13,9 +13,9 @@ export interface SceneDimensions {
   depth: number;
 }
 
-export type SceneWallHeightSource = "ceiling_plane" | "wall_point" | "manual" | "assumed";
+export type SceneWallHeightSource = "ceiling_plane" | "wall_point" | "manual" | "assumed" | "estimated";
 
-export type SceneObjectSource = "depth" | "manual";
+export type SceneObjectSource = "depth" | "manual" | "sfm_estimated";
 
 export interface SceneWall {
   id: string;
@@ -24,7 +24,10 @@ export interface SceneWall {
   height: number;
   thickness: number;
   color?: string;
-  /** F07 capture provenance of `height`; `assumed` means it was not measured. */
+  /**
+   * F07 capture provenance of `height`; `assumed` and `estimated` mean it was not measured
+   * (estimated = derived from video) until the agent confirms it as `manual`.
+   */
   heightSource?: SceneWallHeightSource;
 }
 
@@ -37,6 +40,11 @@ export interface SceneOpeningV2 {
   height: number;
   type: "door" | "window";
   sillHeight?: number;
+  /**
+   * F07: `estimated` when a capture recognised the opening with a single signal; the agent
+   * clears it by confirming. Absent for openings drawn by hand.
+   */
+  source?: "estimated";
 }
 
 export interface SceneRoomV2 {
@@ -60,7 +68,10 @@ export interface SceneObject {
 
 export interface SceneDocument {
   version: "2.0";
-  unit: "meters";
+  unit: "meters" | "arbitrary";
+  measurement?: { source: "sfm"; scale: "reference" | "unscaled"; alignment: "connected" | "disconnected"; clock: "realtime" | "unknown"; referenceConfirmed?: boolean };
+  captureId?: string;
+  scale?: { mode: "metric" | "proportional" };
   walls: SceneWall[];
   openings: SceneOpeningV2[];
   rooms: SceneRoomV2[];
@@ -201,3 +212,8 @@ export const DEFAULT_SCENE_DOCUMENT: SceneDocument = {
     },
   ],
 };
+
+/** A proportional plan keeps ratios and connections but its values are not real meters. */
+export function isProportional(scene: Pick<SceneDocument, "scale"> & Partial<Pick<SceneDocument, "unit" | "measurement">>): boolean {
+  return scene.unit === "arbitrary" || scene.scale?.mode === "proportional" || scene.measurement?.scale === "unscaled";
+}

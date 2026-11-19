@@ -49,3 +49,14 @@ worker3d/.cache/
 
 # Instance id written by the gentle-ai SDD tooling
 .gentle-ai-instance
+
+# F07: evidencia, capturas y herramientas temporales locales (solo en la raíz).
+/F07_*
+/integrate_f07_local.py
+/resolve_f07_merge.py
+# Paquetes privados de captura; nunca forman parte de un PR.
+*.mp4
+*.mov
+*.zip
+*.apk
+*.aab

@@ -40,6 +40,7 @@ typedef _Built = ({
   SpatialCaptureController controller,
   FakeCaptureBackend backend,
   InMemoryPendingUploadStore pending,
+  FakePackageFiles files,
 });
 
 Future<_Built> _build(
@@ -49,6 +50,9 @@ Future<_Built> _build(
 }) async {
   final captures = backend ?? FakeCaptureBackend();
   final pending = InMemoryPendingUploadStore();
+  final files = FakePackageFiles({
+    _zipPath: [1, 2, 3, 4],
+  });
   late SpatialCaptureController controller;
   await tester.runAsync(() async {
     final session = StaffSessionController(
@@ -79,14 +83,17 @@ Future<_Built> _build(
           client: captures.client,
         ),
         store: pending,
-        files: FakePackageFiles({
-          _zipPath: [1, 2, 3, 4],
-        }),
+        files: files,
       ),
     );
     await controller.load();
   });
-  return (controller: controller, backend: captures, pending: pending);
+  return (
+    controller: controller,
+    backend: captures,
+    pending: pending,
+    files: files,
+  );
 }
 
 Future<void> _pump(
@@ -163,7 +170,11 @@ void main() {
       );
       await _pump(tester, built.controller);
 
-      expect(find.text('Borrador listo'), findsOneWidget);
+      expect(
+        find.text('Borrador generado · requiere revisión'),
+        findsOneWidget,
+      );
+      expect(find.text('Borrador listo'), findsNothing);
       expect(find.textContaining('panel'), findsOneWidget);
       expect(find.byKey(const ValueKey('upload-refresh-button')), findsNothing);
     },
@@ -199,17 +210,69 @@ void main() {
       backend: backend,
     );
     await _pump(tester, built.controller);
+    final uploads = built.controller.uploads!;
+    // initState retries automatically. Observe the finished offline attempt,
+    // not the transient local-only copy displayed before that attempt.
+    await tester.runAsync(() => uploads.idle);
+    await tester.pump();
 
-    expect(find.text('Recorrido guardado en el teléfono'), findsOneWidget);
+    expect(
+      find.text('Subida pendiente: no se completó el envío'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Sin conexión'), findsOneWidget);
+    expect(find.byKey(const ValueKey('upload-retry-button')), findsOneWidget);
+    expect(backend.requests, hasLength(1));
+    expect(backend.registerCalls, 0);
+    expect(backend.putCalls, 0);
+    expect(backend.completeCalls, 0);
+    var persisted = (await built.pending.list('staff-1')).single;
+    expect(persisted.captureId, 'cap-1');
+    expect(persisted.stage, UploadStage.local);
+    expect(persisted.lastError, contains('Sin conexión'));
+    expect(persisted.permanent, isFalse);
+    expect(persisted.zipPath, _zipPath);
+    expect(built.files.files[_zipPath], [1, 2, 3, 4]);
+    expect(built.files.deleted, isEmpty);
 
     await _tap(tester, find.byKey(const ValueKey('upload-retry-button')));
+    await tester.runAsync(() => uploads.idle);
+    await tester.pump();
     expect(find.textContaining('Sin conexión'), findsOneWidget);
+    expect(backend.requests, hasLength(2));
+    expect(built.files.files[_zipPath], [1, 2, 3, 4]);
+    expect(built.files.deleted, isEmpty);
 
     backend.offline = false;
     await _tap(tester, find.byKey(const ValueKey('upload-retry-button')));
+    await tester.runAsync(() => uploads.idle);
+    await tester.pump();
 
     expect(find.text('En la cola de reconstrucción'), findsOneWidget);
     expect(backend.captures, hasLength(1));
+    expect(backend.captures.keys.single, 'cap-1');
+    expect(backend.captures['cap-1']!.uploaded, [1, 2, 3, 4]);
     expect(backend.registerCalls, 1);
+    expect(backend.putCalls, 1);
+    expect(backend.completeCalls, 1);
+    persisted = (await built.pending.list('staff-1')).single;
+    expect(persisted.captureId, 'cap-1');
+    expect(persisted.stage, UploadStage.completed);
+    expect(persisted.remoteStatus, RemoteCaptureStatus.queued);
+    expect(persisted.lastError, isNull);
+    expect(persisted.zipPath, isNull);
+    expect(built.files.deleted, [_zipPath]);
+
+    // Further retry triggers can refresh status, but must not resend the ZIP.
+    await tester.runAsync(
+      () => Future.wait([uploads.retry(), uploads.retry()]),
+    );
+    await tester.pump();
+    expect(find.text('En la cola de reconstrucción'), findsOneWidget);
+    expect(backend.captures, hasLength(1));
+    expect(backend.registerCalls, 1);
+    expect(backend.putCalls, 1);
+    expect(backend.completeCalls, 1);
+    expect(built.files.deleted, [_zipPath]);
   });
 }

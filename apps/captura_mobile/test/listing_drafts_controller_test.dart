@@ -57,6 +57,24 @@ _build({bool signedIn = true}) async {
 }
 
 void main() {
+  group('reset', () {
+    test('clears the previous account listings and notifies', () async {
+      final harness = await _build();
+      harness.backend.seed(id: 'draft-1');
+      await harness.controller.load();
+      expect(harness.controller.listings, isNotEmpty);
+      var notified = 0;
+      harness.controller.addListener(() => notified++);
+
+      harness.controller.reset();
+
+      expect(harness.controller.listings, isEmpty);
+      expect(harness.controller.loadState, ListingsLoadState.loading);
+      expect(harness.controller.message, isNull);
+      expect(notified, 1);
+    });
+  });
+
   group('load', () {
     test('loads the drafts of the session agency by default', () async {
       final harness = await _build();

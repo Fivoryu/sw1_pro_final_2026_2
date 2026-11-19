@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import base64
+import io
+import json
+import zipfile
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -83,6 +86,13 @@ def _scene() -> dict[str, Any]:
     }
 
 
+def _capture_zip(capture_id: str = _CAPTURE, listing_id: str = "listing-one") -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("manifest.json", json.dumps({"schemaVersion": 1, "captureId": capture_id, "listingId": listing_id}))
+    return buffer.getvalue()
+
+
 def _utc(value: datetime | None) -> datetime | None:
     assert value is not None
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value
@@ -151,9 +161,9 @@ class Ctx:
     def base(self, agency: str = "agency-one", listing: str = "listing-one") -> str:
         return f"/api/v1/staff/agencies/{agency}/listings/{listing}/captures"
 
-    def register(self, capture_id: str = _CAPTURE, size: int = 1000, **where: str) -> Any:
+    def register(self, capture_id: str = _CAPTURE, size: int | None = None, **where: str) -> Any:
         return self.client.post(
-            self.base(**where), json={"captureId": capture_id, "sizeBytes": size}
+            self.base(**where), json={"captureId": capture_id, "sizeBytes": size if size is not None else len(_capture_zip(capture_id))}
         )
 
     def row(self, capture_id: str = _CAPTURE) -> ListingCapture:
@@ -165,7 +175,7 @@ class Ctx:
     def queued(self) -> str:
         """Register, upload and complete; return the job id."""
         assert self.register().status_code == 201
-        self.storage.objects[self.row().object_key] = b"zip-bytes"
+        self.storage.objects[self.row().object_key] = _capture_zip()
         done = self.client.post(f"{self.base()}/{_CAPTURE}/complete")
         assert done.status_code == 202, done.text
         return self.row().job_id
@@ -259,20 +269,22 @@ def test_register_rejects_capture_id_already_used_by_another_listing(ctx: Ctx) -
 
 def test_complete_enqueues_once_and_is_idempotent(ctx: Ctx) -> None:
     ctx.register()
+    ctx.storage.objects[ctx.row().object_key] = _capture_zip()
     url = f"{ctx.base()}/{_CAPTURE}/complete"
 
     first = ctx.client.post(url)
     again = ctx.client.post(url)
 
     assert first.status_code == 202 and again.status_code == 202, again.text
-    assert first.json() == {"captureId": _CAPTURE, "status": "queued"}
-    assert again.json() == {"captureId": _CAPTURE, "status": "queued"}
+    assert first.json() == {"captureId": _CAPTURE, "status": "queued", "uploadVerified": True}
+    assert again.json() == {"captureId": _CAPTURE, "status": "queued", "uploadVerified": True}
     assert [m.job_id for m in ctx.queue.published] == [ctx.row().job_id]
     assert _utc(ctx.row().uploaded_at) == _T0
 
 
 def test_complete_with_unavailable_queue_keeps_capture_recoverable(ctx: Ctx) -> None:
     ctx.register()
+    ctx.storage.objects[ctx.row().object_key] = _capture_zip()
     ctx.queue.fail_on_publish = True
     url = f"{ctx.base()}/{_CAPTURE}/complete"
 
@@ -295,7 +307,7 @@ def test_complete_unknown_capture_is_404(ctx: Ctx) -> None:
 def test_get_reports_state_through_the_whole_lifecycle(ctx: Ctx) -> None:
     ctx.register()
     assert ctx.status()["status"] == "awaiting_upload"
-    ctx.storage.objects[ctx.row().object_key] = b"zip-bytes"
+    ctx.storage.objects[ctx.row().object_key] = _capture_zip()
     assert ctx.client.post(f"{ctx.base()}/{_CAPTURE}/complete").status_code == 202
     job_id = ctx.row().job_id
     assert ctx.status()["status"] == "queued"
@@ -318,6 +330,9 @@ def test_accept_only_from_completed_and_idempotent(ctx: Ctx) -> None:
     early = ctx.client.post(url)
     token = ctx.claim(job_id).json()["claim_token"]
     ctx.worker(job_id, "complete", token, {"sceneDraft": _scene(), "warnings": []})
+
+    saved = ctx.client.put(ctx.base().removesuffix("/captures") + "/scene", json={**_scene(), "captureId": _CAPTURE})
+    assert saved.status_code == 200, saved.text
 
     first = ctx.client.post(url)
     again = ctx.client.post(url)
@@ -530,6 +545,8 @@ def test_retention_deletes_frames_after_accept_but_keeps_draft(ctx: Ctx) -> None
     key = ctx.row().object_key
     before = run_capture_retention_sweep(ctx.session_factory, ctx.storage, now=_T0)
     assert before == 0 and key in ctx.storage.objects
+    saved = ctx.client.put(ctx.base().removesuffix("/captures") + "/scene", json={**_scene(), "captureId": _CAPTURE})
+    assert saved.status_code == 200, saved.text
     ctx.client.post(f"{ctx.base()}/{_CAPTURE}/accept")
 
     deleted = run_capture_retention_sweep(ctx.session_factory, ctx.storage, now=_T0)

@@ -720,184 +720,186 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-    'traces a local floorplan and keeps only metric geometry remote',
-    (tester) async {
-      final source = _FloorplanPhotoSource(
-        await tester.runAsync(_testPng) ?? Uint8List(0),
-      );
-      final built = await _build(tester, traceSource: source);
-      tester.view.physicalSize = const Size(720, 1600);
-      tester.view.devicePixelRatio = 2;
-      addTearDown(tester.view.reset);
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: andeanTheme(),
-          home: SpatialCaptureScreen(controller: built.controller),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await _tapAndSettle(
-        tester,
-        find.byKey(const ValueKey('capture-room-button')),
-      );
-      expect(find.text('Captura automática'), findsOneWidget);
-      expect(find.text('Dibujar ambiente'), findsOneWidget);
-      expect(find.text('Plano o croquis'), findsOneWidget);
-      expect(find.textContaining('PDF'), findsNothing);
-      await _tapAndSettle(
-        tester,
-        find.byKey(const ValueKey('floorplan-capture-method')),
-      );
-      expect(tester.takeException(), isNull);
-      final pick = find.byKey(const ValueKey('floorplan-pick-source'));
-      await tester.tap(pick);
+  testWidgets('traces a local floorplan and keeps only metric geometry remote', (
+    tester,
+  ) async {
+    final source = _FloorplanPhotoSource(
+      await tester.runAsync(_testPng) ?? Uint8List(0),
+    );
+    final built = await _build(tester, traceSource: source);
+    tester.view.physicalSize = const Size(720, 1600);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: andeanTheme(),
+        home: SpatialCaptureScreen(controller: built.controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _tapAndSettle(
+      tester,
+      find.byKey(const ValueKey('capture-room-button')),
+    );
+    expect(find.text('Captura automática'), findsOneWidget);
+    expect(find.text('Dibujar ambiente'), findsOneWidget);
+    expect(find.text('Plano o croquis'), findsOneWidget);
+    expect(find.textContaining('PDF'), findsNothing);
+    await _tapAndSettle(
+      tester,
+      find.byKey(const ValueKey('floorplan-capture-method')),
+    );
+    expect(tester.takeException(), isNull);
+    final pick = find.byKey(const ValueKey('floorplan-pick-source'));
+    await tester.tap(pick);
+    // Image decoding runs in real time: poll (bounded) instead of a fixed wait.
+    final deadline = DateTime.now().add(const Duration(seconds: 30));
+    while (find.text('Mover / zoom').evaluate().isEmpty &&
+        DateTime.now().isBefore(deadline)) {
       await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 500)),
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
       );
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(find.text('Mover / zoom'), findsOneWidget);
+    expect(find.text('Trazar'), findsOneWidget);
+    await tester.tap(find.text('Trazar'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('floorplan-room-name')),
+      'Dormitorio plano',
+    );
+    final canvas = find.byKey(const ValueKey('floorplan-trace-canvas'));
+    await tester.ensureVisible(canvas);
+    for (final point in const [
+      Offset(50, 30),
+      Offset(250, 30),
+      Offset(250, 230),
+      Offset(50, 230),
+    ]) {
+      await tester.tapAt(tester.getTopLeft(canvas) + point);
       await tester.pumpAndSettle();
-      expect(find.text('Mover / zoom'), findsOneWidget);
-      expect(find.text('Trazar'), findsOneWidget);
-      await tester.tap(find.text('Trazar'));
-      await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const ValueKey('floorplan-room-name')),
-        'Dormitorio plano',
-      );
-      final canvas = find.byKey(const ValueKey('floorplan-trace-canvas'));
-      await tester.ensureVisible(canvas);
-      for (final point in const [
-        Offset(50, 30),
-        Offset(250, 30),
-        Offset(250, 230),
-        Offset(50, 230),
-      ]) {
-        await tester.tapAt(tester.getTopLeft(canvas) + point);
-        await tester.pumpAndSettle();
-      }
-      final close = find.byKey(const ValueKey('trace-close'));
-      await tester.scrollUntilVisible(
-        close,
-        150,
-        scrollable: find
-            .descendant(
-              of: find.byKey(const ValueKey('floorplan-trace-scroll')),
-              matching: find.byType(Scrollable),
-            )
-            .first,
-      );
-      await tester.ensureVisible(close);
-      await tester.pumpAndSettle();
-      expect(close.hitTestable(), findsOneWidget);
-      await tester.tap(close);
-      await tester.pumpAndSettle();
-      await _enterWallDimensions(tester, 4);
-      expect(find.text('Pared de referencia'), findsNothing);
-      await tester.pumpAndSettle();
-      expect(find.text('Vista previa métrica'), findsOneWidget);
-      final provenance = find.text('Plano o croquis con medidas por pared');
-      await tester.scrollUntilVisible(
-        provenance,
-        200,
-        scrollable: find
-            .descendant(
-              of: find.byKey(const ValueKey('floorplan-trace-scroll')),
-              matching: find.byType(Scrollable),
-            )
-            .first,
-      );
-      expect(provenance, findsOneWidget);
-      expect(tester.takeException(), isNull);
-      final save = find.byKey(const ValueKey('floorplan-trace-save'));
-      await tester.scrollUntilVisible(
-        save,
-        200,
-        scrollable: find
-            .descendant(
-              of: find.byKey(const ValueKey('floorplan-trace-scroll')),
-              matching: find.byType(Scrollable),
-            )
-            .first,
-      );
-      await tester.tap(save);
-      await tester.pumpAndSettle();
+    }
+    final close = find.byKey(const ValueKey('trace-close'));
+    await tester.scrollUntilVisible(
+      close,
+      150,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('floorplan-trace-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.ensureVisible(close);
+    await tester.pumpAndSettle();
+    expect(close.hitTestable(), findsOneWidget);
+    await tester.tap(close);
+    await tester.pumpAndSettle();
+    await _enterWallDimensions(tester, 4);
+    expect(find.text('Pared de referencia'), findsNothing);
+    await tester.pumpAndSettle();
+    expect(find.text('Vista previa métrica'), findsOneWidget);
+    final provenance = find.text('Plano o croquis con medidas por pared');
+    await tester.scrollUntilVisible(
+      provenance,
+      200,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('floorplan-trace-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(provenance, findsOneWidget);
+    expect(tester.takeException(), isNull);
+    final save = find.byKey(const ValueKey('floorplan-trace-save'));
+    await tester.scrollUntilVisible(
+      save,
+      200,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('floorplan-trace-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.tap(save);
+    await tester.pumpAndSettle();
 
-      final room = built.controller.rooms.single;
-      expect(room.name, 'Dormitorio plano');
-      expect(room.acquisition.method, RoomAcquisitionMethod.floorplanTrace);
-      expect(room.metrics, isNull);
-      expect(edgeLengths(room.corners).first, closeTo(4, 1e-9));
-      expect(
-        find.text('Plano o croquis con medidas por pared'),
-        findsOneWidget,
-      );
-      expect(find.byKey(const ValueKey('edit-trace-room-1')), findsOneWidget);
-      expect(tester.takeException(), isNull);
+    final room = built.controller.rooms.single;
+    expect(room.name, 'Dormitorio plano');
+    expect(room.acquisition.method, RoomAcquisitionMethod.floorplanTrace);
+    expect(room.metrics, isNull);
+    expect(edgeLengths(room.corners).first, closeTo(4, 1e-9));
+    expect(find.text('Plano o croquis con medidas por pared'), findsOneWidget);
+    expect(find.byKey(const ValueKey('edit-trace-room-1')), findsOneWidget);
+    expect(tester.takeException(), isNull);
 
-      final editRoom = find.byKey(const ValueKey('edit-room-room-1'));
-      await tester.drag(
-        find.byKey(const ValueKey('spatial-capture-screen')),
-        const Offset(0, -800),
-      );
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(editRoom);
-      await tester.pumpAndSettle();
-      expect(editRoom.hitTestable(), findsOneWidget);
-      await tester.tap(editRoom);
-      await tester.pumpAndSettle();
-      expect(find.byType(RoomEditorScreen), findsOneWidget);
-      final addOpening = find.byKey(const ValueKey('add-opening-button'));
-      await tester.scrollUntilVisible(
-        addOpening,
-        300,
-        scrollable: find
-            .descendant(
-              of: find.byKey(const ValueKey('room-editor-scroll')),
-              matching: find.byType(Scrollable),
-            )
-            .first,
-      );
-      expect(addOpening, findsOneWidget);
-      expect(tester.takeException(), isNull);
-      Navigator.of(tester.element(find.byType(RoomEditorScreen))).pop();
-      await tester.pumpAndSettle();
+    final editRoom = find.byKey(const ValueKey('edit-room-room-1'));
+    await tester.drag(
+      find.byKey(const ValueKey('spatial-capture-screen')),
+      const Offset(0, -800),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(editRoom);
+    await tester.pumpAndSettle();
+    expect(editRoom.hitTestable(), findsOneWidget);
+    await tester.tap(editRoom);
+    await tester.pumpAndSettle();
+    expect(find.byType(RoomEditorScreen), findsOneWidget);
+    final addOpening = find.byKey(const ValueKey('add-opening-button'));
+    await tester.scrollUntilVisible(
+      addOpening,
+      300,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('room-editor-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(addOpening, findsOneWidget);
+    expect(tester.takeException(), isNull);
+    Navigator.of(tester.element(find.byType(RoomEditorScreen))).pop();
+    await tester.pumpAndSettle();
 
-      final fresh = await _newController(
-        tester,
-        backend: built.backend,
-        ar: built.ar,
-        store: built.store,
-      );
-      expect(
-        fresh.rooms.single.acquisition.method,
-        RoomAcquisitionMethod.floorplanTrace,
-      );
-      expect(fresh.traceForRoom('room-1'), isNotNull);
-      expect(fresh.preview!.document['version'], '2.0');
-      expect(fresh.preview!.document.toString(), isNot(contains('source-')));
+    final fresh = await _newController(
+      tester,
+      backend: built.backend,
+      ar: built.ar,
+      store: built.store,
+    );
+    expect(
+      fresh.rooms.single.acquisition.method,
+      RoomAcquisitionMethod.floorplanTrace,
+    );
+    expect(fresh.traceForRoom('room-1'), isNotNull);
+    expect(fresh.preview!.document['version'], '2.0');
+    expect(fresh.preview!.document.toString(), isNot(contains('source-')));
 
-      final trace = fresh.traceForRoom('room-1')!;
-      await fresh.discardFloorplanSource(trace.sourceId);
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: andeanTheme(),
-          home: SpatialCaptureScreen(controller: fresh),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final editTrace = find.byKey(const ValueKey('edit-trace-room-1'));
-      await tester.ensureVisible(editTrace);
-      await tester.tap(editTrace);
-      await tester.pumpAndSettle();
-      expect(
-        find.text('La imagen original ya no está disponible.'),
-        findsOneWidget,
-      );
-      expect(fresh.rooms.single.name, 'Dormitorio plano');
-      expect(fresh.preview!.document['version'], '2.0');
-      expect(tester.takeException(), isNull);
-    },
-  );
+    final trace = fresh.traceForRoom('room-1')!;
+    await fresh.discardFloorplanSource(trace.sourceId);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: andeanTheme(),
+        home: SpatialCaptureScreen(controller: fresh),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final editTrace = find.byKey(const ValueKey('edit-trace-room-1'));
+    await tester.ensureVisible(editTrace);
+    await tester.tap(editTrace);
+    await tester.pumpAndSettle();
+    expect(
+      find.text('La imagen original ya no está disponible.'),
+      findsOneWidget,
+    );
+    expect(fresh.rooms.single.name, 'Dormitorio plano');
+    expect(fresh.preview!.document['version'], '2.0');
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('move zoom and trace modes own mutually exclusive gestures', (
     tester,
