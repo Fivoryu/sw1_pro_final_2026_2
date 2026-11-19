@@ -109,9 +109,11 @@ void main() {
     expect(h.controller.busy, isTrue);
     final attempt = h.controller.idle;
     var finished = false;
-    unawaited(attempt.then<void>((_) {
-      finished = true;
-    }));
+    unawaited(
+      attempt.then<void>((_) {
+        finished = true;
+      }),
+    );
     await files.entered.future;
     expect(finished, isFalse);
     expect(h.files.deleted, isEmpty);
@@ -139,8 +141,10 @@ void main() {
 
     await h.controller.enqueue(_package());
     await files.entered.future;
-    expect(await h.controller.enqueue(_package(id: 'cap-2', path: secondPath)),
-        isTrue);
+    expect(
+      await h.controller.enqueue(_package(id: 'cap-2', path: secondPath)),
+      isTrue,
+    );
     final allAttempts = h.controller.idle;
     expect(h.controller.busy, isTrue);
     expect(h.files.deleted, isEmpty);
@@ -150,8 +154,10 @@ void main() {
 
     expect(h.controller.items, hasLength(2));
     expect(h.controller.items.every((item) => item.upload.isSent), isTrue);
-    expect((await h.store.list('staff-1')).every((upload) => upload.isSent),
-        isTrue);
+    expect(
+      (await h.store.list('staff-1')).every((upload) => upload.isSent),
+      isTrue,
+    );
     expect(h.backend.registerCalls, 2);
     expect(h.backend.putCalls, 2);
     expect(h.backend.completeCalls, 2);

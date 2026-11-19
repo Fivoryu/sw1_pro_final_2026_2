@@ -365,7 +365,9 @@ class _UploadsCard extends StatelessWidget {
               Text(uploads.message!),
             ],
             if (uploads.busy &&
-                uploads.items.every((item) => item.phase == UploadPhase.idle)) ...[
+                uploads.items.every(
+                  (item) => item.phase == UploadPhase.idle,
+                )) ...[
               const SizedBox(height: 8),
               const Text('Revisando la cola y preparando el reintento…'),
               const LinearProgressIndicator(),

@@ -183,26 +183,27 @@ class CaptureUploadController extends ChangeNotifier {
     // uploading this listing: wait, then read its persisted result and retry
     // anything still pending instead of joining with a stale in-memory queue.
     late final Future<void> operation;
-    operation = Future<void>.microtask(() async {
-      if (active != null) {
-        try {
-          await active;
-        } on Object {
-          // This run independently reloads the durable queue below.
-        }
-      }
-      if (_ownerId != owner) {
-        _message = noSessionMessage;
-        return;
-      }
-      await _run();
-    }).whenComplete(() {
-      if (identical(_activeListings[key], operation)) {
-        _activeListings.remove(key);
-      }
-      if (identical(_running, operation)) _running = null;
-      _notify();
-    });
+    operation =
+        Future<void>.microtask(() async {
+          if (active != null) {
+            try {
+              await active;
+            } on Object {
+              // This run independently reloads the durable queue below.
+            }
+          }
+          if (_ownerId != owner) {
+            _message = noSessionMessage;
+            return;
+          }
+          await _run();
+        }).whenComplete(() {
+          if (identical(_activeListings[key], operation)) {
+            _activeListings.remove(key);
+          }
+          if (identical(_running, operation)) _running = null;
+          _notify();
+        });
     _activeListings[key] = operation;
     _running = operation;
     _notify();
