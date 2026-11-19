@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
+from urllib.error import HTTPError
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
@@ -27,6 +29,7 @@ from app.modules.stripe_payments.models import (
 from app.modules.stripe_payments.service import payment_amount_minor_units, stripe_currency
 
 router = APIRouter(tags=["stripe-card-payments"])
+_logger = logging.getLogger(__name__)
 
 
 class CardPaymentResponse(BaseModel):
@@ -47,6 +50,7 @@ class StripeConnectStatusResponse(BaseModel):
     agency_id: str
     connected: bool
     details_submitted: bool
+    account_exists: bool = False
     charges_enabled: bool
     payouts_enabled: bool
     onboarding_url: str | None = None
@@ -338,11 +342,20 @@ async def stripe_webhook(
     return {"received": True}
 
 
+class ConnectOnboardingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contact_email: Annotated[str, StringConstraints(
+        strip_whitespace=True, max_length=254, pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$"
+    )] | None = None
+
+
 @router.post("/api/v1/staff/agencies/{agency_id}/stripe/connect/onboarding-link")
 def create_connect_onboarding_link(
     agency_id: str,
     request: Request,
     staff: ActiveStaff = Depends(get_active_staff),
+    payload: ConnectOnboardingRequest | None = None,
 ) -> dict[str, str]:
     _require_agency_admin(staff, agency_id)
     settings: Settings = request.app.state.settings
@@ -350,13 +363,17 @@ def create_connect_onboarding_link(
         raise HTTPException(status_code=503, detail="Stripe Connect test country is not configured")
     with _session_factory(request)() as session:
         account = session.query(StripeConnectAccount).filter_by(agency_id=agency_id).one_or_none()
+    operation_stage = "create_connect_account" if account is None else "create_account_link"
     try:
         gateway = _gateway(request)
         if account is None:
+            if payload is None or payload.contact_email is None:
+                raise HTTPException(status_code=422, detail="Stripe Connect contact email is required")
             remote = gateway.create_connect_account(
                 country=settings.stripe_connect_account_country.upper(),
                 agency_id=agency_id,
-                idempotency_key=f"roomforge-connect-account-{agency_id}",
+                contact_email=payload.contact_email,
+                idempotency_key=f"roomforge-connect-v2-account-{agency_id}",
             )
             account_id = remote.get("id")
             if not isinstance(account_id, str):
@@ -376,6 +393,7 @@ def create_connect_onboarding_link(
                 session.add(account)
         else:
             account_id = account.stripe_account_id
+        operation_stage = "create_account_link"
         origin = settings.web_origin.rstrip("/")
         link = gateway.create_account_link(
             account_id=account_id,
@@ -383,7 +401,34 @@ def create_connect_onboarding_link(
             return_url=f"{origin}/?stripe-connect=return",
             idempotency_key=f"roomforge-connect-link-{agency_id}-{int(_now(request).timestamp()) // 60}",
         )
-    except (StripeGatewayError, ValueError):
+    except (StripeGatewayError, ValueError) as error:
+        cause = error.__cause__
+        http_status = None
+        diagnostic_fields: dict[str, object] = {
+            "operation_stage": operation_stage,
+            "exception_class": type(error).__name__,
+        }
+        if isinstance(error, StripeGatewayError):
+            # Older local gateway builds only chain the urllib HTTPError.
+            http_status = getattr(error, "http_status", None)
+            if http_status is None and isinstance(cause, HTTPError):
+                http_status = cause.code
+            diagnostic_fields.update(
+                {
+                    "http_status": http_status,
+                    "provider_error_type": getattr(error, "provider_error_type", None),
+                    "provider_error_code": getattr(error, "provider_error_code", None),
+                    "provider_error_param": getattr(error, "provider_error_param", None),
+                }
+            )
+        if cause is not None:
+            diagnostic_fields["cause_class"] = type(cause).__name__
+        _logger.warning(
+            "Stripe Connect onboarding failed: stage=%s http_status=%s",
+            operation_stage,
+            http_status if type(http_status) is int else "unknown",
+            extra=diagnostic_fields,
+        )
         raise HTTPException(status_code=503, detail="Stripe Connect onboarding is unavailable") from None
     url = link.get("url")
     if not isinstance(url, str):
@@ -428,6 +473,7 @@ def get_connect_status(
     return StripeConnectStatusResponse(
         agency_id=agency_id,
         connected=values["details_submitted"] and values["payouts_enabled"],
+        account_exists=True,
         details_submitted=values["details_submitted"],
         charges_enabled=values["charges_enabled"],
         payouts_enabled=values["payouts_enabled"],

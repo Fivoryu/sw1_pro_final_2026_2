@@ -116,9 +116,11 @@ Para comprobar el escrow sin la app, consultar el saldo RFT del escrow con `eth_
 
 **Evidencia a registrar** en `odd/tasks/f09-reservations-completion.md`: modelo del teléfono y de la wallet, hashes de las transacciones, respuesta de la API (`event_name`, `status`, `replayed`), saldos antes y después, y el resultado de cada negativo.
 
-## 4. Tarea B — Stripe en modo de prueba (F09.8) — **PAUSADA**
+## 4. Tarea B — Stripe en modo de prueba (F09.8)
 
-El recorrido manual queda pendiente por decisión explícita del usuario. `stripe tools enable_connect` no tuvo éxito: aunque el proceso terminó con exit 0, el JSON indicó `request_failed` porque la clave no tenía acceso a la cuenta objetivo; no se creó una cuenta conectada ni un Account Link. El intento de sandbox claimable quedó sin verificar y abrió un fallback de login/autorización; se indicó no aprobarlo ni ingresar credenciales porque la ruta podía usar una cuenta live. No hay sandbox confirmado ni operación/dato real involucrado. No ejecutar ni reintentar esta tarea hasta que el usuario lo solicite explícitamente.
+**Actualización 2026-11-19:** se completó el alta de la agencia demo en Stripe Connect de prueba. El entorno local llegó a la revisión `0034_listing_reviews` y ambos inmuebles sintéticos, `f09-card-transfer-demo` y `f09-card-refund-demo`, respondieron HTTP 200 en el catálogo. Antes del recorrido móvil se verificó la entrega del webhook firmado con un pago sintético de BOB 10 sin reserva asociada. El inmueble previo de Sopocachi conserva su reserva con wallet.
+
+**Evidencia posterior (2026-11-19):** en un Samsung A55 se completaron dos reservas independientes con depósito de prueba de BOB 10. En la primera, el panel registró el rechazo y Stripe confirmó el reembolso de BOB 10. En la segunda, el panel registró la aceptación y Stripe registró exactamente una transferencia no revertida de USD 0,85, vinculada al cobro original; Stripe liquidó ese depósito en USD. El reenvío manual del mismo evento en el entorno de prueba queda pendiente.
 
 1. En el archivo de entorno: `STRIPE_SECRET_KEY=sk_test_…` y `STRIPE_PUBLISHABLE_KEY=pk_test_…` (la API rechaza claves que no sean de prueba).
 2. Reenviar los webhooks a la API local y copiar el `whsec_…` que imprime en `STRIPE_WEBHOOK_SECRET`; recrear el contenedor `api`:
@@ -150,8 +152,11 @@ Registrar los IDs de PaymentIntent, transferencia y reembolso en el registro ODD
 
 ## 6. Cierre de la fase
 
+La validación móvil de wallet queda pausada por decisión del equipo. La issue [#27](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/27) conserva el seguimiento de los casos pendientes. La evidencia de tarjeta no cierra ese alcance.
+
 - [ ] Negativos restantes de wallet y evidencia completa de A registrados en `odd/tasks/f09-reservations-completion.md`.
-- [ ] Recorrido Stripe de B y su evidencia: **pausados**, no completados.
+- [x] Completar desde el móvil el recorrido Stripe de B y verificar por separado la transferencia y el reembolso.
+- [ ] Verificar el reenvío idempotente de un evento Stripe en el entorno de prueba.
 - [ ] PR con `Closes #27` (no corresponde declararlo hasta completar los criterios restantes).
 - [ ] Plan maestro: fila F09 de §1.4.1 en ✅ con la evidencia; F09.4 y F09.8 actualizadas en la sección F09; #27 y #28 movidas a «cerradas» en la tabla §1.4.5.
 - [ ] Suites en verde en el CI del PR, incluido el job `Contracts and chain seam (Hardhat)`.

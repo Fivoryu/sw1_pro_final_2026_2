@@ -29,11 +29,17 @@ class CustomerReservationsController extends ChangeNotifier {
   String? _message;
   QuoteSnapshot? _quote;
   List<ReservationRecord> _reservations = const [];
+  final Set<String> _submittedCardPayments = {};
 
   bool get busy => _busy;
   String? get message => _message;
   QuoteSnapshot? get quote => _quote;
   List<ReservationRecord> get reservations => _reservations;
+
+  bool isVerifyingCardPayment(ReservationRecord reservation) =>
+      reservation.status == 'pending' &&
+      reservation.depositConfirmedAt == null &&
+      _submittedCardPayments.contains(reservation.reservationId);
 
   Future<QuoteSnapshot?> createQuote({
     required String listingId,
@@ -80,7 +86,7 @@ class CustomerReservationsController extends ChangeNotifier {
         walletId: wallet.id,
         idempotencyKey: key,
       );
-      await loadReservations();
+      await _refreshAfterAction();
       return reservation;
     } on CustomerAuthFailure catch (failure) {
       _message = failure.detail;
@@ -104,9 +110,11 @@ class CustomerReservationsController extends ChangeNotifier {
   Future<ReservationRecord?> createCardReservation({
     required QuoteSnapshot quote,
   }) async {
+    if (_busy) return null;
     _busy = true;
     _message = null;
     notifyListeners();
+    ReservationRecord? created;
     try {
       final key = List<int>.generate(
         24,
@@ -117,29 +125,39 @@ class CustomerReservationsController extends ChangeNotifier {
         quoteId: quote.quoteId,
         idempotencyKey: key,
       );
-      final session = await _api.createCardPaymentIntent(
-        reservation.reservationId,
-      );
-      final completed = await _cardPaymentHandler.present(session);
-      _message = completed
-          ? 'Pago enviado a Stripe. La reserva se confirmará cuando el servidor valide el webhook.'
-          : 'El pago no se completó. La solicitud sigue pendiente; podés reintentar o cancelarla.';
-      await loadReservations();
+      created = reservation;
+      _reservations = [
+        reservation,
+        ..._reservations.where(
+          (item) => item.reservationId != reservation.reservationId,
+        ),
+      ];
+      await _presentCardPayment(reservation);
       return reservation;
     } on CustomerAuthFailure catch (failure) {
       _message = failure.detail;
       if (failure.statusCode == 409) {
         try {
-          _reservations = await _api.listReservations();
+          await _refreshReservations();
+          for (final item in _reservations) {
+            if (created == null &&
+                item.listingId == quote.listingId &&
+                item.status == 'pending') {
+              _message =
+                  'Ya tenés una solicitud para este inmueble. Podés retomarla en Mis reservas.';
+              return item;
+            }
+          }
         } on CustomerAuthFailure {
           // Keep the original conflict detail if the follow-up read also fails.
         }
       }
-      return null;
+      return created;
     } catch (_) {
-      _message =
-          'No se pudo iniciar el pago con tarjeta. Revisá la conexión y el estado de la reserva.';
-      return null;
+      _message = created == null
+          ? 'No se pudo confirmar la solicitud. Revisá Mis reservas antes de intentarlo de nuevo.'
+          : 'La solicitud quedó guardada. Revisá el estado del pago en Mis reservas.';
+      return created;
     } finally {
       _busy = false;
       notifyListeners();
@@ -147,19 +165,12 @@ class CustomerReservationsController extends ChangeNotifier {
   }
 
   Future<bool> payCardReservation(ReservationRecord reservation) async {
+    if (_busy || isVerifyingCardPayment(reservation)) return false;
     _busy = true;
     _message = null;
     notifyListeners();
     try {
-      final session = await _api.createCardPaymentIntent(
-        reservation.reservationId,
-      );
-      final completed = await _cardPaymentHandler.present(session);
-      _message = completed
-          ? 'Pago enviado a Stripe. La confirmación depende del webhook del servidor.'
-          : 'El pago no se completó; podés intentarlo de nuevo mientras la reserva siga vigente.';
-      _reservations = await _api.listReservations();
-      return completed;
+      return await _presentCardPayment(reservation);
     } on CustomerAuthFailure catch (failure) {
       _message = failure.detail;
       return false;
@@ -169,6 +180,41 @@ class CustomerReservationsController extends ChangeNotifier {
     } finally {
       _busy = false;
       notifyListeners();
+    }
+  }
+
+  Future<bool> _presentCardPayment(ReservationRecord reservation) async {
+    final session = await _api.createCardPaymentIntent(
+      reservation.reservationId,
+    );
+    final completed = await _cardPaymentHandler.present(session);
+    if (completed) _submittedCardPayments.add(reservation.reservationId);
+    _message = completed
+        ? 'Pago enviado. Estamos verificando el depósito.'
+        : 'La solicitud quedó guardada. Podés completar el pago desde Mis reservas.';
+    try {
+      await _refreshReservations();
+    } on CustomerAuthFailure {
+      // A failed refresh does not change the outcome of the payment sheet.
+    }
+    return completed;
+  }
+
+  Future<void> _refreshReservations() async {
+    _reservations = await _api.listReservations();
+    for (final reservation in _reservations) {
+      if (reservation.status != 'pending' ||
+          reservation.depositConfirmedAt != null) {
+        _submittedCardPayments.remove(reservation.reservationId);
+      }
+    }
+  }
+
+  Future<void> _refreshAfterAction() async {
+    try {
+      await _refreshReservations();
+    } on CustomerAuthFailure catch (failure) {
+      _message = failure.detail;
     }
   }
 
@@ -184,11 +230,12 @@ class CustomerReservationsController extends ChangeNotifier {
   }
 
   Future<void> loadReservations() async {
+    if (_busy) return;
     _busy = true;
     _message = null;
     notifyListeners();
     try {
-      _reservations = await _api.listReservations();
+      await _refreshReservations();
     } on CustomerAuthFailure catch (failure) {
       _message = failure.detail;
     } finally {
@@ -209,7 +256,7 @@ class CustomerReservationsController extends ChangeNotifier {
     notifyListeners();
     try {
       await executor.deposit(reservation: reservation, currency: currency);
-      await loadReservations();
+      await _refreshAfterAction();
       return true;
     } on CustomerAuthFailure catch (failure) {
       _message = failure.detail;
@@ -246,7 +293,7 @@ class CustomerReservationsController extends ChangeNotifier {
     notifyListeners();
     try {
       await executor.cancel(reservation: reservation, currency: currency);
-      await loadReservations();
+      await _refreshAfterAction();
       return true;
     } on CustomerAuthFailure catch (failure) {
       _message = failure.detail;
@@ -311,7 +358,7 @@ class CustomerReservationsController extends ChangeNotifier {
     notifyListeners();
     try {
       await executor.expire(reservation: reservation, currency: currency);
-      await loadReservations();
+      await _refreshAfterAction();
       return true;
     } on CustomerAuthFailure catch (failure) {
       _message = failure.detail;

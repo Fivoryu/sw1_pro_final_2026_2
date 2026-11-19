@@ -6,6 +6,7 @@ import '../../../../data/services/customer_booking_api.dart';
 import '../../../../data/services/local_wallet_connect.dart';
 import '../../../../domain/customer_session_controller.dart';
 import '../../../theme/andean_theme.dart';
+import '../../../theme/editorial_surfaces.dart';
 
 /// Account tab: renders the customer session state and drives login,
 /// registration, retry, and logout.
@@ -327,58 +328,36 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        const Row(
           children: [
-            Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(
-                    color: AndeanColors.secondary,
-                    shape: BoxShape.circle,
+            EditorialEmblem(Icons.account_balance_wallet_outlined, dark: true),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'WALLET DE PRUEBA',
+                    style: TextStyle(
+                      color: EditorialColors.accent,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                      letterSpacing: 1.3,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  'IDENTIDAD CRIPTOGRÁFICA',
-                  style: AndeanTypography.labelSm.copyWith(
-                    color: AndeanColors.secondary,
-                    letterSpacing: 0.8,
+                  Text(
+                    'Tu billetera externa',
+                    style: AndeanTypography.headlineLg,
                   ),
-                ),
-              ],
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: AndeanColors.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(9999),
-              ),
-              child: Text(
-                'EVM v1.4.2',
-                style: AndeanTypography.labelSm.copyWith(
-                  color: AndeanColors.secondary,
-                ),
+                ],
               ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
-        Text(
-          'Billetera Externa EVM',
-          style: AndeanTypography.headlineSm.copyWith(fontSize: 20),
-        ),
-        const SizedBox(height: 2),
-        const Text(
-          'EIP-191 & Protocolo WalletConnect (Reown AppKit)',
-          style: AndeanTypography.bodySm,
-        ),
         const SizedBox(height: 14),
         Container(
           decoration: BoxDecoration(
-            color: AndeanColors.surfaceContainerLowest,
+            color: EditorialColors.sand,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AndeanColors.border),
           ),
@@ -404,34 +383,13 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        const Text(
-                          'Principio No Custodiado',
-                          style: AndeanTypography.labelLg,
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AndeanColors.secondaryFixed,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            'AUDITABLE',
-                            style: AndeanTypography.labelSm.copyWith(
-                              color: AndeanColors.onSecondaryFixedVariant,
-                            ),
-                          ),
-                        ),
-                      ],
+                    const Text(
+                      'Tus claves quedan con vos',
+                      style: AndeanTypography.labelLg,
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'RoomForge nunca solicitará ni almacenará tus claves privadas ni frase semilla. Toda firma u operación se autoriza directamente en tu aplicación de billetera externa.',
+                      'Firmás en tu propia wallet. RoomForge nunca te pide ni guarda tus claves privadas ni tu frase semilla.',
                       style: AndeanTypography.bodySm.copyWith(
                         color: AndeanColors.onSurfaceVariant,
                       ),
@@ -445,26 +403,24 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
         const SizedBox(height: 16),
         Card(
           key: const ValueKey('customer-wallet-section'),
-          color: AndeanColors.surfaceContainerLowest,
+          color: EditorialColors.paper,
+          elevation: 0,
+          margin: EdgeInsets.zero,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: AndeanColors.border),
+            side: const BorderSide(color: EditorialColors.line),
           ),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Text(
-                      'ESTADO DE CONEXIÓN',
-                      style: AndeanTypography.labelSm.copyWith(
-                        color: AndeanColors.outline,
-                        letterSpacing: 0.6,
-                      ),
-                    ),
+                    Text('Conexión', style: AndeanTypography.headlineMd),
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 10,
@@ -473,7 +429,7 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
                       decoration: BoxDecoration(
                         color: linkedWalletConnected
                             ? AndeanColors.successBg
-                            : AndeanColors.errorContainer,
+                            : EditorialColors.sand,
                         borderRadius: BorderRadius.circular(9999),
                       ),
                       child: Row(
@@ -485,7 +441,7 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
                             decoration: BoxDecoration(
                               color: linkedWalletConnected
                                   ? AndeanColors.successText
-                                  : AndeanColors.error,
+                                  : EditorialColors.accent,
                               shape: BoxShape.circle,
                             ),
                           ),
@@ -497,7 +453,7 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
                             style: AndeanTypography.labelSm.copyWith(
                               color: linkedWalletConnected
                                   ? AndeanColors.successText
-                                  : AndeanColors.onErrorContainer,
+                                  : EditorialColors.accent,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -510,16 +466,18 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: AndeanColors.surfaceContainerLow,
+                    color: EditorialColors.canvas,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Column(
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           const Text(
-                            'Red vinculada',
+                            'Red de prueba',
                             style: AndeanTypography.bodySm,
                           ),
                           Container(
@@ -541,7 +499,7 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
-                                  'Hardhat Local Node (31337)',
+                                  'Hardhat · 31337',
                                   style: AndeanTypography.monoData.copyWith(
                                     color: AndeanColors.primaryContainer,
                                     fontWeight: FontWeight.w600,
@@ -564,10 +522,6 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
                             IconButton(
                               icon: const Icon(Icons.content_copy, size: 16),
                               tooltip: 'Copiar dirección',
-                              constraints: const BoxConstraints(
-                                minWidth: 32,
-                                minHeight: 32,
-                              ),
                               padding: EdgeInsets.zero,
                               color: AndeanColors.secondary,
                               onPressed: () {

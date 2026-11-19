@@ -880,12 +880,14 @@ El arranque anticipado se apoya en §1.5 regla 5 («F08 puede empezar con el pil
 
 ### F09.8 — Depósito con tarjeta mediante Stripe (modo de prueba)
 
+**Actualización 2026-11-19 ([#99](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/99)):** se verificó el alta de la agencia demo con Accounts v2, el depósito en Android confirmado por webhook y, en solicitudes distintas, la transferencia al aceptar y el reembolso al rechazar. La [guía de cierre](f09-guia-cierre.md) conserva la evidencia. Queda pendiente el reenvío manual del evento de prueba. La verificación móvil de wallet ([#27](https://github.com/Fivoryu/sw1_pro_final_2026_2/issues/27)) queda pausada y la fase sigue parcial.
+
 - **Origen:** incorporado con el PR #58 (2026-10-22) como vía alternativa al escrow on-chain para el mismo depósito de reserva; se documenta aquí para que el alcance quede en el plan y no solo en la fila de estado.
 - **Entrada:** reserva `pending` creada con el depósito autorizado por el servidor (no por el cliente) y agencia con cuenta Stripe Connect habilitada para cobros.
 - **Acciones:** la app cliente obtiene un PaymentIntent del servidor (`POST /api/v1/reservations/{id}/card-payment-intent`) y paga con `flutter_stripe`; el webhook firmado (`POST /api/v1/stripe/webhook`) confirma el pago de forma idempotente por `stripe_event_id`. El personal vincula la agencia con Connect (enlace de onboarding y estado) y decide desde el panel (`POST /api/v1/staff/reservations/{id}/card-decision`): aceptar transfiere el depósito a la cuenta conectada de la agencia; rechazar, cancelar o vencer reembolsa. Un pago que llega después del plazo se reembolsa y la reserva queda vencida. Tablas `stripe_connect_account`, `reservation_card_payment` y `stripe_webhook_event` (migración `0019_stripe_card_payments`, unificada con `0027_merge_stripe_volume_suggestions`).
 - **Límites:** solo modo de prueba; la configuración rechaza claves que no sean `sk_test_`/`pk_test_`. Monedas de tarjeta BOB y USD en unidades menores exactas; USDT queda solo on-chain. No reemplaza F09.2–F09.6 ni cierra las issues #27/#28: el escrow sigue siendo la vía del plan y su verificación pendiente no se da por cumplida con pagos con tarjeta.
 - **Salida:** depósito con tarjeta, decisión de la agencia y salida del dinero (transferencia o reembolso) con estado conciliado por webhook.
-- **Aceptación:** webhook con firma inválida o vencida rechazado; evento duplicado sin efectos dobles; aceptar no reembolsa y rechazar no transfiere; ninguna reserva aparece confirmada sin `payment_intent.succeeded` verificado. Recorrido manual con cuenta Stripe de prueba del equipo **pendiente y pausado por decisión explícita del usuario**.
+- **Aceptación:** webhook con firma inválida o vencida rechazado; evento duplicado sin efectos dobles; aceptar no reembolsa y rechazar no transfiere; ninguna reserva aparece confirmada sin `payment_intent.succeeded` verificado.
 
 ## F10 — Integración de las tres superficies
 

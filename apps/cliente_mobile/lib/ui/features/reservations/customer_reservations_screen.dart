@@ -4,9 +4,11 @@ import '../../../../data/models/reservation_models.dart';
 import '../../../../data/services/customer_chat_api.dart';
 import '../../../../domain/customer_reservations_controller.dart';
 import '../chat/chat_conversations_screen.dart';
+import '../catalog/views/catalog_format.dart';
 import '../../../../domain/customer_session_controller.dart';
 import '../../theme/andean_theme.dart';
 import '../../theme/andean_widgets.dart';
+import '../../theme/editorial_surfaces.dart';
 
 class CustomerReservationsScreen extends StatefulWidget {
   const CustomerReservationsScreen({
@@ -14,12 +16,14 @@ class CustomerReservationsScreen extends StatefulWidget {
     required this.controller,
     required this.sessionController,
     this.chatApi,
+    this.initialReservationId,
   });
 
   /// When provided, the screen links to the customer's chat conversations.
   final CustomerChatApi? chatApi;
   final CustomerReservationsController? controller;
   final CustomerSessionController sessionController;
+  final String? initialReservationId;
 
   @override
   State<CustomerReservationsScreen> createState() =>
@@ -90,75 +94,89 @@ class _CustomerReservationsScreenState
   Widget _content(
     BuildContext context,
     CustomerReservationsController controller,
-  ) => ListView(
-    key: const ValueKey('customer-reservations-content'),
-    padding: const EdgeInsets.all(20),
-    children: [
-      Row(
-        children: [
-          const Expanded(
-            child: AndeanSectionHeading('Mis reservas'),
-          ),
-          if (widget.chatApi != null)
+  ) => RefreshIndicator(
+    onRefresh: controller.loadReservations,
+    child: ListView(
+      key: const ValueKey('customer-reservations-content'),
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(20),
+      children: [
+        Row(
+          children: [
+            const Expanded(child: AndeanSectionHeading('Mis reservas')),
+            if (widget.chatApi != null)
+              IconButton(
+                key: const ValueKey('open-conversations'),
+                tooltip: 'Mis conversaciones',
+                onPressed: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        ChatConversationsScreen(api: widget.chatApi!),
+                  ),
+                ),
+                icon: const Icon(Icons.chat_bubble_outline),
+              ),
             IconButton(
-              key: const ValueKey('open-conversations'),
-              tooltip: 'Mis conversaciones',
-              onPressed: () => Navigator.of(context).push<void>(
-                MaterialPageRoute<void>(
-                  builder: (_) => ChatConversationsScreen(api: widget.chatApi!),
+              key: const ValueKey('refresh-reservations'),
+              tooltip: 'Actualizar',
+              onPressed: controller.busy ? null : controller.loadReservations,
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        const ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: EditorialEmblem(Icons.shield_outlined),
+          title: Text(
+            'Pagos en modo de prueba',
+            style: AndeanTypography.labelLg,
+          ),
+          subtitle: Text(
+            'Tarjeta o wallet. La operación inmobiliaria se cierra fuera de RoomForge.',
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (controller.busy && controller.reservations.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+        if (controller.message != null)
+          Semantics(
+            liveRegion: true,
+            child: Card(
+              color: AndeanColors.errorContainer,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  controller.message!,
+                  key: const ValueKey('reservations-error'),
+                  style: AndeanTypography.bodyMd.copyWith(
+                    color: AndeanColors.onErrorContainer,
+                  ),
                 ),
               ),
-              icon: const Icon(Icons.chat_bubble_outline),
             ),
-          IconButton(
-            key: const ValueKey('refresh-reservations'),
-            tooltip: 'Actualizar',
-            onPressed: controller.busy ? null : controller.loadReservations,
-            icon: const Icon(Icons.refresh),
           ),
-        ],
-      ),
-      const SizedBox(height: 12),
-      const AndeanNoticeBanner(
-        title: 'ENTORNO INSTITUCIONAL',
-        badge: 'Hardhat 31337',
-        icon: Icons.terminal,
-        message:
-            'Red de Pruebas Hardhat (Chain 31337) · Fondos y tokens RFT de prueba local. No se custodia moneda fiduciaria ni se realiza compraventa final dentro de la app.',
-      ),
-      const SizedBox(height: 12),
-      if (controller.busy && controller.reservations.isEmpty)
-        const Padding(
-          padding: EdgeInsets.all(24),
-          child: Center(child: CircularProgressIndicator()),
-        ),
-      if (controller.message != null)
-        Card(
-          color: AndeanColors.errorContainer,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
+        if (!controller.busy &&
+            controller.message == null &&
+            controller.reservations.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
             child: Text(
-              controller.message!,
-              key: const ValueKey('reservations-error'),
-              style: AndeanTypography.bodyMd.copyWith(
-                color: AndeanColors.onErrorContainer,
-              ),
+              'Todavía no tenés reservas. Explorá un inmueble y solicitá una reserva para verla acá.',
+              key: ValueKey('reservations-empty'),
             ),
           ),
-        ),
-      if (!controller.busy &&
-          controller.message == null &&
-          controller.reservations.isEmpty)
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 24),
-          child: Text(
-            'Todavía no tenés reservas. Explorá un inmueble y solicitá una reserva para verla acá.',
-            key: ValueKey('reservations-empty'),
-          ),
-        ),
-      for (final reservation in controller.reservations)
-        _reservationCard(context, reservation, controller),
-    ],
+        for (final reservation in controller.reservations)
+          if (reservation.reservationId == widget.initialReservationId)
+            _reservationCard(context, reservation, controller),
+        for (final reservation in controller.reservations)
+          if (reservation.reservationId != widget.initialReservationId)
+            _reservationCard(context, reservation, controller),
+      ],
+    ),
   );
 
   Widget _reservationCard(
@@ -171,9 +189,13 @@ class _CustomerReservationsScreenState
         ? snapshot.oneTimeTotal.currency
         : snapshot.lines.first.currency;
     final isCardPayment = item.paymentMethod == 'card';
+    final verifyingPayment = controller.isVerifyingCardPayment(item);
+    final deadline = item.decisionDeadlineAt.toLocal();
+    final localization = MaterialLocalizations.of(context);
+    final hasTime = deadline.isAfter(DateTime.now());
     final deposit = item.depositAmount == null
-        ? 'Sin depósito configurado'
-        : 'Depósito: ${item.depositAmount} $currency';
+        ? 'Sin depósito'
+        : formatMoney(item.depositAmount!, currency);
 
     final (statusBg, statusFg) = switch (item.status) {
       'pending' => (AndeanColors.warningBg, AndeanColors.warningText),
@@ -186,25 +208,28 @@ class _CustomerReservationsScreenState
     return Card(
       key: ValueKey('reservation-${item.reservationId}'),
       margin: const EdgeInsets.only(top: 14),
-      color: AndeanColors.surfaceContainerLowest,
+      color: EditorialColors.paper,
+      elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
-        side: const BorderSide(color: AndeanColors.border, width: 1),
+        side: const BorderSide(color: EditorialColors.line),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Expanded(
-                  child: Text(
-                    'Reserva ${item.reservationId}',
-                    style: AndeanTypography.headlineSm.copyWith(fontSize: 17),
-                  ),
+                EditorialEmblem(
+                  isCardPayment
+                      ? Icons.credit_card_outlined
+                      : Icons.account_balance_wallet_outlined,
                 ),
+                const Text('Reserva', style: AndeanTypography.headlineMd),
                 AndeanPillChip(
                   label: _statusLabel(item.status),
                   backgroundColor: statusBg,
@@ -214,29 +239,57 @@ class _CustomerReservationsScreenState
             ),
             const SizedBox(height: 6),
             Text(
-              'Inmueble ${item.listingId} · oferta v${snapshot.offerVersion}',
+              isCardPayment
+                  ? 'Tarjeta de prueba · Stripe'
+                  : 'Wallet de prueba · red local',
               style: AndeanTypography.bodySm,
+            ),
+            Text(
+              'Ref. ${item.reservationId}',
+              style: AndeanTypography.monoData.copyWith(
+                color: AndeanColors.mutedMineral,
+              ),
             ),
             const SizedBox(height: 12),
             Container(
+              width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AndeanColors.surfaceContainerLow,
-                borderRadius: BorderRadius.circular(12),
+                color: EditorialColors.canvas,
+                borderRadius: BorderRadius.circular(14),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Text(
+                    isCardPayment
+                        ? 'Depósito con tarjeta'
+                        : 'Depósito con wallet',
+                    style: AndeanTypography.labelMd,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    deposit,
+                    style: AndeanTypography.headlineLg.copyWith(
+                      color: AndeanColors.primaryBrand,
+                    ),
+                  ),
+                  if (snapshot.oneTimeTotal.amount != '0.00' ||
+                      snapshot.monthlyTotal.amount != '0.00')
+                    const Divider(color: EditorialColors.line),
                   if (snapshot.oneTimeTotal.amount != '0.00') ...[
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    Wrap(
+                      spacing: 8,
                       children: [
                         const Text(
                           'Pago único:',
                           style: AndeanTypography.bodySm,
                         ),
                         Text(
-                          '${snapshot.oneTimeTotal.amount} ${snapshot.oneTimeTotal.currency}',
+                          formatMoney(
+                            snapshot.oneTimeTotal.amount,
+                            snapshot.oneTimeTotal.currency,
+                          ),
                           style: AndeanTypography.monoData.copyWith(
                             color: AndeanColors.primaryContainer,
                             fontWeight: FontWeight.bold,
@@ -247,12 +300,15 @@ class _CustomerReservationsScreenState
                     const SizedBox(height: 4),
                   ],
                   if (snapshot.monthlyTotal.amount != '0.00') ...[
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    Wrap(
+                      spacing: 8,
                       children: [
                         const Text('Mensual:', style: AndeanTypography.bodySm),
                         Text(
-                          '${snapshot.monthlyTotal.amount} ${snapshot.monthlyTotal.currency}',
+                          formatMoney(
+                            snapshot.monthlyTotal.amount,
+                            snapshot.monthlyTotal.currency,
+                          ),
                           style: AndeanTypography.monoData.copyWith(
                             color: AndeanColors.primaryContainer,
                             fontWeight: FontWeight.bold,
@@ -262,30 +318,12 @@ class _CustomerReservationsScreenState
                     ),
                     const SizedBox(height: 4),
                   ],
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        isCardPayment
-                            ? 'Depósito con tarjeta:'
-                            : 'Depósito en Escrow:',
-                        style: AndeanTypography.bodySm,
-                      ),
-                      Text(
-                        deposit,
-                        style: AndeanTypography.monoData.copyWith(
-                          color: AndeanColors.secondary,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
                 ],
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              'Plazo de respuesta: ${item.decisionDeadlineAt.toLocal()}',
+              'Plazo de respuesta: ${localization.formatShortDate(deadline)} · ${localization.formatTimeOfDay(TimeOfDay.fromDateTime(deadline))}',
               style: AndeanTypography.bodySm,
             ),
             if (item.status == 'pending')
@@ -294,14 +332,18 @@ class _CustomerReservationsScreenState
                 child: Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AndeanColors.surfaceContainer,
-                    borderRadius: BorderRadius.circular(8),
+                    color: item.depositConfirmedAt != null
+                        ? AndeanColors.successBg
+                        : AndeanColors.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(
-                        Icons.info_outline,
+                      Icon(
+                        item.depositConfirmedAt != null
+                            ? Icons.check_circle_outline
+                            : Icons.info_outline,
                         size: 16,
                         color: AndeanColors.secondary,
                       ),
@@ -310,8 +352,10 @@ class _CustomerReservationsScreenState
                         child: Text(
                           isCardPayment
                               ? item.depositConfirmedAt == null
-                                    ? 'Pago pendiente. Stripe confirmará el depósito cuando el servidor reciba y valide el webhook.'
-                                    : 'Pago con tarjeta confirmado por Stripe; aguardá la decisión de la inmobiliaria.'
+                                    ? verifyingPayment
+                                          ? 'Pago enviado. Estamos verificando el depósito. Actualizá para consultar el estado.'
+                                          : 'El depósito todavía no está confirmado. Podés completar el pago desde aquí.'
+                                    : 'Depósito confirmado. Ahora falta la respuesta de la inmobiliaria.'
                               : item.depositConfirmedAt == null
                               ? 'Pendiente no significa depósito confirmado. La confirmación requiere verificar la transacción en la red local.'
                               : 'Depósito local confirmado; aguardá la decisión de la inmobiliaria.',
@@ -326,7 +370,7 @@ class _CustomerReservationsScreenState
               const SizedBox(height: 12),
               if (item.depositAmount != null &&
                   (isCardPayment || item.depositConfirmedAt != null) &&
-                  !item.decisionDeadlineAt.isAfter(DateTime.now().toUtc()))
+                  !hasTime)
                 SizedBox(
                   width: double.infinity,
                   height: 48,
@@ -345,8 +389,9 @@ class _CustomerReservationsScreenState
                   ),
                 ),
               if (item.depositAmount != null &&
-                  item.decisionDeadlineAt.isAfter(DateTime.now().toUtc()) &&
-                  (item.depositConfirmedAt == null))
+                  hasTime &&
+                  item.depositConfirmedAt == null &&
+                  !verifyingPayment)
                 SizedBox(
                   width: double.infinity,
                   height: 48,
@@ -372,7 +417,7 @@ class _CustomerReservationsScreenState
                     ),
                   ),
                 ),
-              if (item.decisionDeadlineAt.isAfter(DateTime.now().toUtc())) ...[
+              if (hasTime) ...[
                 const SizedBox(height: 6),
                 SizedBox(
                   width: double.infinity,

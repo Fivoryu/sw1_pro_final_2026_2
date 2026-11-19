@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   createStripeConnectOnboardingLink,
   decideCardReservation,
@@ -30,6 +30,7 @@ export function StripeCardPaymentsAdmin({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [contactEmail, setContactEmail] = useState("");
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -52,13 +53,27 @@ export function StripeCardPaymentsAdmin({
     void refresh();
   }, [refresh]);
 
-  async function startOnboarding() {
+  useEffect(() => {
+    setContactEmail("");
+  }, [agencyId]);
+
+  async function startOnboarding(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!connect || connect.agency_id !== agencyId) return;
     setBusy(true);
     setError(null);
     try {
-      const url = await createStripeConnectOnboardingLink(accessToken, agencyId);
+      const url = await createStripeConnectOnboardingLink(
+        accessToken, agencyId, connect.account_exists ? undefined : contactEmail.trim(),
+      );
       window.location.assign(url);
     } catch (failure) {
+      // The account may have been created even if Stripe could not open the link.
+      try {
+        setConnect(await getStripeConnectStatus(accessToken, agencyId));
+      } catch {
+        // Preserve the onboarding error rather than hiding it with a refresh error.
+      }
       setError(failureMessage(failure));
       setBusy(false);
     }
@@ -116,9 +131,18 @@ export function StripeCardPaymentsAdmin({
             </p>
           ) : null}
         </div>
-        <button className="review-button" type="button" onClick={() => void startOnboarding()} disabled={busy || connect?.connected === true}>
-          {connect?.details_submitted ? "Continuar configuración" : "Configurar Stripe Connect"}
-        </button>
+        <form className="stripe-card-admin__onboarding" onSubmit={(event) => void startOnboarding(event)}>
+          {connect?.agency_id === agencyId && !connect.account_exists ? (
+            <label>
+              Correo de contacto para Stripe
+              <input type="email" required maxLength={254} autoComplete="email" value={contactEmail}
+                onChange={(event) => setContactEmail(event.target.value)} disabled={busy} />
+            </label>
+          ) : null}
+          <button className="review-button" type="submit" disabled={busy || connect?.agency_id !== agencyId || connect.connected}>
+            {connect?.account_exists ? "Continuar configuración" : "Configurar Stripe Connect"}
+          </button>
+        </form>
       </section>
 
       {error ? <p className="staff-session-error" role="alert">{error}</p> : null}
