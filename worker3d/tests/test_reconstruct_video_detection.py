@@ -1,3 +1,4 @@
+# ruff: noqa: E402  -- tests import the standalone worker after configuring sys.path.
 """Furniture suggestions for schema 2 (video) packages, F07 T6.
 
 A synthetic furniture cluster is added to the synthetic room of ``test_reconstruct_video`` and a
@@ -113,7 +114,7 @@ def test_a_detection_becomes_a_volume_with_the_pending_suggestion(tmp_path: Path
     result = run_detect(package_for(tmp_path, model), model, _factory(detector))
 
     [obj] = [o for o in result.scene_draft["objects"] if o["type"] == "occupancy"]
-    assert obj["id"] == "box-1" and obj["source"] == "depth"
+    assert obj["id"] == "box-1" and obj["source"] == "sfm_estimated"
     # The plan frame of an SfM model has an arbitrary yaw, so only frame-independent facts are pinned.
     corners = [(w["start"]["x"], w["start"]["z"]) for w in result.scene_draft["walls"]]
     assert reconstruct._point_in_polygon((obj["position"]["x"], obj["position"]["z"]), corners)

@@ -7,6 +7,7 @@ import {
   listListingTransitions,
   StaffListingsApiError,
   putListingScene,
+  sceneRevision,
   transitionListing,
   updateListingLocation,
   type StaffListing,
@@ -238,6 +239,20 @@ describe("staff listing scene API", () => {
       },
     );
     expect(result).toEqual(DEFAULT_SCENE_DOCUMENT);
+  });
+
+  it("preserves revision ETags and sends conditional writes", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(DEFAULT_SCENE_DOCUMENT), {
+      status: 200, headers: { ETag: '"7"' },
+    }));
+    const loaded = await getListingScene("token", "a", "l");
+    expect(sceneRevision(loaded)).toBe('"7"');
+    respondWithJson(DEFAULT_SCENE_DOCUMENT);
+    await putListingScene("token", "a", "l", loaded, sceneRevision(loaded));
+    expect(fetchMock.mock.calls.at(-1)?.[1]?.headers).toMatchObject({ "If-Match": '"7"' });
+    respondWithJson(DEFAULT_SCENE_DOCUMENT);
+    await putListingScene("token", "a", "new", loaded, null);
+    expect(fetchMock.mock.calls.at(-1)?.[1]?.headers).toMatchObject({ "If-None-Match": "*" });
   });
 });
 

@@ -27,6 +27,11 @@ def test_put_round_trips_the_scale_mode(
 
     saved = context.client.put(_scene_url(), json=expected)
 
+    if mode == "proportional":
+        assert saved.status_code == 422, saved.text
+        assert saved.json()["code"] == "scene_invalid"
+        assert context.client.get(_scene_url()).status_code == 404
+        return
     assert saved.status_code == 200, saved.text
     assert saved.json() == expected
     assert context.client.get(_scene_url()).json() == expected

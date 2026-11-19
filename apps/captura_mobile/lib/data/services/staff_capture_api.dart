@@ -20,7 +20,7 @@ class CaptureRegistration {
   final RemoteCaptureStatus status;
 
   /// Short-lived signed URL the ZIP is PUT to.
-  final String uploadUrl;
+  final String? uploadUrl;
   final DateTime? expiresAt;
 }
 
@@ -48,6 +48,19 @@ class UploadUrlExpired extends StaffAuthFailure {
     : super(
         code: 'upload_url_expired',
         detail: 'La subida venció. La retomamos desde el principio.',
+      );
+}
+
+/// The signed PUT uses a separate connection from the authenticated API.
+class UploadConnectionFailure extends StaffAuthFailure {
+  const UploadConnectionFailure()
+    : super(
+        code: kNetworkError,
+        detail:
+            'Sin conexión con el almacenamiento del recorrido. El archivo '
+            'sigue guardado en el teléfono. Reintentá cuando ese servicio '
+            'esté disponible.',
+        isNetworkFailure: true,
       );
 }
 
@@ -83,25 +96,34 @@ class StaffCaptureApi {
     required String listingId,
     required String captureId,
     required int sizeBytes,
+    String? sha256,
   }) async {
     final response = await _send(
       'POST',
       _capturesPath(agencyId, listingId),
       accessToken: accessToken,
-      body: {'captureId': captureId, 'sizeBytes': sizeBytes},
+      body: {
+        'captureId': captureId,
+        'sizeBytes': sizeBytes,
+        if (sha256 != null) 'sha256': sha256,
+      },
     );
     final json = _success(response);
     final id = json['captureId'];
     final status = RemoteCaptureStatus.fromWire(json['status']);
     final url = json['uploadUrl'];
-    if (id is! String || status == null || url is! String || url.isEmpty) {
+    if (id is! String ||
+        id != captureId ||
+        status == null ||
+        (status == RemoteCaptureStatus.awaitingUpload &&
+            (url is! String || url.isEmpty))) {
       throw malformedResponseFailure();
     }
     final expires = json['expiresAt'];
     return CaptureRegistration(
       captureId: id,
       status: status,
-      uploadUrl: url,
+      uploadUrl: url is String ? url : null,
       expiresAt: expires is String ? DateTime.tryParse(expires) : null,
     );
   }
@@ -131,11 +153,11 @@ class StaffCaptureApi {
         await _client.send(request).timeout(uploadTimeout),
       ).timeout(uploadTimeout);
     } on TimeoutException {
-      throw networkFailure();
+      throw const UploadConnectionFailure();
     } on SocketException {
-      throw networkFailure();
+      throw const UploadConnectionFailure();
     } on http.ClientException {
-      throw networkFailure();
+      throw const UploadConnectionFailure();
     }
     if (response.statusCode == 401 ||
         response.statusCode == 403 ||
@@ -162,8 +184,13 @@ class StaffCaptureApi {
       '${_capturePath(agencyId, listingId, captureId)}/complete',
       accessToken: accessToken,
     );
-    final status = RemoteCaptureStatus.fromWire(_success(response)['status']);
-    if (status == null) throw malformedResponseFailure();
+    final body = _success(response);
+    if (body['uploadVerified'] != true || body['captureId'] != captureId) {
+      throw malformedResponseFailure();
+    }
+    final status = RemoteCaptureStatus.fromWire(body['status']);
+    if (status == null || status == RemoteCaptureStatus.awaitingUpload)
+      throw malformedResponseFailure();
     return status;
   }
 

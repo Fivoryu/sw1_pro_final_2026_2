@@ -52,6 +52,7 @@ class VideoCaptureFailed extends VideoCaptureResult {
 abstract interface class VideoCapture {
   Future<VideoCaptureResult> record({
     required String listingId,
+    String? ownerId,
     String? firstRoomName,
   });
 }
@@ -68,12 +69,14 @@ class MethodChannelVideoCapture implements VideoCapture {
   @override
   Future<VideoCaptureResult> record({
     required String listingId,
+    String? ownerId,
     String? firstRoomName,
   }) async {
     final Map<Object?, Object?>? reply;
     try {
       reply = await _channel.invokeMapMethod<Object?, Object?>('recordVideo', {
         'listingId': listingId,
+        'ownerId': ?ownerId,
         'firstRoomName': ?firstRoomName,
       });
     } on MissingPluginException {

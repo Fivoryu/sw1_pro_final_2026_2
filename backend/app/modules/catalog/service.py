@@ -144,8 +144,78 @@ def validate_scene_integrity(scene: ListingSceneDocument) -> None:
             referenced.add(wall_id)
 
 
+def require_metric_scene(scene: ListingSceneDocument) -> None:
+    """Arbitrary/reliability-blocked reconstruction drafts never become listing measurements."""
+    measure = scene.measurement
+    if scene.unit != "meters" or (scene.scale is not None and scene.scale.mode == "proportional") or (measure is not None and (
+        measure.scale != "reference" or measure.alignment != "connected" or measure.clock != "realtime"
+        or not measure.reference_confirmed
+    )):
+        raise InvalidSceneIntegrityError("Capture requires valid metric scale, clock and connected alignment")
+
+
 def get_listing_scene(session: Session, listing_id: str) -> ListingScene | None:
     return session.get(ListingScene, listing_id)
+
+
+def validate_scene_origin(session: Session, *, agency_id: str, listing_id: str,
+                          scene: dict[str, object], stored: ListingScene | None,
+                          manual_replacement: bool = False) -> None:
+    """Bind captured geometry to server evidence; legacy/manual scenes stay valid.
+
+    Existing provenance cannot be erased by omitting optional client fields. An
+    initial copy of a known capture's geometry must identify that capture as well.
+    Human geometry edits are allowed after association; scale evidence is immutable.
+    """
+    from app.modules.reconstruction.models import ListingCapture
+
+    origin = scene.get("captureId")
+    previous = stored.scene.get("captureId") if stored is not None else None
+    if manual_replacement:
+        # A deliberate manual/floorplan replacement is a different business
+        # action from dropping optional fields while editing captured geometry.
+        # The caller checks the exact persisted revision under the listing lock.
+        document = ListingSceneDocument.model_validate(scene)
+        if (origin is not None or document.measurement is not None
+            or any(obj.source == "sfm_estimated" for obj in document.objects)
+            or any(wall.height_source in {"estimated", "assumed"} for wall in document.walls)):
+            raise InvalidSceneIntegrityError("Manual replacement cannot carry unverified SfM measurements")
+        return
+    if previous is not None and origin is None:
+        raise InvalidSceneIntegrityError("Capture provenance cannot be removed")
+    captures = session.query(ListingCapture).filter(
+        ListingCapture.agency_id == agency_id, ListingCapture.listing_id == listing_id,
+        ListingCapture.scene_draft.is_not(None),
+    ).all()
+    if origin is None:
+        geometry = {key: scene.get(key) for key in ("walls", "rooms", "openings", "objects")}
+        # Persistence also holds historical v1 documents; only the HTTP scene
+        # boundary validates v2 shape. Provenance inspection must not reject a
+        # legacy record merely because it has no v2 walls/openings.
+        raw_walls = scene.get("walls")
+        walls = raw_walls if isinstance(raw_walls, list) else []
+        wall_ids = {wall.get("id") for wall in walls if isinstance(wall, dict)}
+        if scene.get("measurement") is not None or any(
+            ({key: capture.scene_draft.get(key) for key in geometry} == geometry or
+             (wall_ids and wall_ids == {wall.get("id") for wall in capture.scene_draft.get("walls", [])}))
+            for capture in captures if capture.scene_draft
+        ):
+            raise InvalidSceneIntegrityError("Captured scene requires its captureId")
+        return
+    capture = next((capture for capture in captures if capture.id == origin), None)
+    if capture is None or capture.status not in {"completed", "accepted"} or capture.scene_draft is None:
+        raise InvalidSceneIntegrityError("Scene capture does not belong to a completed listing capture")
+    if capture.package_manifest is None or capture.package_sha256 is None:
+        raise InvalidSceneIntegrityError("Verify historical capture package before applying its scene")
+    evidence = ListingSceneDocument.model_validate(capture.scene_draft)
+    if capture.package_manifest.get("schemaVersion") == 2 and evidence.measurement is None:
+        raise InvalidSceneIntegrityError("Historical video has no measurement evidence; recapture or measure manually")
+    require_metric_scene(evidence)
+    if any("unidades arbitrarias" in warning or "sin medida de referencia" in warning.lower()
+           for warning in capture.warnings or []):
+        raise InvalidSceneIntegrityError("Historical capture has no verified scale")
+    if scene.get("measurement") != capture.scene_draft.get("measurement"):
+        raise InvalidSceneIntegrityError("Capture measurement evidence cannot be changed or removed")
 
 
 def upsert_listing_scene(
@@ -158,6 +228,7 @@ def upsert_listing_scene(
     updated_by: str,
     if_match: str | None = None,
     if_none_match: str | None = None,
+    manual_replacement: bool = False,
 ) -> ListingScene | None:
     """Replace a listing's full scene after locking its parent listing row.
 
@@ -183,6 +254,11 @@ def upsert_listing_scene(
         if_none_match, current_revision, weak=True
     ):
         raise SceneConflictError(current_revision)
+
+    if manual_replacement and (current_revision is None or if_match != scene_etag(current_revision)):
+        raise SceneConflictError(current_revision)
+    validate_scene_origin(session, agency_id=agency_id, listing_id=listing_id, scene=scene, stored=stored,
+                          manual_replacement=manual_replacement)
 
     if stored is None:
         stored = ListingScene(
@@ -689,6 +765,13 @@ def transition_staff_listing(
         raise InvalidListingTransitionError
     if action == "submit" and not _has_confirmed_photo(session, listing_id):
         raise ListingPhotoRequiredError
+    if action == "publish":
+        saved_scene = session.get(ListingScene, listing_id)
+        if saved_scene is not None:
+            try:
+                require_metric_scene(ListingSceneDocument.model_validate(saved_scene.scene))
+            except (ValueError, InvalidSceneIntegrityError):
+                raise InvalidListingTransitionError from None
     listing.approval_status, listing.is_published = target
     session.flush()
     session.add(

@@ -1,3 +1,4 @@
+# ruff: noqa: E402  -- tests import the standalone worker after configuring sys.path.
 """Reconstruction queue consumer contracts; no network, queue or heavy dependency required."""
 
 from __future__ import annotations
@@ -6,6 +7,7 @@ import io
 import json
 import sys
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +37,7 @@ class FakeResponse:
         self.status_code = status_code
         self._body = body or {}
         self.content = content
-        self.headers = headers or {}
+        self.headers: Mapping[str, str] = headers or {}
 
     def json(self) -> dict[str, Any]:
         return self._body
@@ -179,6 +181,23 @@ def test_corrupt_zip_is_not_retryable() -> None:
     _, _, body = http.posts[1]
     assert body is not None
     assert body["retryable"] is False
+
+
+@pytest.mark.parametrize("code", ["F07_FFMPEG", "F07_SFM", "F07_SFM_TIMEOUT"])
+def test_video_runtime_failure_reports_safe_pipeline_stage(code: str) -> None:
+    from reconstruct_video import VideoRuntimeError
+
+    def reconstructor(package_dir: Path) -> reconstruct.ReconstructionResult:
+        raise VideoRuntimeError(code, "secret signed URL and private filename")
+
+    http, queue = FakeHttpClient(), FakeQueue()
+    _worker(http, queue, reconstructor).run_once()
+    body = http.posts[1][2]
+    assert body is not None
+    assert body["retryable"] is True
+    assert body["reason"].startswith(code + ":")
+    assert "secret" not in body["reason"]
+    assert "private" not in body["reason"]
 
 
 def test_unexpected_error_is_retryable_and_hides_exception_text() -> None:

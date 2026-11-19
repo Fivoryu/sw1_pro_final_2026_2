@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -203,12 +205,30 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
     floorplanInterpreter: widget.floorplanInterpreter,
   );
   StaffSessionStatus? _lastStatus;
+  StreamSubscription<dynamic>? _connectivity;
+  DateTime? _lastConnectivityRetry;
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_onSessionChanged);
     widget.controller.restore();
+    _connectivity = const EventChannel('roomforge/connectivity')
+        .receiveBroadcastStream()
+        .listen((event) {
+          if (event != true) return;
+          if (widget.controller.status == StaffSessionStatus.offline) {
+            widget.controller.restore().catchError((Object _) {});
+            return;
+          }
+          if (widget.controller.status != StaffSessionStatus.signedIn) return;
+          final now = DateTime.now();
+          if (_lastConnectivityRetry != null &&
+              now.difference(_lastConnectivityRetry!).inSeconds < 5)
+            return;
+          _lastConnectivityRetry = now;
+          _drafts.resumePendingUploads().catchError((Object _) {});
+        }, onError: (Object _) {});
   }
 
   void _onSessionChanged() {
@@ -263,6 +283,7 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
 
   @override
   void dispose() {
+    _connectivity?.cancel();
     widget.controller.removeListener(_onSessionChanged);
     _notifications?.dispose();
     _drafts.dispose();

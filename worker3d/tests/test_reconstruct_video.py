@@ -1,3 +1,4 @@
+# ruff: noqa: E402  -- tests import the standalone worker after configuring sys.path.
 """Schema 2 reconstruction (video + sensors -> scene v2 draft), F07 T5.
 
 The heavy external steps (ffmpeg, pycolmap) are replaced by fakes that return a synthetic
@@ -12,7 +13,7 @@ import math
 import sys
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -100,7 +101,7 @@ def make_model(
     for index, (px, pz) in zip(frames, spots, strict=True):
         yaw = math.atan2(mx - px, mz - pz)
         r_w = _camera_rotation_w(_forward(yaw, pitch_deg))
-        centre = tuple(scale * c + s for c, s in zip(_mv(ROT, (px, 1.4, pz)), shift, strict=True))
+        centre = cast(rv.Vec3, tuple(scale * c + s for c, s in zip(_mv(ROT, (px, 1.4, pz)), shift, strict=True)))
         poses.append(rv.CameraPose(index, _mm(ROT, r_w), centre))
 
     world: list[tuple[float, float, float]] = []
@@ -127,7 +128,7 @@ def make_model(
                     world.append((x0 + sx, height, z0 + sz))
     points = [
         rv.SparsePoint(
-            tuple(scale * c + s for c, s in zip(_mv(ROT, p), shift, strict=True)), tuple(frames)
+            cast(rv.Vec3, tuple(scale * c + s for c, s in zip(_mv(ROT, p), shift, strict=True))), tuple(frames)
         )
         for p in world
     ]
@@ -606,6 +607,68 @@ def test_without_a_reference_the_model_is_flagged_as_unscaled(tmp_path: Path) ->
     # Nothing metric was applied: the 4x3 room is brought to a nominal 5-unit long side with one
     # factor, so the short side is 3/4 of it (plus the fixed wall thickness).
     assert wall_lengths(result.scene_draft)[0] == pytest.approx(3.75 + 0.15, abs=0.02)
+    assert result.scene_draft["unit"] == "arbitrary"
+    assert result.scene_draft["measurement"]["scale"] == "unscaled"
+
+
+@pytest.mark.parametrize("scale", [0.001, 0.05, 0.1, 1.0, 10.0, 1000.0])
+def test_unscaled_contours_are_invariant_to_sfm_gauge(tmp_path: Path, scale: float) -> None:
+    package, model = single_room(tmp_path, scale=scale, shift=(0.0, 0.0, 0.0))
+    scene = run(package, [model]).scene_draft
+    assert scene["unit"] == "arbitrary"
+    assert scene["measurement"]["scale"] == "unscaled"
+    assert len(scene["rooms"]) == 1
+    assert len(scene["walls"]) == 4
+    assert wall_lengths(scene) == [3.9, 3.9, 5.15, 5.15]
+
+
+def test_unknown_clock_does_not_use_numerically_coincident_gravity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = make_model((0.0, 0.0, 4.0, 3.0))
+    manifest = v2_manifest()
+    manifest["video"]["timestampSource"] = "unknown"
+    package = write_v2(tmp_path / "p", manifest, sensors=gravity_lines([model]))
+    original = rv.estimate_up
+    observed: list[list[rv.SensorSample]] = []
+
+    def checked(poses: Any, times: Any, sensors: Any, transform: Any) -> Any:
+        observed.append(sensors)
+        return original(poses, times, sensors, transform)
+
+    monkeypatch.setattr(rv, "estimate_up", checked)
+    scene = run(package, [model]).scene_draft
+    assert observed == [[]]
+    assert scene["measurement"]["clock"] == "unknown"
+
+
+def test_no_poses_has_actionable_evidence_classification(tmp_path: Path) -> None:
+    package, _ = single_room(tmp_path)
+    with pytest.raises(reconstruct.InvalidPackage, match="F07_POSES:.*no camera poses"):
+        run(package, [])
+
+
+def test_incomplete_contour_keeps_scale_and_clock_context_within_failure_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    package, model = single_room(tmp_path)
+    manifest = json.loads((package / "manifest.json").read_text())
+    manifest["video"]["timestampSource"] = "unknown"
+    (package / "manifest.json").write_text(json.dumps(manifest))
+    monkeypatch.setattr(reconstruct, "propose_contour", lambda *_, **__: reconstruct.ProposalFailed("incomplete"))
+    with pytest.raises(reconstruct.InvalidPackage, match="F07_CONTOUR:") as error:
+        run(package, [model])
+    assert "Sin referencia métrica." in str(error.value)
+    assert "Reloj no verificado." in str(error.value)
+    assert len("Invalid package: " + str(error.value)) <= 255
+    message = next(record.message for record in caplog.records if record.message.startswith("F07 reconstruction diagnostic:"))
+    diagnostic = json.loads(message.split(": ", 1)[1])
+    assert diagnostic["poses_unique"] > 0
+    assert len(diagnostic["components"]) == 1
+    assert diagnostic["contours"][0]["reason"] == "incomplete"
+    assert diagnostic["contours"][0]["wallCandidates"] >= diagnostic["contours"][0]["segments"]
+    assert manifest["captureId"] not in message
+    assert manifest["rooms"][0]["name"] not in message
 
 
 def test_a_reference_that_misses_the_plane_is_reported_and_not_applied(tmp_path: Path) -> None:
@@ -621,6 +684,33 @@ def test_a_reference_that_misses_the_plane_is_reported_and_not_applied(tmp_path:
 
     assert any("referencia" in w and "no pudo ubicarse" in w for w in result.warnings)
     assert any(w.startswith("Sin medida de referencia") for w in result.warnings)
+
+
+def test_failed_contour_preserves_unapplied_reference_in_public_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    model = make_model((0.0, 0.0, 4.0, 3.0), pitch_deg=0.0)
+    reference = {
+        "kind": "object", "label": "Private reference", "lengthM": 0.27,
+        "surface": "floor", "frameNs": T0,
+        "p1": {"x": 0.5, "y": 0.5}, "p2": {"x": 0.5, "y": 0.9},
+    }
+    manifest = v2_manifest(reference=reference)
+    manifest["video"]["timestampSource"] = "unknown"
+    package = write_v2(tmp_path / "p", manifest, sensors=gravity_lines([model]))
+    monkeypatch.setattr(reconstruct, "propose_contour", lambda *_, **__: reconstruct.ProposalFailed("incomplete"))
+    with pytest.raises(reconstruct.InvalidPackage, match="F07_CONTOUR:") as error:
+        run(package, [model])
+    reason = str(error.value)
+    assert "Referencia sin escala aplicada." in reason
+    assert "Reloj no verificado." in reason
+    assert "captura manual" in reason
+    assert len("Invalid package: " + reason) <= 255
+    diagnostic = next(r.message for r in caplog.records if r.message.startswith("F07 reconstruction diagnostic:"))
+    values = json.loads(diagnostic.split(": ", 1)[1])
+    assert values["reference_outcome"] == "SUPPORT_PLANE_MISSING"
+    assert values["reference_applied"] is False
+    assert reference["label"] not in diagnostic + reason
 
 
 def test_missing_gravity_is_flagged(tmp_path: Path) -> None:
@@ -672,6 +762,8 @@ def test_a_split_reconstruction_stays_proportional_when_the_reference_reaches_on
 
     scene = result.scene_draft
     assert [r["name"] for r in scene["rooms"]] == ["Estar", "Cuarto"]
+    assert scene["measurement"]["alignment"] == "disconnected"
+    assert scene["unit"] == "arbitrary"
     assert any("partida en 2 piezas" in w for w in result.warnings)
     # One scale for the whole walkthrough: a reference that reaches only one piece is not applied.
     assert scene["scale"] == {"mode": "proportional"}
@@ -741,6 +833,7 @@ def test_the_draft_passes_the_scene_v2_gate_of_the_api(tmp_path: Path) -> None:
 
 def test_a_missing_ffmpeg_gives_a_clear_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(rv.shutil, "which", lambda _name: None)
+    monkeypatch.setitem(sys.modules, "imageio_ffmpeg", None)
 
     with pytest.raises(reconstruct.ExternalToolMissing, match="ffmpeg"):
         rv.FfmpegFrameExtractor().extract(tmp_path / "video.mp4", [0], tmp_path)
@@ -824,6 +917,7 @@ def test_the_cli_reports_a_missing_tool_without_a_traceback(
 ) -> None:
     package = write_v2(tmp_path / "p")
     monkeypatch.setattr(rv.shutil, "which", lambda _name: None)
+    monkeypatch.setitem(sys.modules, "imageio_ffmpeg", None)
 
     code = reconstruct.main([str(package)])
 
@@ -871,6 +965,7 @@ def test_a_schema_2_job_with_a_missing_tool_is_retryable_not_invalid(
 
     package = write_v2(tmp_path / "p")
     monkeypatch.setattr(rv.shutil, "which", lambda _name: None)
+    monkeypatch.setitem(sys.modules, "imageio_ffmpeg", None)
     http, queue = FakeHttpClient(package=_v2_zip(package)), FakeQueue()
 
     _worker(http, queue).run_once()

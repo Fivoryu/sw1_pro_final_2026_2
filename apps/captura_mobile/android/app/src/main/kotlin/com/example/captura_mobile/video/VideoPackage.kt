@@ -197,6 +197,7 @@ class ReferenceMark private constructor(
 ) {
     fun toMap(): Map<String, Any?> = linkedMapOf<String, Any?>(
         "kind" to "object",
+        "dimensionsSource" to "user_confirmed",
         "label" to label,
         "lengthM" to lengthM,
         "surface" to surface.wireName,
@@ -235,7 +236,7 @@ data class ReferencePreset(val label: String, val lengthM: Double, val surface: 
 
 object ReferencePresets {
     val ALL = listOf(
-        ReferencePreset("Hoja A4 (lado largo)", 0.297, ReferenceSurface.WALL, otherSideM = 0.210),
+        ReferencePreset("Hoja A4 (largo: 29,7 cm; corto: 21 cm)", 0.297, ReferenceSurface.WALL, otherSideM = 0.210),
         ReferencePreset("Tarjeta (lado largo)", 0.0856, ReferenceSurface.WALL, otherSideM = 0.05398),
         ReferencePreset("Puerta estándar (alto)", 2.0, ReferenceSurface.FLOOR),
     )
@@ -245,7 +246,8 @@ object ReferencePresets {
 
 // region Rooms (S6)
 
-/** One room interval of the video, in `elapsedRealtimeNanos`: [fromNs, toNs). */
+/** One video interval [fromNs, toNs), in the Camera2 clock used by frames.jsonl.
+ * It agrees with elapsedRealtimeNanos only when timestampSource is realtime. */
 data class VideoRoom(val id: String, val name: String, val fromNs: Long, val toNs: Long)
 
 /**
@@ -277,12 +279,15 @@ class RoomTimeline(firstName: String) {
         return VideoRoom("room-$number", "Ambiente $number", nowNs, nowNs)
     }
 
-    /** Closes the last room at [endNs]. An empty trailing room is dropped unless it is the only one. */
+    /** Closes the last room at [endNs]. Drop an empty trailing room; reject an empty recording or a clock reversal. */
     fun finish(endNs: Long): List<VideoRoom> {
         val open = checkNotNull(current) { "The timeline was not started" }
+        require(endNs >= open.fromNs && (endNs > open.fromNs || closed.isNotEmpty())) {
+            "Room end must follow its start in the camera clock"
+        }
         current = null
-        if (endNs > open.fromNs || closed.isEmpty()) {
-            closed.add(VideoRoom(open.id, open.name, open.fromNs, maxOf(endNs, open.fromNs)))
+        if (endNs > open.fromNs) {
+            closed.add(VideoRoom(open.id, open.name, open.fromNs, endNs))
         }
         return closed.toList()
     }
@@ -298,6 +303,9 @@ class FrameLog {
 
     val count: Int get() = timestamps.size
     val firstTimestampNs: Long? get() = timestamps.firstOrNull()
+
+    @Synchronized
+    fun timestamps(): List<Long> = timestamps.toList()
 
     @Synchronized
     fun contains(timestampNs: Long): Boolean = timestamps.contains(timestampNs)
@@ -366,6 +374,7 @@ object VideoManifestBuilder {
     fun build(input: VideoManifestInput): Map<String, Any?> {
         require(input.listingId.isNotBlank()) { "A package needs a non-blank listingId" }
         require(input.rooms.isNotEmpty()) { "A package needs at least one room" }
+        require(input.rooms.all { it.fromNs < it.toNs }) { "Room intervals must have positive duration" }
         require(input.sensorOrientation in intArrayOf(0, 90, 180, 270)) { "Invalid sensor orientation" }
         require(input.videoSize.width > 0 && input.videoSize.height > 0) { "Invalid video size" }
         val manifest = linkedMapOf<String, Any?>(
@@ -425,6 +434,7 @@ object VideoPackageBuilder {
             target.delete()
             return VideoPackageOutcome.TooLarge(size)
         }
+        CaptureRecovery.verifyAndSyncZip(target)
         return VideoPackageOutcome.Built(size)
     }
 
@@ -449,9 +459,11 @@ object VideoCaptureResult {
         durationMs: Long,
         reachedTimeLimit: Boolean,
         timestampSource: String,
+        sha256: String? = null,
     ): Map<String, Any?> = linkedMapOf(
         "outcome" to "captured",
         "capturePackage" to linkedMapOf(
+            "sha256" to sha256,
             "zipPath" to zipPath,
             "captureId" to captureId,
             "sizeBytes" to sizeBytes,

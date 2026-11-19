@@ -66,6 +66,8 @@ class ListingCapture(Base):
     listing_id: Mapped[str] = mapped_column(String(36), nullable=False)
     object_key: Mapped[str] = mapped_column(String(255), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    package_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    package_manifest: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     lease_expires_at: Mapped[datetime | None] = mapped_column(

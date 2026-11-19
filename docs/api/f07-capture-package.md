@@ -1,5 +1,7 @@
 # Paquete de captura F07 → worker3d
 
+> **Correcciones de integridad, 2026-11-17:** la sección «Endurecimiento aditivo» al final precisa la validación de subida, referencia y salida privada. Sustituye las descripciones anteriores que permiten aplicar un borrador sin escala. No acredita QA física.
+
 > **Estado:** este documento contiene dos contratos.
 > - **Esquema `2` (vigente para la captura por video, congelado el 2026-11-15):** primera parte. Sustituye al borrador `docs/api/f07-capture-package-v2-borrador.md`. Dirección aprobada el 2026-10-23 (plan maestro §F07, «Decisión 2026-10-23»).
 > - **Esquema `1` (heredado, congelado el 2026-10-21):** segunda parte. Es el contrato del código ARCore existente, que lo sigue consumiendo. Plan maestro §F07, decisión 2026-10-21, F07.7.
@@ -49,7 +51,7 @@ Una línea JSON por cuadro del video:
 ```
 
 - `i`: índice del cuadro, desde 0; los valores son consecutivos (la línea de posición `n` lleva `i = n`).
-- `t`: nanosegundos del reloj `elapsedRealtimeNanos`; es la marca de tiempo del sensor de Camera2 para ese cuadro. Debe ser **estrictamente creciente**.
+- `t`: marca original `SENSOR_TIMESTAMP` de Camera2, en nanosegundos. Coincide con `elapsedRealtimeNanos` solo si `timestampSource` es `realtime`; con `unknown` no se presume sincronía con sensores. Debe ser **estrictamente creciente**.
 - Máximo 20 000 líneas (límite elegido durante la implementación, no medido); el archivo debe tener al menos una. Las líneas vacías se ignoran.
 
 ## `sensors.jsonl`
@@ -63,7 +65,7 @@ Una línea JSON por muestra, ordenada por `t`:
 { "t": 1234567030, "type": "mag", "x": 21.0, "y": -3.5, "z": 40.2 }
 ```
 
-- `t`: nanosegundos del **mismo reloj** (`elapsedRealtimeNanos`) que `frames.jsonl` y `video.startedAtNs`, para sincronizar sensores y cuadros. El archivo debe estar ordenado por `t` (no decreciente); un archivo desordenado se rechaza.
+- `t`: nanosegundos del reloj de eventos de sensores Android (`elapsedRealtimeNanos`). Solo se alinea con cuadros y `video.startedAtNs` cuando Camera2 declara `realtime`. El archivo debe estar ordenado por `t` (no decreciente); un archivo desordenado se rechaza.
 - Máximo 400 000 líneas (límite elegido durante la implementación, no medido). Cada línea necesita `t` entero, un `type` conocido y `x`, `y`, `z` numéricos.
 - `type`: `gyro` (rad/s), `accel` (m/s²), `gravity` (m/s²) o `mag`. `mag` es opcional y `worker3d` **no lo usa**; se registra pero no es un dato confiable.
 - Frecuencia solicitada: 100 Hz. Es la tasa pedida al sistema operativo; la tasa real entregada no está medida.
@@ -175,7 +177,9 @@ Usa el flujo vigente de la API de capturas, sin cambios (ver «API» en la parte
 
 ## Guía en vivo durante la grabación (S8)
 
-La app muestra un aviso a la vez sobre la vista previa. Los avisos son **solo en vivo**: no se guardan en el paquete ni cambian el esquema `2`. Prioridad: movimiento brusco, poca luz, giro rápido, cierre del recorrido. Cada aviso se mantiene 2 s después de que su condición termina. La lógica está en `CaptureGuidance.kt` (función pura, con pruebas JVM).
+La guía visual usa copias asíncronas de la vista previa, hasta 192×192 y una por segundo, con un solo análisis en vuelo. Evalúa luz, detalle y coincidencias locales sin depender de giroscopio. Los pasos se avanzan explícitamente; las muestras útiles indican solapamiento local, no paredes ni cobertura 3D verificadas. Puede desactivarse y su indisponibilidad no impide grabar/guardar. Los candidatos rectangulares no identifican A4 ni medidas: las esquinas se ajustan y las dimensiones reales en cm se confirman sobre el cuadro codificado al finalizar. No se guardan imágenes de análisis ni se cambia el esquema.
+
+`CaptureGuidance.kt` conserva las señales de sensores heredadas descritas abajo; no acreditan cobertura ni posición y no sustituyen la guía visual en la pantalla de video.
 
 | Aviso | Señal | Umbral (supuesto, no medido) |
 | --- | --- | --- |
@@ -199,6 +203,7 @@ Advertencias nuevas previstas para el esquema `2`:
 - «Gravedad no disponible: no se distinguió piso de techo».
 - Aviso cuando el «arriba» derivado de la gravedad difiere del plano de piso o techo ajustado en más de 10° (tolerancia heurística, no medida).
 - Sin referencia utilizable, la escena queda en unidades arbitrarias con un aviso: no existe escala de respaldo (la decisión D3 sigue abierta).
+- Para ensamblar exclusivamente contornos sin escala se normaliza la extensión de trayectoria a 10 unidades **adimensionales**, haciendo las heurísticas relativas a ella; no son metros ni una escala física de respaldo. Las piezas métricas conservan su factor medido y sus validaciones.
 
 Otros comportamientos: un `schemaVersion` explícito distinto de 1 o 2 se rechaza como `unsupported schemaVersion`, y la app rechaza antes de subir un paquete superior a 150 MiB. Estos valores y tolerancias son supuestos no medidos.
 
@@ -342,3 +347,58 @@ La app de captura permite grabar sin red y enviar después, con un modo acotado:
 - **Envío**: el paquete queda en el teléfono y en la cola. Al volver la red («Reintentar conexión») se hace la renovación real de la sesión; solo entonces la cola se envía sola. Si la renovación es rechazada (no una falla de red), la sesión y la caché local se descartan como siempre y los paquetes en cola **no se borran**.
 - **Cierre de sesión**: borra la sesión guardada, el id de cuenta y la caché de inmuebles. Cambiar de cuenta también borra la caché anterior.
 - **Sin límite de vigencia**: este modo no impone un plazo de acceso sin conexión; queda como decisión abierta del dueño del producto.
+
+## Endurecimiento aditivo — 2026-11-17
+
+- El paquete sigue usando esquema 1 o 2. El nuevo APK añade `reference.dimensionsSource: "user_confirmed"` tras confirmación explícita de las dimensiones reales; un preset no acredita una medición. Referencias antiguas siguen siendo legibles, con confirmación pendiente.
+- En video, la referencia se marca **al terminar**, sobre el primer cuadro real del MP4 mediante el decodificador del teléfono. Debe filmarse el objeto al inicio. No se usa el bitmap de TextureView como evidencia del cuadro codificado.
+- Android contrasta número de cuadros y PTS del MP4 con Camera2 antes de empaquetar; el worker vuelve a contrastar la secuencia completa antes de SfM. Se toleran 2 ms de cuantización en tiempos relativos: es una guarda operativa no medida, no una garantía del offset absoluto sensor/codificador. La correspondencia física requiere QA con dispositivo.
+- `CaptureRegistration` admite `sha256` opcional, calculado por el APK sobre el ZIP. Repetir un captureId con tamaño/hash distinto produce conflicto. `/complete` comprueba existencia, tamaño, CRC, límites e identidad del manifiesto; escribe y relee una copia verificada en una clave que no tiene URL PUT. Solo entonces devuelve `uploadVerified: true`, encola y permite liberar el ZIP local después de persistir el estado. Una respuesta antigua sin ese indicador conserva la copia local. Los errores recuperables mantienen la captura.
+- El claim incorpora `capture_id`, `listing_id`, `size_bytes`, `package_sha256` y `lease_seconds`; el worker contrasta bytes y manifiesto antes de reconstruir. `POST /api/v1/reconstruction/jobs/{job_id}/renew` requiere autenticación y `X-Reconstruction-Claim-Token` vigente; no resucita leases vencidas. La terminación sigue siendo idempotente. Un resultado se conserva en la caché privada persistente hasta recibir confirmación del servidor.
+- Los borradores de video incluyen `measurement: {source: "sfm", scale: "reference" | "unscaled", alignment: "connected" | "disconnected", clock: "realtime" | "unknown", referenceConfirmed: boolean}`. Sin escala para **todas** las piezas, `unit` es `arbitrary`; únicamente el borrador de captura admite ese valor. La API rechaza su aceptación, guardado como escena del inmueble y publicación. También bloquea reloj no fiable, piezas desconectadas o referencia no confirmada. Catálogo y visor públicos siguen recibiendo exclusivamente metros. Las cajas de video declaran `source: "sfm_estimated"`; las fuentes `depth` y `manual` existentes se conservan.
+- `scale.mode: "proportional"` identifica además la normalización relativa de Trevor. El factor nominal se mantiene separado de la escala por referencia y nunca convierte las coordenadas a metros. Las capturas históricas proporcionales que declaraban `unit: "meters"` se exponen como `arbitrary`, sin modificar su evidencia durante GET. Confirmar una altura o abertura no cambia esta modalidad. Véase el [informe de integración](../integracion/f07-20261118/README.md).
+- La escala requiere intersecciones dentro del soporte finito del suelo o de la pared observada; se rechaza extrapolación fuera de segmentos. Si el rectángulo no intersecta o sus dos escalas son inconsistentes, se conserva un borrador sin escala y se informa: ya no se toma silenciosamente el lado largo ni se recupera una escala alternativa a partir de la misma referencia dudosa.
+- El worker usa la distorsión SIMPLE_RADIAL tanto al proyectar como al formar rayos. Ninguna de estas correcciones mide exactitud física. Sin gravedad utilizable, la reconstrucción queda bloqueada para aceptación métrica. Las piezas desconectadas se conservan como propuesta con ubicación relativa desconocida y no pueden aceptarse como inmueble conectado.
+- El retorno de Internet validado despierta la cola; una sesión offline se renueva antes de enviar. Las escrituras por propietario son serializadas, con temporal único, backup y etapas monótonas; los journals nativos recuperan paquetes aún no encolados después de un reinicio. Una interrupción intenta finalizar y conservar la toma; una muerte de proceso con MP4 sin finalizar no se declara recuperada sin prueba física.
+- La revisión `0036_capture_integrity` conserva checksum y manifiesto nullable para los registros existentes. Desplegar primero esta migración y el backend compatible, después el worker y el APK/panel. Los datos históricos no adquieren procedencia verificada por migración. No se retiran ARCore, captura manual ni importación de planos.
+
+Los límites de 300 cuadros SfM, cuatro hilos, extracción de características hasta 1600 px, 1800 s para PyCOLMAP, matching secuencial con vecindad diez cuando hay más de veinte imágenes y contenedor de 6 GiB/4 CPU son **guardas operativas, no SLA ni tolerancias de exactitud**. El presupuesto y la cobertura de recorridos de 30/90/300 s requieren medición. Los originales de staging y el snapshot se incluyen en la limpieza; el almacenamiento desplegado debe aplicar una caducidad a objetos de staging recreados mediante URLs previas todavía vigentes.
+
+## Corrección residual R01–R12
+
+- Una captura purgada o vencida sin recibo verificado no puede reabrirse: registro/completado
+  responden `410`, sin URL nueva ni snapshot. Un recibo ya verificado sigue consultable tras
+  su borrado legal; esto confirma entrega histórica y no reactiva almacenamiento/procesamiento.
+- Un SHA histórico nulo se reconcilia con bytes remotos si existen. En `awaiting_upload` sin objeto
+  puede fijar una expectativa; nunca constituye prueba de entrega. Tamaño, identidad y hash en
+  conflicto siguen rechazándose. Capturas históricas sin manifiesto se verifican por `/complete`
+  sin reiniciar el trabajo ni extender su retención. Sin objeto verificable, se conserva la copia
+  local y se responde un error recuperable explícito; la migración no inventa evidencia.
+- `/complete` valida CRC con plazo de 120 s y realiza I/O fuera de la transacción. Una segunda
+  transacción corta revalida estado, identidad y retención bajo bloqueo de fila. Cada candidato
+  nuevo tiene clave propia; el perdedor elimina solo su candidato. El almacenamiento debe tener
+  caducidad para candidatos huérfanos tras muerte de proceso/fallo de limpieza; no hay barrido
+  remoto de huérfanos certificado aquí.
+- Los fallos de publicación o mensajes no reclamados no consumen intentos de reconstrucción.
+  Solo fallos de ejecución o leases de ejecución vencidas consumen la cuota existente.
+- `/accept` exige una escena persistida con el mismo `captureId`, evidencia compatible y escala
+  válida. Un `If-Match` suministrado debe coincidir con la revisión actual; conflicto: `412`.
+  El bloqueo del inmueble serializa aceptación con guardado. Repetir una aceptación confirmada
+  sigue siendo idempotente; no se atribuye evidencia retroactiva a registros antiguos.
+- El claim añade `cache_delete_after`. La caché privada vence al menor plazo entre esa fecha y
+  `RECONSTRUCTION_CACHE_RETENTION_SECONDS` (máximo 30 días); incluye cachés antiguas y temporales.
+  Su capacidad predeterminada es 128 MiB. Se aplica contrapresión en vez de expulsar resultados
+  ambiguos vigentes. Un estado terminal confirmado elimina su resultado; tras vencer la política
+  no se promete reutilización indefinida. El sweep se ejecuta mientras el worker está activo;
+  volúmenes de workers retirados deben limpiarse operacionalmente.
+- Android distingue descarte explícito de segundo plano: finaliza grabación o empaqueta un MP4
+  finalizado. Conserva sidecars y checkpoints privados; solo borra raw tras verificar CRC del ZIP,
+  sincronizarlo y persistir el journal de recuperación. Un reinicio puede recuperar el MP4
+  finalizado y validado, filtrando propietario. Un MP4 no finalizado se conserva para rescate,
+  sin declarar captura válida ni fabricar referencia confirmada.
+  Si se interrumpe el marcado, `reference-draft.json` conserva entradas sin confirmar dentro
+  del ZIP; el worker no lo usa para escalar ni lo confunde con `manifest.reference`.
+
+Los controles MP4/Camera2 de conteo y tiempos relativos mantienen su tolerancia de 2 ms.
+El offset absoluto y el comportamiento físico del dispositivo siguen pendientes, según
+[el procedimiento residual](../../odd/tasks/f07-residual-hardening.md).

@@ -86,6 +86,7 @@ from app.modules.catalog.service import (
     transition_staff_listing,
     upsert_listing_scene,
     validate_scene_integrity,
+    require_metric_scene,
 )
 from app.modules.identity.session import ActiveStaff, get_active_staff
 
@@ -264,6 +265,7 @@ def get_public_listing_scene(
         try:
             scene = ListingSceneDocument.model_validate(stored.scene)
             validate_scene_integrity(scene)
+            require_metric_scene(scene)
         except (ValidationError, InvalidSceneIntegrityError):
             return _scene_error_response(
                 404, "Scene is not defined for this listing", "scene_not_defined"
@@ -872,6 +874,7 @@ def replace_agency_listing_scene(
     staff: ActiveStaff = Depends(get_active_staff),
     if_match: Annotated[str | None, Header()] = None,
     if_none_match: Annotated[str | None, Header()] = None,
+    x_scene_intent: Annotated[str | None, Header()] = None,
 ) -> ListingSceneDocument | JSONResponse:
     """Replace the scene; optional If-Match/If-None-Match make the write conditional.
 
@@ -881,6 +884,7 @@ def replace_agency_listing_scene(
     try:
         scene = ListingSceneDocument.model_validate(body)
         validate_scene_integrity(scene)
+        require_metric_scene(scene)
     except ValidationError as error:
         return _scene_error_response(
             422, _scene_validation_detail(error), "scene_invalid"
@@ -900,6 +904,7 @@ def replace_agency_listing_scene(
                 updated_by=staff["id"],
                 if_match=if_match,
                 if_none_match=if_none_match,
+                manual_replacement=x_scene_intent == "manual-replacement",
             )
             if stored is None:
                 return _scene_error_response(404, "Listing not found", "listing_not_found")
@@ -917,6 +922,8 @@ def replace_agency_listing_scene(
             "scene_conflict",
             headers=headers,
         )
+    except InvalidSceneIntegrityError as error:
+        return _scene_error_response(422, error.detail, "scene_invalid")
     response.headers["ETag"] = scene_etag(revision)
     return saved
 

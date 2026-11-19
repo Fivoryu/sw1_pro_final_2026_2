@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import '../data/models/staff_listing.dart';
 import '../data/services/ar_capture_channel.dart';
@@ -214,6 +215,42 @@ class ListingDraftsController extends ChangeNotifier {
   /// a no-op without an access token, so it never runs in offline mode.
   Future<void> resumePendingUploads() async {
     if (_session.accessToken == null) return;
+    final owner = _session.ownerId;
+    if (owner != null) {
+      try {
+        final journals = await const MethodChannel(
+          'roomforge/video_capture',
+        ).invokeListMethod<dynamic>('recoverPackages', {'ownerId': owner});
+        for (final entry in journals ?? []) {
+          if (entry is! Map ||
+              entry['ownerId'] != owner ||
+              entry['listingId'] is! String)
+            continue;
+          final result = entry['result'];
+          if (result is! Map || result['capturePackage'] is! Map) continue;
+          final package = CapturePackageInfo.fromJson(
+            Map<String, Object?>.from(result['capturePackage'] as Map),
+          );
+          final controller = uploadsFor(entry['listingId'] as String);
+          if (controller == null) continue;
+          try {
+            await controller.load();
+            if (await controller.enqueue(package)) {
+              await const MethodChannel(
+                'roomforge/video_capture',
+              ).invokeMethod<void>('ackPackage', {
+                'ownerId': owner,
+                'captureId': package.captureId,
+              });
+            }
+          } finally {
+            controller.dispose();
+          }
+        }
+      } on Object {
+        /* Journals and ZIPs stay private and intact for the next retry. */
+      }
+    }
     final listingIds = {
       for (final upload in await pendingUploads()) upload.listingId,
     };

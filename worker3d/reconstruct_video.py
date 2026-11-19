@@ -3,7 +3,7 @@
 Lives next to ``reconstruct.py`` (schema 1, ARCore): ``reconstruct.reconstruct`` dispatches here
 when ``manifest.json`` declares ``schemaVersion: 2``. The frozen package is described in
 ``docs/api/f07-capture-package.md`` (S9); every numeric parameter below is a heuristic, not a
-measured tolerance, and nothing here has been run on a real recording.
+measured tolerance. Native adapter checks do not establish accuracy on a phone recording.
 
 Pipeline:
 
@@ -25,24 +25,34 @@ The output measures are estimates: no accuracy has been measured (S7).
 from __future__ import annotations
 
 import bisect
+import hashlib
 import importlib
 import itertools
 import json
+import logging
 import math
 import random
+import re
 import shutil
+import sqlite3
+import statistics
 import subprocess
+import sys
 import tempfile
+import time
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol, cast
 
 import opening_placement
 import reconstruct
 from reconstruct import ExternalToolMissing, InvalidPackage, ReconstructionResult
 from stage_cache import StageCache, fingerprint
+
+# Captured when this module is loaded, rather than hashing a later on-disk revision per job.
+SOURCE_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
 # --- Frozen package limits (S9) and heuristics (none of them measured) ----------------------
 
@@ -56,6 +66,26 @@ VIDEO_FILE, FRAMES_FILE, SENSORS_FILE = "video.mp4", "frames.jsonl", "sensors.js
 
 # Frames handed to SfM per second of video.
 EXTRACT_FPS = 3.0
+MAX_SFM_FRAMES = 300  # Operational cap, not a precision or business SLA.
+# Bump when adapters or the cached (models, native diagnostics) representation change.
+SPARSE_STAGE_VERSION = 2
+# Dimensionless canonical path extent for draft-only, unscaled contour assembly.
+# This is not a conversion to meters. Metric pieces retain their measured factor.
+UNSCALED_PATH_EXTENT = 10.0
+
+
+class VideoRuntimeError(RuntimeError):
+    """Detailed local cause with a fixed, privacy-safe public stage classification."""
+
+    REASONS: ClassVar[dict[str, str]] = {
+        "F07_FFMPEG": "No se pudo decodificar o extraer el video. Conservá el paquete para revisión técnica.",
+        "F07_SFM": "Falló el procesamiento SfM. Conservá el paquete para revisión técnica.",
+        "F07_SFM_TIMEOUT": "El procesamiento SfM superó el tiempo disponible. Usá captura manual o pedí revisión técnica.",
+    }
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(detail)
+        self.public_reason = f"{code}: {self.REASONS[code]}"
 # A gravity sample further than this from a frame is not used for it.
 GRAVITY_MAX_SKEW_NS = 200_000_000
 # Below this length the mean of the per-frame "up" vectors is not a consistent direction.
@@ -153,6 +183,7 @@ class Intrinsics:
     fy: float
     cx: float
     cy: float
+    radial: float = 0.0  # COLMAP SIMPLE_RADIAL, in normalised camera coordinates.
 
 
 @dataclass(frozen=True)
@@ -551,9 +582,10 @@ def estimate_up(
         t = frame_times.get(pose.frame_index)
         if t is None or not gravity:
             continue
+        frame_time = t  # Preserve narrowing inside the key callback.
         at = bisect.bisect_left(times, t)
         near = min(
-            (gravity[j] for j in (at - 1, at) if 0 <= j < len(gravity)), key=lambda s: abs(s.t - t)
+            (gravity[j] for j in (at - 1, at) if 0 <= j < len(gravity)), key=lambda s: abs(s.t - frame_time)
         )
         if abs(near.t - t) > GRAVITY_MAX_SKEW_NS:
             continue
@@ -778,9 +810,17 @@ def _pixel_ray(
     point: dict[str, float], pose: CameraPose, intrinsics: Intrinsics
 ) -> tuple[Vec3, Vec3]:
     u, v = point["x"] * intrinsics.width, point["y"] * intrinsics.height
-    direction = _mv(
-        pose.rotation, ((u - intrinsics.cx) / intrinsics.fx, (v - intrinsics.cy) / intrinsics.fy, 1.0)
-    )
+    xd, yd = (u - intrinsics.cx) / intrinsics.fx, (v - intrinsics.cy) / intrinsics.fy
+    x, y = xd, yd
+    for _ in range(30):
+        distortion = 1 + intrinsics.radial * (x * x + y * y)
+        if distortion <= 0:
+            raise InvalidPackage("camera distortion cannot be inverted")
+        x, y = xd / distortion, yd / distortion
+    if math.hypot(x * (1 + intrinsics.radial * (x*x + y*y)) - xd,
+                  y * (1 + intrinsics.radial * (x*x + y*y)) - yd) > 1e-7:
+        raise InvalidPackage("camera distortion inversion did not converge")
+    direction = _mv(pose.rotation, (x, y, 1.0))
     return pose.center, _unit3(direction)
 
 
@@ -814,16 +854,40 @@ def _plane_hits(
         if fit.floor_y is None:
             return None
         floor_hits = [_hit_floor(o, d, fit.floor_y) for o, d in rays]
-        return None if any(h is None for h in floor_hits) else floor_hits  # type: ignore[return-value]
+        hull = _support_hull(fit.floor_xz)
+        if len(hull) < 3 or any(
+            h is None or not reconstruct._point_in_polygon((h[0], h[2]), hull) for h in floor_hits
+        ):
+            return None
+        return floor_hits  # type: ignore[return-value]
     best: tuple[float, list[Vec3]] | None = None
     for wall in fit.walls:
         found = [_hit_wall(o, d, wall) for o, d in rays]
         if any(f is None for f in found):
             continue
         score = sum(f[1] for f in found if f is not None)
+        if score > 1e-6:  # Numerical epsilon only: do not extrapolate beyond observed wall spans.
+            continue
         if best is None or score < best[0]:
             best = (score, [f[0] for f in found if f is not None])
     return best[1] if best else None
+
+
+def _support_hull(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Finite support of observed floor points; never an infinite floor plane."""
+    ordered = sorted(set(points))
+    if len(ordered) < 3:
+        return ordered
+    def half(seq: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        result: list[tuple[float, float]] = []
+        for p in seq:
+            while len(result) >= 2 and reconstruct._cross(
+                reconstruct._sub(result[-1], result[-2]), reconstruct._sub(p, result[-1])
+            ) <= 0:
+                result.pop()
+            result.append(p)
+        return result
+    return half(ordered)[:-1] + half(ordered[::-1])[:-1]
 
 
 def reference_scale(
@@ -866,8 +930,19 @@ def rect_scale(
 
 WARNING_RECT_INCONSISTENT = (
     "La medida de referencia es inconsistente: el ancho y el alto del objeto dan escalas que "
-    "difieren más del 8 %; el objeto pudo estar inclinado o mal detectado. Se usó el lado largo."
+    "difieren más del 8 %; el objeto pudo estar inclinado o mal detectado. No se aplicó la escala."
 )
+
+REFERENCE_MESSAGES = {
+    "FRAME_NOT_REGISTERED": "REFERENCE_FRAME_NOT_REGISTERED: El fotograma de referencia no obtuvo pose. "
+        "Incluí el objeto completo y detalles del apoyo en vistas superpuestas; o usá captura manual.",
+    "SUPPORT_PLANE_MISSING": "REFERENCE_SUPPORT_PLANE_MISSING: La referencia no pudo ubicarse sobre "
+        "una superficie observada. Mostrá el apoyo alrededor del objeto; no se aplicó la escala.",
+    "RECT_INCONSISTENT": "REFERENCE_RECT_INCONSISTENT: Ancho y alto dan escalas incompatibles. "
+        "Revisá las esquinas y medidas reales; no se aplicó la escala.",
+    "REFERENCE_APPLIED": "REFERENCE_APPLIED: Referencia aplicada a una pieza observada; "
+        "la aceptación métrica y la precisión requieren revisión independiente.",
+}
 
 # Takes the reference frame image and the 4 normalised corners; returns 4 refined corners.
 CornerRefiner = Callable[[Path, list[dict[str, float]]], list[dict[str, float]]]
@@ -881,7 +956,7 @@ def default_corner_refiner(frame: Path, corners: list[dict[str, float]]) -> list
     environment); its accuracy gain is unmeasured and ``CORNER_REFINE_MAX_SHIFT`` is an assumption.
     """
     try:
-        import cv2
+        cv2 = importlib.import_module("cv2")
         import numpy as np
     except ImportError:
         return corners
@@ -920,14 +995,24 @@ def refine_rect_corners(
 # --- Adapters (external tools, imported lazily) --------------------------------------------
 
 
+def find_ffmpeg(name: str) -> str | None:
+    executable = shutil.which(name)
+    if executable is not None:
+        return executable
+    try:
+        return str(importlib.import_module("imageio_ffmpeg").get_ffmpeg_exe())
+    except (ImportError, RuntimeError):
+        return None
+
+
 class FfmpegFrameExtractor:
-    """Frames by index with the ``ffmpeg`` CLI. NOT exercised against a real ffmpeg here."""
+    """Frames by index with FFmpeg 7+ (file-loaded filter, no command-line size limit)."""
 
     TIMEOUT_S = 900
 
     def __init__(
         self,
-        which: Callable[[str], str | None] = shutil.which,
+        which: Callable[[str], str | None] = find_ffmpeg,
         runner: Callable[..., Any] = subprocess.run,
     ) -> None:
         self._which = which
@@ -942,7 +1027,12 @@ class FfmpegFrameExtractor:
         out_dir.mkdir(parents=True, exist_ok=True)
         ordered = sorted(set(indices))
         script = out_dir.parent / f"{out_dir.name}-select.txt"
-        script.write_text("select=" + "+".join(f"eq(n\\,{i})" for i in ordered), encoding="utf-8")
+        # FFmpeg's expression parser has a depth limit even with a file-loaded filter.
+        # Balance the sum so selecting hundreds of exact indices needs logarithmic depth.
+        terms = [f"eq(n\\,{i})" for i in ordered]
+        while len(terms) > 1:
+            terms = ["(" + "+".join(terms[i:i + 2]) + ")" for i in range(0, len(terms), 2)]
+        script.write_text("select=" + "".join(terms), encoding="utf-8")
         command = [
             executable, "-hide_banner", "-loglevel", "error",
             # The container is sniffed from content, not the extension: pin local files and the
@@ -950,13 +1040,13 @@ class FfmpegFrameExtractor:
             # or fetch URLs.
             "-protocol_whitelist", "file", "-f", "mov",
             "-noautorotate", "-i", str(video), "-an",
-            "-filter_script:v", str(script), "-vsync", "0", "-qscale:v", "2",
+            "-/filter:v", str(script), "-fps_mode", "passthrough", "-qscale:v", "2",
             str(out_dir / "%06d.jpg"),
         ]
         done = self._runner(command, capture_output=True, check=False, timeout=self.TIMEOUT_S)
         if done.returncode != 0:
             tail = bytes(done.stderr or b"")[-200:].decode("utf-8", "replace")
-            raise RuntimeError(f"ffmpeg failed (exit {done.returncode}): {tail}")
+            raise VideoRuntimeError("F07_FFMPEG", f"ffmpeg failed (exit {done.returncode}): {tail}")
         produced = sorted(out_dir.glob("*.jpg"))
         if not produced:
             raise RuntimeError("ffmpeg produced no frames")
@@ -967,15 +1057,66 @@ class FfmpegFrameExtractor:
             )
         return [ExtractedFrame(i, p) for i, p in zip(ordered, produced, strict=True)]
 
+    def validate_timestamps(self, video: Path, frames: list[FrameStamp]) -> None:
+        executable = self._which("ffmpeg")
+        if executable is None:
+            raise ExternalToolMissing("ffmpeg is required to validate MP4 timestamps")
+        result = self._runner([executable, "-hide_banner", "-nostdin", "-loglevel", "info",
+            "-protocol_whitelist", "file", "-f", "mov", "-noautorotate", "-i", str(video),
+            "-an", "-vf", "showinfo", "-frames:v", str(MAX_FRAME_LINES + 1),
+            "-fps_mode", "passthrough", "-f", "null", "-"],
+            capture_output=True, check=False, timeout=self.TIMEOUT_S)
+        if result.returncode != 0:
+            raise InvalidPackage("video could not be decoded for timestamp validation")
+        pts = [float(t) for t in re.findall(rb"\bn:\s*\d+.*?pts_time:([-+\d.eE]+)", result.stderr)]
+        if len(pts) != len(frames):
+            raise InvalidPackage("MP4 frame count does not match frames.jsonl")
+        if any(b <= a for a, b in itertools.pairwise(pts)) or any(
+            abs((t - pts[0]) * 1e9 - (f.t - frames[0].t)) > 2_000_000
+            for t, f in zip(pts, frames, strict=True)
+        ):
+            raise InvalidPackage("MP4 presentation timestamps do not match the camera timeline")
+
 
 class PycolmapPoseEstimator:
-    """Sparse SfM with ``pycolmap``. NOT exercised against a real pycolmap here: the API calls
-    below follow the pycolmap 3.x documentation and need a first real run."""
+    """CPU sparse SfM with one shared camera for the unrotated video frames.
+
+    Native extraction, matching and mapping verified with PyCOLMAP 4.2.1 on Windows.
+    """
 
     def __init__(self, importer: Callable[[str], Any] = importlib.import_module) -> None:
         self._importer = importer
+        self.diagnostics: dict[str, Any] = {}
 
     def estimate(self, frames: list[ExtractedFrame], work_dir: Path) -> list[SparseModel]:
+        try:
+            self._importer("pycolmap")
+        except ImportError as error:
+            raise ExternalToolMissing("pycolmap is required to estimate camera poses") from error
+        if self._importer is not importlib.import_module:
+            return self._estimate_in_process(frames, work_dir)
+        work_dir.mkdir(parents=True, exist_ok=True)
+        request = work_dir / "request.json"
+        output = work_dir / "models.json"
+        request.write_text(json.dumps([{"index": f.index, "path": str(f.path)} for f in frames]), encoding="utf-8")
+        try:
+            subprocess.run([sys.executable, str(Path(__file__).resolve()), "--sfm", str(request), str(output)],
+                           check=True, timeout=1800, capture_output=True)
+        except subprocess.TimeoutExpired as error:
+            raise VideoRuntimeError("F07_SFM_TIMEOUT", "PyCOLMAP exceeded the 1800 second runtime limit") from error
+        except subprocess.CalledProcessError as error:
+            raise VideoRuntimeError("F07_SFM", "PyCOLMAP subprocess failed; inspect runtime resources and input") from error
+        raw = json.loads(output.read_text(encoding="utf-8"))
+        summary = output.with_suffix(".stats.json")
+        if summary.exists():
+            self.diagnostics = json.loads(summary.read_text(encoding="utf-8"))
+        return [SparseModel(
+            [CameraPose(p["frame_index"], cast(Mat3, tuple(tuple(row) for row in p["rotation"])), tuple(p["center"])) for p in m["poses"]],
+            [SparsePoint(tuple(p["xyz"]), tuple(p["frames"])) for p in m["points"]],
+            Intrinsics(**m["intrinsics"]),
+        ) for m in raw]  # type: ignore[arg-type]
+
+    def _estimate_in_process(self, frames: list[ExtractedFrame], work_dir: Path) -> list[SparseModel]:
         try:
             pycolmap = self._importer("pycolmap")
         except ImportError as error:
@@ -986,12 +1127,28 @@ class PycolmapPoseEstimator:
         images_dir = frames[0].path.parent
         index_by_name = {f.path.name: f.index for f in frames}
         database = work_dir / "database.db"
-        pycolmap.extract_features(database, images_dir)
-        pycolmap.match_exhaustive(database)
+        stages: dict[str, float] = {}
+        started = time.perf_counter()
+        # SparseModel carries one calibration. AUTO creates a different camera per JPEG
+        # without EXIF, which would make all but the first frame use the wrong intrinsics.
+        pycolmap.extract_features(
+            database, images_dir, camera_mode=pycolmap.CameraMode.SINGLE, device=pycolmap.Device.cpu,
+            extraction_options=pycolmap.FeatureExtractionOptions({"num_threads": 4, "max_image_size": 1600}),
+        )
+        matching = pycolmap.FeatureMatchingOptions({"num_threads": 4})
+        stages["features"] = time.perf_counter() - started
+        started = time.perf_counter()
+        if len(frames) <= 20:
+            pycolmap.match_exhaustive(database, device=pycolmap.Device.cpu, matching_options=matching)
+        else:
+            pycolmap.match_sequential(database, device=pycolmap.Device.cpu, matching_options=matching,
+                                     pairing_options={"overlap": 10, "loop_detection": False})
         sparse = work_dir / "sparse"
         sparse.mkdir(exist_ok=True)
+        stages["matching"] = time.perf_counter() - started
+        started = time.perf_counter()
         models: list[SparseModel] = []
-        for rec in pycolmap.incremental_mapping(database, images_dir, sparse).values():
+        for rec in pycolmap.incremental_mapping(database, images_dir, sparse, options={"num_threads": 4}).values():
             frame_of_image: dict[int, int] = {}
             poses: list[CameraPose] = []
             intrinsics: Intrinsics | None = None
@@ -1000,8 +1157,8 @@ class PycolmapPoseEstimator:
                 if index is None:
                     continue
                 frame_of_image[image_id] = index
-                pose = image.cam_from_world
-                pose = pose() if callable(pose) else pose
+                transform = image.cam_from_world
+                pose: Any = transform() if callable(transform) else transform
                 matrix = pose.rotation.matrix()
                 r_cw = tuple(tuple(float(matrix[r][c]) for c in range(3)) for r in range(3))
                 r_wc = _transpose(r_cw)  # type: ignore[arg-type]
@@ -1014,6 +1171,7 @@ class PycolmapPoseEstimator:
                     intrinsics = Intrinsics(
                         float(camera.width), float(camera.height),
                         float(k[0][0]), float(k[1][1]), float(k[0][2]), float(k[1][2]),
+                        float(camera.params[3]) if camera.model_name == "SIMPLE_RADIAL" else 0.0,
                     )
             if intrinsics is None or not poses:
                 continue
@@ -1026,7 +1184,35 @@ class PycolmapPoseEstimator:
                 for p in rec.points3D.values()
             ]
             models.append(SparseModel(poses, points, intrinsics))
+        stages["mapping"] = time.perf_counter() - started
+        self.diagnostics = _matching_diagnostics(database, index_by_name)
+        self.diagnostics["stage_durations"] = stages
         return models
+
+
+def _matching_diagnostics(database: Path, indices: dict[str, int]) -> dict[str, Any]:
+    """Small native-adapter sidecar. Never emits image names, descriptors or coordinates."""
+    if not database.exists():  # Injected adapters need not create a COLMAP database.
+        return {}
+    with sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True) as db:
+        images = {i: indices[n] for i, n in db.execute("SELECT image_id,name FROM images") if n in indices}
+        features = dict(db.execute("SELECT image_id,rows FROM keypoints"))
+        frames = {str(index): {"features": features.get(i, 0), "verified_pairs": 0, "inliers": 0}
+                  for i, index in images.items()}
+        verified, inliers = 0, 0
+        for pair, count in db.execute("SELECT pair_id,rows FROM two_view_geometries"):
+            if count <= 0:
+                continue
+            verified += 1
+            inliers += count
+            for image in (pair // 2147483647, pair % 2147483647):
+                if image in images:
+                    entry = frames[str(images[image])]
+                    entry["verified_pairs"] += 1
+                    entry["inliers"] += count
+    counts = list(features.values())
+    return {"verified_matches": verified, "verified_inliers": inliers,
+            "features_median": statistics.median(counts) if counts else 0, "frame_stats": frames}
 
 
 def default_adapters() -> tuple[FrameExtractor, PoseEstimator]:
@@ -1043,6 +1229,7 @@ class _Piece:
     intrinsics: Intrinsics
     up_source: str
     rooms: dict[str, _RoomFit] = field(default_factory=dict)
+    display_factor: float | None = None
     factor: float | None = None
     tilts: dict[str, float] = field(default_factory=dict)  # room id -> worst floor/ceiling tilt
 
@@ -1065,6 +1252,17 @@ def _plan_extent(piece: _Piece) -> float:
         max(c[2] for c in centres) - min(c[2] for c in centres),
     )
     return extent
+
+
+def _assembly_factor(piece: _Piece) -> float:
+    if piece.display_factor is not None:
+        return piece.display_factor
+    if piece.factor is not None:
+        return piece.factor
+    extent = _plan_extent(piece)
+    if not math.isfinite(extent) or extent <= 0:
+        raise InvalidPackage("F07_POSES: La trayectoria no permite estimar un contorno. Usá captura manual.")
+    return UNSCALED_PATH_EXTENT / extent
 
 
 def _fit_rooms(piece: _Piece, rooms: list[dict[str, Any]], room_of_frame: dict[int, str]) -> None:
@@ -1182,7 +1380,9 @@ def _place_detections(
                 continue
             x, y, z = _mv(inverse, (xyz[0] - pose.center[0], xyz[1] - pose.center[1], xyz[2] - pose.center[2]))
             if z > 1e-9:
-                projected.append((z, intrinsics.fx * x / z + intrinsics.cx, intrinsics.fy * y / z + intrinsics.cy, xyz))
+                radial = 1 + intrinsics.radial * ((x / z)**2 + (y / z)**2)
+                projected.append((z, intrinsics.fx * x / z * radial + intrinsics.cx,
+                                  intrinsics.fy * y / z * radial + intrinsics.cy, xyz))
         for item in items:
             x1, y1, x2, y2 = item["box"]
             inside = [(z, xyz) for z, u, v, xyz in projected if x1 <= u <= x2 and y1 <= v <= y2]
@@ -1335,8 +1535,9 @@ def _edge_observed(a: reconstruct.Point, b: reconstruct.Point, segments: list[re
     return False
 
 
-def _meters(point: reconstruct.Point) -> str:
-    return f"({point[0]:.2f} m; {point[1]:.2f} m)"
+def _meters(point: reconstruct.Point, metric: bool = True) -> str:
+    unit = "m" if metric else "u.a."
+    return f"({point[0]:.2f} {unit}; {point[1]:.2f} {unit})"
 
 
 def make_stage_cache(directory: Path) -> StageCache:
@@ -1353,7 +1554,7 @@ def _sparse_key(package: VideoPackage, reference_index: int | None, estimator: P
     parts = (
         fingerprint([package.directory / VIDEO_FILE, package.directory / FRAMES_FILE]),
         f"fps={video['fps']}",
-        f"extract={EXTRACT_FPS}",
+        f"extract={EXTRACT_FPS};budget={MAX_SFM_FRAMES};adapter={SPARSE_STAGE_VERSION}",
         f"reference={reference_index}",
         f"estimator={type(estimator).__module__}.{type(estimator).__qualname__}",
     )
@@ -1371,6 +1572,38 @@ def reconstruct_video(
     opening_detector: OpeningDetectorFactory | None = None,
     stage_cache: StageCache | None = None,
 ) -> VideoReconstructionResult:
+    diagnostics: dict[str, Any] = {"source_sha256": SOURCE_SHA256,
+        "frames_validated": 0, "frames_selected": 0, "frames_extracted": 0,
+        "verified_matches": None, "poses_unique": 0, "components": [], "reference_outcome": "NOT_EVALUATED",
+        "stage_durations": {}, "output_metric": False, "output_acceptable": None,
+        "acceptance": "BACKEND_REVIEW_REQUIRED", "outcome": "failed"}
+    started = time.perf_counter()
+    try:
+        result = _reconstruct_video(package_dir, diagnostics=diagnostics, extractor=extractor,
+            estimator=estimator, device_to_camera=device_to_camera,
+            detector_factory=detector_factory, corner_refiner=corner_refiner,
+            opening_detector=opening_detector, stage_cache=stage_cache)
+        diagnostics["outcome"] = "completed_draft"
+        diagnostics["output_metric"] = result.scene_draft["unit"] == "meters"
+        return result
+    finally:
+        diagnostics["stage_durations"]["total"] = round(time.perf_counter() - started, 4)
+        level = logging.INFO if diagnostics["outcome"] == "completed_draft" else logging.WARNING
+        logging.getLogger(__name__).log(level, "F07 reconstruction diagnostic: %s", json.dumps(diagnostics))
+
+
+def _reconstruct_video(
+    package_dir: Path,
+    *,
+    diagnostics: dict[str, Any],
+    extractor: FrameExtractor | None = None,
+    estimator: PoseEstimator | None = None,
+    device_to_camera: Mat3 | None = None,
+    detector_factory: DetectorFactory | None = None,
+    corner_refiner: CornerRefiner | None = None,
+    opening_detector: OpeningDetectorFactory | None = None,
+    stage_cache: StageCache | None = None,
+) -> VideoReconstructionResult:
     """Reconstruct an unzipped schema 2 package into a scene v2 draft plus warnings.
 
     ``detector_factory`` switches furniture detection on (``None``: off, nothing changes). The
@@ -1380,7 +1613,10 @@ def reconstruct_video(
     keeps the sparse reconstruction between runs of the same recording: with a hit, neither the
     frame extractor nor the pose estimator runs unless a later stage needs the images.
     """
+    started = time.perf_counter()
     package = load_package(package_dir)
+    diagnostics["frames_validated"] = len(package.frames)
+    diagnostics["stage_durations"]["validation"] = time.perf_counter() - started
     manifest = package.manifest
     if device_to_camera is None:
         device_to_camera = device_to_camera_matrix(manifest["video"]["sensorOrientation"])
@@ -1408,35 +1644,61 @@ def reconstruct_video(
         reference_index = min(package.frames, key=lambda f: abs(f.t - reference["frameNs"])).i
     stride = max(1, round(float(manifest["video"]["fps"]) / EXTRACT_FPS))
     indices = set(range(0, len(package.frames), stride))
+    if len(indices) > MAX_SFM_FRAMES - 1:
+        sampled = sorted(indices)
+        indices = {sampled[round(i * (len(sampled) - 1) / (MAX_SFM_FRAMES - 2))]
+                   for i in range(MAX_SFM_FRAMES - 1)}
+        warnings.append("Se limitó el muestreo a 300 cuadros por presupuesto de cómputo; revise la cobertura.")
     if reference_index is not None:
         indices.add(reference_index)
 
+    diagnostics["frames_selected"] = len(indices)
     with tempfile.TemporaryDirectory(prefix="roomforge-sfm-") as scratch:
+        started = time.perf_counter()
+        # Timing integrity is checked even on a cached SfM result.
+        if isinstance(extractor, FfmpegFrameExtractor):
+            extractor.validate_timestamps(package.directory / VIDEO_FILE, package.frames)
+        diagnostics["stage_durations"]["timestamps"] = time.perf_counter() - started
         extracted: list[ExtractedFrame] | None = None
 
         def get_frames() -> list[ExtractedFrame]:
-            # Extracted once, and only when a stage actually needs the images.
             nonlocal extracted
             if extracted is None:
+                started_extract = time.perf_counter()
                 extracted = extractor.extract(package.directory / VIDEO_FILE, sorted(indices), Path(scratch) / "frames")
+                diagnostics["frames_extracted"] = len(extracted)
+                diagnostics["stage_durations"]["extraction"] = time.perf_counter() - started_extract
             return extracted
 
-        def estimate_models() -> list[SparseModel]:
-            return [m for m in estimator.estimate(get_frames(), Path(scratch) / "sfm") if m.poses and m.points]
+        def estimate_models() -> tuple[list[SparseModel], dict[str, Any]]:
+            models = [m for m in estimator.estimate(get_frames(), Path(scratch) / "sfm") if m.poses and m.points]
+            return models, getattr(estimator, "diagnostics", {})
 
+        started = time.perf_counter()
         if stage_cache is None:
-            models = estimate_models()
+            models, native = estimate_models()
         else:
-            models = stage_cache.fetch(
-                "sfm", _sparse_key(package, reference_index, estimator), estimate_models, keep=bool
+            models, native = stage_cache.fetch(
+                "sfm", _sparse_key(package, reference_index, estimator), estimate_models, keep=lambda value: bool(value[0])
             )
+        diagnostics["stage_durations"]["sfm"] = time.perf_counter() - started
+        diagnostics["verified_matches"] = native.get("verified_matches")
+        diagnostics["verified_inliers"] = native.get("verified_inliers")
+        diagnostics["features_median"] = native.get("features_median")
+        # Preserve native stage timings without reporting a cached computation as a new one.
+        diagnostics["native_stage_durations"] = native.get("stage_durations", {})
+        diagnostics["sfm_cache_hit"] = stage_cache is not None and extracted is None
+        diagnostics["reference_matches"] = native.get("frame_stats", {}).get(str(reference_index))
+        diagnostics["poses_unique"] = len({p.frame_index for m in models for p in m.poses})
         # Optional sub-pixel refinement of the reference rectangle (the frame lives in scratch).
         rect_corners: list[dict[str, float]] | None = None
         if reference is not None and reference.get("rect") is not None:
             rect_corners = reference["rect"]["corners"]
             reference_frame = next((f for f in get_frames() if f.index == reference_index), None)
             if reference_frame is not None:
-                rect_corners = refine_rect_corners(reference_frame.path, rect_corners, corner_refiner)
+                rect_corners = refine_rect_corners(
+                    reference_frame.path, reference["rect"]["corners"], corner_refiner,
+                )
         # The frames live in this scratch directory: detect here, place the boxes later.
         detections: dict[int, list[dict[str, Any]]] = {}
         model_id = ""
@@ -1468,14 +1730,20 @@ def reconstruct_video(
                     opening_boxes = {}
                     warnings.append(WARNING_OPENINGS_FAILED)
     if not models:
-        raise InvalidPackage("no camera poses could be estimated from the video")
+        raise InvalidPackage(
+            "F07_POSES: no camera poses could be estimated from the video. "
+            "Mejorá la luz, enfocá zonas con textura y mantené vistas superpuestas; o usá captura manual."
+        )
 
+    started = time.perf_counter()
     pieces: list[_Piece] = []
     for model in models:
         usable = [p for p in model.poses if p.frame_index in frame_times]
         if not usable:
             continue
-        up, source = estimate_up(usable, frame_times, package.sensors, device_to_camera)
+        # Numerical coincidence is not evidence that UNKNOWN clocks are synchronized.
+        aligned_sensors = package.sensors if manifest["video"]["timestampSource"] == "realtime" else []
+        up, source = estimate_up(usable, frame_times, aligned_sensors, device_to_camera)
         piece = _align(model, up, source, frame_times)
         _fit_rooms(piece, rooms, room_of_frame)
         if piece.rooms:
@@ -1489,6 +1757,14 @@ def reconstruct_video(
             "sostuvo derecho; revise el piso y las alturas."
         )
 
+    pieces.sort(key=lambda piece: (
+        tuple(sorted((p.frame_index, p.center, p.rotation) for p in piece.poses)),
+        tuple(sorted(piece.points)), tuple(asdict(piece.intrinsics).values()),
+    ))
+    component_summaries: list[dict[str, Any]] = [{"poses": len(p.poses), "points": len(p.points),
+        "wall_candidates": sum(len(f.walls) for f in p.rooms.values()), "valid_contours": 0,
+        "observed_edges": 0, "inferred_edges": 0, "selected_rooms": 0} for p in pieces]
+    diagnostics["components"] = component_summaries
     for piece in pieces:
         for room_id, tilt in piece.tilts.items():
             if tilt > GRAVITY_TILT_MAX_DEG:
@@ -1498,33 +1774,49 @@ def reconstruct_video(
                     "de la captura; el piso y las alturas pueden no ser fiables."
                 )
 
-    scaled = False
+    reference_outcomes: list[str] = []
     if reference is not None and reference_index is not None:
         room_id = room_of_frame[reference_index]
         for piece in pieces:
             pose = next((p for p in piece.poses if p.frame_index == reference_index), None)
-            if pose is None or room_id not in piece.rooms:
-                continue
-            fit = piece.rooms[room_id]
-            piece.factor = None
-            if rect_corners is not None:
-                estimate = rect_scale(
-                    reference["rect"], rect_corners, reference["surface"], pose, piece.intrinsics, fit
-                )
-                if estimate is not None:
-                    piece.factor = estimate[0]
-                    if estimate[1] and WARNING_RECT_INCONSISTENT not in warnings:
-                        warnings.append(WARNING_RECT_INCONSISTENT)
-            if piece.factor is None:  # no rect, or its corners miss the plane: use the two points
-                piece.factor = reference_scale(reference, pose, piece.intrinsics, fit)
-            scaled = piece.factor is not None
-        if not scaled:
-            warnings.append(
-                f"La medida de referencia «{reference['label']}» no pudo ubicarse sobre "
-                f"{'el piso' if reference['surface'] == 'floor' else 'una pared'} ajustado; no se aplicó."
-            )
-    # One scale for the whole walkthrough: metric only when every piece got a factor, otherwise
-    # every piece stays in the same arbitrary unit so ratios and connections remain comparable.
+            status = "FRAME_NOT_REGISTERED"
+            if pose is not None:
+                status = "SUPPORT_PLANE_MISSING"
+                fit = piece.rooms.get(room_id)
+                if fit is not None and rect_corners is not None:
+                    estimate = rect_scale(reference["rect"], rect_corners, reference["surface"],
+                                          pose, piece.intrinsics, fit)
+                    if estimate is not None:
+                        if estimate[1]:
+                            status = "RECT_INCONSISTENT"
+                        else:
+                            piece.factor = estimate[0]
+                            status = "REFERENCE_APPLIED"
+                elif fit is not None:
+                    piece.factor = reference_scale(reference, pose, piece.intrinsics, fit)
+                    if piece.factor is not None:
+                        status = "REFERENCE_APPLIED"
+            reference_outcomes.append(status)
+    scaled = any(p.factor is not None for p in pieces)
+    priority = ["REFERENCE_APPLIED", "RECT_INCONSISTENT", "SUPPORT_PLANE_MISSING", "FRAME_NOT_REGISTERED"]
+    reference_outcome = next((status for status in priority if status in reference_outcomes), "NOT_PROVIDED")
+    diagnostics["reference_outcome"] = reference_outcome
+    diagnostics["reference_pose_registered"] = any(status != "FRAME_NOT_REGISTERED" for status in reference_outcomes)
+    diagnostics["reference_applied"] = scaled
+    diagnostics["reference_support"] = reference_outcome in ("RECT_INCONSISTENT", "REFERENCE_APPLIED")
+    for entry, status in zip(component_summaries, reference_outcomes, strict=False):
+        entry["reference_outcome"] = status
+    if reference_outcome == "FRAME_NOT_REGISTERED":
+        matches = diagnostics.get("reference_matches")
+        diagnostics["reference_registration_reason"] = (
+            "NO_FEATURES" if matches is not None and matches["features"] == 0 else
+            "NO_VERIFIED_MATCHES" if matches is not None and matches["verified_pairs"] == 0 else
+            "MAPPER_DID_NOT_REGISTER_VERIFIED_FRAME" if matches is not None else "ADAPTER_DETAILS_UNAVAILABLE")
+    if "RECT_INCONSISTENT" in reference_outcomes:
+        warnings.append(WARNING_RECT_INCONSISTENT)
+    if reference is not None:
+        warnings.append(REFERENCE_MESSAGES[reference_outcome])
+    # Metric evidence is kept separate from the display normalization factor.
     metric = scaled and all(piece.factor is not None for piece in pieces)
     if scaled and not metric:
         for piece in pieces:
@@ -1534,23 +1826,13 @@ def reconstruct_video(
             "escalas y el plano quedó proporcional."
         )
     if not metric:
-        # Arbitrary SfM units would trip the metric thresholds of the shared builder (minimum room
-        # area, weld tolerance, wall thickness). One factor for the whole walkthrough brings the
-        # largest room to a nominal size; ratios and relative sizes between rooms are untouched.
-        extent = max(
-            (
-                max(max(p[0] for p in line.points) - min(p[0] for p in line.points),
-                    max(p[2] for p in line.points) - min(p[2] for p in line.points))
-                for piece in pieces
-                for fit in piece.rooms.values()
-                for line in fit.walls
-                if line.points
-            ),
-            default=0.0,
-        )
+        extent = max((max(max(p[0] for p in line.points) - min(p[0] for p in line.points),
+                          max(p[2] for p in line.points) - min(p[2] for p in line.points))
+                      for piece in pieces for fit in piece.rooms.values()
+                      for line in fit.walls if line.points), default=0.0)
         if extent > 0:
             for piece in pieces:
-                piece.factor = PROPORTIONAL_NOMINAL_SIDE / extent
+                piece.display_factor = PROPORTIONAL_NOMINAL_SIDE / extent
     if not scaled:
         warnings.append(
             "Sin medida de referencia: el plano es proporcional. Conserva las razones entre anchos, "
@@ -1567,11 +1849,12 @@ def reconstruct_video(
     cursor = 0.0
     boxes: list[dict[str, Any]] = []
     placed: list[_Candidate] = []
+    contour_rejections: list[dict[str, Any]] = []
     detected = sum(len(items) for items in detections.values())
-    for piece_number, piece in enumerate(pieces):
-        factor = piece.factor if piece.factor is not None else 1.0
-        piece_rooms: list[reconstruct._Room] = []
-        crossings = _room_crossings(piece, room_of_frame, factor)
+    candidates: dict[tuple[int, str], tuple[list[reconstruct.WallSegment], list[reconstruct.Point]]] = {}
+    winners: dict[str, tuple[tuple[Any, ...], int]] = {}
+    for piece_index, piece in enumerate(pieces):
+        factor = _assembly_factor(piece)
         room_segments = {
             room_id: [
                 s
@@ -1585,9 +1868,6 @@ def reconstruct_video(
         every_wall = [(s.start, s.end) for items in room_segments.values() for s in items]
         piece_axis = reconstruct.dominant_axis(every_wall) if every_wall else None
         for room_id, fit in piece.rooms.items():
-            if room_id in seen:
-                warnings.append(f"«{fit.name}» aparece en más de una pieza desconectada; se usó la primera.")
-                continue
             segments = room_segments[room_id]
             proposal = reconstruct.propose_contour(
                 [(s.start, s.end) for s in segments],
@@ -1596,17 +1876,61 @@ def reconstruct_video(
                 axis=piece_axis,
             )
             if isinstance(proposal, reconstruct.ProposalFailed):
+                contour_rejections.append({
+                    "poses": len(fit.cameras_xz), "points": fit.point_count,
+                    "wallCandidates": len(fit.walls), "segments": len(segments),
+                    "metricScale": piece.factor is not None, "reason": proposal.message,
+                })
                 warnings.append(f"«{fit.name}» no se incluyó en la escena. {proposal.message}")
                 continue
-            seen.add(room_id)
             corners = proposal.corners
+            observed = sum(_edge_observed(corner, corners[(i + 1) % len(corners)], segments)
+                           for i, corner in enumerate(corners))
+            inferred = len(corners) - observed
+            cameras = [(x * factor, z * factor) for x, z in fit.cameras_xz]
+            hull = _support_hull(cameras)
+            area = abs(reconstruct._signed_area(corners))
+            coverage = min(1.0, abs(reconstruct._signed_area(hull)) / area) if len(hull) >= 3 and area > 0 else 0.0
+            poses = len({p.frame_index for p in piece.poses if room_of_frame.get(p.frame_index) == room_id})
+            inside = sum(reconstruct._point_in_polygon(camera, corners) for camera in cameras)
+            inside_fraction = inside / len(cameras) if cameras else 0.0
+            # Inferences lose to observed closure, then actual edges, poses and spatial
+            # coverage decide. Canonical coordinates break exact ties; they are never logged.
+            rank = (-inferred, observed, inside_fraction, poses, coverage, fit.point_count,
+                    piece.factor is not None, tuple(sorted(corners)))
+            candidates[(piece_index, room_id)] = (segments, corners)
+            if room_id not in winners or rank > winners[room_id][0]:
+                winners[room_id] = (rank, piece_index)
+            component = component_summaries[piece_index]
+            component["valid_contours"] += 1
+            component["observed_edges"] += observed
+            component["inferred_edges"] += inferred
+            component.setdefault("candidates", []).append({"room_ordinal": next(
+                i for i, room in enumerate(rooms) if room["id"] == room_id),
+                "observed": observed, "inferred": inferred, "poses": poses,
+                "cameras_inside_fraction": round(inside_fraction, 4),
+                "spatial_coverage": round(coverage, 4), "points": fit.point_count,
+                "reference_applied": piece.factor is not None})
+    diagnostics["stage_durations"]["geometry"] = time.perf_counter() - started
+    diagnostics["contours"] = contour_rejections
+    started = time.perf_counter()
+    for piece_index, piece in enumerate(pieces):
+        factor = _assembly_factor(piece)
+        piece_rooms: list[reconstruct._Room] = []
+        crossings = _room_crossings(piece, room_of_frame, factor)
+        for room_id, fit in piece.rooms.items():
+            if room_id not in winners or winners[room_id][1] != piece_index:
+                continue
+            segments, corners = candidates[(piece_index, room_id)]
+            diagnostics["components"][piece_index]["selected_rooms"] += 1
+            seen.add(room_id)
             if reconstruct._signed_area(corners) < 0:
                 corners = corners[::-1]
             for i, corner in enumerate(corners):
                 following = corners[(i + 1) % len(corners)]
                 if not _edge_observed(corner, following, segments):
                     warnings.append(
-                        f"Pared sin observar entre {_meters(corner)} y {_meters(following)} en «{fit.name}»: "
+                        f"Pared sin observar entre {_meters(corner, metric)} y {_meters(following, metric)} en «{fit.name}»: "
                         "su posición es una estimación. Verifíquela en el editor."
                     )
             measured = fit.floor_y is not None and fit.ceiling_y is not None
@@ -1626,7 +1950,7 @@ def reconstruct_video(
                     openings=_room_openings(
                         piece, fit, room_id, corners, height, factor, room_of_frame, opening_boxes, crossings
                     ),
-                    group=piece_number,
+                    group=piece_index,
                 )
             )
         if not piece_rooms:
@@ -1659,13 +1983,42 @@ def reconstruct_video(
         if room["id"] not in seen and not any(room["name"] in w for w in warnings):
             warnings.append(f"«{room['name']}» no se incluyó en la escena: no hay puntos reconstruidos en su intervalo.")
     if not scene_rooms:
-        raise InvalidPackage("No se pudo cerrar el contorno de ningún ambiente: " + " ".join(warnings))
+        registered = len({p.frame_index for m in models for p in m.poses})
+        code = "F07_OVERLAP" if registered < len(indices) / 4 else "F07_CONTOUR"
+        context = " Sin referencia métrica." if reference is None else ""
+        if reference is not None and not scaled:
+            context += " Referencia sin escala aplicada."
+        if len(pieces) > 1:
+            context += " Piezas desconectadas."
+        if manifest["video"]["timestampSource"] == "unknown":
+            context += " Reloj no verificado."
+        raise InvalidPackage(
+            f"{code}: No se pudo cerrar ningún ambiente "
+            f"({registered}/{len(indices)} vistas; {len(pieces)} piezas). "
+            "Mostrá bases y esquinas con solapamiento o usá captura manual." + context
+        )
 
     if detected and not boxes:
         warnings.append(WARNING_NO_DEPTH)
     builder = reconstruct._SceneBuilder(scene_rooms, boxes, snap_shared_walls=SNAP_SHARED_WALLS)
     scene = builder.build()
     scene["scale"] = {"mode": "metric" if metric else "proportional"}
+    # Draft-only arbitrary units are valid reconstruction output, never a metric listing scene.
+    scene["unit"] = "meters" if metric else "arbitrary"
+    if not metric or len(pieces) > 1:
+        warnings.append(
+            "Borrador generado — no medible: falta escala aplicada o las piezas están desconectadas. "
+            "No uses sus dimensiones; revisá la evidencia o usá captura manual."
+        )
+    scene["measurement"] = {
+        "source": "sfm",
+        "scale": "reference" if metric else "unscaled",
+        "alignment": "connected" if len(pieces) == 1 else "disconnected",
+        "clock": manifest["video"]["timestampSource"] if all(p.up_source == "gravity" for p in pieces) else "unknown",
+        "referenceConfirmed": reference is not None and reference.get("dimensionsSource") == "user_confirmed",
+    }
+    for obj in scene["objects"]:
+        obj["source"] = "sfm_estimated"
     warnings.extend(builder.warnings)
     warnings.append(
         "Las medidas son estimadas a partir del video y los sensores; su exactitud no se midió. "
@@ -1696,9 +2049,33 @@ def reconstruct_video(
                 for number, found in enumerate(placed, start=1)
             ],
         }
+    diagnostics["stage_durations"]["assembly"] = time.perf_counter() - started
+    diagnostics["selected_observed_edges"] = sum(rank[1] for rank, _ in winners.values())
+    diagnostics["selected_inferred_edges"] = sum(-rank[0] for rank, _ in winners.values())
+    unsupported_rooms = sum(rank[2] == 0.0 for rank, _ in winners.values())
+    diagnostics["selected_rooms_without_inside_cameras"] = unsupported_rooms
+    if unsupported_rooms:
+        warnings.append(
+            "GEOMETRY_CAMERA_SUPPORT_MISSING: Ninguna cámara registrada queda dentro del contorno "
+            f"de {unsupported_rooms} ambiente(s) seleccionado(s). La geometría es provisional: "
+            "revisá paredes observadas y cierres inferidos; capturá bases de paredes y esquinas "
+            "adyacentes con vistas superpuestas o usá captura manual."
+        )
     return VideoReconstructionResult(
         scene_draft=scene,
         warnings=[w[:500] for w in warnings],
         volume_views=[],
         volume_suggestions=suggestions,
     )
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 4 or sys.argv[1] != "--sfm":
+        raise SystemExit("internal usage: --sfm request.json models.json")
+    request_path, output_path = Path(sys.argv[2]), Path(sys.argv[3])
+    input_frames = [ExtractedFrame(f["index"], Path(f["path"]))
+                    for f in json.loads(request_path.read_text(encoding="utf-8"))]
+    estimator = PycolmapPoseEstimator()
+    models = estimator._estimate_in_process(input_frames, request_path.parent)
+    output_path.with_suffix(".stats.json").write_text(json.dumps(estimator.diagnostics), encoding="utf-8")
+    output_path.write_text(json.dumps([asdict(model) for model in models]), encoding="utf-8")

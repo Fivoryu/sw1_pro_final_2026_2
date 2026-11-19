@@ -225,7 +225,9 @@ class _SpatialCaptureScreenState extends State<SpatialCaptureScreen> {
                 ),
                 const SizedBox(height: 16),
                 if (_controller.uploads case final uploads?
-                    when uploads.items.isNotEmpty) ...[
+                    when uploads.items.isNotEmpty ||
+                        uploads.message != null ||
+                        uploads.busy) ...[
                   _UploadsCard(uploads: uploads),
                   const SizedBox(height: 16),
                 ],
@@ -361,6 +363,14 @@ class _UploadsCard extends StatelessWidget {
             if (uploads.message != null) ...[
               const SizedBox(height: 8),
               Text(uploads.message!),
+            ],
+            if (uploads.busy &&
+                uploads.items.every(
+                  (item) => item.phase == UploadPhase.idle,
+                )) ...[
+              const SizedBox(height: 8),
+              const Text('Revisando la cola y preparando el reintento…'),
+              const LinearProgressIndicator(),
             ],
             for (final item in uploads.items) ...[
               const SizedBox(height: 12),
