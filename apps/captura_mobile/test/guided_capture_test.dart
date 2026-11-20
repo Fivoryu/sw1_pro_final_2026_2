@@ -43,13 +43,10 @@ void main() {
     test('derives rooms from the card in the suggested order', () {
       final checklist = CaptureChecklist.derive(bedrooms: 2, bathrooms: 1);
 
-      expect([for (final room in checklist.rooms) room.label], [
-        'Living',
-        'Cocina',
-        'Dormitorio 1',
-        'Dormitorio 2',
-        'Baño',
-      ]);
+      expect(
+        [for (final room in checklist.rooms) room.label],
+        ['Living', 'Cocina', 'Dormitorio 1', 'Dormitorio 2', 'Baño'],
+      );
     });
 
     test('re-deriving keeps room state and extra rooms, and drops rooms '
@@ -70,13 +67,10 @@ void main() {
         previous: withExtra,
       );
 
-      expect([for (final room in second.rooms) room.id], [
-        'living',
-        'kitchen',
-        'bedroom-1',
-        'bathroom-1',
-        'extra-1',
-      ]);
+      expect(
+        [for (final room in second.rooms) room.id],
+        ['living', 'kitchen', 'bedroom-1', 'bathroom-1', 'extra-1'],
+      );
       expect(second.rooms.first.photoIds, ['p1']);
       expect(second.rooms.first.checks, {RoomCheck.lighting});
       expect(second.rooms[2].label, 'Dormitorio');
@@ -100,7 +94,10 @@ void main() {
       expect(checklist.progress({'p1'}), (finished: 2, total: 2));
 
       final unchecked = checklist.replace(living.copyWith(checks: {}));
-      expect(unchecked.problems({'p1'}).single, startsWith('Living: falta confirmar'));
+      expect(
+        unchecked.problems({'p1'}).single,
+        startsWith('Living: falta confirmar'),
+      );
     });
 
     test('at least one room must apply', () {
@@ -112,7 +109,9 @@ void main() {
           skippedReason: 'No',
         ),
       ]);
-      expect(checklist.problems(const {}), ['Fotografiá al menos un ambiente.']);
+      expect(checklist.problems(const {}), [
+        'Fotografiá al menos un ambiente.',
+      ]);
     });
 
     test('round-trips through JSON', () {
@@ -129,7 +128,10 @@ void main() {
           );
       final again = CaptureChecklist.fromJson(checklist.toJson());
       expect(again.toJson(), checklist.toJson());
-      expect(() => CaptureChecklist.fromJson({'version': 2}), throwsFormatException);
+      expect(
+        () => CaptureChecklist.fromJson({'version': 2}),
+        throwsFormatException,
+      );
     });
   });
 
@@ -277,9 +279,10 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    FilledButton submitButton(WidgetTester tester) => tester.widget<FilledButton>(
-      find.byKey(const ValueKey('listing-submit-button')),
-    );
+    FilledButton submitButton(WidgetTester tester) =>
+        tester.widget<FilledButton>(
+          find.byKey(const ValueKey('listing-submit-button')),
+        );
 
     testWidgets('a draft with photos is not sent until the guide is complete', (
       tester,
@@ -289,7 +292,9 @@ void main() {
 
       expect(submitButton(tester).onPressed, isNull);
       expect(
-        find.textContaining('Completá la captura guiada para enviar a revisión'),
+        find.textContaining(
+          'Completá la captura guiada para enviar a revisión',
+        ),
         findsOneWidget,
       );
       expect(find.text('0 de 7 ambientes listos.'), findsOneWidget);
@@ -308,7 +313,8 @@ void main() {
       ]);
       final result = await pumpEditor(
         tester,
-        seedStore: (store) => store.entries['staff-1/listing-1'] = done.toJson(),
+        seedStore: (store) =>
+            store.entries['staff-1/listing-1'] = done.toJson(),
       );
       await scrollTo(tester, 'listing-submit-button');
 
@@ -319,7 +325,10 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('listing-submit-confirm')));
       await tester.pumpAndSettle();
-      expect(result.backend.listings['listing-1']!['approval_status'], 'pending');
+      expect(
+        result.backend.listings['listing-1']!['approval_status'],
+        'pending',
+      );
     });
 
     testWidgets('a photo that passes is uploaded and assigned to its room', (
@@ -331,7 +340,9 @@ void main() {
       await tester.pumpAndSettle();
 
       for (final check in RoomCheck.values) {
-        await tester.tap(find.byKey(ValueKey('guided-check-living-${check.name}')));
+        await tester.tap(
+          find.byKey(ValueKey('guided-check-living-${check.name}')),
+        );
         await tester.pumpAndSettle();
       }
       await tester.tap(find.byKey(const ValueKey('guided-camera-living')));
@@ -350,7 +361,9 @@ void main() {
       expect(result.backend.confirmedPhotos('listing-1'), hasLength(2));
       expect(find.text('1 foto aprobada'), findsOneWidget);
       expect(
-        tester.widget<Text>(find.byKey(const ValueKey('guided-status-living'))).data,
+        tester
+            .widget<Text>(find.byKey(const ValueKey('guided-status-living')))
+            .data,
         'Listo',
       );
       final stored = CaptureChecklist.fromJson(
@@ -372,7 +385,9 @@ void main() {
 
       expect(result.backend.confirmedPhotos('listing-1'), hasLength(1));
       expect(
-        find.text('La foto está muy oscura. Encendé las luces o abrí las cortinas.'),
+        find.text(
+          'La foto está muy oscura. Encendé las luces o abrí las cortinas.',
+        ),
         findsOneWidget,
       );
       expect(find.text('Sin fotos aprobadas todavía.'), findsWidgets);
@@ -387,7 +402,9 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('guided-skip-kitchen')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('guided-skip-reason-confirm')));
+      await tester.tap(
+        find.byKey(const ValueKey('guided-skip-reason-confirm')),
+      );
       await tester.pumpAndSettle();
       // A blank reason keeps the dialog open.
       expect(find.byKey(const ValueKey('guided-skip-reason')), findsOneWidget);
@@ -395,18 +412,28 @@ void main() {
         find.byKey(const ValueKey('guided-skip-reason')),
         'Cocina integrada al living',
       );
-      await tester.tap(find.byKey(const ValueKey('guided-skip-reason-confirm')));
+      await tester.tap(
+        find.byKey(const ValueKey('guided-skip-reason-confirm')),
+      );
       await tester.pumpAndSettle();
-      expect(find.text('No aplica: Cocina integrada al living'), findsOneWidget);
+      expect(
+        find.text('No aplica: Cocina integrada al living'),
+        findsOneWidget,
+      );
 
       await scrollTo(tester, 'guided-add-room');
       await tester.tap(find.byKey(const ValueKey('guided-add-room')));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const ValueKey('guided-room-name')), 'Patio');
+      await tester.enterText(
+        find.byKey(const ValueKey('guided-room-name')),
+        'Patio',
+      );
       await tester.tap(find.byKey(const ValueKey('guided-room-name-confirm')));
       await tester.pumpAndSettle();
 
-      var stored = CaptureChecklist.fromJson(result.store.entries['staff-1/listing-1']);
+      var stored = CaptureChecklist.fromJson(
+        result.store.entries['staff-1/listing-1'],
+      );
       final patio = stored.rooms.last;
       expect(patio.label, 'Patio');
       expect(stored.rooms[1].skippedReason, 'Cocina integrada al living');
@@ -414,7 +441,9 @@ void main() {
       await scrollTo(tester, 'guided-remove-${patio.id}');
       await tester.tap(find.byKey(ValueKey('guided-remove-${patio.id}')));
       await tester.pumpAndSettle();
-      stored = CaptureChecklist.fromJson(result.store.entries['staff-1/listing-1']);
+      stored = CaptureChecklist.fromJson(
+        result.store.entries['staff-1/listing-1'],
+      );
       expect(stored.rooms.map((room) => room.label), isNot(contains('Patio')));
     });
   });
