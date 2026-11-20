@@ -2,25 +2,60 @@ import 'package:flutter/material.dart';
 
 import 'package:flutter/services.dart';
 
+import '../../customer_tabs.dart';
 import 'guide_assistant.dart';
 import 'guide_content.dart';
+import 'reservation_conversation.dart';
 
-/// Help button that opens a chat-style assistant for [screen]. It only
-/// explains and has no effect on the screen.
+/// Opens the guide. Only an explicitly chosen tab can be returned by the chat.
 class GuideHelpButton extends StatelessWidget {
-  const GuideHelpButton({super.key, required this.screen, this.label});
+  const GuideHelpButton({
+    super.key,
+    required this.screen,
+    this.label,
+    this.reservationStep,
+  });
+
+  final ValueGetter<DetailReservationStep>? reservationStep;
 
   final GuideScreen screen;
 
   /// When set, uses a compass icon whose tooltip starts with this label.
   final String? label;
 
-  void _open(BuildContext context) => showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
-    builder: (_) => GuideSheet(screen: screen),
-  );
+  Future<void> _open(BuildContext context) async {
+    final tabs = CustomerTabs.maybeOf(context);
+    final page = ModalRoute.of(context);
+    final navigator = Navigator.of(context);
+    final rootNavigator = Navigator.of(context, rootNavigator: true);
+    // Only leave the shell or a read-only listing page. Never discard a
+    // filter, form or other modal just because the engine knows a tab name.
+    bool canVisit(CustomerTab tab) =>
+        tabs != null &&
+        page is PageRoute &&
+        navigator == rootNavigator &&
+        (page.isFirst
+            ? tabs.selected != tab
+            : screen == GuideScreen.listingDetail) &&
+        (tab != CustomerTab.reservations || tabs.canVisitReservations());
+    final tab = await showModalBottomSheet<CustomerTab>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => GuideSheet(
+        screen: screen,
+        reservationStep: reservationStep,
+        canVisit: canVisit,
+      ),
+    );
+    if (!context.mounted ||
+        tab == null ||
+        page?.isCurrent != true ||
+        !canVisit(tab))
+      return;
+    navigator.popUntil((route) => route.isFirst);
+    tabs!.select(tab);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,10 +85,17 @@ class _Message {
   final String text;
 }
 
-/// Chat-style assistant sheet. Answers come from [GuideAssistant]; nothing the
-/// person writes or taps here triggers an action of the screen.
+/// Answering a question never navigates. Following a link returns a typed tab.
 class GuideSheet extends StatefulWidget {
-  const GuideSheet({super.key, required this.screen});
+  const GuideSheet({
+    super.key,
+    required this.screen,
+    this.canVisit,
+    this.reservationStep,
+  });
+
+  final bool Function(CustomerTab)? canVisit;
+  final ValueGetter<DetailReservationStep>? reservationStep;
 
   final GuideScreen screen;
 
@@ -64,10 +106,11 @@ class GuideSheet extends StatefulWidget {
 class _GuideSheetState extends State<GuideSheet> {
   static const _assistant = GuideAssistant();
 
+  final _conversation = ReservationConversation();
   final _input = TextEditingController();
   final _scroll = ScrollController();
   final _messages = <_Message>[];
-  late List<String> _suggestions;
+  late GuideReply _reply;
   bool _full = false;
 
   @override
@@ -75,7 +118,7 @@ class _GuideSheetState extends State<GuideSheet> {
     super.initState();
     final hello = _assistant.greeting(widget.screen);
     _messages.add(_Message(fromUser: false, text: hello.text));
-    _suggestions = hello.suggestions;
+    _reply = hello;
   }
 
   @override
@@ -88,12 +131,16 @@ class _GuideSheetState extends State<GuideSheet> {
   void _ask(String raw) {
     final question = raw.trim();
     if (question.isEmpty) return;
-    final reply = _assistant.answer(question, widget.screen);
+    final reply = _conversation.answer(
+      question,
+      widget.screen,
+      step: widget.reservationStep?.call() ?? DetailReservationStep.quote,
+    );
     setState(() {
       _messages
         ..add(_Message(fromUser: true, text: question))
         ..add(_Message(fromUser: false, text: reply.text));
-      _suggestions = reply.suggestions;
+      _reply = reply;
     });
     _input.clear();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -152,7 +199,16 @@ class _GuideSheetState extends State<GuideSheet> {
             child: Wrap(
               spacing: 8,
               children: [
-                for (final s in _suggestions)
+                if (_reply.destination case final tab?
+                    when widget.canVisit?.call(tab) == true)
+                  ActionChip(
+                    label: Text(
+                      'Llevame',
+                      semanticsLabel: 'Llevame a ${tab.label}',
+                    ),
+                    onPressed: () => Navigator.pop(context, tab),
+                  ),
+                for (final s in _reply.suggestions)
                   ActionChip(label: Text(s), onPressed: () => _ask(s)),
               ],
             ),
@@ -194,8 +250,9 @@ class _GuideSheetState extends State<GuideSheet> {
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
     final inset = media.viewInsets.bottom;
-    final available = media.size.height * 0.85 - inset;
-    final height = available < 240 ? 240.0 : available;
+    final height = inset > 0
+        ? media.size.height - inset
+        : media.size.height * 0.85;
     return Padding(
       padding: EdgeInsets.only(bottom: inset),
       child: SafeArea(
@@ -220,6 +277,11 @@ class _GuideSheetState extends State<GuideSheet> {
                     ),
                     TextButton(
                       key: const ValueKey('guide-full-toggle'),
+                      // The app theme defaults to full-width buttons. A Row
+                      // gives non-flex children unbounded horizontal space.
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(48, 48),
+                      ),
                       onPressed: () => setState(() => _full = !_full),
                       child: Text(
                         _full ? 'Volver al chat' : 'Ver guía completa',

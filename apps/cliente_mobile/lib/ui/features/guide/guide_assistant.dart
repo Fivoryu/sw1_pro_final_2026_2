@@ -1,13 +1,17 @@
 import 'dart:math' as math;
 
+import '../../customer_tab.dart';
 import 'guide_content.dart';
 
-/// Answer of the guide assistant: Spanish text plus follow-up suggestions.
+enum ReservationIntent { start, follow }
+
+/// An optional destination is a suggestion, not an instruction to navigate.
 class GuideReply {
-  const GuideReply(this.text, this.suggestions);
+  const GuideReply(this.text, this.suggestions, {this.destination});
 
   final String text;
   final List<String> suggestions;
+  final CustomerTab? destination;
 }
 
 /// Pure, deterministic, offline answer engine built only on [GuideContent].
@@ -547,7 +551,7 @@ class GuideAssistant {
     return GuideReply(
       '¡Hola! Soy la guía de RoomForge. Ahora estás en «${screenLabel(screen)}». '
       '${c.goal}\n\nPodés escribirme una pregunta o tocar una sugerencia. '
-      'Yo solo te explico cómo se hace: no hago nada por vos en la pantalla.',
+      'Si aparece «Llevame», solo te lleva a una pantalla. Vos decidís si reservás o pagás.',
       initialSuggestions(screen),
     );
   }
@@ -701,8 +705,8 @@ class GuideAssistant {
 
   /// Reservation intent from the raw words: start («reservo») or follow
   /// («mis reservas»); null when other words say something else.
-  String? _reservationLead(List<String> tokens, Set<String> q) {
-    if (!q.contains(_stem('reserva'))) return null;
+  static ReservationIntent? reservationIntent(String question) {
+    final tokens = _tokens(normalize(question));
     final start =
         tokens.any(_startVerbs.contains) ||
         (tokens.any(_reservationNouns.contains) &&
@@ -718,8 +722,8 @@ class GuideAssistant {
       ..._reservationNouns,
     };
     if (!tokens.every(vocab.contains)) return null;
-    if (start && !follow) return _stem('reservar');
-    if (follow && !start) return _stem('seguir');
+    if (start && !follow) return ReservationIntent.start;
+    if (follow && !start) return ReservationIntent.follow;
     return null;
   }
 
@@ -781,8 +785,11 @@ class GuideAssistant {
 
     // 3b. Starting vs following a reservation: the action verb decides, and
     // the own-screen boost must not override it.
-    final lead = _reservationLead(tokens, q);
-    if (lead != null) {
+    final intent = reservationIntent(norm);
+    if (intent != null) {
+      final lead = _stem(
+        intent == ReservationIntent.start ? 'reservar' : 'seguir',
+      );
       final picks = [
         for (final e in _entries)
           if (e.kind == _Kind.walkthrough &&

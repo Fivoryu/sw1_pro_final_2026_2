@@ -14,6 +14,7 @@ import '../../favorites/favorite_button.dart';
 import 'catalog_format.dart';
 import '../../guide/guide_content.dart';
 import '../../guide/guide_help_button.dart';
+import '../../guide/reservation_conversation.dart';
 import 'listing_photo.dart';
 import '../../chat/chat_conversation_screen.dart';
 import '../../reservations/customer_reservations_screen.dart';
@@ -130,6 +131,24 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     });
   }
 
+  DetailReservationStep _reservationStep() {
+    if (_detail == null || widget.reservationsController == null) {
+      return DetailReservationStep.unavailable;
+    }
+    if (_submittingQuote || _requestingReservation) {
+      return DetailReservationStep.busy;
+    }
+    if (widget.sessionController?.status != CustomerSessionStatus.signedIn) {
+      return DetailReservationStep.signIn;
+    }
+    if (_activeReservationId != null) {
+      return DetailReservationStep.alreadyRequested;
+    }
+    return _quote?.expiresAt.isAfter(DateTime.now()) == true
+        ? DetailReservationStep.chooseMethod
+        : DetailReservationStep.quote;
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: EditorialColors.canvas,
@@ -143,7 +162,10 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
             listingId: widget.listingId,
             listing: _detail?.listing,
           ),
-        const GuideHelpButton(screen: GuideScreen.listingDetail),
+        GuideHelpButton(
+          screen: GuideScreen.listingDetail,
+          reservationStep: _reservationStep,
+        ),
       ],
     ),
     body: Center(

@@ -16,6 +16,7 @@ import 'domain/customer_favorites_controller.dart';
 import 'domain/customer_notifications_controller.dart';
 import 'domain/customer_reservations_controller.dart';
 import 'domain/customer_session_controller.dart';
+import 'ui/customer_tabs.dart';
 import 'ui/features/auth/views/customer_account_screen.dart';
 import 'ui/features/catalog/views/catalog_screen.dart';
 import 'ui/features/catalog/views/listing_detail_screen.dart';
@@ -94,6 +95,11 @@ class RoomForgeApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
+    builder: (_, navigator) => CustomerTabHost(
+      canVisitReservations: () => bookingApi != null &&
+          sessionController.status == CustomerSessionStatus.signedIn,
+      child: navigator!,
+    ),
     debugShowCheckedModeBanner: false,
     title: 'RoomForge',
     theme: andeanTheme(),
@@ -140,7 +146,6 @@ class CustomerShell extends StatefulWidget {
 }
 
 class _CustomerShellState extends State<CustomerShell> {
-  int _selectedIndex = 0;
   late final _catalog = CatalogController(api: widget.catalogApi);
   late final _reservations = widget.bookingApi == null
       ? null
@@ -216,13 +221,13 @@ class _CustomerShellState extends State<CustomerShell> {
     );
   }
 
-  void _openNotifications() {
+  void _openNotifications(CustomerTabs tabs) {
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => NotificationsScreen(
           controller: _notifications!,
           chatApi: widget.chatApi,
-          onOpenReservations: () => setState(() => _selectedIndex = 1),
+          onOpenReservations: () => tabs.select(CustomerTab.reservations),
         ),
       ),
     );
@@ -241,7 +246,22 @@ class _CustomerShellState extends State<CustomerShell> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) {
+    final tabs = CustomerTabs.maybeOf(context);
+    // CustomerShell can also be embedded without RoomForgeApp.
+    if (tabs == null) {
+      return CustomerTabHost(
+        canVisitReservations: () => widget.bookingApi != null &&
+            widget.sessionController.status == CustomerSessionStatus.signedIn,
+        child: Builder(
+          builder: (context) => _shell(CustomerTabs.maybeOf(context)!),
+        ),
+      );
+    }
+    return _shell(tabs);
+  }
+
+  Widget _shell(CustomerTabs tabs) => Scaffold(
     backgroundColor: EditorialColors.canvas,
     appBar: AppBar(
       backgroundColor: EditorialColors.canvas,
@@ -272,14 +292,14 @@ class _CustomerShellState extends State<CustomerShell> {
                     CustomerSessionStatus.signedIn
                 ? NotificationsBell(
                     controller: _notifications,
-                    onPressed: _openNotifications,
+                    onPressed: () => _openNotifications(tabs),
                   )
                 : const SizedBox.shrink(),
           ),
       ],
     ),
     body: IndexedStack(
-      index: _selectedIndex,
+      index: tabs.selected.index,
       children: [
         CatalogScreen(
           controller: _catalog,
@@ -308,23 +328,23 @@ class _CustomerShellState extends State<CustomerShell> {
       elevation: 0,
       backgroundColor: EditorialColors.paper,
       indicatorColor: EditorialColors.sand,
-      selectedIndex: _selectedIndex,
-      onDestinationSelected: (index) => setState(() => _selectedIndex = index),
-      destinations: const [
+      selectedIndex: tabs.selected.index,
+      onDestinationSelected: (index) => tabs.select(CustomerTab.values[index]),
+      destinations: [
         NavigationDestination(
           icon: Icon(Icons.explore_outlined),
           selectedIcon: Icon(Icons.explore),
-          label: 'Explorar',
+          label: CustomerTab.explore.label,
         ),
         NavigationDestination(
           icon: Icon(Icons.event_note_outlined),
           selectedIcon: Icon(Icons.event_note),
-          label: 'Reservas',
+          label: CustomerTab.reservations.label,
         ),
         NavigationDestination(
           icon: Icon(Icons.person_outline),
           selectedIcon: Icon(Icons.person),
-          label: 'Cuenta',
+          label: CustomerTab.account.label,
         ),
       ],
     ),
