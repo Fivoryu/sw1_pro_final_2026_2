@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import { useEffect, useId, useRef, useState } from "react";
 import type { SceneDocument } from "../../application/sceneContract";
 import { SceneViewer } from "../editor3d/SceneViewer";
@@ -218,6 +219,8 @@ export function AgencyReviewQueue({ accessToken, agencyId }: AgencyReviewQueuePr
         <span className="protected-staff-review-queue__eyebrow">PUBLICACIONES DE LA INMOBILIARIA</span>
         <h2 id="agency-review-queue-heading">Cola de revisión</h2>
       </div>
+
+      <ContextualGuide screenId="listing-review-queue" />
 
       <div aria-label="Estado de los inmuebles" className="review-tabs" role="tablist">
         {TABS.map((candidate) => (
