@@ -109,6 +109,8 @@ class GuideAssistant {
     'cerrar',
     'cierro',
     'cierras',
+    'cierra',
+    'cierre',
     'salir',
     'salgo',
     'sales',
@@ -116,6 +118,50 @@ class GuideAssistant {
     'desloguear',
     'deslogear',
   };
+
+  /// Logout wording rewritten to «cerrar» when it is about the session.
+  static const _logoutRewrite = {
+    'cierro',
+    'cierra',
+    'cierras',
+    'cierre',
+    'salgo',
+    'sales',
+    'salir',
+  };
+
+  /// Reservation intents. Starting one («reservo») and following one
+  /// («mis reservas») live in different walkthroughs.
+  static const _startVerbs = {
+    'reservo',
+    'reservar',
+    'reservarlo',
+    'apartar',
+    'separar',
+  };
+  static const _startSupport = {
+    'hago',
+    'hacer',
+    'crear',
+    'armar',
+    'solicitar',
+    'pedir',
+    'nueva',
+    'inmueble',
+    'inmuebles',
+  };
+  static const _followVerbs = {
+    'ver',
+    'veo',
+    'seguir',
+    'sigo',
+    'estado',
+    'mis',
+    'mi',
+    'revisar',
+    'consultar',
+  };
+  static const _reservationNouns = {'reserva', 'reservas'};
 
   /// Extra words people use for a glossary term.
   static const Map<String, String> _synonyms = {
@@ -198,6 +244,13 @@ class GuideAssistant {
     'ver',
     'puedes',
     'podes',
+    'significa',
+    'significan',
+    'quiere',
+    'decir',
+    'mis',
+    'tus',
+    'sus',
   };
 
   static const _greetingWords = {
@@ -303,8 +356,13 @@ class GuideAssistant {
     final tokens = _tokens(normalized);
     final login =
         tokens.any(_loginWords.contains) && !tokens.any(_logoutWords.contains);
+    final aboutSession = tokens.contains('sesion') || tokens.contains('cuenta');
     final out = <String>[];
     for (final t in tokens) {
+      if (aboutSession && _logoutRewrite.contains(t)) {
+        out.add('cerrar');
+        continue;
+      }
       if (login && (t == 'sesion' || _loginWords.contains(t))) continue;
       out.addAll(_tokenSynonyms[t] ?? [t]);
     }
@@ -597,33 +655,72 @@ class GuideAssistant {
     return s;
   }
 
-  /// Meaningful query words found in the entry (name or body).
-  int _matched(_Entry e, Set<String> q) =>
-      q.where((t) => e.name.contains(t) || e.body.contains(t)).length;
-
-  _Entry? _best(Set<String> q, GuideScreen current, {_Kind? only}) {
-    _Entry? best;
-    var top = 0.0;
-    for (final e in _entries) {
+  /// Entries ordered by score, best first (only those above the threshold).
+  List<_Entry> _ranked(Set<String> q, GuideScreen current, {_Kind? only}) {
+    final scored = <(_Entry, double, int)>[];
+    for (var i = 0; i < _entries.length; i++) {
+      final e = _entries[i];
       if (only != null && e.kind != only) continue;
       final s = _score(e, q, current);
-      if (s > top) {
-        top = s;
-        best = e;
-      }
+      if (s >= 3.0) scored.add((e, s, i));
     }
-    if (best == null || top < 3.0) return null;
-    // Honest fallback when most meaningful words are not covered.
-    if (q.length == 2) {
-      // Both words must be covered; only a generic domain word may be skipped.
-      final missing = q.where(
-        (t) => !best!.name.contains(t) && !best.body.contains(t),
-      );
-      if (missing.any((t) => !_genericWords.contains(t))) return null;
-    } else if (q.length > 2 && _matched(best, q) * 2 < q.length) {
-      return null;
+    // Ties keep entry order (List.sort is not stable).
+    scored.sort((a, b) {
+      final c = b.$2.compareTo(a.$2);
+      return c != 0 ? c : a.$3.compareTo(b.$3);
+    });
+    return [for (final x in scored) x.$1];
+  }
+
+  /// Stems of «pagar»/«depósito»: «pago» expands to both, as one idea.
+  static final Set<String> _payAlias = {_stem('pagar'), _stem('deposito')};
+
+  /// Honest coverage rule: most meaningful words must be covered. With
+  /// [relaxed], either of the two «pago» synonyms covers the other.
+  bool _covers(_Entry e, Set<String> q, {bool relaxed = false}) {
+    bool has(String t) => e.name.contains(t) || e.body.contains(t);
+    bool ok(String t) =>
+        has(t) ||
+        _genericWords.contains(t) ||
+        (relaxed && _payAlias.contains(t) && _payAlias.any(has));
+    if (q.length == 2) return q.every(ok);
+    if (q.length > 2) {
+      return q.where((t) => has(t) || ok(t)).length * 2 >= q.length;
     }
-    return best;
+    return true;
+  }
+
+  /// Best-ranked entry that passes the coverage rule, or null. Entries of the
+  /// current screen may use the relaxed rule; the rest need strict coverage.
+  _Entry? _best(Set<String> q, GuideScreen current, {_Kind? only}) {
+    for (final e in _ranked(q, current, only: only)) {
+      if (_covers(e, q, relaxed: e.screen == current)) return e;
+    }
+    return null;
+  }
+
+  /// Reservation intent from the raw words: start («reservo») or follow
+  /// («mis reservas»); null when other words say something else.
+  String? _reservationLead(List<String> tokens, Set<String> q) {
+    if (!q.contains(_stem('reserva'))) return null;
+    final start =
+        tokens.any(_startVerbs.contains) ||
+        (tokens.any(_reservationNouns.contains) &&
+            tokens.any(const {'hago', 'hacer', 'crear', 'armar'}.contains));
+    final follow =
+        tokens.any(_reservationNouns.contains) &&
+        tokens.any(_followVerbs.contains);
+    final vocab = {
+      ..._stopwords,
+      ..._startVerbs,
+      ..._startSupport,
+      ..._followVerbs,
+      ..._reservationNouns,
+    };
+    if (!tokens.every(vocab.contains)) return null;
+    if (start && !follow) return _stem('reservar');
+    if (follow && !start) return _stem('seguir');
+    return null;
   }
 
   /// Answers [question] asked while the person is on [screen].
@@ -681,6 +778,21 @@ class GuideAssistant {
       }),
     );
     if (q.isEmpty) return _fallback(screen);
+
+    // 3b. Starting vs following a reservation: the action verb decides, and
+    // the own-screen boost must not override it.
+    final lead = _reservationLead(tokens, q);
+    if (lead != null) {
+      final picks = [
+        for (final e in _entries)
+          if (e.kind == _Kind.walkthrough &&
+              e.name.isNotEmpty &&
+              e.name.first == lead &&
+              e.name.contains(_stem('reserva')))
+            e,
+      ];
+      if (picks.isNotEmpty) return _fromEntry(picks.first, screen);
+    }
 
     // 4. Glossary questions: "qué es X".
     if (_definePhrase.hasMatch('$norm ')) {
