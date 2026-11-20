@@ -1,3 +1,5 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
+import type { GuideScreenId } from "../guide/guideContent";
 import { useEffect, useState } from "react";
 import type { LoginCompletion } from "../../application/staffAuthApi";
 import {
@@ -41,6 +43,12 @@ const rolePresentation: Record<StaffRole, { heading: string; navigation: string 
     navigation: "Inicio del agente",
   },
 };
+
+const welcomeGuideId = {
+  platform_admin: "welcome-platform-admin",
+  agency_admin: "welcome-agency-admin",
+  agent: "welcome-agent",
+} as const satisfies Record<StaffRole, GuideScreenId>;
 
 export function ProtectedStaffShell() {
   const [session, setSession] = useState<StaffSession | null>(null);
@@ -307,6 +315,7 @@ export function ProtectedStaffShell() {
         <main className="protected-staff-content">
           <p className="eyebrow">ESPACIO PRIVADO</p>
           <h1>{presentation.heading}</h1>
+          <ContextualGuide screenId={welcomeGuideId[session.user.role]} />
           {logoutError ? (
             <p className="staff-session-error" role="alert">
               {logoutError}

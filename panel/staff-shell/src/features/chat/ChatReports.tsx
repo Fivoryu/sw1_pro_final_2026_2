@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import { useEffect, useRef, useState } from "react";
 import {
   listBlockedCustomers,
@@ -83,6 +84,7 @@ export function ChatReports({ accessToken, showBlocks }: ChatReportsProps) {
   return (
     <section aria-labelledby="chat-reports-heading" className="chat-reports">
       <h3 id="chat-reports-heading">Reportes de conversaciones</h3>
+      <ContextualGuide screenId="chat-reports" />
       {reports.kind === "loading" ? <p aria-busy="true">Cargando reportes…</p> : null}
       {reports.kind === "error" ? (
         <p className="review-queue__message review-queue__message--error" role="alert">

@@ -7,6 +7,8 @@ import '../../../../data/services/local_wallet_connect.dart';
 import '../../../../domain/customer_session_controller.dart';
 import '../../../theme/andean_theme.dart';
 import '../../../theme/editorial_surfaces.dart';
+import '../../guide/guide_content.dart';
+import '../../guide/guide_help_button.dart';
 
 /// Account tab: renders the customer session state and drives login,
 /// registration, retry, and logout.
@@ -203,7 +205,20 @@ class _CustomerAccountScreenState extends State<CustomerAccountScreen> {
   Widget _scroll(List<Widget> children) => Center(
     child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 720),
-      child: ListView(padding: const EdgeInsets.all(20), children: children),
+      child: Column(
+        children: [
+          const Align(
+            alignment: Alignment.centerRight,
+            child: GuideHelpButton(screen: GuideScreen.account),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(20),
+              children: children,
+            ),
+          ),
+        ],
+      ),
     ),
   );
 

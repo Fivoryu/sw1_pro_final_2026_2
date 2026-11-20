@@ -1,3 +1,5 @@
+import '../../guide/guide_content.dart';
+import '../../guide/guide_help_button.dart';
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
@@ -172,7 +174,10 @@ class _ListingViewerScreenState extends State<ListingViewerScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Recorrido 3D')),
+    appBar: AppBar(
+      title: const Text('Recorrido 3D'),
+      actions: const [GuideHelpButton(screen: GuideScreen.viewer)],
+    ),
     body: switch (_controller.state) {
       ViewerLoadState.loading => const Center(
         child: CircularProgressIndicator(key: ValueKey('viewer-loading')),
@@ -211,7 +216,8 @@ class _ListingViewerScreenState extends State<ListingViewerScreen> {
       _pageBuilt = true;
       _armPageWatchdog();
     }
-    final page = widget.viewerBuilder?.call(context, _onBridgePayload) ??
+    final page =
+        widget.viewerBuilder?.call(context, _onBridgePayload) ??
         _ViewerPage(
           onReady: (controller) => _webController = controller,
           report: _onBridgePayload,
@@ -223,7 +229,9 @@ class _ListingViewerScreenState extends State<ListingViewerScreen> {
         page,
         if (!_sceneRendered)
           ColoredBox(
-            color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.85),
+            color: Theme.of(
+              context,
+            ).colorScheme.surface.withValues(alpha: 0.85),
             child: _viewerFailed
                 ? ListView(
                     key: const ValueKey('viewer-runtime-error'),

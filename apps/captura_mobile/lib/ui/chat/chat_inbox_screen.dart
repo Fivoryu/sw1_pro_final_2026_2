@@ -8,6 +8,7 @@ import '../../domain/staff_chat_controller.dart';
 import '../../domain/staff_session_controller.dart';
 import 'chat_conversation_screen.dart';
 import 'chat_format.dart';
+import '../guide/contextual_guide.dart';
 
 /// Inbox refresh period while the screen is visible.
 const Duration kInboxPollInterval = Duration(seconds: 15);
@@ -78,7 +79,10 @@ class _ChatInboxScreenState extends State<ChatInboxScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Conversaciones')),
+    appBar: AppBar(
+      title: const Text('Conversaciones'),
+      actions: const [ContextualGuideButton(screen: GuideScreen.chatInbox)],
+    ),
     body: ListenableBuilder(
       listenable: widget.controller,
       builder: (context, _) {

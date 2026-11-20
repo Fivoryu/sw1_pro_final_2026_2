@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 // panel/staff-shell/src/features/agencies/AgencyDashboard.tsx
 
 import { useEffect, useState } from "react";
@@ -103,6 +104,7 @@ export function AgencyDashboard({ agencyId, accessToken }: AgencyDashboardProps)
       <h1 style={{ fontSize: "2.5rem", fontWeight: 400, color: "#111", margin: "0 0 32px 0", letterSpacing: "-0.02em" }}>
         Métricas de la Agencia
       </h1>
+      <ContextualGuide screenId="agency-dashboard" />
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "24px" }}>
         <section aria-label="Publicaciones" style={cardStyle}>

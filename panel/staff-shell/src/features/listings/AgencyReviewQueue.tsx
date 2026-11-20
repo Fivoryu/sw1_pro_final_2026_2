@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import { useEffect, useId, useRef, useState } from "react";
 import type { SceneDocument } from "../../application/sceneContract";
 import { SceneViewer } from "../editor3d/SceneViewer";
@@ -225,6 +226,8 @@ export function AgencyReviewQueue({ accessToken, agencyId }: AgencyReviewQueuePr
         <h2 id="agency-review-queue-heading">Cola de revisión</h2>
       </div>
 
+      <ContextualGuide screenId="listing-review-queue" />
+
       <div aria-label="Estado de los inmuebles" className="review-tabs" role="tablist">
         {TABS.map((candidate) => (
           <button
@@ -451,6 +454,7 @@ function ListingReviewDetail({
       <button className="review-button review-button--link" onClick={onBack} type="button">
         Volver a la bandeja
       </button>
+      <ContextualGuide screenId="listing-detail" />
 
       {actionError ? (
         <p className="review-queue__message review-queue__message--error" role="alert">

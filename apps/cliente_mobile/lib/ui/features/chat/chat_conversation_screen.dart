@@ -1,3 +1,5 @@
+import '../guide/guide_content.dart';
+import '../guide/guide_help_button.dart';
 import 'package:flutter/material.dart';
 
 import '../../../data/models/chat_models.dart';
@@ -26,7 +28,8 @@ Future<String?> openListingChat(
   }
   await navigator.push<void>(
     MaterialPageRoute<void>(
-      builder: (_) => ChatConversationScreen(api: api, conversation: conversation),
+      builder: (_) =>
+          ChatConversationScreen(api: api, conversation: conversation),
     ),
   );
   return null;
@@ -102,6 +105,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
     appBar: AppBar(
       title: Text(widget.conversation.agencyName),
       actions: [
+        const GuideHelpButton(screen: GuideScreen.chat),
         IconButton(
           key: const ValueKey('chat-report'),
           tooltip: 'Reportar conversación',

@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
   createExchangeRate,
@@ -165,6 +166,7 @@ export function ExchangeRatesAdmin({ accessToken }: ExchangeRatesAdminProps) {
           existentes conservan la tasa congelada al momento de crearse.
         </p>
       </div>
+      <ContextualGuide screenId="exchange-rates" />
 
       {rates.kind === "loading" ? (
         <p aria-busy="true" className="review-queue__message">

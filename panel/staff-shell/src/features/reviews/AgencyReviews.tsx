@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   listReviews,
@@ -162,6 +163,7 @@ export function AgencyReviews({ accessToken, isAgencyAdmin }: AgencyReviewsProps
   return (
     <section aria-labelledby="agency-reviews-heading" className="agency-reviews">
       <h2 id="agency-reviews-heading">Reseñas</h2>
+      <ContextualGuide screenId="agency-reviews" />
       {state.kind === "loading" ? <p aria-busy="true">Cargando reseñas…</p> : null}
       {state.kind === "error" ? (
         <p className="review-queue__message review-queue__message--error" role="alert">

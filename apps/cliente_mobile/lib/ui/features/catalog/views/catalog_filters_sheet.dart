@@ -1,3 +1,5 @@
+import '../../guide/guide_content.dart';
+import '../../guide/guide_help_button.dart';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -298,9 +300,16 @@ class _CatalogFiltersSheetState extends State<CatalogFiltersSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Filtros del catálogo',
-            style: Theme.of(context).textTheme.titleLarge,
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Filtros del catálogo',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+              const GuideHelpButton(screen: GuideScreen.filters),
+            ],
           ),
           const SizedBox(height: 8),
           Text(

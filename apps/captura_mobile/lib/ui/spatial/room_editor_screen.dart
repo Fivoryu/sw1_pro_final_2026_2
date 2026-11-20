@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../domain/spatial/spatial.dart';
 import '../../domain/spatial_capture_controller.dart';
 import 'spatial_format.dart';
+import '../guide/contextual_guide.dart';
 
 /// Row actions need a finite width; the app theme's `Size.fromHeight(48)`
 /// deliberately expands standalone actions to the available width.
@@ -209,7 +210,10 @@ class _RoomEditorScreenState extends State<RoomEditorScreen> {
       for (final record in toleranceRecords(room)) record.edgeIndex: record,
     };
     return Scaffold(
-      appBar: AppBar(title: Text(room.name)),
+      appBar: AppBar(
+        title: Text(room.name),
+        actions: const [ContextualGuideButton(screen: GuideScreen.roomEditor)],
+      ),
       body: SafeArea(
         child: ListView(
           key: const ValueKey('room-editor-scroll'),

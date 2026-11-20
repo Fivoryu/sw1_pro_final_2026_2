@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import { useState } from "react";
 
 const PANEL_PATH = "/panel";
@@ -123,6 +124,7 @@ export function LandingPage() {
       </header>
 
       <main>
+      <ContextualGuide screenId="landing" />
         <section className="landing-hero">
           <h1>Publicá inmuebles con recorridos 3D</h1>
           <p>

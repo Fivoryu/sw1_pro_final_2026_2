@@ -1,3 +1,4 @@
+import { ContextualGuide } from "./features/guide/ContextualGuide";
 import { InvitationAcceptancePage } from "./features/auth/InvitationAcceptancePage";
 import { ProtectedStaffShell } from "./features/auth/ProtectedStaffShell";
 import { LandingPage } from "./features/landing/LandingPage";
@@ -40,7 +41,12 @@ export function App() {
 
   // --- RUTA EXCLUSIVA PARA TU VISOR 3D ---
   if (currentUrl.pathname === "/visor3d") {
-    return <SceneViewer />;
+    return (
+      <>
+        <ContextualGuide screenId="scene-viewer" />
+        <SceneViewer />
+      </>
+    );
   }
 
   if (pathInvitation.isInvitationRoute) {
