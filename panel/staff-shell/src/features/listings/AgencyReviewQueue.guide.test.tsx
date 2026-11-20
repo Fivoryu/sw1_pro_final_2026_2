@@ -76,6 +76,7 @@ describe("review queue contextual guide", () => {
     await user.click(screen.getByRole("button", { name: "Guía" }));
 
     const panel = screen.getByRole("complementary", { name: "Guía" });
+    await user.click(within(panel).getByRole("button", { name: "Ver guía completa" }));
     expect(within(panel).getAllByRole("listitem").length).toBeGreaterThanOrEqual(3);
     expect(panel).toHaveTextContent("Revisar");
 

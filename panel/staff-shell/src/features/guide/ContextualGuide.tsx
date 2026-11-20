@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { answerQuestion, getGreeting, getInitialChips } from "./guideAssistant";
 import { GLOSSARY, GUIDE_TOPICS, type GuideScreenId } from "./guideContent";
 
 const SECTIONS = [
@@ -10,14 +11,29 @@ const SECTIONS = [
 
 type SectionId = (typeof SECTIONS)[number]["id"];
 
+interface ChatMessage {
+  id: number;
+  role: "assistant" | "user";
+  text: string;
+}
+
 /**
- * Help button that opens a panel with the purpose, walkthroughs, common
- * mistakes and glossary of one screen. It only displays guidance and never
- * triggers any action of the screen.
+ * Help button that opens a chat-style assistant for one screen: the person
+ * writes a question or taps a suggestion and gets an answer built from the
+ * guide content. The full structured guide (purpose, walkthroughs, mistakes,
+ * glossary) stays one tap away. It only explains and never triggers any
+ * action of the screen.
  */
 export function ContextualGuide({ screenId }: { screenId: GuideScreenId }) {
   const [open, setOpen] = useState(false);
   const [section, setSection] = useState<SectionId>("purpose");
+  const [showFull, setShowFull] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [chips, setChips] = useState<string[]>([]);
+  const [draft, setDraft] = useState("");
+  const nextId = useRef(1);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
   const headingId = useId();
   const describedById = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -27,15 +43,42 @@ export function ContextualGuide({ screenId }: { screenId: GuideScreenId }) {
 
   useEffect(() => {
     if (open) {
-      headingRef.current?.focus();
+      if (inputRef.current) inputRef.current.focus();
+      else headingRef.current?.focus();
     } else if (wasOpen.current) {
       toggleRef.current?.focus();
     }
     wasOpen.current = open;
   }, [open]);
 
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [messages]);
+
+  function openGuide() {
+    if (messages.length === 0) {
+      setMessages([{ id: nextId.current++, role: "assistant", text: getGreeting(screenId) }]);
+      setChips(getInitialChips(screenId));
+    }
+    setOpen(true);
+  }
+
+  function ask(question: string) {
+    const trimmed = question.trim();
+    if (trimmed.length === 0) return;
+    const answer = answerQuestion(trimmed, screenId);
+    setMessages((current) => [
+      ...current,
+      { id: nextId.current++, role: "user", text: trimmed },
+      { id: nextId.current++, role: "assistant", text: answer.text },
+    ]);
+    setChips(answer.chips);
+    setDraft("");
+  }
+
   function close() {
     setOpen(false);
+    setShowFull(false);
     setSection("purpose");
   }
 
@@ -60,7 +103,63 @@ export function ContextualGuide({ screenId }: { screenId: GuideScreenId }) {
           <p className="contextual-guide__note">
             Esta guía solo te indica qué hacer; no ejecuta ninguna acción por ti.
           </p>
-          <div aria-label="Secciones de la guía" className="contextual-guide__tabs" role="tablist">
+          {showFull ? null : (
+            <>
+              <div aria-live="polite" className="contextual-guide__log" ref={logRef} role="log">
+                {messages.map((message) => (
+                  <p
+                    className={`contextual-guide__message contextual-guide__message--${message.role}`}
+                    key={message.id}
+                  >
+                    {message.text}
+                  </p>
+                ))}
+              </div>
+              <div aria-label="Sugerencias" className="contextual-guide__chips" role="group">
+                {chips.map((chip) => (
+                  <button
+                    className="contextual-guide__chip"
+                    key={chip}
+                    onClick={() => ask(chip)}
+                    type="button"
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
+              <div className="contextual-guide__composer">
+                <input
+                  aria-label="Escribe tu pregunta"
+                  className="contextual-guide__input"
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      ask(draft);
+                    }
+                  }}
+                  placeholder="Escribe tu pregunta"
+                  ref={inputRef}
+                  type="text"
+                  value={draft}
+                />
+                <button onClick={() => ask(draft)} type="button">
+                  Enviar
+                </button>
+              </div>
+            </>
+          )}
+          <button
+            className="contextual-guide__link"
+            onClick={() => setShowFull((current) => !current)}
+            type="button"
+          >
+            {showFull ? "Volver al chat" : "Ver guía completa"}
+          </button>
+          {showFull ? (
+            <>
+            <div aria-label="Secciones de la guía" className="contextual-guide__tabs" role="tablist">
             {SECTIONS.map((candidate) => (
               <button
                 aria-selected={candidate.id === section}
@@ -125,6 +224,8 @@ export function ContextualGuide({ screenId }: { screenId: GuideScreenId }) {
               </dl>
             ) : null}
           </div>
+            </>
+          ) : null}
           <button onClick={close} type="button">
             Cerrar guía
           </button>
@@ -134,7 +235,7 @@ export function ContextualGuide({ screenId }: { screenId: GuideScreenId }) {
           <button
             aria-describedby={describedById}
             className="contextual-guide__toggle"
-            onClick={() => setOpen(true)}
+            onClick={openGuide}
             ref={toggleRef}
             type="button"
           >
