@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'data/services/catalog_api.dart';
 import 'data/services/customer_booking_api.dart';
 import 'data/services/customer_chat_api.dart';
+import 'data/services/customer_favorites_api.dart';
 import 'data/services/customer_notifications_api.dart';
 import 'data/services/customer_reviews_api.dart';
 import 'data/services/local_wallet_connect.dart';
@@ -11,11 +12,14 @@ import 'data/services/customer_token_store.dart';
 import 'data/services/quote_api.dart';
 import 'data/services/scene_api.dart';
 import 'domain/catalog_controller.dart';
+import 'domain/customer_favorites_controller.dart';
 import 'domain/customer_notifications_controller.dart';
 import 'domain/customer_reservations_controller.dart';
 import 'domain/customer_session_controller.dart';
 import 'ui/features/auth/views/customer_account_screen.dart';
 import 'ui/features/catalog/views/catalog_screen.dart';
+import 'ui/features/catalog/views/listing_detail_screen.dart';
+import 'ui/features/favorites/favorites_screen.dart';
 import 'ui/features/notifications/notifications_screen.dart';
 import 'ui/features/reservations/customer_reservations_screen.dart';
 
@@ -51,6 +55,10 @@ void main() => runApp(
       baseUrl: _apiBaseUrl,
       accessTokenProvider: () => _customerSession.obtainAccessToken(),
     ),
+    favoritesApi: CustomerFavoritesApi(
+      baseUrl: _apiBaseUrl,
+      accessTokenProvider: () => _customerSession.obtainAccessToken(),
+    ),
   ),
 );
 
@@ -71,6 +79,7 @@ class RoomForgeApp extends StatelessWidget {
     this.chatApi,
     this.notificationsApi,
     this.reviewsApi,
+    this.favoritesApi,
   });
 
   final CustomerSessionController sessionController;
@@ -81,6 +90,7 @@ class RoomForgeApp extends StatelessWidget {
   final CustomerChatApi? chatApi;
   final CustomerNotificationsApi? notificationsApi;
   final CustomerReviewsApi? reviewsApi;
+  final CustomerFavoritesApi? favoritesApi;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -96,6 +106,7 @@ class RoomForgeApp extends StatelessWidget {
       chatApi: chatApi,
       notificationsApi: notificationsApi,
       reviewsApi: reviewsApi,
+      favoritesApi: favoritesApi,
     ),
   );
 }
@@ -111,6 +122,7 @@ class CustomerShell extends StatefulWidget {
     this.chatApi,
     this.notificationsApi,
     this.reviewsApi,
+    this.favoritesApi,
   });
 
   final CustomerSessionController sessionController;
@@ -121,6 +133,7 @@ class CustomerShell extends StatefulWidget {
   final CustomerChatApi? chatApi;
   final CustomerNotificationsApi? notificationsApi;
   final CustomerReviewsApi? reviewsApi;
+  final CustomerFavoritesApi? favoritesApi;
 
   @override
   State<CustomerShell> createState() => _CustomerShellState();
@@ -139,11 +152,16 @@ class _CustomerShellState extends State<CustomerShell> {
   late final _notifications = widget.notificationsApi == null
       ? null
       : CustomerNotificationsController(api: widget.notificationsApi!);
+  late final _favorites = widget.favoritesApi == null
+      ? null
+      : CustomerFavoritesController(api: widget.favoritesApi!);
+  CustomerSessionStatus? _favoritesStatus;
 
   @override
   void initState() {
     super.initState();
     widget.sessionController.addListener(_syncNotifications);
+    widget.sessionController.addListener(_syncFavorites);
     widget.sessionController.restore();
   }
 
@@ -156,6 +174,46 @@ class _CustomerShellState extends State<CustomerShell> {
     } else {
       notifications.stop();
     }
+  }
+
+  /// Favorites belong to the signed-in customer: loaded on sign-in and
+  /// forgotten on sign-out, so another customer never sees them.
+  void _syncFavorites() {
+    final favorites = _favorites;
+    final status = widget.sessionController.status;
+    if (favorites == null || status == _favoritesStatus) return;
+    _favoritesStatus = status;
+    if (status == CustomerSessionStatus.signedIn) {
+      favorites.load();
+    } else {
+      favorites.clear();
+    }
+  }
+
+  void _openFavorites() {
+    void openListing(String listingId) => Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => ListingDetailScreen(
+              controller: _catalog,
+              listingId: listingId,
+              reservationsController: _reservations,
+              sessionController: widget.sessionController,
+              sceneApi: widget.sceneApi,
+              quoteApi: widget.quoteApi,
+              chatApi: widget.chatApi,
+              reviewsApi: widget.reviewsApi,
+              favoritesController: _favorites,
+            ),
+          ),
+        );
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => FavoritesScreen(
+          controller: _favorites!,
+          onOpenListing: openListing,
+        ),
+      ),
+    );
   }
 
   void _openNotifications() {
@@ -173,6 +231,8 @@ class _CustomerShellState extends State<CustomerShell> {
   @override
   void dispose() {
     widget.sessionController.removeListener(_syncNotifications);
+    widget.sessionController.removeListener(_syncFavorites);
+    _favorites?.dispose();
     _notifications?.dispose();
     _catalog.dispose();
     _reservations?.dispose();
@@ -190,6 +250,20 @@ class _CustomerShellState extends State<CustomerShell> {
       titleSpacing: 20,
       toolbarHeight: 64,
       actions: [
+        if (_favorites != null)
+          ListenableBuilder(
+            listenable: widget.sessionController,
+            builder: (context, _) =>
+                widget.sessionController.status ==
+                    CustomerSessionStatus.signedIn
+                ? IconButton(
+                    key: const ValueKey('open-favorites'),
+                    tooltip: 'Mis favoritos',
+                    onPressed: _openFavorites,
+                    icon: const Icon(Icons.favorite_border),
+                  )
+                : const SizedBox.shrink(),
+          ),
         if (_notifications != null)
           ListenableBuilder(
             listenable: widget.sessionController,
@@ -215,6 +289,7 @@ class _CustomerShellState extends State<CustomerShell> {
           quoteApi: widget.quoteApi,
           chatApi: widget.chatApi,
           reviewsApi: widget.reviewsApi,
+          favoritesController: _favorites,
         ),
         CustomerReservationsScreen(
           controller: _reservations,
