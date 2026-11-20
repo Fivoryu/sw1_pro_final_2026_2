@@ -124,7 +124,15 @@ class ListingPhotosController extends ChangeNotifier {
 
   /// Picks a photo from [origin] and uploads it; a cancel does nothing.
   Future<void> add(PhotoOrigin origin) async {
-    if (!canAdd) return;
+    final picked = await pick(origin);
+    if (picked != null) await upload(picked);
+  }
+
+  /// Picks a photo from [origin] without uploading it, so a caller can check
+  /// it first (F14.2). Null on cancel or failure, with [message] set when it
+  /// failed.
+  Future<PickedPhoto?> pick(PhotoOrigin origin) async {
+    if (!canAdd) return null;
     _message = null;
     final PickedPhoto? picked;
     try {
@@ -132,24 +140,31 @@ class ListingPhotosController extends ChangeNotifier {
     } on UnsupportedPhotoFormat {
       _message = 'Elegí una foto JPG, PNG, WebP, HEIC o HEIF.';
       _notify();
-      return;
+      return null;
     } on Exception {
       _message = 'No pudimos abrir la cámara o la galería.';
       _notify();
-      return;
+      return null;
     }
     if (picked == null) {
       _notify();
-      return;
+      return null;
     }
     if (picked.bytes.length > maxBytes) {
       _message = 'La foto pesa más de 20 MiB. Elegí otra.';
       _notify();
-      return;
+      return null;
     }
+    return picked;
+  }
+
+  /// Uploads [picked]; the confirmed photo, or null when the upload failed
+  /// (it then stays in [uploads] to retry or discard).
+  Future<ListingPhoto?> upload(PickedPhoto picked) async {
+    if (!canAdd) return null;
     final upload = PhotoUpload._(picked.bytes, picked.contentType);
     _uploads.add(upload);
-    await _run(upload);
+    return _run(upload);
   }
 
   /// Tries a failed upload again, reusing its link while it is valid.
@@ -209,7 +224,7 @@ class ListingPhotosController extends ChangeNotifier {
     return true;
   }
 
-  Future<void> _run(PhotoUpload upload) async {
+  Future<ListingPhoto?> _run(PhotoUpload upload) async {
     upload
       ..state = PhotoUploadState.uploading
       ..progress = 0
@@ -218,7 +233,7 @@ class ListingPhotosController extends ChangeNotifier {
     final credentials = _credentials();
     if (credentials == null) {
       _fail(upload, _noSessionMessage);
-      return;
+      return null;
     }
 
     var stage = _Stage.request;
@@ -254,6 +269,7 @@ class ListingPhotosController extends ChangeNotifier {
       _photos = [..._photos, photo];
       _notify();
       onListingChanged?.call();
+      return photo;
     } on StaffAuthFailure catch (failure) {
       if (stage == _Stage.confirm &&
           (failure.statusCode == 422 || failure.statusCode == 404)) {
@@ -261,6 +277,7 @@ class ListingPhotosController extends ChangeNotifier {
         upload._grant = null;
       }
       _fail(upload, _messageFor(failure, stage));
+      return null;
     }
   }
 

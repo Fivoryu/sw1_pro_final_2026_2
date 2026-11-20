@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../data/models/staff_listing.dart';
 import '../data/services/ar_capture_channel.dart';
 import '../data/services/capture_draft_store.dart';
+import '../data/services/guided_capture_store.dart';
 import '../data/services/offline_listing_store.dart';
 import '../data/services/photo_source.dart';
 import '../data/services/staff_auth_failure.dart';
@@ -12,6 +13,8 @@ import '../data/services/staff_listing_photos_api.dart';
 import '../data/services/staff_listings_api.dart';
 import '../data/services/staff_scene_api.dart';
 import '../data/services/staff_floorplan_interpretation_api.dart';
+import 'guided_capture/photo_quality.dart';
+import 'guided_capture_controller.dart';
 import 'listing_photos_controller.dart';
 import 'spatial/capture_upload.dart';
 import 'spatial/capture_upload_controller.dart';
@@ -34,6 +37,8 @@ class ListingDraftsController extends ChangeNotifier {
     required PhotoSource photoSource,
     StaffSceneApi? sceneApi,
     CaptureDraftStore? captureStore,
+    GuidedCaptureStore? guidedStore,
+    PhotoAnalyzer photoAnalyzer = analyzePhotoBytes,
     ArCapture? arCapture,
     StaffCaptureApi? captureApi,
     PendingUploadStore? uploadStore,
@@ -45,6 +50,8 @@ class ListingDraftsController extends ChangeNotifier {
        _photoSource = photoSource,
        _sceneApi = sceneApi,
        _captureStore = captureStore,
+       _guidedStore = guidedStore,
+       _photoAnalyzer = photoAnalyzer,
        _arCapture = arCapture,
        _captureApi = captureApi,
        _uploadStore = uploadStore,
@@ -61,6 +68,8 @@ class ListingDraftsController extends ChangeNotifier {
   final PhotoSource _photoSource;
   final StaffSceneApi? _sceneApi;
   final CaptureDraftStore? _captureStore;
+  final GuidedCaptureStore? _guidedStore;
+  final PhotoAnalyzer _photoAnalyzer;
   final ArCapture? _arCapture;
   final StaffCaptureApi? _captureApi;
   final PendingUploadStore? _uploadStore;
@@ -165,6 +174,26 @@ class ListingDraftsController extends ChangeNotifier {
 
   /// Spatial capture (F07) of a saved listing; null when this build has no
   /// capture services wired.
+  /// Whether this build stores guided capture checklists (F14.2). With it,
+  /// a draft is sent to review only when its guided capture is complete.
+  bool get supportsGuidedCapture => _guidedStore != null;
+
+  /// Guided capture of [listingId] over its [photos]; null without storage.
+  GuidedCaptureController? guidedCaptureFor(
+    String listingId,
+    ListingPhotosController photos,
+  ) {
+    final store = _guidedStore;
+    if (store == null) return null;
+    return GuidedCaptureController(
+      listingId: listingId,
+      session: _session,
+      store: store,
+      photos: photos,
+      analyzer: _photoAnalyzer,
+    );
+  }
+
   SpatialCaptureController? spatialCaptureFor(String listingId) {
     final sceneApi = _sceneApi;
     final store = _captureStore;
