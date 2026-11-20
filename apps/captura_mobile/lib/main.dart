@@ -20,6 +20,7 @@ import 'domain/staff_notifications_controller.dart';
 import 'domain/staff_reviews_controller.dart';
 import 'domain/staff_session_controller.dart';
 import 'ui/chat/chat_inbox_screen.dart';
+import 'ui/guide/contextual_guide.dart';
 import 'ui/notifications/staff_notifications_screen.dart';
 import 'ui/reviews/staff_reviews_screen.dart';
 import 'ui/listings/listings_screen.dart';
@@ -236,6 +237,14 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
     appBar: AppBar(
       title: const Text('RoomForge Captura'),
       actions: [
+        ListenableBuilder(
+          listenable: widget.controller,
+          builder: (context, _) => ContextualGuideButton(
+            screen: widget.controller.status == StaffSessionStatus.signedIn
+                ? GuideScreen.welcome
+                : GuideScreen.access,
+          ),
+        ),
         if (_notifications != null && widget.chatApi != null)
           ListenableBuilder(
             listenable: widget.controller,

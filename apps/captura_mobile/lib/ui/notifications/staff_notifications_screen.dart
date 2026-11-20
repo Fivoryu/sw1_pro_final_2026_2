@@ -6,6 +6,7 @@ import '../../domain/staff_chat_controller.dart';
 import '../../domain/staff_notifications_controller.dart';
 import '../../domain/staff_session_controller.dart';
 import '../chat/chat_conversation_screen.dart';
+import '../guide/contextual_guide.dart';
 
 /// Wording of a notice. The API sends ids and a kind only.
 String staffNotificationTitle(StaffNotification notification) {
@@ -129,6 +130,7 @@ class _StaffNotificationsScreenState extends State<StaffNotificationsScreen> {
     appBar: AppBar(
       title: const Text('Notificaciones'),
       actions: [
+        const ContextualGuideButton(screen: GuideScreen.notifications),
         ListenableBuilder(
           listenable: widget.controller,
           builder: (context, _) => TextButton(

@@ -11,6 +11,7 @@ import '../../data/services/staff_floorplan_interpretation_api.dart';
 import '../../domain/spatial/spatial.dart';
 import '../../domain/spatial_capture_controller.dart';
 import 'spatial_format.dart';
+import '../guide/contextual_guide.dart';
 
 enum _TraceMode { navigate, trace }
 
@@ -2994,6 +2995,7 @@ class _FloorplanTraceScreenState extends State<FloorplanTraceScreen> {
             icon: const Icon(Icons.close),
           ),
           actions: [
+            const ContextualGuideButton(screen: GuideScreen.floorplanTrace),
             if (_source != null && _closed)
               IconButton(
                 tooltip: 'Herramientas de edición',

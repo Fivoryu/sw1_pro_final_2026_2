@@ -12,6 +12,7 @@ import 'floor_plan_view.dart';
 import 'floorplan_trace_screen.dart';
 import 'room_editor_screen.dart';
 import 'spatial_format.dart';
+import '../guide/contextual_guide.dart';
 
 /// Minimum 48 dp touch target for primary actions.
 const _actionMinSize = Size.fromHeight(48);
@@ -175,7 +176,12 @@ class _SpatialCaptureScreenState extends State<SpatialCaptureScreen> {
     final theme = Theme.of(context);
     final preview = _controller.preview;
     return Scaffold(
-      appBar: AppBar(title: const Text('Captura espacial')),
+      appBar: AppBar(
+        title: const Text('Captura espacial'),
+        actions: const [
+          ContextualGuideButton(screen: GuideScreen.spatialCapture),
+        ],
+      ),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(

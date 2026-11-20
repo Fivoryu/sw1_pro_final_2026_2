@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/models/staff_review.dart';
 import '../../domain/staff_reviews_controller.dart';
+import '../guide/contextual_guide.dart';
 
 /// Wording of the agency's rating summary. With fewer than three reviews
 /// there is no average; the counts always appear next to it.
@@ -124,7 +125,10 @@ class _StaffReviewsScreenState extends State<StaffReviewsScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Reseñas')),
+    appBar: AppBar(
+      title: const Text('Reseñas'),
+      actions: const [ContextualGuideButton(screen: GuideScreen.reviews)],
+    ),
     body: Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 720),

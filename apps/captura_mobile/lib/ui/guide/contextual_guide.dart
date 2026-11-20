@@ -1,33 +1,18 @@
 import 'package:flutter/material.dart';
 
-/// Screens that offer a contextual guide.
-enum GuideScreen { listingsList, listingEditor }
+import 'guide_content.dart';
 
-/// Title of the guide shown for [screen].
-String guideTitle(GuideScreen screen) => switch (screen) {
-  GuideScreen.listingsList => 'Cómo preparar un borrador',
-  GuideScreen.listingEditor => 'Cómo completar el borrador',
-};
+export 'guide_content.dart';
 
-/// Deterministic, rule-based steps for [screen]. The guide only indicates
+/// Steps of the primary walkthrough of [screen]. The guide only indicates
 /// what to do; it never performs the action for the person.
-List<String> guideSteps(GuideScreen screen) => switch (screen) {
-  GuideScreen.listingsList => const [
-    'Tocá «Nuevo inmueble» para empezar un borrador.',
-    'Completá los datos y guardalos como borrador.',
-    'Volvé a esta lista: tus borradores aparecen en la pestaña «Borradores».',
-    'Cuando esté completo, abrilo y enviá el inmueble a revisión.',
-  ],
-  GuideScreen.listingEditor => const [
-    'Elegí la moneda y cargá el precio base.',
-    'Marcá la ubicación en el mapa y, si querés, agregá una descripción.',
-    'Sumá las fotos del inmueble desde la cámara o la galería.',
-    'Tocá «Guardar borrador» para conservar tus cambios.',
-    'Cuando esté listo, tocá «Enviar a revisión».',
-  ],
-};
+List<String> guideSteps(GuideScreen screen) =>
+    guideWalkthroughs(screen).first.steps;
 
-/// Help button that opens a bottom sheet with step-by-step guidance.
+/// Help button that opens a bottom sheet with the guide of [screen].
+///
+/// It only reads static text: it holds no controller and touches no screen
+/// state, so it is safe in capture screens.
 class ContextualGuideButton extends StatelessWidget {
   const ContextualGuideButton({super.key, required this.screen});
 
@@ -36,11 +21,12 @@ class ContextualGuideButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => IconButton(
     key: const ValueKey('guide-button'),
-    tooltip: 'Asistente inteligente',
+    tooltip: 'Asistente inteligente: ayuda de esta pantalla',
     icon: const Icon(Icons.help_outline),
     onPressed: () => showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       builder: (_) => _GuideSheet(screen: screen),
     ),
   );
@@ -51,46 +37,114 @@ class _GuideSheet extends StatelessWidget {
 
   final GuideScreen screen;
 
+  Widget _heading(ThemeData theme, String text) => Padding(
+    padding: const EdgeInsets.only(top: 20, bottom: 8),
+    child: Semantics(
+      header: true,
+      child: Text(text, style: theme.textTheme.titleMedium),
+    ),
+  );
+
+  Widget _step(ThemeData theme, Key key, int number, String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        CircleAvatar(radius: 12, child: Text('$number')),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(text, key: key, style: theme.textTheme.bodyMedium),
+        ),
+      ],
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final steps = guideSteps(screen);
+    final walkthroughs = guideWalkthroughs(screen);
     return SafeArea(
-      child: SingleChildScrollView(
-        key: const ValueKey('guide-sheet'),
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(guideTitle(screen), style: theme.textTheme.titleLarge),
-            const SizedBox(height: 12),
-            for (var i = 0; i < steps.length; i++)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    CircleAvatar(radius: 12, child: Text('${i + 1}')),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        steps[i],
-                        key: ValueKey('guide-step-$i'),
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                    ),
-                  ],
+      child: Semantics(
+        label: 'Guía de ayuda: ${guideTitle(screen)}',
+        child: SingleChildScrollView(
+          key: const ValueKey('guide-sheet'),
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Semantics(
+                header: true,
+                child: Text(
+                  guideTitle(screen),
+                  style: theme.textTheme.titleLarge,
                 ),
               ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Entendido'),
+              _heading(theme, 'Para qué sirve'),
+              Text(guidePurpose(screen), style: theme.textTheme.bodyMedium),
+              _heading(theme, 'Paso a paso'),
+              for (var w = 0; w < walkthroughs.length; w++) ...[
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, bottom: 8),
+                  child: Text(
+                    walkthroughs[w].title,
+                    style: theme.textTheme.titleSmall,
+                  ),
+                ),
+                for (var i = 0; i < walkthroughs[w].steps.length; i++)
+                  _step(
+                    theme,
+                    ValueKey(w == 0 ? 'guide-step-$i' : 'guide-step-$w-$i'),
+                    i + 1,
+                    walkthroughs[w].steps[i],
+                  ),
+              ],
+              _heading(theme, 'Errores comunes'),
+              for (final mistake in guideMistakes(screen))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        mistake.problem,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        'Qué hacer: ${mistake.solution}',
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ],
+                  ),
+                ),
+              _heading(theme, 'Glosario'),
+              for (final term in guideGlossary(screen))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: '${term.term}: ',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        TextSpan(text: term.definition),
+                      ],
+                    ),
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Entendido'),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

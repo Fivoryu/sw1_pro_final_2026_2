@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../data/models/staff_chat.dart';
 import '../../domain/staff_chat_controller.dart';
 import 'chat_format.dart';
+import '../guide/contextual_guide.dart';
 
 /// Message refresh period while a conversation is open.
 const Duration kConversationPollInterval = Duration(seconds: 3);
@@ -164,6 +165,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
         appBar: AppBar(
           title: Text(conversation.customerEmail),
           actions: [
+            const ContextualGuideButton(screen: GuideScreen.chatConversation),
             if (_controller.isAdmin)
               IconButton(
                 key: const ValueKey('reassign-action'),
