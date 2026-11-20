@@ -4,11 +4,18 @@ import 'package:flutter/services.dart';
 
 import 'guide_assistant.dart';
 import 'guide_content.dart';
+import 'reservation_conversation.dart';
 
-/// Help button that opens a chat-style assistant for [screen]. It only
-/// explains and has no effect on the screen.
+/// Opens the contextual guide without performing a screen action.
 class GuideHelpButton extends StatelessWidget {
-  const GuideHelpButton({super.key, required this.screen, this.label});
+  const GuideHelpButton({
+    super.key,
+    required this.screen,
+    this.label,
+    this.reservationStep,
+  });
+
+  final ValueGetter<DetailReservationStep>? reservationStep;
 
   final GuideScreen screen;
 
@@ -19,7 +26,7 @@ class GuideHelpButton extends StatelessWidget {
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (_) => GuideSheet(screen: screen),
+    builder: (_) => GuideSheet(screen: screen, reservationStep: reservationStep),
   );
 
   @override
@@ -50,10 +57,15 @@ class _Message {
   final String text;
 }
 
-/// Chat-style assistant sheet. Answers come from [GuideAssistant]; nothing the
-/// person writes or taps here triggers an action of the screen.
+/// Chat sheet for explaining the next step from the current screen.
 class GuideSheet extends StatefulWidget {
-  const GuideSheet({super.key, required this.screen});
+  const GuideSheet({
+    super.key,
+    required this.screen,
+    this.reservationStep,
+  });
+
+  final ValueGetter<DetailReservationStep>? reservationStep;
 
   final GuideScreen screen;
 
@@ -64,10 +76,11 @@ class GuideSheet extends StatefulWidget {
 class _GuideSheetState extends State<GuideSheet> {
   static const _assistant = GuideAssistant();
 
+  final _conversation = ReservationConversation();
   final _input = TextEditingController();
   final _scroll = ScrollController();
   final _messages = <_Message>[];
-  late List<String> _suggestions;
+  late GuideReply _reply;
   bool _full = false;
 
   @override
@@ -75,7 +88,7 @@ class _GuideSheetState extends State<GuideSheet> {
     super.initState();
     final hello = _assistant.greeting(widget.screen);
     _messages.add(_Message(fromUser: false, text: hello.text));
-    _suggestions = hello.suggestions;
+    _reply = hello;
   }
 
   @override
@@ -88,12 +101,16 @@ class _GuideSheetState extends State<GuideSheet> {
   void _ask(String raw) {
     final question = raw.trim();
     if (question.isEmpty) return;
-    final reply = _assistant.answer(question, widget.screen);
+    final reply = _conversation.answer(
+      question,
+      widget.screen,
+      step: widget.reservationStep?.call() ?? DetailReservationStep.quote,
+    );
     setState(() {
       _messages
         ..add(_Message(fromUser: true, text: question))
         ..add(_Message(fromUser: false, text: reply.text));
-      _suggestions = reply.suggestions;
+      _reply = reply;
     });
     _input.clear();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -152,7 +169,7 @@ class _GuideSheetState extends State<GuideSheet> {
             child: Wrap(
               spacing: 8,
               children: [
-                for (final s in _suggestions)
+                for (final s in _reply.suggestions)
                   ActionChip(label: Text(s), onPressed: () => _ask(s)),
               ],
             ),
@@ -194,8 +211,9 @@ class _GuideSheetState extends State<GuideSheet> {
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
     final inset = media.viewInsets.bottom;
-    final available = media.size.height * 0.85 - inset;
-    final height = available < 240 ? 240.0 : available;
+    final height = inset > 0
+        ? media.size.height - inset
+        : media.size.height * 0.85;
     return Padding(
       padding: EdgeInsets.only(bottom: inset),
       child: SafeArea(
@@ -220,6 +238,11 @@ class _GuideSheetState extends State<GuideSheet> {
                     ),
                     TextButton(
                       key: const ValueKey('guide-full-toggle'),
+                      // The app theme defaults to full-width buttons. A Row
+                      // gives non-flex children unbounded horizontal space.
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(48, 48),
+                      ),
                       onPressed: () => setState(() => _full = !_full),
                       child: Text(
                         _full ? 'Volver al chat' : 'Ver guía completa',

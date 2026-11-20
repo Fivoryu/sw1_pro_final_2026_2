@@ -33,6 +33,10 @@ class GuideTerm {
 /// Deterministic, rule-based guidance for one screen. It only describes what
 /// the person can do; it never performs any action.
 class GuideContent {
+  static const startReservation =
+      'Reservar un inmueble: sumar opcionales y elegir cómo reservar';
+  static const trackReservation = 'Seguir una reserva';
+
   const GuideContent({
     required this.title,
     required this.goal,
@@ -248,7 +252,7 @@ class GuideContent {
           ],
         ),
         GuideWalkthrough(
-          name: 'Reservar un inmueble: sumar opcionales y elegir cómo reservar',
+          name: startReservation,
           steps: [
             'En «Opcionales», marcá los extras que quieras sumar.',
             'En «Moneda de la cotización», elegí BOB, USD o USDT en el desplegable.',
@@ -375,7 +379,7 @@ class GuideContent {
           'Muestra tus reservas y en qué estado está cada una, y te deja cancelarlas o pedir la devolución del depósito cuando corresponda.',
       walkthroughs: [
         GuideWalkthrough(
-          name: 'Seguir una reserva',
+          name: trackReservation,
           steps: [
             'Entrá a tu cuenta: sin sesión no se ven las reservas.',
             'Abrí la pestaña Reservas.',
