@@ -146,6 +146,12 @@ List<GuideWalkthrough> guideWalkthroughs(GuideScreen screen) =>
           'Tocá «Conversaciones» o «Reseñas» si querés atender clientes.',
           'Al terminar, tocá «Cerrar sesión» para proteger tu cuenta.',
         ]),
+        GuideWalkthrough('Cerrar sesión', [
+          'Entrá con tu cuenta: en esta pantalla verás «Sesión iniciada».',
+          'Bajá hasta el final de la pantalla.',
+          'Tocá «Cerrar sesión» para salir de tu cuenta.',
+          'Volverás a ver los campos de correo y contraseña.',
+        ]),
       ],
       GuideScreen.listingsList => const [
         GuideWalkthrough('Crear un inmueble nuevo', [

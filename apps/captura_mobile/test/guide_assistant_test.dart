@@ -7,7 +7,8 @@ GuideAnswer ask(GuideScreen screen, String question) =>
 
 void expectWalkthrough(GuideAnswer a, GuideScreen screen, String title) {
   final w = guideWalkthroughs(screen).firstWhere((w) => w.title == title);
-  expect(a.text, contains(w.title));
+  // The reply is exactly this walkthrough, never a sibling with similar words.
+  expect(a.text, contains('Para «${w.title}»:\n1. '));
   for (var i = 0; i < w.steps.length; i++) {
     expect(a.text, contains('${i + 1}. ${w.steps[i]}'));
   }
@@ -225,7 +226,48 @@ void main() {
 
     test('password does not collide with contour or control', () {
       final a = ask(GuideScreen.floorplanTrace, 'cómo controlo la contraseña');
-      expect(a.text, isNot(contains('contorno')));
+      expect(a.text, isNot(contains('Para «Corregir el contorno')));
+      expect(a.text, isNot(contains('Problema frecuente: El contorno')));
+    });
+  });
+
+  group('GuideAssistant logout and coverage (R2)', () {
+    test('logout questions reach Cerrar sesión, not the login steps', () {
+      for (final q in [
+        'cómo cierro sesión',
+        'cierro mi sesión',
+        'quiero salir de mi cuenta',
+        'cerrar sesión',
+      ]) {
+        final a = ask(GuideScreen.access, q);
+        expectWalkthrough(a, GuideScreen.access, 'Cerrar sesión');
+        expect(a.text, isNot(contains('Para «Iniciar sesión»')), reason: q);
+      }
+      final other = ask(GuideScreen.listingsList, 'cómo cierro sesión');
+      expect(other.text, contains('Para «Cerrar sesión»:\n1. '));
+    });
+
+    test('login questions still reach Iniciar sesión', () {
+      for (final q in ['no puedo entrar', 'iniciar sesión', 'sesión']) {
+        expectWalkthrough(
+          ask(GuideScreen.access, q),
+          GuideScreen.access,
+          'Iniciar sesión',
+        );
+      }
+    });
+
+    test('two meaningful words must both match', () {
+      final a = ask(GuideScreen.reviews, 'borrar reseña');
+      expect(a.text, contains('no estoy seguro'));
+      expect(
+        ask(GuideScreen.listingsList, 'cómo publico').text,
+        contains('Para «Enviar un inmueble a revisión»:\n1. '),
+      );
+      expect(
+        ask(GuideScreen.spatialCapture, 'qué es un ambiente').text,
+        contains('Una habitación o espacio'),
+      );
     });
   });
 

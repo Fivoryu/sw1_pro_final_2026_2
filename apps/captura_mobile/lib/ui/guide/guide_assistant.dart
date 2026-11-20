@@ -146,6 +146,7 @@ class GuideAssistant {
   static const _purposeWords = {'sirve', 'pantalla', 'aqui', 'aca', 'ahi'};
   static const _moreWords = {'opciones', 'otra', 'otras', 'cosas', 'ademas'};
   static final _intentWords = {
+    'significa',
     ..._lostWords,
     ..._purposeWords,
     ..._errorWords,
@@ -269,7 +270,22 @@ class GuideAssistant {
             ),
           )
           .length;
-      if (query.length >= 2 && matchedWords * 2 < query.length) continue;
+      if (query.length == 2 && !termsOnly) {
+        // Both words must match; a generic domain word may be skipped only
+        // when the other one matches.
+        final unmatched = [
+          for (final w in query)
+            if (!w.any(
+              (s) =>
+                  e.titleStems.contains(s) ||
+                  (!termsOnly && e.bodyStems.contains(s)),
+            ))
+              w,
+        ];
+        if (unmatched.any((w) => !w.every(_genericStems.contains))) continue;
+      } else if (query.length >= 2 && matchedWords * 2 < query.length) {
+        continue;
+      }
       if (e.titleStems.isNotEmpty) {
         score *= 1 + 0.5 * titleHits / e.titleStems.length;
       }
@@ -369,6 +385,14 @@ const _synonymGroups = <(List<String>, List<String>)>[
     ['ambi'],
   ),
   (['mido', 'mides', 'mide', 'midiendo', 'midan'], ['medi']),
+  (
+    [
+      'cerrar', 'cierro', 'cierra', 'cierras', 'cierre', 'cerrando', 'cerrarla',
+      'cerrado', //
+    ],
+    ['cerr'],
+  ),
+  (['incorrecta', 'incorrecto', 'incorrectas', 'incorrectos'], ['corr']),
   (['imagen', 'imagenes'], ['foto']),
   (['totp', 'verificacion', 'autenticador', 'autenticacion'], ['codi']),
   (['clave', 'claves', 'password', 'pass', 'pwd'], ['contra']),
@@ -386,6 +410,9 @@ List<String> _canon(String word) => _synonyms[word] ?? [_stem(word)];
 Set<String> _stems(String text) => {
   for (final t in _tokens(guideNormalize(text))) ..._canon(t),
 };
+
+/// Generic domain stems that may be left unmatched in a two-word question.
+const _genericStems = <String>{'inmu', 'pant'};
 
 /// 0 when equal, 1 when [a] and [b] differ by one edit, else 2.
 int _editDistanceUpTo1(String a, String b) {
