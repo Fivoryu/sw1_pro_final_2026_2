@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { StaffLoginShell } from "../auth/StaffLoginShell";
@@ -94,3 +94,21 @@ describe("ContextualGuide chat", () => {
     expect(screen.getByRole("button", { name: "Guía" })).toHaveFocus();
   });
 });
+
+describe("ContextualGuide chat input (J10)", () => {
+  it("limits the question length and ignores Enter while composing", async () => {
+    const user = userEvent.setup();
+    render(<ContextualGuide screenId="exchange-rates" />);
+    await user.click(screen.getByRole("button", { name: "Guía" }));
+    const panel = screen.getByRole("complementary", { name: "Guía" });
+    const input = within(panel).getByRole("textbox", { name: "Escribe tu pregunta" });
+    expect(input).toHaveAttribute("maxlength", "200");
+    await user.type(input, "tipo de cambio");
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    expect(input).toHaveValue("tipo de cambio");
+    expect(within(panel).getByRole("log")).not.toHaveTextContent("tipo de cambio");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input).toHaveValue("");
+  });
+});
+

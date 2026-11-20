@@ -58,3 +58,46 @@ describe("guide content completeness", () => {
     }
   });
 });
+
+describe("guide content accuracy against the panel (J2, J3, J9)", () => {
+  it("platform admin guides do not mention the notification bell", () => {
+    expect(allText("welcome-platform-admin")).not.toMatch(/campana/i);
+  });
+
+  it("the notifications guide is for agency staff and agency guides keep the bell", () => {
+    expect(GUIDE_TOPICS.notifications.audience).toBe("Personal de inmobiliaria (administradores y agentes).");
+    expect(allText("welcome-agent")).toMatch(/campana/i);
+  });
+
+  it("platform admin chat reports guide has no blocked-clients list or unblock", () => {
+    const text = allText("chat-reports");
+    expect(text).not.toMatch(/Clientes bloqueados/);
+    expect(text).not.toMatch(/Desbloquear/i);
+  });
+
+  it("the agency admin chat inbox guide explains blocked clients and unblocking", () => {
+    const t = GUIDE_TOPICS["chat-inbox"];
+    expect(t.walkthroughs.some((w) => w.title.includes("Desbloquear"))).toBe(true);
+    expect(allText("chat-inbox")).toMatch(/Clientes bloqueados/);
+  });
+
+  it("the blocked-by-mistake problem points to the agency admin, not the platform admin", () => {
+    const m = GUIDE_TOPICS["chat-conversation"].mistakes.find((x) => x.problem.includes("Bloqueé"));
+    expect(m?.fix).toMatch(/bandeja de chat/);
+    expect(m?.fix).not.toMatch(/administrador de plataforma/);
+  });
+
+  it("welcome guides describe the left side menu, not a top menu", () => {
+    for (const id of ["welcome-agency-admin", "welcome-agent"] as const) {
+      expect(allText(id), id).not.toMatch(/menú de arriba/);
+      expect(allText(id), id).toMatch(/menú lateral/);
+    }
+  });
+
+  it("each welcome guide has a Cerrar sesión walkthrough", () => {
+    for (const id of ["welcome-platform-admin", "welcome-agency-admin", "welcome-agent"] as const) {
+      expect(GUIDE_TOPICS[id].walkthroughs.some((w) => w.title === "Cerrar sesión"), id).toBe(true);
+    }
+  });
+});
+

@@ -279,7 +279,7 @@ export const GUIDE_TOPICS = {
       "Registrar los tipos de cambio para convertir monedas.",
       "Invitar al administrador de una inmobiliaria.",
       "Revisar los reportes de conversaciones y de reseñas.",
-      "Ver tus notificaciones con la campana de arriba.",
+      "Cerrar tu sesión con el botón Cerrar sesión, arriba a la derecha.",
     ],
     walkthroughs: [
       {
@@ -289,6 +289,14 @@ export const GUIDE_TOPICS = {
           { title: "Invita a una inmobiliaria", detail: "En Invitar administrador de inmobiliaria elige la inmobiliaria, escribe el correo de su administrador y pulsa Enviar invitación." },
           { title: "Atiende los reportes", detail: "Baja hasta Reportes de conversaciones y Reportes de reseñas y decide qué hacer con cada uno." },
           { title: "Pide ayuda cuando la necesites", detail: "Cada bloque tiene su propio botón Guía con los pasos concretos." },
+        ],
+      },
+      {
+        title: "Cerrar sesión",
+        steps: [
+          { title: "Busca el botón", detail: "Cerrar sesión está en la franja superior, arriba a la derecha." },
+          { title: "Púlsalo", detail: "El botón cambia a «Cerrando sesión…» unos segundos." },
+          { title: "Comprueba", detail: "Vuelves a la pantalla de acceso. Para entrar de nuevo necesitas tu correo, contraseña y código." },
         ],
       },
     ],
@@ -308,7 +316,8 @@ export const GUIDE_TOPICS = {
       "Mirar los números de tu inmobiliaria en el resumen.",
       "Revisar, aprobar, rechazar y publicar inmuebles.",
       "Configurar los pagos con tarjeta y decidir sobre reservas.",
-      "Usar el menú de arriba para ir al Editor de escenas, al Chat o a las Reseñas.",
+      "Usar el menú lateral (a la izquierda; en pantallas angostas aparece arriba) para ir al Editor de escenas, al Chat o a las Reseñas.",
+      "Ver tus notificaciones con la campana de la franja superior.",
     ],
     walkthroughs: [
       {
@@ -319,6 +328,14 @@ export const GUIDE_TOPICS = {
           { title: "Publica los aprobados", detail: "Un inmueble aprobado todavía no se ve para los clientes: abre su detalle y pulsa Publicar." },
           { title: "Configura los pagos", detail: "En Tarjetas y reservas completa la configuración de pagos una sola vez para poder recibir depósitos." },
           { title: "Atiende a los clientes", detail: "Usa el Chat para responder conversaciones y las Reseñas para contestar opiniones." },
+        ],
+      },
+      {
+        title: "Cerrar sesión",
+        steps: [
+          { title: "Busca el botón", detail: "Cerrar sesión está en la franja superior, arriba a la derecha." },
+          { title: "Púlsalo", detail: "El botón cambia a «Cerrando sesión…» unos segundos." },
+          { title: "Comprueba", detail: "Vuelves a la pantalla de acceso. Para entrar de nuevo necesitas tu correo, contraseña y código." },
         ],
       },
     ],
@@ -338,15 +355,23 @@ export const GUIDE_TOPICS = {
       "Abrir el Editor de escenas para ajustar el plano y el mobiliario de un inmueble.",
       "Atender conversaciones de clientes en el Chat.",
       "Ver y reportar reseñas en Reseñas.",
-      "Ver tus notificaciones con la campana de arriba.",
+      "Ver tus notificaciones con la campana de la franja superior.",
     ],
     walkthroughs: [
       {
         title: "Tu primer día",
         steps: [
           { title: "Captura el inmueble en el teléfono", detail: "Abre la aplicación RoomForge Captura, crea el borrador del inmueble, toma las fotos y envíalo a revisión." },
-          { title: "Ajusta la escena aquí", detail: "En el menú de arriba abre el Editor de escenas, elige el inmueble y corrige lo que haga falta." },
+          { title: "Ajusta la escena aquí", detail: "En el menú lateral (a la izquierda; en pantallas angostas aparece arriba) abre el Editor de escenas, elige el inmueble y corrige lo que haga falta." },
           { title: "Responde a los clientes", detail: "Abre el Chat y contesta las conversaciones asignadas a ti." },
+        ],
+      },
+      {
+        title: "Cerrar sesión",
+        steps: [
+          { title: "Busca el botón", detail: "Cerrar sesión está en la franja superior, arriba a la derecha." },
+          { title: "Púlsalo", detail: "El botón cambia a «Cerrando sesión…» unos segundos." },
+          { title: "Comprueba", detail: "Vuelves a la pantalla de acceso. Para entrar de nuevo necesitas tu correo, contraseña y código." },
         ],
       },
     ],
@@ -711,13 +736,21 @@ export const GUIDE_TOPICS = {
           { title: "Elige otra", detail: "Pulsa otra conversación para continuar." },
         ],
       },
+      {
+        title: "Desbloquear a un cliente (administradores de inmobiliaria)",
+        steps: [
+          { title: "Baja a Clientes bloqueados", detail: "Está al final de la bandeja de chat, debajo de Reportes de conversaciones; solo lo ves si eres administrador de inmobiliaria." },
+          { title: "Pulsa Desbloquear", detail: "Junto al cliente que quieres liberar." },
+          { title: "Comprueba", detail: "Desaparece de la lista y podrá escribir otra vez." },
+        ],
+      },
     ],
     mistakes: [
       { problem: "Aparece «Otro agente ya tomó esta conversación».", fix: "Otra persona la atendió primero y la bandeja se actualizó. Elige otra." },
       { problem: "No puedo escribir en una conversación.", fix: "Está en Solo lectura porque pertenece a otro agente." },
       { problem: "No hay conversaciones.", fix: "Aún no hay clientes escribiendo. Vuelve a revisar más tarde." },
     ],
-    glossary: ["conversacion", "bandeja", "agente", "administrador_agencia"],
+    glossary: ["conversacion", "bandeja", "agente", "administrador_agencia", "bloqueo"],
   },
 
   "chat-conversation": {
@@ -759,7 +792,7 @@ export const GUIDE_TOPICS = {
     ],
     mistakes: [
       { problem: "El botón Enviar está desactivado.", fix: "El mensaje está vacío o la conversación es de solo lectura." },
-      { problem: "Bloqueé a un cliente por error.", fix: "Pídele al administrador de plataforma que lo desbloquee en Clientes bloqueados." },
+      { problem: "Bloqueé a un cliente por error.", fix: "Si eres administrador de inmobiliaria, ve a la bandeja de chat, baja a Clientes bloqueados y pulsa Desbloquear junto al cliente. Si eres agente, pídeselo al administrador de tu inmobiliaria." },
       { problem: "No veo la opción de bloquear ni de reasignar.", fix: "Esas acciones son solo para administradores de inmobiliaria." },
     ],
     glossary: ["conversacion", "reporte", "bloqueo", "agente", "administrador_agencia"],
@@ -769,11 +802,10 @@ export const GUIDE_TOPICS = {
     heading: "Cómo atender reportes de conversaciones",
     audience: "Administradores de plataforma.",
     purpose:
-      "Aquí llegan los reportes que el personal de las inmobiliarias hizo sobre clientes. También puedes ver qué clientes están bloqueados y desbloquearlos.",
+      "Aquí llegan los reportes que el personal de las inmobiliarias hizo sobre clientes. Esta lista es para leerlos y decidir qué hacer; no tiene botones para actuar sobre los clientes.",
     canDo: [
-      "Leer cada reporte: quién lo hizo y por qué.",
-      "Ver los clientes bloqueados.",
-      "Desbloquear a un cliente.",
+      "Leer cada reporte: quién lo hizo, en qué inmueble y por qué.",
+      "Ver los agentes involucrados.",
     ],
     walkthroughs: [
       {
@@ -781,28 +813,20 @@ export const GUIDE_TOPICS = {
         steps: [
           { title: "Lee el motivo", detail: "Cada reporte muestra la razón escrita por quien lo envió." },
           { title: "Valora la situación", detail: "Decide si el cliente actuó mal o fue un error." },
-          { title: "Actúa", detail: "Si fue un error, desbloquea al cliente en la lista de bloqueados." },
-        ],
-      },
-      {
-        title: "Desbloquear a un cliente",
-        steps: [
-          { title: "Baja a Clientes bloqueados", detail: "Busca al cliente en la lista." },
-          { title: "Pulsa Desbloquear", detail: "Junto a su nombre." },
-          { title: "Comprueba", detail: "Desaparece de la lista y podrá escribir otra vez." },
+          { title: "Anota tu decisión", detail: "Aquí solo se leen los reportes; la inmobiliaria es quien decide sobre el cliente desde su propia bandeja de chat." },
         ],
       },
     ],
     mistakes: [
-      { problem: "Desbloqueé al cliente equivocado.", fix: "El administrador de la inmobiliaria puede volver a bloquearlo desde la conversación." },
+      { problem: "Busco cómo actuar sobre un cliente reportado.", fix: "Las acciones sobre clientes las hace el administrador de la inmobiliaria desde su bandeja de chat; esta lista solo muestra reportes." },
       { problem: "La lista aparece vacía.", fix: "«No hay reportes» significa que no hay nada pendiente." },
     ],
-    glossary: ["reporte", "bloqueo", "conversacion", "administrador_plataforma"],
+    glossary: ["reporte", "conversacion", "administrador_plataforma"],
   },
 
   notifications: {
     heading: "Cómo usar las notificaciones",
-    audience: "Todo el personal.",
+    audience: "Personal de inmobiliaria (administradores y agentes).",
     purpose:
       "La campana de arriba muestra avisos cortos de lo que necesita tu atención: mensajes nuevos, conversaciones asignadas y cambios en reservas.",
     canDo: [

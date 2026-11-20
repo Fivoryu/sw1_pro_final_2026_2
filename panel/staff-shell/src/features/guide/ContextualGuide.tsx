@@ -131,9 +131,10 @@ export function ContextualGuide({ screenId }: { screenId: GuideScreenId }) {
                 <input
                   aria-label="Escribe tu pregunta"
                   className="contextual-guide__input"
+                  maxLength={200}
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter") {
+                    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
                       event.preventDefault();
                       event.stopPropagation();
                       ask(draft);

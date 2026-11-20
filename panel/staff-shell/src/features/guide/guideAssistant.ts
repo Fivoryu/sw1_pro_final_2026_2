@@ -19,21 +19,50 @@ const STOPWORDS = new Set(
     "a al algo ante como con cual cuales cuando de del el ella ellos en entre es esa ese eso esta este esto " +
     "la las le les lo los me mi mis mas muy no o para pero por porque que se si sin sobre su sus te ti tu tus " +
     "un una uno unos unas y ya yo hay son ser soy estoy puedo puede quiero quisiera necesito hacer hago donde " +
-    "significa significan quiere decir ver tengo debo pantalla"
+    "significa significan quiere decir tengo debo pantalla sale salen salio aparece pasa sucede"
   ).split(" "),
 );
 
 /** Groups of words that mean the same thing for the person asking. */
 const SYNONYMS: string[][] = [
-  ["entrar", "entro", "ingresar", "acceder", "acceso", "login", "iniciar", "sesion"],
-  ["clave", "contrasena", "password"],
+  ["entrar", "entro", "entra", "ingresar", "ingreso", "acceder", "acceso", "login", "loguear", "loguearme", "logueo", "logeo", "iniciar", "conectar"],
+  ["cerrar", "cierro", "cierra", "salir", "salgo", "desconectar", "logout"],
+  ["clave", "contrasena", "contrasenas", "contrasenia", "password", "pass"],
   ["crear", "agregar", "anadir", "nuevo", "nueva"],
-  ["borrar", "eliminar", "quitar"],
+  ["publicar", "publico", "subir", "subo", "subirlo", "poner", "ponerlo", "linea"],
+  ["borrar", "borro", "eliminar", "elimino", "quitar", "quito", "suprimir", "remover"],
+  ["ver", "mostrar", "muestra", "muestran", "visualizar", "mirar", "consultar"],
   ["activar", "actibo", "activo", "habilitar"],
   ["error", "fallo", "falla", "problema"],
   ["precio", "costo", "valor"],
-  ["pagar", "pago", "cobrar", "cobro"],
+  ["pagar", "pago", "pagos", "cobrar", "cobro", "abonar"],
 ];
+
+/** Domain words so common that matching only them must not count as understanding. */
+const GENERIC = new Set(["inmueble", "inmuebles", "cliente", "clientes", "sistema", "panel", "ver"].map((w) => w.slice(0, 5)));
+
+/** Words that only carry an intent (greeting, thanks, lost, purpose, errors, more). */
+const GREETING_WORDS = new Set(["hola", "buenas", "buenos", "dias", "tardes", "noches", "hey", "saludos"]);
+const THANKS_WORDS = new Set(["gracias", "genial", "perfecto", "muchas", "mil", "excelente"]);
+const LOST_WORDS = new Set(["perdi", "perdido", "perdida", "ayuda", "ayudame", "auxilio", "entiendo", "nada", "favor", "porfa"]);
+const PURPOSE_WORDS = new Set(["sirve", "pagina", "aqui", "vista", "ventana", "estoy"]);
+const MISTAKE_WORDS = new Set(["errores", "problemas", "comunes", "frecuentes"]);
+const MORE_WORDS = new Set(["otras", "cosas", "pantallas", "sistema", "aplicacion", "app", "panel"]);
+
+function editDistanceAtMostOne(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i += 1;
+  if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1);
+  const [longer, shorter] = a.length > b.length ? [a, b] : [b, a];
+  return longer.slice(i + 1) === shorter.slice(i);
+}
+
+/** Fuzzy only between 5-letter stems, so it never applies to words shorter than 5 letters. */
+function fuzzyStemMatch(query: string, candidate: string): boolean {
+  return query.length === 5 && candidate.length === 5 && editDistanceAtMostOne(query, candidate);
+}
 
 function plainText(text: string): string {
   return text
@@ -51,7 +80,11 @@ export function normalizeText(text: string): string[] {
     .filter((token) => token.length > 0 && !STOPWORDS.has(token));
 }
 
+/** Words whose 5-letter prefix would collide with an unrelated verb ("borrador" vs "borrar"). */
+const STEM_OVERRIDES: Record<string, string> = { borrador: "borrad", borradores: "borrad" };
+
 function stem(token: string): string {
+  if (STEM_OVERRIDES[token]) return STEM_OVERRIDES[token];
   return token.length > 5 ? token.slice(0, 5) : token;
 }
 
@@ -225,70 +258,126 @@ function answerWithEntry(entry: Entry, screenId: GuideScreenId, asked: string): 
   return { text, chips: pickChips(chips, asked) };
 }
 
-function scoreEntry(entry: Entry, groups: string[][], normalized: string, glossaryBoost: boolean): number {
-  if (groups.length === 0) return 0;
+interface QueryGroup {
+  stems: string[];
+  /** The asked word is so common in the domain that matching only it proves little. */
+  generic: boolean;
+}
+
+function toGroup(token: string): QueryGroup {
+  return { stems: expand(token), generic: GENERIC.has(stem(token)) };
+}
+
+function scoreEntry(
+  entry: Entry,
+  groups: QueryGroup[],
+  normalized: string,
+  glossaryBoost: boolean,
+): { score: number; coverage: number } {
+  if (groups.length === 0) return { score: 0, coverage: 0 };
   let score = 0;
   let matched = 0;
+  let coveredWeight = 0;
   for (const group of groups) {
     let best = 0;
     for (const item of entry.fields) {
-      if (group.some((s) => item.stems.has(s))) best = Math.max(best, item.weight);
+      if (group.stems.some((s) => item.stems.has(s))) {
+        best = Math.max(best, item.weight);
+      } else if (group.stems.some((s) => [...item.stems].some((c) => fuzzyStemMatch(s, c)))) {
+        best = Math.max(best, item.weight * 0.9);
+      }
     }
-    if (best > 0) matched += 1;
+    if (best > 0) {
+      matched += 1;
+      coveredWeight += group.generic ? 0.5 : 1;
+    }
     score += best;
   }
   score *= 0.5 + 0.5 * (matched / groups.length);
   if (entry.label === normalized) score += 10;
   if (entry.kind === "glossary") score *= glossaryBoost ? 2 : 0.5;
   if (entry.kind === "purpose") score *= 0.6;
-  return score;
+  return { score, coverage: coveredWeight / groups.length };
 }
 
 const MIN_SCORE = 2;
+/** With two or more meaningful words, the answer must cover at least this share of them. */
+const MIN_COVERAGE = 0.5;
+
+/** True when every meaningful word of the question belongs to the intent. */
+function only(tokens: string[], intentWords: Set<string>): boolean {
+  return tokens.every((token) => intentWords.has(token));
+}
 
 export function answerQuestion(question: string, screenId: GuideScreenId): AssistantAnswer {
   const topic = GUIDE_TOPICS[screenId];
-  const raw = plainText(question);
-  const tokens = normalizeText(question);
+  const raw = plainText(question).replace(/\binici\w* (la |mi )?sesion\b/g, "entrar");
+  const tokens = normalizeText(raw);
   const here = pickChips(getInitialChips(screenId), "");
 
+  // Words that belong to an intent which fired but left a real question behind are
+  // dropped; the rest of the question is then answered normally.
+  const intentWords = new Set<string>();
+
+  if (/^(hola|buenas|buenos dias|buenas tardes|buenas noches|hey|saludos)\b/.test(raw)) {
+    if (only(tokens, GREETING_WORDS)) return { text: getGreeting(screenId), chips: here };
+    GREETING_WORDS.forEach((word) => intentWords.add(word));
+  }
   if (/\b(gracias|genial|perfecto)\b/.test(raw)) {
-    return { text: "¡Con gusto! Si te quedas con otra duda, escríbela o toca una sugerencia.", chips: here };
+    if (only(tokens, new Set([...THANKS_WORDS, ...GREETING_WORDS]))) {
+      return { text: "¡Con gusto! Si te quedas con otra duda, escríbela o toca una sugerencia.", chips: here };
+    }
+    THANKS_WORDS.forEach((word) => intentWords.add(word));
   }
-  if (/^(hola|buenas|buenos dias|buenas tardes|buenas noches|hey|saludos)\b/.test(raw) && tokens.length <= 2) {
-    return { text: getGreeting(screenId), chips: here };
-  }
+  const content = (): string[] => tokens.filter((token) => !intentWords.has(token));
+
   if (/\b(me perdi|perdido|perdida|no se que hacer|ayuda|ayudame|auxilio|no entiendo)\b/.test(raw)) {
-    return {
-      text:
-        `No te preocupes, vamos paso a paso. Estás en: ${topic.heading}.\n${topic.purpose}\n` +
-        `Aquí puedes:\n${bullets(topic.canDo)}\nElige una sugerencia para empezar.`,
-      chips: here,
-    };
+    if (only(content(), LOST_WORDS)) {
+      return {
+        text:
+          `No te preocupes, vamos paso a paso. Estás en: ${topic.heading}.\n${topic.purpose}\n` +
+          `Aquí puedes:\n${bullets(topic.canDo)}\nElige una sugerencia para empezar.`,
+        chips: here,
+      };
+    }
+    LOST_WORDS.forEach((word) => intentWords.add(word));
   }
+  let purposeAsked = false;
   if (/\b(para que sirve|que es esta|donde estoy)\b/.test(raw)) {
-    return {
-      text: `${topic.heading}.\n${topic.purpose}\n\nAquí puedes:\n${bullets(topic.canDo)}`,
-      chips: pickChips(getInitialChips(screenId), PURPOSE_CHIP),
-    };
+    if (only(content(), PURPOSE_WORDS)) {
+      return {
+        text: `${topic.heading}.\n${topic.purpose}\n\nAquí puedes:\n${bullets(topic.canDo)}`,
+        chips: pickChips(getInitialChips(screenId), PURPOSE_CHIP),
+      };
+    }
+    PURPOSE_WORDS.forEach((word) => intentWords.add(word));
+    purposeAsked = true;
   }
   if (/\b(errores|problemas) (comunes|frecuentes)\b/.test(raw) || /^que errores\b/.test(raw)) {
-    const list = topic.mistakes.map((m) => `- ${m.problem}\n  Qué hacer: ${m.fix}`).join("\n");
-    return { text: `Errores comunes en esta pantalla:\n${list}`, chips: pickChips(getInitialChips(screenId), ERRORS_CHIP) };
+    if (only(content(), MISTAKE_WORDS)) {
+      const list = topic.mistakes.map((m) => `- ${m.problem}\n  Qué hacer: ${m.fix}`).join("\n");
+      return { text: `Errores comunes en esta pantalla:\n${list}`, chips: pickChips(getInitialChips(screenId), ERRORS_CHIP) };
+    }
+    MISTAKE_WORDS.forEach((word) => intentWords.add(word));
   }
   if (/\b(que mas|otras cosas|otras pantallas|en el sistema)\b/.test(raw)) {
-    return otherScreens(screenId);
+    if (only(content(), MORE_WORDS)) return otherScreens(screenId);
+    MORE_WORDS.forEach((word) => intentWords.add(word));
   }
 
-  const groups = tokens.map(expand);
-  const glossaryBoost = /\b(que es|que son|significa|significan|quiere decir|definicion)\b/.test(raw);
-  const normalized = tokens.join(" ");
-  let best: { entry: Entry; score: number } | null = null;
+  const query = content();
+  const groups = query.map(toGroup);
+  const glossaryBoost =
+    purposeAsked || /\b(que es|que son|significa|significan|quiere decir|definicion)\b/.test(raw);
+  const normalized = query.join(" ");
+  let best: { entry: Entry; score: number; coverage: number } | null = null;
   for (const entry of getKnowledgeBase()) {
-    let score = scoreEntry(entry, groups, normalized, glossaryBoost);
+    const scored = scoreEntry(entry, groups, normalized, glossaryBoost);
+    let score = scored.score;
     if (entry.screen === screenId) score *= 1.5;
-    if (score > (best?.score ?? 0)) best = { entry, score };
+    if (score > (best?.score ?? 0)) best = { entry, score, coverage: scored.coverage };
   }
   if (!best || best.score < MIN_SCORE) return fallback(screenId, question);
+  if (groups.length >= 2 && best.coverage < MIN_COVERAGE) return fallback(screenId, question);
   return answerWithEntry(best.entry, screenId, question);
 }

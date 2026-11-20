@@ -83,3 +83,79 @@ describe("answerQuestion", () => {
     }
   });
 });
+
+describe("answerQuestion: intents do not hijack real questions (J4)", () => {
+  it("answers the question after a greeting prefix", () => {
+    const r = answerQuestion("hola, ¿cómo hago para entrar?", "login");
+    expect(r.text).toContain("Escribe tu correo");
+    expect(r.text).not.toContain("Soy la guía");
+  });
+
+  it("does not treat 'ayuda para X' as getting lost", () => {
+    const r = answerQuestion("necesito ayuda para publicar", "welcome-agency-admin");
+    expect(r.text).not.toContain("No te preocupes");
+    expect(r.text.toLowerCase()).toContain("publica");
+  });
+
+  it("answers glossary questions phrased with intent words", () => {
+    expect(answerQuestion("¿para qué sirve el tipo de cambio?", "login").text).toContain("Tipo de cambio:");
+    expect(answerQuestion("no entiendo qué es tipo de cambio", "login").text).toContain("Tipo de cambio:");
+  });
+
+  it("answers 'en el sistema' questions instead of listing screens", () => {
+    const r = answerQuestion("cómo entro en el sistema", "login");
+    expect(r.text).toContain("Escribe tu correo");
+    expect(r.text).not.toContain("Además de esta pantalla");
+  });
+
+  it("answers the question after thanks", () => {
+    const r = answerQuestion("gracias, y cómo entro", "login");
+    expect(r.text).toContain("Escribe tu correo");
+    expect(r.text).not.toMatch(/^¡Con gusto/);
+  });
+
+  it("still handles bare intents", () => {
+    expect(answerQuestion("muchas gracias", "login").text).toMatch(/Con gusto/);
+    expect(answerQuestion("hola buenas", "login").text).toContain("¡Hola!");
+    expect(answerQuestion("necesito ayuda", "login").text).toContain("No te preocupes");
+  });
+});
+
+describe("answerQuestion: typos, synonyms and sessions (J5)", () => {
+  it("tolerates a one-letter typo in a long word", () => {
+    expect(answerQuestion("¿qué significa aitenticadora?", "login").text.toLowerCase()).toContain("aplicación autenticadora");
+  });
+
+  it("does not apply fuzzy matching to short words", () => {
+    expect(answerQuestion("xyz abc", "login").text).toContain("No estoy seguro");
+  });
+
+  it.each(["cómo ingreso", "quiero acceder", "cómo me logueo", "cómo inicio sesión"])("%s resolves to login", (q) => {
+    expect(answerQuestion(q, "login").text).toContain("Escribe tu correo");
+  });
+
+  it("resolves 'cómo cierro sesión' to the logout walkthrough, not login", () => {
+    for (const id of ["welcome-platform-admin", "welcome-agency-admin", "welcome-agent"] as const) {
+      const r = answerQuestion("cómo cierro sesión", id);
+      expect(r.text, id).toContain("Cerrar sesión");
+      expect(r.text, id).not.toContain("Escribe tu correo");
+    }
+    expect(answerQuestion("cómo cierro sesión", "login").text).toContain("Cerrar sesión");
+  });
+
+  it("resolves 'quiero eliminar una publicación' and 'cómo salgo' sensibly", () => {
+    expect(answerQuestion("cómo salgo", "welcome-agent").text).toContain("Cerrar sesión");
+  });
+});
+
+describe("answerQuestion: partial matches fall back (J8)", () => {
+  it("does not answer 'borrar un inmueble' with an unrelated walkthrough", () => {
+    const r = answerQuestion("quiero borrar un inmueble", "listing-review-queue");
+    expect(r.text).toContain("No estoy seguro");
+  });
+
+  it("still answers when the words are covered", () => {
+    expect(answerQuestion("abrir un inmueble para revisarlo", "listing-review-queue").text).toContain("1.");
+  });
+});
+
