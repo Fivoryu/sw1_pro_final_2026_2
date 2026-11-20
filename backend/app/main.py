@@ -38,6 +38,10 @@ from app.modules.chat.router import customer_router as customer_chat_router
 from app.modules.chat.router import staff_router as staff_chat_router
 from app.modules.notifications.router import customer_router as customer_notifications_router
 from app.modules.notifications.router import staff_router as staff_notifications_router
+from app.modules.push.dispatcher import dispatch_loop as push_dispatch_loop
+from app.modules.push.fcm import FcmClient, PushSender
+from app.modules.push.router import customer_router as customer_devices_router
+from app.modules.push.router import staff_router as staff_devices_router
 from app.modules.favorites.router import favorites_router as customer_favorites_router
 from app.modules.favorites.router import saved_searches_router as customer_saved_searches_router
 from app.modules.reviews.router import customer_router as customer_reviews_router
@@ -311,6 +315,18 @@ async def _photo_deletion_cleanup_loop(
             logger.exception("Listing photo deletion sweep failed")
 
 
+def _create_push_sender(settings: Settings) -> PushSender | None:
+    """Build the FCM client, or None (push off) when no usable key is configured."""
+    path = settings.fcm_service_account_file
+    if not path:
+        return None
+    try:
+        return FcmClient.from_file(path)
+    except (OSError, ValueError, KeyError):
+        logger.exception("FCM service account unusable; push notifications are disabled")
+        return None
+
+
 def _build_lifespan(
     session_factory: sessionmaker[Session],
     settings: Settings,
@@ -372,10 +388,16 @@ def _build_lifespan(
                 settings=settings,
             )
         )
+        push_dispatcher: asyncio.Task[None] | None = None
+        if application.state.push_sender is not None:
+            push_dispatcher = asyncio.create_task(
+                push_dispatch_loop(session_factory, application.state.push_sender, clock=clock)
+            )
         try:
             yield
         finally:
             for task in (
+                push_dispatcher,
                 refresher,
                 photo_cleaner,
                 photo_deleter,
@@ -400,6 +422,7 @@ def create_app(
     job_queue: JobQueue | None = None,
     reconstruction_queue: ReconstructionQueue | None = None,
     floorplan_interpreter: FloorplanInterpreter | None = None,
+    push_sender: PushSender | None = None,
 ) -> FastAPI:
     install_location_redaction()
     resolved_settings = settings or Settings.from_env()
@@ -445,6 +468,9 @@ def create_app(
         resolved_settings, injected_storage=photo_storage
     )
     app.state.job_queue = resolved_job_queue
+    app.state.push_sender = (
+        push_sender if push_sender is not None else _create_push_sender(resolved_settings)
+    )
     app.state.reconstruction_queue = resolved_reconstruction_queue
     app.state.floorplan_interpreter = floorplan_interpreter or GroqFloorplanInterpreter(
         api_key=resolved_settings.groq_api_key,
@@ -482,6 +508,8 @@ def create_app(
     app.include_router(staff_chat_router)
     app.include_router(customer_notifications_router)
     app.include_router(staff_notifications_router)
+    app.include_router(customer_devices_router)
+    app.include_router(staff_devices_router)
     app.include_router(customer_reviews_router)
     app.include_router(customer_favorites_router)
     app.include_router(customer_saved_searches_router)

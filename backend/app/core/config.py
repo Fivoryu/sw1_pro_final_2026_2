@@ -89,6 +89,8 @@ class Settings:
     groq_api_key: str | None = None
     groq_floorplan_model: str = "qwen/qwen3.8-27b"
     groq_floorplan_timeout_seconds: int = 30
+    # Path to the Firebase service-account key; push notifications stay off when unset.
+    fcm_service_account_file: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -177,6 +179,7 @@ class Settings:
             groq_floorplan_timeout_seconds=_positive_timeout_from_env(
                 "GROQ_FLOORPLAN_TIMEOUT_SECONDS", 30
             ),
+            fcm_service_account_file=os.environ.get("FCM_SERVICE_ACCOUNT_FILE") or None,
         )
 
     def escrow_address_for(self, currency: str) -> str | None:

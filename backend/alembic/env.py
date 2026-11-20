@@ -14,6 +14,7 @@ from app.modules.customer_identity import models as customer_identity_models  # 
 from app.modules.favorites import models as favorite_models  # noqa: F401
 from app.modules.identity import models as identity_models
 from app.modules.notifications import models as notification_models  # noqa: F401
+from app.modules.push import models as push_models  # noqa: F401
 from app.modules.reservations import models as reservation_models  # noqa: F401
 from app.modules.reviews import models as review_models  # noqa: F401
 
