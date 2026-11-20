@@ -270,7 +270,24 @@ class GuideAssistant {
             ),
           )
           .length;
-      if (query.length == 2 && !termsOnly) {
+      if (termsOnly) {
+        // A definition lookup needs every non-generic word to hit the term.
+        final missed = [
+          for (final w in query)
+            if (!w.any(e.titleStems.contains)) w,
+        ];
+        // A missed word is tolerated only when it names an action of this
+        // screen ("para qué sirve medir ambientes"), never a foreign topic.
+        final own = {
+          for (final o in _knowledge.entries)
+            if (o.screen == screen) ...o.titleStems,
+        };
+        if (missed.any(
+          (w) => !w.every((s) => _genericStems.contains(s) || own.contains(s)),
+        )) {
+          continue;
+        }
+      } else if (query.length == 2) {
         // Both words must match; a generic domain word may be skipped only
         // when the other one matches.
         final unmatched = [
@@ -376,7 +393,24 @@ const _synonymGroups = <(List<String>, List<String>)>[
     ],
     ['envi', 'revi'],
   ),
-  (['subir', 'subo', 'sube', 'subirlo'], ['envi']),
+  // "subir" is both "upload a photo" and "submit for review".
+  (['subir', 'subo', 'sube', 'subes', 'subirlo'], ['envi', 'agre']),
+  (
+    ['crear', 'creo', 'creas', 'crea', 'creando', 'creamos', 'creado'],
+    ['crea'],
+  ),
+  (
+    [
+      'borrar', 'borro', 'borras', 'borra', 'borrando', 'eliminar', 'elimino',
+      'eliminas', 'elimina', 'eliminando', //
+    ],
+    ['elim'],
+  ),
+  (['abrir', 'abro', 'abres', 'abre', 'abriendo'], ['abri']),
+  (['tocar', 'toco', 'tocas', 'toca', 'tocando'], ['toca']),
+  (['leer', 'leo', 'lees', 'lee', 'leyendo'], ['leer']),
+  (['pedir', 'pido', 'pides', 'pide'], ['pedi']),
+  (['ver', 'veo', 'ves', 'viendo'], ['ver']),
   (
     [
       'habitacion', 'habitaciones', 'cuarto', 'cuartos', 'pieza', 'piezas',
