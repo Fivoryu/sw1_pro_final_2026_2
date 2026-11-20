@@ -1,8 +1,10 @@
+import 'package:captura_mobile/data/services/offline_listing_store.dart';
 import 'package:captura_mobile/data/services/staff_auth_api.dart';
 import 'package:captura_mobile/domain/staff_session_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fake_staff_backend.dart';
+import 'support/in_memory_offline_listing_store.dart';
 
 const _baseUrl = 'https://api.example.test';
 
@@ -10,22 +12,29 @@ const _baseUrl = 'https://api.example.test';
   StaffSessionController controller,
   FakeStaffBackend backend,
   InMemoryStaffCredentialStore store,
+  InMemoryOfflineListingStore? cache,
 })
-_build({String? cookie, String? csrf}) {
+_build({String? cookie, String? csrf, String? owner, bool withCache = false}) {
   final backend = FakeStaffBackend();
   final store = InMemoryStaffCredentialStore(
     refreshCookie: cookie,
     csrfToken: csrf,
+    ownerId: owner,
   );
+  final cache = withCache ? InMemoryOfflineListingStore() : null;
   return (
     controller: StaffSessionController(
       api: StaffAuthApi(baseUrl: _baseUrl, client: backend.client),
       credentialStore: store,
+      offlineStore: cache,
     ),
     backend: backend,
     store: store,
+    cache: cache,
   );
 }
+
+const _listing = OfflineListing(listingId: 'listing-1', label: 'La Paz');
 
 void main() {
   group('restore', () {
@@ -70,6 +79,162 @@ void main() {
       expect(harness.controller.status, StaffSessionStatus.unavailable);
       expect(harness.store.refreshCookie, 'refresh-cookie');
       expect(harness.store.csrfToken, 'csrf-1');
+    });
+  });
+
+  group('offline mode (S10)', () {
+    test('enters offline with a stored session and no network', () async {
+      final harness = _build(
+        cookie: 'refresh-cookie',
+        csrf: 'csrf-1',
+        owner: 'staff-1',
+        withCache: true,
+      );
+      await harness.cache!.write('staff-1', 'draft', [_listing]);
+      harness.backend.offline = true;
+
+      await harness.controller.restore();
+
+      expect(harness.controller.status, StaffSessionStatus.offline);
+      expect(harness.controller.offlineListings, [
+        isA<OfflineListing>().having((l) => l.listingId, 'id', 'listing-1'),
+      ]);
+      expect(harness.controller.ownerId, 'staff-1');
+      // Not authenticated for any API call.
+      expect(harness.controller.accessToken, isNull);
+      expect(harness.controller.account, isNull);
+      expect(harness.store.refreshCookie, 'refresh-cookie');
+    });
+
+    test('does not enter offline without a stored session', () async {
+      final harness = _build(owner: 'staff-1', withCache: true);
+      await harness.cache!.write('staff-1', 'draft', [_listing]);
+      harness.backend.offline = true;
+
+      await harness.controller.restore();
+
+      expect(harness.controller.status, StaffSessionStatus.signedOut);
+      expect(harness.controller.offlineListings, isEmpty);
+    });
+
+    test('does not enter offline when the owner is unknown', () async {
+      final harness = _build(
+        cookie: 'refresh-cookie',
+        csrf: 'csrf-1',
+        withCache: true,
+      );
+      harness.backend.offline = true;
+
+      await harness.controller.restore();
+
+      expect(harness.controller.status, StaffSessionStatus.unavailable);
+    });
+
+    test('makes no API call while offline entry is decided', () async {
+      final harness = _build(
+        cookie: 'refresh-cookie',
+        csrf: 'csrf-1',
+        owner: 'staff-1',
+        withCache: true,
+      );
+      harness.backend.offline = true;
+
+      await harness.controller.restore();
+
+      expect(harness.backend.calls, ['/api/v1/auth/refresh']);
+    });
+
+    test('a rejected session is discarded and the cache wiped', () async {
+      final harness = _build(
+        cookie: 'stale-cookie',
+        csrf: 'csrf-1',
+        owner: 'staff-1',
+        withCache: true,
+      );
+      await harness.cache!.write('staff-1', 'draft', [_listing]);
+      harness.backend.refreshRejected = true;
+
+      await harness.controller.restore();
+
+      expect(harness.controller.status, StaffSessionStatus.signedOut);
+      expect(harness.store.refreshCookie, isNull);
+      expect(harness.store.ownerId, isNull);
+      expect(harness.cache!.data, isEmpty);
+    });
+
+    test('the real refresh runs when the network returns', () async {
+      final harness = _build(
+        cookie: 'refresh-cookie',
+        csrf: 'csrf-1',
+        owner: 'staff-1',
+        withCache: true,
+      );
+      harness.backend.offline = true;
+      await harness.controller.restore();
+      harness.backend.offline = false;
+
+      await harness.controller.restore();
+
+      expect(harness.controller.status, StaffSessionStatus.signedIn);
+      expect(harness.controller.accessToken, 'access-token');
+      expect(harness.controller.ownerId, 'staff-1');
+      expect(harness.store.ownerId, 'staff-1');
+    });
+
+    test('sign-out wipes the stored session, owner and cache', () async {
+      final harness = _build(
+        cookie: 'refresh-cookie',
+        csrf: 'csrf-1',
+        withCache: true,
+      );
+      await harness.controller.restore();
+      await harness.controller.rememberListings('draft', [_listing]);
+      expect(harness.cache!.data['staff-1'], isNotNull);
+
+      await harness.controller.signOut();
+
+      expect(harness.store.refreshCookie, isNull);
+      expect(harness.store.ownerId, isNull);
+      expect(harness.cache!.data, isEmpty);
+    });
+
+    test('the cache is kept per account', () async {
+      final harness = _build(
+        cookie: 'refresh-cookie',
+        csrf: 'csrf-1',
+        owner: 'staff-2',
+        withCache: true,
+      );
+      await harness.cache!.write('staff-1', 'draft', [_listing]);
+      harness.backend.offline = true;
+
+      await harness.controller.restore();
+
+      expect(harness.controller.status, StaffSessionStatus.offline);
+      expect(harness.controller.offlineListings, isEmpty);
+    });
+
+    test('a different account signing in wipes the previous cache', () async {
+      final harness = _build(
+        cookie: 'refresh-cookie',
+        csrf: 'csrf-1',
+        owner: 'staff-9',
+        withCache: true,
+      );
+      await harness.cache!.write('staff-9', 'draft', [_listing]);
+
+      await harness.controller.restore();
+
+      expect(harness.cache!.data, isEmpty);
+      expect(harness.store.ownerId, 'staff-1');
+    });
+
+    test('remembers listings only for the signed-in account', () async {
+      final harness = _build(withCache: true);
+
+      await harness.controller.rememberListings('draft', [_listing]);
+
+      expect(harness.cache!.data, isEmpty);
     });
   });
 

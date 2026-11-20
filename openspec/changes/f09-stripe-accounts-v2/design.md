@@ -1,0 +1,4 @@
+## Diseño
+El panel solicita el correo explícitamente y lo envía solo al iniciar el alta. El endpoint staff conserva la autorización y la asociación por agencia. El adaptador usa JSON y una versión fija de Stripe para Accounts y Account Links v2. La clave de creación es estable por agencia. La consulta del estado usa la representación v1 de la cuenta, compatible con Accounts v2 según Stripe, para conservar el contrato del panel y los webhooks de F09.8.
+## Liquidación de transferencias
+Para transferir el depósito íntegro se usan el importe bruto y la moneda de liquidación que Stripe informa en la transacción de saldo del cargo verificado. Se conserva el cargo original como `source_transaction`. La moneda y el importe del depósito en RoomForge no cambian. Los reintentos de transferencias con conversión comparten una clave de idempotencia distinta de la solicitud anterior a esta corrección, que Stripe rechazaba por moneda incompatible.

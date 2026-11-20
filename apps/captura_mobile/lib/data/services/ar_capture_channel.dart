@@ -53,6 +53,7 @@ class CapturePackageInfo {
     required this.droppedKeyframes,
     required this.failedKeyframes,
     required this.rooms,
+    this.sha256,
   });
 
   /// Throws [FormatException] when [json] is not a valid package description.
@@ -78,6 +79,7 @@ class CapturePackageInfo {
       throw const FormatException('Capture package "rooms" must not be empty');
     }
     return CapturePackageInfo(
+      sha256: json['sha256'] is String ? json['sha256'] as String : null,
       zipPath: string('zipPath'),
       captureId: string('captureId'),
       sizeBytes: integer('sizeBytes', min: 1),
@@ -99,6 +101,7 @@ class CapturePackageInfo {
     );
   }
 
+  final String? sha256;
   final String zipPath;
   final String captureId;
   final int sizeBytes;

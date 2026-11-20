@@ -42,3 +42,10 @@ it("raises StaffListingsApiError with the HTTP status on failure", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
   await expect(getCapture("tok", "a", "l", "c")).rejects.toBeInstanceOf(StaffListingsApiError);
 });
+
+it("acceptance retry is conditional on the saved scene revision", async () => {
+  const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 412 });
+  vi.stubGlobal("fetch", fetchMock);
+  await expect(acceptCapture("tok", "a", "l", "c", '"7"')).rejects.toMatchObject({ status: 412 });
+  expect(fetchMock.mock.calls[0][1].headers).toMatchObject({ "If-Match": '"7"' });
+});

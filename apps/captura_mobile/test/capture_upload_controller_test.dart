@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:captura_mobile/data/services/ar_capture_channel.dart';
 import 'package:captura_mobile/data/services/staff_auth_api.dart';
 import 'package:captura_mobile/data/services/staff_capture_api.dart';
@@ -26,6 +28,22 @@ Future<StaffSessionController> signedIn() async {
 
 const _zipPath = '/files/capture_packages/cap-1.zip';
 final _zipBytes = List<int>.generate(100, (i) => i);
+
+class _PausedPackageFiles extends FakePackageFiles {
+  _PausedPackageFiles(super.files);
+
+  final entered = Completer<void>();
+  final release = Completer<void>();
+
+  @override
+  Stream<List<int>> open(String path) async* {
+    if (path == _zipPath && !entered.isCompleted) {
+      entered.complete();
+      await release.future;
+    }
+    yield* super.open(path);
+  }
+}
 
 CapturePackageInfo _package({String id = 'cap-1', String path = _zipPath}) =>
     CapturePackageInfo(
@@ -79,6 +97,130 @@ Future<_Harness> _build({
 }
 
 void main() {
+  test('enqueue publishes the attempt before idle is observed', () async {
+    final files = _PausedPackageFiles({_zipPath: _zipBytes});
+    final h = await _build(files: files);
+    addTearDown(() {
+      if (!files.release.isCompleted) files.release.complete();
+      return h.controller.idle;
+    });
+
+    expect(await h.controller.enqueue(_package()), isTrue);
+    expect(h.controller.busy, isTrue);
+    final attempt = h.controller.idle;
+    var finished = false;
+    unawaited(
+      attempt.then<void>((_) {
+        finished = true;
+      }),
+    );
+    await files.entered.future;
+    expect(finished, isFalse);
+    expect(h.files.deleted, isEmpty);
+
+    files.release.complete();
+    await attempt;
+
+    expect(h.controller.items.single.upload.stage, UploadStage.completed);
+    expect(h.backend.putCalls, 1);
+    expect(h.backend.completeCalls, 1);
+    expect(h.controller.busy, isFalse);
+  });
+
+  test('idle includes a capture enqueued during an active upload', () async {
+    const secondPath = '/files/capture_packages/cap-2.zip';
+    final files = _PausedPackageFiles({
+      _zipPath: _zipBytes,
+      secondPath: _zipBytes,
+    });
+    final h = await _build(files: files);
+    addTearDown(() {
+      if (!files.release.isCompleted) files.release.complete();
+      return h.controller.idle;
+    });
+
+    await h.controller.enqueue(_package());
+    await files.entered.future;
+    expect(
+      await h.controller.enqueue(_package(id: 'cap-2', path: secondPath)),
+      isTrue,
+    );
+    final allAttempts = h.controller.idle;
+    expect(h.controller.busy, isTrue);
+    expect(h.files.deleted, isEmpty);
+
+    files.release.complete();
+    await allAttempts;
+
+    expect(h.controller.items, hasLength(2));
+    expect(h.controller.items.every((item) => item.upload.isSent), isTrue);
+    expect(
+      (await h.store.list('staff-1')).every((upload) => upload.isSent),
+      isTrue,
+    );
+    expect(h.backend.registerCalls, 2);
+    expect(h.backend.putCalls, 2);
+    expect(h.backend.completeCalls, 2);
+    expect(h.backend.captures, hasLength(2));
+    expect(h.controller.busy, isFalse);
+  });
+
+  test('another controller waits and reloads without a second PUT', () async {
+    final files = _PausedPackageFiles({_zipPath: _zipBytes});
+    final first = await _build(files: files);
+    CaptureUploadController? secondController;
+    addTearDown(() async {
+      if (!files.release.isCompleted) files.release.complete();
+      await first.controller.idle;
+      await secondController?.idle;
+    });
+
+    await first.controller.enqueue(_package());
+    await files.entered.future;
+    final second = await _build(
+      files: files,
+      backend: first.backend,
+      store: first.store,
+      session: first.session,
+    );
+    secondController = second.controller;
+    await second.controller.enqueue(_package());
+    final allAttempts = second.controller.idle;
+    expect(second.controller.busy, isTrue);
+    expect(first.backend.registerCalls, 1);
+
+    files.release.complete();
+    await allAttempts;
+
+    expect(second.controller.items.single.upload.stage, UploadStage.completed);
+    expect(first.backend.registerCalls, 1);
+    expect(first.backend.putCalls, 1);
+    expect(first.backend.completeCalls, 1);
+    expect(first.backend.captures, hasLength(1));
+  });
+
+  test(
+    'unverified HTTP 202 retains the local ZIP and the uploaded stage',
+    () async {
+      final backend = FakeCaptureBackend()..verifyCompletion = false;
+      final h = await _build(backend: backend);
+      await h.controller.enqueue(_package());
+      await h.controller.idle;
+      expect(h.controller.items.single.upload.stage, UploadStage.uploaded);
+      expect(h.files.files.containsKey(_zipPath), isTrue);
+      expect(h.files.deleted, isEmpty);
+    },
+  );
+  test('a missing remote object is repaired from the retained ZIP', () async {
+    final backend = FakeCaptureBackend()..loseUploadsBeforeComplete = 1;
+    final h = await _build(backend: backend);
+    await h.controller.enqueue(_package());
+    await h.controller.idle;
+    expect(h.controller.items.single.upload.stage, UploadStage.completed);
+    expect(backend.putCalls, 2);
+    expect(backend.captures, hasLength(1));
+  });
+
   test(
     'registers, uploads and completes, deleting the ZIP only at the end',
     () async {
@@ -139,6 +281,7 @@ void main() {
       expect(item.upload.stage, UploadStage.registered);
       expect(item.upload.zipPath, _zipPath);
       expect(item.upload.lastError, contains('Sin conexión'));
+      expect(item.upload.lastError, contains('almacenamiento'));
       expect(item.upload.permanent, isFalse);
       expect(h.files.deleted, isEmpty);
 

@@ -18,6 +18,7 @@ import 'catalog_format.dart';
 import 'listing_detail_screen.dart';
 import 'listing_photo.dart';
 import '../../../theme/andean_theme.dart';
+import '../../../theme/editorial_surfaces.dart';
 import '../../../theme/andean_widgets.dart';
 
 /// The "Explorar" tab: published listings with filters, paging and honest
@@ -175,17 +176,29 @@ class _CatalogScreenState extends State<CatalogScreen> {
         builder: (context, _) => ListView(
           padding: const EdgeInsets.all(20),
           children: [
+            const Text(
+              'CATÁLOGO INMOBILIARIO',
+              style: TextStyle(
+                color: EditorialColors.accent,
+                fontWeight: FontWeight.w700,
+                fontSize: 11,
+                letterSpacing: 1.5,
+              ),
+            ),
+            const SizedBox(height: 6),
             const AndeanSectionHeading(
               'Explorar inmuebles',
               subtitle: 'Encontrá un espacio que se sienta propio.',
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             DropdownButtonFormField<DisplayCurrency>(
               key: const ValueKey('catalog-currency-selector'),
               initialValue: _controller.displayCurrency,
               decoration: const InputDecoration(
                 labelText: 'Moneda de visualización',
                 border: OutlineInputBorder(),
+                filled: true,
+                fillColor: EditorialColors.paper,
               ),
               items: [
                 for (final currency in DisplayCurrency.values)
@@ -197,11 +210,13 @@ class _CatalogScreenState extends State<CatalogScreen> {
                 }
               },
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 10),
             FilledButton.icon(
               key: const ValueKey('catalog-filter-button'),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(48),
+                backgroundColor: EditorialColors.sand,
+                foregroundColor: AndeanColors.primaryBrand,
               ),
               onPressed: _openFilters,
               icon: const Icon(Icons.tune),
@@ -317,7 +332,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
         borderRadius: BorderRadius.circular(20),
         side: const BorderSide(color: AndeanColors.border, width: 1),
       ),
-      color: AndeanColors.surfaceContainerLowest,
+      color: EditorialColors.paper,
+      elevation: 0,
       child: InkWell(
         onTap: () => _openListing(listing),
         child: Column(
@@ -326,14 +342,13 @@ class _CatalogScreenState extends State<CatalogScreen> {
             Stack(
               children: [
                 SizedBox(
-                  height: 170,
+                  height: listing.coverPhotoUrl == null ? 106 : 180,
                   width: double.infinity,
                   child: listing.coverPhotoUrl == null
-                      ? PhotoPlaceholder(
+                      ? _CatalogPhotoPlaceholder(
                           key: ValueKey(
                             'catalog-cover-placeholder-${listing.listingId}',
                           ),
-                          message: 'Sin fotos oficiales',
                         )
                       : ListingPhoto(
                           key: ValueKey('catalog-cover-${listing.listingId}'),
@@ -341,35 +356,36 @@ class _CatalogScreenState extends State<CatalogScreen> {
                           semanticLabel: 'Portada de ${locationLabel(listing)}',
                         ),
                 ),
-                Positioned(
-                  top: 10,
-                  left: 10,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AndeanColors.surface.withValues(alpha: 0.92),
-                      borderRadius: BorderRadius.circular(6),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color.fromRGBO(27, 59, 54, 0.08),
-                          blurRadius: 4,
-                          offset: Offset(0, 2),
+                if (listing.coverPhotoUrl != null)
+                  Positioned(
+                    top: 10,
+                    left: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AndeanColors.surface.withValues(alpha: 0.92),
+                        borderRadius: BorderRadius.circular(6),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color.fromRGBO(27, 59, 54, 0.08),
+                            blurRadius: 4,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Text(
+                        operationLabel(listing.operation),
+                        style: AndeanTypography.monoData.copyWith(
+                          color: AndeanColors.secondary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
                         ),
-                      ],
-                    ),
-                    child: Text(
-                      'ID #${listing.listingId}',
-                      style: AndeanTypography.monoData.copyWith(
-                        color: AndeanColors.secondary,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11,
                       ),
                     ),
                   ),
-                ),
                 if (widget.favoritesController != null)
                   Positioned(
                     top: 6,
@@ -404,19 +420,30 @@ class _CatalogScreenState extends State<CatalogScreen> {
                           ),
                         ),
                       ),
-                      AndeanPillChip(
-                        label: operationLabel(listing.operation),
-                        backgroundColor: AndeanColors.surfaceContainerHigh,
-                      ),
+                      if (listing.coverPhotoUrl == null)
+                        AndeanPillChip(
+                          label: operationLabel(listing.operation),
+                          backgroundColor: EditorialColors.sand,
+                        ),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    chargeLabel(listing.basePrice, listing.operation),
-                    style: AndeanTypography.headlineMd.copyWith(
-                      color: AndeanColors.primaryContainer,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          chargeLabel(listing.basePrice, listing.operation),
+                          style: AndeanTypography.headlineMd.copyWith(
+                            color: AndeanColors.primaryBrand,
+                          ),
+                        ),
+                      ),
+                      const Icon(
+                        Icons.arrow_forward_rounded,
+                        size: 18,
+                        color: AndeanColors.secondary,
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -426,4 +453,40 @@ class _CatalogScreenState extends State<CatalogScreen> {
       ),
     );
   }
+}
+
+class _CatalogPhotoPlaceholder extends StatelessWidget {
+  const _CatalogPhotoPlaceholder({super.key});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+    decoration: const BoxDecoration(
+      gradient: LinearGradient(
+        colors: [EditorialColors.sand, Color(0xFFF4EFE5)],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ),
+    ),
+    child: Stack(
+      fit: StackFit.expand,
+      children: [
+        const Positioned(
+          right: -6,
+          bottom: -29,
+          child: ExcludeSemantics(
+            child: Icon(
+              Icons.apartment_rounded,
+              size: 131,
+              color: Color(0x24765A39),
+            ),
+          ),
+        ),
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: Text('Sin fotos oficiales', style: AndeanTypography.labelMd),
+        ),
+      ],
+    ),
+  );
 }

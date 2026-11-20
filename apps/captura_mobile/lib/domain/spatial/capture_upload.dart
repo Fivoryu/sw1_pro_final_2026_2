@@ -55,6 +55,7 @@ class PendingCaptureUpload {
     required this.sizeBytes,
     required this.keyframeCount,
     required this.createdAt,
+    this.sha256,
     this.stage = UploadStage.local,
     this.uploadUrl,
     this.remoteStatus,
@@ -63,6 +64,7 @@ class PendingCaptureUpload {
     this.permanent = false,
   });
 
+  final String? sha256;
   final String captureId;
   final String listingId;
 
@@ -102,6 +104,7 @@ class PendingCaptureUpload {
     bool clearLastError = false,
     bool? permanent,
   }) => PendingCaptureUpload(
+    sha256: sha256,
     captureId: captureId,
     listingId: listingId,
     zipPath: clearZipPath ? null : (zipPath ?? this.zipPath),
@@ -117,6 +120,7 @@ class PendingCaptureUpload {
   );
 
   Map<String, Object?> toJson() => {
+    'sha256': sha256,
     'captureId': captureId,
     'listingId': listingId,
     'zipPath': zipPath,
@@ -163,6 +167,7 @@ class PendingCaptureUpload {
     }
     final remote = optional('remoteStatus');
     return PendingCaptureUpload(
+      sha256: optional('sha256'),
       captureId: string('captureId'),
       listingId: string('listingId'),
       zipPath: optional('zipPath'),

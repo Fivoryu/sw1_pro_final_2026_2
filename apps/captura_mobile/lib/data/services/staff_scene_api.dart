@@ -86,6 +86,8 @@ Map<String, Object?> sceneUploadDocument(Map<String, Object?> document) {
   return {
     'version': document['version'],
     'unit': document['unit'],
+    if (document['captureId'] != null) 'captureId': document['captureId'],
+    if (document['measurement'] != null) 'measurement': document['measurement'],
     'walls': [for (final value in list('walls')) wall(value)],
     'openings': [for (final value in list('openings')) opening(value)],
     'rooms': [for (final value in list('rooms')) room(value)],
@@ -180,15 +182,17 @@ class StaffSceneApi {
     required String listingId,
     required Map<String, Object?> document,
     required String? baseEtag,
+    bool manualReplacement = false,
   }) async {
     final response = await _send(
       'PUT',
       _scenePath(agencyId, listingId),
       accessToken: accessToken,
       body: sceneUploadDocument(document),
-      headers: baseEtag == null
-          ? const {'If-None-Match': '*'}
-          : {'If-Match': baseEtag},
+      headers: {
+        if (baseEtag == null) 'If-None-Match': '*' else 'If-Match': baseEtag,
+        if (manualReplacement) 'X-Scene-Intent': 'manual-replacement',
+      },
     );
     final text = _text(response);
     if (response.statusCode == 412) {

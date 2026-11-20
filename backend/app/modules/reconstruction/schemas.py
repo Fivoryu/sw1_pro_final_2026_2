@@ -16,6 +16,7 @@ class CaptureRegistration(BaseModel):
 
     capture_id: Annotated[str, Field(alias="captureId", pattern=r"^[A-Za-z0-9_-]{1,64}$")]
     size_bytes: Annotated[int, Field(alias="sizeBytes", ge=1, le=MAX_PACKAGE_BYTES)]
+    sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None
 
 
 class CaptureRegistered(BaseModel):
@@ -32,6 +33,7 @@ class CaptureStatusOnly(BaseModel):
 
     capture_id: str = Field(alias="captureId")
     status: str
+    upload_verified: bool = Field(default=False, alias="uploadVerified")
 
 
 class CaptureResponse(BaseModel):
@@ -93,3 +95,9 @@ class ReconstructionClaimResponse(BaseModel):
     status: str
     claim_token: str | None = None
     download_url: str | None = None
+    capture_id: str | None = None
+    listing_id: str | None = None
+    package_sha256: str | None = None
+    size_bytes: int | None = None
+    lease_seconds: int | None = None
+    cache_delete_after: datetime | None = None

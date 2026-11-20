@@ -8,11 +8,12 @@ import re
 import time
 from collections.abc import Mapping
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 
 _logger = logging.getLogger(__name__)
+_CONNECT_API_VERSION = "2026-11-18.endive"
 _MAX_DIAGNOSTIC_LENGTH = 300
 _SENSITIVE_PROVIDER_VALUE = re.compile(
     r"\b(?:sk|pk|rk)_(?:test|live)_[A-Za-z0-9_-]+\b"
@@ -78,19 +79,27 @@ class StripeGateway:
         self,
         method: str,
         path: str,
-        fields: Mapping[str, str],
+        fields: Mapping[str, object],
         *,
-        idempotency_key: str,
+        idempotency_key: str | None = None,
+        api_v2: bool = False,
     ) -> dict[str, object]:
-        body = urlencode(fields).encode("utf-8")
+        body = None
+        if method == "GET":
+            if fields:
+                path = f"{path}?{urlencode(fields)}"
+        else:
+            body = (json.dumps(dict(fields)) if api_v2 else urlencode(fields)).encode("utf-8")
+        version = "v2/core" if api_v2 else "v1"
         request = Request(
-            f"https://api.stripe.com/v1/{path.lstrip('/')}",
+            f"https://api.stripe.com/{version}/{path.lstrip('/')}",
             data=body,
             method=method,
             headers={
                 "Authorization": f"Bearer {self._secret_key}",
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Idempotency-Key": idempotency_key,
+                "Content-Type": "application/json" if api_v2 else "application/x-www-form-urlencoded",
+                **({"Idempotency-Key": idempotency_key} if idempotency_key else {}),
+                **({"Stripe-Version": _CONNECT_API_VERSION} if api_v2 else {}),
             },
         )
         try:
@@ -99,14 +108,11 @@ class StripeGateway:
         except HTTPError as error:
             diagnostics = _provider_error_details(error)
             _logger.warning(
-                "Stripe API rejected request: status=%s type=%s code=%s param=%s "
-                "request_id=%s message=%s",
+                "Stripe API rejected request: status=%s type=%s code=%s param=%s",
                 diagnostics["http_status"],
                 diagnostics["provider_error_type"] or "-",
                 diagnostics["provider_error_code"] or "-",
                 diagnostics["provider_error_param"] or "-",
-                diagnostics["provider_request_id"] or "-",
-                diagnostics["provider_error_message"] or "-",
             )
             raise StripeGatewayError(
                 "Stripe is unavailable or rejected the request", **diagnostics
@@ -133,7 +139,6 @@ class StripeGateway:
             {
                 "amount": str(amount),
                 "currency": currency,
-                "payment_method_types[0]": "card",
                 "transfer_group": reservation_id,
                 "metadata[reservation_id]": reservation_id,
             },
@@ -141,18 +146,27 @@ class StripeGateway:
         )
 
     def create_connect_account(
-        self, *, country: str, agency_id: str, idempotency_key: str
+        self, *, country: str, agency_id: str, contact_email: str, idempotency_key: str
     ) -> dict[str, object]:
         return self._request(
             "POST",
             "accounts",
             {
-                "type": "express",
-                "country": country.upper(),
-                "capabilities[transfers][requested]": "true",
-                "metadata[agency_id]": agency_id,
+                "contact_email": contact_email,
+                "dashboard": "express",
+                "identity": {"country": country.upper()},
+                "defaults": {
+                    "responsibilities": {"fees_collector": "application", "losses_collector": "application"},
+                },
+                "configuration": {
+                    "recipient": {
+                        "capabilities": {"stripe_balance": {"stripe_transfers": {"requested": True}}},
+                    },
+                },
+                "metadata": {"agency_id": agency_id},
             },
             idempotency_key=idempotency_key,
+            api_v2=True,
         )
 
     def create_account_link(
@@ -168,11 +182,16 @@ class StripeGateway:
             "account_links",
             {
                 "account": account_id,
-                "type": "account_onboarding",
-                "refresh_url": refresh_url,
-                "return_url": return_url,
+                "use_case": {
+                    "type": "account_onboarding",
+                    "account_onboarding": {
+                        "refresh_url": refresh_url,
+                        "return_url": return_url,
+                    },
+                },
             },
             idempotency_key=idempotency_key,
+            api_v2=True,
         )
 
     def retrieve_account(self, account_id: str) -> dict[str, object]:
@@ -200,12 +219,42 @@ class StripeGateway:
         reservation_id: str,
         idempotency_key: str,
     ) -> dict[str, object]:
+        charge = self._request(
+            "GET",
+            f"charges/{quote(source_transaction, safe='')}",
+            {"expand[]": "balance_transaction"},
+        )
+        if (
+            charge.get("id") != source_transaction
+            or charge.get("currency") != currency
+            or charge.get("amount") != amount
+            or charge.get("paid") is not True
+            or charge.get("amount_refunded") != 0
+        ):
+            raise StripeGatewayError("Stripe source charge does not match the verified deposit")
+        balance = charge.get("balance_transaction")
+        if not isinstance(balance, dict):
+            raise StripeGatewayError("Stripe charge settlement is not available")
+        settlement_amount = balance.get("amount")
+        settlement_currency = balance.get("currency")
+        if (
+            type(settlement_amount) is not int
+            or settlement_amount <= 0
+            or not isinstance(settlement_currency, str)
+            or re.fullmatch(r"[a-z]{3}", settlement_currency) is None
+            or (settlement_currency == currency and settlement_amount != amount)
+        ):
+            raise StripeGatewayError("Stripe returned an invalid charge settlement")
+        # Preserve same-currency retries. The old key cannot have created a
+        # valid source-linked transfer when its currency differed from settlement.
+        if settlement_currency != currency:
+            idempotency_key = f"{idempotency_key}-settlement-v1"
         return self._request(
             "POST",
             "transfers",
             {
-                "amount": str(amount),
-                "currency": currency,
+                "amount": str(settlement_amount),
+                "currency": settlement_currency,
                 "destination": destination,
                 "source_transaction": source_transaction,
                 "transfer_group": reservation_id,

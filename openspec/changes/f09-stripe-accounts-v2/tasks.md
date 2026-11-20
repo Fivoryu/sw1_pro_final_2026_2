@@ -1,0 +1,5 @@
+- [x] Adaptar el alta y el enlace de onboarding al contrato Accounts v2.
+- [x] Capturar y validar el correo en el flujo de alta, sin volver a pedirlo al continuar.
+- [x] Verificar el contrato backend/panel con pruebas automatizadas: 42 pruebas del backend, 4 del panel y compilación del panel correctas.
+- [x] Verificar que Stripe genera un Account Link v2 para la cuenta demo existente en el sandbox de RoomForge.
+- [x] Validar el onboarding de prueba: el navegador abrió el formulario, regresó al panel y mostró datos completos y transferencias habilitadas. Ambos indicadores se verificaron en la base local.

@@ -617,13 +617,20 @@ def test_connect_onboarding_creates_and_scopes_agency_account(
         stripe_connect_account_country="US",
     )
 
-    response = context.client.post("/api/v1/staff/agencies/agency-one/stripe/connect/onboarding-link")
+    path = "/api/v1/staff/agencies/agency-one/stripe/connect/onboarding-link"
+    assert context.client.post(path).status_code == 422
+    assert context.client.post(path, json={"contact_email": "not-an-email"}).status_code == 422
+    response = context.client.post(path, json={"contact_email": "finance@example.test"})
 
     assert response.status_code == 200, response.text
     assert response.json() == {"url": "https://connect.stripe.test/onboarding"}
     with context.session_factory() as session:
         account = session.query(StripeConnectAccount).filter_by(agency_id="agency-one").one()
         assert account.stripe_account_id == "acct_test_agency"
+
+    assert context.client.post(path).status_code == 200
+    status = context.client.get("/api/v1/staff/agencies/agency-one/stripe/connect")
+    assert status.json()["account_exists"] is True
 
 
 def test_card_acceptance_transfers_to_connected_agency_account(
@@ -1705,3 +1712,112 @@ def test_permit_deadline_ceils_subsecond_policy_deadline_and_policy_stays_exclus
     assert expired.status_code == 409, expired.text
     assert expired.json()["code"] == "reservation_decision_deadline_passed"
     assert rpc.calls == ["eth_chainId", "eth_getCode", "eth_call", "eth_call"]
+
+
+def _make_listing_require_an_included_extra(
+    context: ReservationsContext, *, listing_id: str, quote_has_line: bool
+) -> str:
+    """Add an included extra and return a current quote, with or without its line.
+
+    Quote snapshots are immutable, so a new one is stored at the advanced offer version.
+    """
+    from uuid import uuid4
+
+    from app.modules.catalog.models import ListingExtra
+
+    quote_id = str(uuid4())
+    with context.session_factory.begin() as session:
+        session.add(
+            ListingExtra(
+                id="extra-included",
+                listing_id=listing_id,
+                name="Sofa",
+                price=Decimal("300.00"),
+                inclusion="included",
+            )
+        )
+        session.flush()
+        listing = session.get(Listing, listing_id)
+        assert listing is not None
+        lines: list[dict[str, Any]] = [
+            {
+                "kind": "base",
+                "extra_id": None,
+                "amount": "100000.00",
+                "currency": "BOB",
+                "charge_period": "one_time",
+            }
+        ]
+        total = Decimal("100000.00")
+        if quote_has_line:
+            lines.append(
+                {
+                    "kind": "extra",
+                    "extra_id": "extra-included",
+                    "amount": "300.00",
+                    "currency": "BOB",
+                    "charge_period": "one_time",
+                }
+            )
+            total += Decimal("300.00")
+        session.add(
+            QuoteSnapshot(
+                id=quote_id,
+                listing_id=listing_id,
+                offer_version=listing.offer_version,
+                operation="sale",
+                currency="BOB",
+                lines=lines,
+                one_time_total=total,
+                monthly_total=Decimal("0.00"),
+                created_at=context.clock(),
+                expires_at=context.clock() + timedelta(minutes=15),
+            )
+        )
+    return quote_id
+
+
+def test_reservation_rejects_a_quote_that_lacks_an_included_extra(
+    reservations_context: ReservationsContext,
+) -> None:
+    context = reservations_context
+    customer_id, auth = _customer_auth(context, email="included-missing@example.test")
+    _, wallet_id = _seed_reservation_inputs(
+        context, customer_id, listing_id="included-missing-listing", deposit_amount=Decimal("1000.00")
+    )
+    quote_id = _make_listing_require_an_included_extra(
+        context, listing_id="included-missing-listing", quote_has_line=False
+    )
+
+    response = _create_reservation(
+        context,
+        auth,
+        listing_id="included-missing-listing",
+        quote_id=quote_id,
+        wallet_id=wallet_id,
+    )
+
+    assert (response.status_code, response.json()["code"]) == (409, "quote_missing_included_extra")
+
+
+def test_reservation_accepts_a_quote_that_carries_every_included_extra(
+    reservations_context: ReservationsContext,
+) -> None:
+    context = reservations_context
+    customer_id, auth = _customer_auth(context, email="included-present@example.test")
+    _, wallet_id = _seed_reservation_inputs(
+        context, customer_id, listing_id="included-present-listing", deposit_amount=Decimal("1000.00")
+    )
+    quote_id = _make_listing_require_an_included_extra(
+        context, listing_id="included-present-listing", quote_has_line=True
+    )
+
+    response = _create_reservation(
+        context,
+        auth,
+        listing_id="included-present-listing",
+        quote_id=quote_id,
+        wallet_id=wallet_id,
+    )
+
+    assert response.status_code == 201, response.text
