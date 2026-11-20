@@ -159,7 +159,7 @@ void main() {
   test('ties are not resolved by enum order (welcome tour)', () {
     final r = _assistant.answer('¿cómo reservo?', GuideScreen.catalog);
     expect(r.text, isNot(contains('Recorrido completo')));
-    expect(r.text.toLowerCase(), contains('reserv'));
+    expect(r.text, contains('«Reservar un inmueble'));
   });
 
   test('a partial match with mostly unmatched words falls back honestly', () {
@@ -168,5 +168,44 @@ void main() {
       GuideScreen.catalog,
     );
     expect(r.text, contains('no estoy seguro'));
+  });
+
+  test('action questions about starting a reservation pick the start flow', () {
+    for (final q in [
+      '¿cómo reservo?',
+      'quiero reservar',
+      'cómo hago una reserva',
+    ]) {
+      final r = _assistant.answer(q, GuideScreen.catalog);
+      expect(r.text, contains('«Reservar un inmueble'), reason: q);
+      expect(r.text, isNot(contains('«Seguir una reserva»')), reason: q);
+    }
+  });
+
+  test('other action questions still resolve to their own steps', () {
+    final cancel = _assistant.answer(
+      'cómo cancelo una reserva',
+      GuideScreen.catalog,
+    );
+    expect(cancel.text, contains('«Cancelar una solicitud»'));
+    final quote = _assistant.answer('cómo cotizo', GuideScreen.catalog);
+    expect(quote.text, contains('Calcular cotización'));
+  });
+
+  test('two-word questions need both words covered', () {
+    final r = _assistant.answer('borrar reseña', GuideScreen.catalog);
+    expect(r.text, contains('no estoy seguro'));
+    expect(
+      _assistant.answer('cerrar sesión', GuideScreen.catalog).text,
+      contains('«Cerrar sesión»'),
+    );
+    expect(
+      _assistant.answer('cómo reservo', GuideScreen.catalog).text,
+      isNot(contains('no estoy seguro')),
+    );
+    expect(
+      _assistant.answer('qué es escrow', GuideScreen.catalog).text,
+      isNot(contains('no estoy seguro')),
+    );
   });
 }

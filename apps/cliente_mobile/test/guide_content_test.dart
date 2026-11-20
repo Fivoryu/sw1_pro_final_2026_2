@@ -104,13 +104,32 @@ void main() {
       final lower = ' ${text.toLowerCase()} ';
       for (final word in _englishWords) {
         expect(
-          RegExp('\b$word\b').hasMatch(lower),
+          RegExp(r'\b' + RegExp.escape(word) + r'\b').hasMatch(lower),
           isFalse,
           reason: '"$text" contains "$word"',
         );
       }
     }
   });
+  test('reservation guidance follows the real detail screen order', () {
+    final detail = GuideContent.forScreen(GuideScreen.listingDetail);
+    final w = detail.walkthroughs.firstWhere(
+      (x) => x.name.startsWith('Reservar un inmueble'),
+    );
+    final steps = w.steps.join(' ');
+    expect(steps, contains('Calcular cotización'));
+    expect(steps, contains('Elegir cómo reservar'));
+    expect(
+      steps.indexOf('Calcular cotización'),
+      lessThan(steps.indexOf('Elegir cómo reservar')),
+    );
+    expect(steps, isNot(contains('botón de reservar')));
+    expect(
+      detail.mistakes.join(' '),
+      allOf(contains('Elegir cómo reservar'), contains('Calcular cotización')),
+    );
+  });
+
   test('quote guidance matches the real labels of the flow', () {
     final detail = _allText(
       GuideContent.forScreen(GuideScreen.listingDetail),

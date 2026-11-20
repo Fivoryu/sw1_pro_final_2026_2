@@ -248,12 +248,13 @@ class GuideContent {
           ],
         ),
         GuideWalkthrough(
-          name: 'Sumar opcionales y reservar',
+          name: 'Reservar un inmueble: sumar opcionales y elegir cómo reservar',
           steps: [
             'En «Opcionales», marcá los extras que quieras sumar.',
-            'Elegí la moneda de la reserva en el desplegable (BOB, USD o USDT).',
-            'Tocá el botón de reservar. Si no entraste a tu cuenta, la app te lo va a pedir.',
-            'Confirmá los datos y elegí cómo pagar con dinero de prueba: tarjeta de prueba o wallet de prueba.',
+            'En «Moneda de la cotización», elegí BOB, USD o USDT en el desplegable.',
+            'Tocá «Calcular cotización» y esperá el resumen con el total.',
+            'Debajo del resumen, tocá «Elegir cómo reservar». Si no entraste a tu cuenta, la app te va a pedir que inicies sesión en Cuenta.',
+            'Elegí cómo pagar el depósito con dinero de prueba: «Tarjeta de prueba» o «Wallet de prueba».',
             'Tocá «Ver mi reserva» para seguir su estado.',
           ],
         ),
@@ -275,7 +276,7 @@ class GuideContent {
         ),
       ],
       mistakes: [
-        'No ves el botón de reserva o te pide iniciar sesión: entrá primero en la pestaña Cuenta.',
+        'No ves el botón «Elegir cómo reservar»: aparece recién después de tocar «Calcular cotización» y ver el resumen. Si cambiás opcionales o moneda, tenés que calcular de nuevo. Si te pide iniciar sesión, entrá primero en la pestaña Cuenta.',
         'El precio no coincide con otra pantalla: puede estar en otra moneda de visualización.',
         'La disponibilidad aparece como no confirmada: es solo informativa. La inmobiliaria la confirma después de tu reserva.',
         'No hay recorrido 3D: no todos los inmuebles lo tienen. Mirá las fotos o consultá por chat.',

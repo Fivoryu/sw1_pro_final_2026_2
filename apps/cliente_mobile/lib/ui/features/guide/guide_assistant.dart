@@ -246,6 +246,9 @@ class GuideAssistant {
     'mal',
   };
 
+  /// Domain words too generic to require a match (stems).
+  static const _genericWords = {'inmue'};
+
   static final RegExp _lostPhrase = RegExp(
     r'perd|ayuda|no se que hacer|no entiendo|que mas puedo|que puedo hacer|'
     r'que hago|por donde empiezo',
@@ -580,8 +583,13 @@ class GuideAssistant {
     }
     if (e.screen == current) s *= 1.4;
     if (s > 0) {
-      // Tie-breakers: actionable walkthroughs, then more specific names.
-      if (e.kind == _Kind.walkthrough) s += 0.02;
+      // Tie-breakers: actionable walkthroughs, then walkthroughs that start
+      // with the action asked («reservo» → «Reservar…», not «Seguir una
+      // reserva»), then more specific names.
+      if (e.kind == _Kind.walkthrough) {
+        s += 0.02;
+        if (e.name.isNotEmpty && q.contains(e.name.first)) s += 0.05;
+      }
       if (e.name.isNotEmpty) {
         s += 0.005 * e.name.where(q.contains).length / e.name.length;
       }
@@ -606,7 +614,15 @@ class GuideAssistant {
     }
     if (best == null || top < 3.0) return null;
     // Honest fallback when most meaningful words are not covered.
-    if (q.length >= 2 && _matched(best, q) * 2 < q.length) return null;
+    if (q.length == 2) {
+      // Both words must be covered; only a generic domain word may be skipped.
+      final missing = q.where(
+        (t) => !best!.name.contains(t) && !best.body.contains(t),
+      );
+      if (missing.any((t) => !_genericWords.contains(t))) return null;
+    } else if (q.length > 2 && _matched(best, q) * 2 < q.length) {
+      return null;
+    }
     return best;
   }
 
