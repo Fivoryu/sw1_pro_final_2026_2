@@ -40,6 +40,10 @@ Reglas del documento v1:
   opcional por muro.
 - `openings[]`: `type` es `door` o `window`; `position` ∈ [0,1] medido desde `start` del muro y
   centrado en ese punto; `width`/`height` > 0; `sillHeight` ≥ 0 (ventanas, default 0.9).
+- `openings[].source` (opcional): `"estimated"` cuando la captura por video reconoció la abertura con una sola señal
+  (visión sin cruce de cámara) y falta que una persona la confirme; se quita al confirmar y no se
+  envía en aberturas dibujadas a mano. Cualquier otro valor se rechaza con `422`. Los lectores que no lo
+  conocen pueden ignorarlo.
   `wallId` debe referenciar un muro del mismo documento.
 - `rooms[]` (complemento): `wallIds` con al menos 3 ids distintos que forman un ciclo; el polígono
   se deriva encadenando los extremos de esos muros en orden. `name` y `color` opcionales.
@@ -57,6 +61,16 @@ un documento sin ellos sigue siendo válido, y cuando no se envían tampoco apar
   - `wall_point`: altura medida con un punto marcado sobre el muro.
   - `manual`: altura ingresada a mano por el agente.
   - `assumed`: altura supuesta; **no fue medida** y no debe presentarse como medición.
+  - `estimated`: altura derivada del video por la reconstrucción; es una estimación que el agente
+    aún no confirmó y no debe presentarse como medición; al confirmarla pasa a `manual`.
+- `scale.mode` (nivel superior del documento): `metric` o `proportional`. Un plano
+  **proporcional** conserva razones y conexiones, pero sus valores **no son metros**: no debe
+  rotularse en metros ni usarse para calcular superficies. La ausencia de `scale` significa
+  `metric` solo para escenas manuales históricas; en una reconstrucción no sustituye su evidencia.
+  Los borradores proporcionales usan `unit: "arbitrary"`. Los documentos proporcionales antiguos
+  que declaraban `"meters"` se normalizan a unidades arbitrarias al validar o consultar capturas;
+  esa lectura no reescribe la evidencia almacenada. No se guardan mediante el PUT de escena
+  métrica, no se aceptan ni se publican. Un modo desconocido se rechaza con `422 scene_invalid`.
 - `objects[].source`: procedencia del volumen; `depth` (extraído de datos de profundidad durante el
   recorrido) o `manual` (ubicado a mano).
 - `objects[].confidence`: número en [0, 1] con la confianza declarada por la captura.
@@ -221,3 +235,34 @@ reserva.
 Las colisiones, las aberturas transitables y los límites del recorrido los decide
 `apps/cliente_mobile/assets/viewer/geometry.mjs`, mediante funciones puras, no el
 renderizador. El módulo está cubierto por 14 pruebas con `node --test`.
+
+## Extensión privada de borradores F07 (2026-11-17)
+
+Las escenas públicas y el PUT de escena del inmueble siguen exigiendo `unit: "meters"`.
+Exclusivamente `sceneDraft` de captura puede usar `unit: "arbitrary"`, acompañado de
+`measurement` (`source: "sfm"`, `scale`, `alignment`, `clock`, `referenceConfirmed`),
+según [el contrato F07](f07-capture-package.md). El backend bloquea aplicar/aceptar/publicar
+borradores sin escala, alineación conectada, reloj confirmado o referencia medida confirmada.
+Una fuente de objeto aditiva, `sfm_estimated`, distingue cajas estimadas con SfM de `depth` y `manual`.
+Los documentos anteriores sin esos campos siguen siendo legibles; su ausencia no acredita precisión física.
+
+### Asociación persistente de captura (R04/R05/R12)
+
+El PUT admite `captureId` para una escena derivada de captura. El servidor comprueba agencia,
+inmueble, estado completado/aceptado y evidencia métrica contra el borrador persistido.
+Permite corregir geometría humana; no permite eliminar o sustituir su evidencia `measurement`.
+La procedencia de una escena ya asociada no puede borrarse omitiendo campos. Una copia inicial
+de geometría o de los mismos identificadores de paredes de una captura también exige asociación.
+Escenas manuales, planos y datos históricos sin origen capturado conservan su contrato.
+
+El reemplazo manual deliberado usa `X-Scene-Intent: manual-replacement` y el ETag exacto
+en `If-Match`; ni ausencia de precondición ni `*` lo autorizan. No admite `captureId`,
+`measurement` SfM, objetos `sfm_estimated` o alturas `estimated/assumed` como medidas manuales.
+Esto preserva la acción existente de reemplazar desde captura manual/plano; omitir metadatos
+en un PUT ordinario sigue rechazándose. El registro de captura anterior se conserva y no se
+acepta automáticamente por haber guardado otra escena. El móvil declara esta intención solo
+en su acción explícita de reemplazo tras conflicto; el DTO ordinario conserva captureId/measurement.
+
+El panel conserva el ETag obtenido al leer/guardar y usa `If-Match` (o `If-None-Match: *`
+para crear). Tras un guardado confirmado, el reintento de aceptación no vuelve a ejecutar PUT.
+Un conflicto de revisión exige recargar; no se sobrescribe automáticamente una revisión nueva.

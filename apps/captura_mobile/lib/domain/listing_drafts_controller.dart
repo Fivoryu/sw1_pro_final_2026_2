@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import '../data/models/staff_listing.dart';
 import '../data/services/ar_capture_channel.dart';
 import '../data/services/capture_draft_store.dart';
 import '../data/services/guided_capture_store.dart';
+import '../data/services/offline_listing_store.dart';
 import '../data/services/photo_source.dart';
 import '../data/services/staff_auth_failure.dart';
 import '../data/services/staff_capture_api.dart';
@@ -109,6 +111,13 @@ class ListingDraftsController extends ChangeNotifier {
       _listings = listings;
       _loadState = ListingsLoadState.ready;
       notifyListeners();
+      await _session.rememberListings(requested.name, [
+        for (final listing in listings)
+          OfflineListing(
+            listingId: listing.listingId,
+            label: '${listing.city} · ${listing.zone}',
+          ),
+      ]);
     } on StaffAuthFailure catch (failure) {
       if (requested != _tab) return;
       _fail(messageFor(failure));
@@ -190,8 +199,6 @@ class ListingDraftsController extends ChangeNotifier {
     final store = _captureStore;
     final ar = _arCapture;
     if (sceneApi == null || store == null || ar == null) return null;
-    final captureApi = _captureApi;
-    final uploadStore = _uploadStore;
     return SpatialCaptureController(
       listingId: listingId,
       session: _session,
@@ -200,16 +207,105 @@ class ListingDraftsController extends ChangeNotifier {
       ar: ar,
       traceSource: _photoSource,
       floorplanInterpreter: _floorplanInterpreter,
-      uploads: captureApi == null || uploadStore == null
-          ? null
-          : CaptureUploadController(
-              listingId: listingId,
-              session: _session,
-              api: captureApi,
-              store: uploadStore,
-              files: _packageFiles,
-            ),
+      uploads: uploadsFor(listingId),
     );
+  }
+
+  /// Whether this build can queue and send capture packages.
+  bool get supportsUploads => _captureApi != null && _uploadStore != null;
+
+  /// Upload queue of one listing; null when this build has no upload services.
+  CaptureUploadController? uploadsFor(String listingId) {
+    final captureApi = _captureApi;
+    final uploadStore = _uploadStore;
+    if (captureApi == null || uploadStore == null) return null;
+    return CaptureUploadController(
+      listingId: listingId,
+      session: _session,
+      api: captureApi,
+      store: uploadStore,
+      files: _packageFiles,
+    );
+  }
+
+  /// Packages of the current account still on the phone (or still being
+  /// followed), oldest first. Reads local storage only.
+  Future<List<PendingCaptureUpload>> pendingUploads() async {
+    final owner = _session.ownerId;
+    final store = _uploadStore;
+    if (owner == null || store == null) return const [];
+    return [
+      for (final upload in await store.list(owner))
+        if (!upload.isFinished) upload,
+    ];
+  }
+
+  /// Resumes the queue of every listing once the session is real (signed in):
+  /// a no-op without an access token, so it never runs in offline mode.
+  Future<void> resumePendingUploads() async {
+    if (_session.accessToken == null) return;
+    final owner = _session.ownerId;
+    if (owner != null) {
+      try {
+        final journals = await const MethodChannel(
+          'roomforge/video_capture',
+        ).invokeListMethod<dynamic>('recoverPackages', {'ownerId': owner});
+        for (final entry in journals ?? []) {
+          if (entry is! Map ||
+              entry['ownerId'] != owner ||
+              entry['listingId'] is! String)
+            continue;
+          final result = entry['result'];
+          if (result is! Map || result['capturePackage'] is! Map) continue;
+          final package = CapturePackageInfo.fromJson(
+            Map<String, Object?>.from(result['capturePackage'] as Map),
+          );
+          final controller = uploadsFor(entry['listingId'] as String);
+          if (controller == null) continue;
+          try {
+            await controller.load();
+            if (await controller.enqueue(package)) {
+              await const MethodChannel(
+                'roomforge/video_capture',
+              ).invokeMethod<void>('ackPackage', {
+                'ownerId': owner,
+                'captureId': package.captureId,
+              });
+            }
+          } finally {
+            controller.dispose();
+          }
+        }
+      } on Object {
+        /* Journals and ZIPs stay private and intact for the next retry. */
+      }
+    }
+    final listingIds = {
+      for (final upload in await pendingUploads()) upload.listingId,
+    };
+    for (final listingId in listingIds) {
+      final uploads = uploadsFor(listingId);
+      if (uploads == null) return;
+      try {
+        await uploads.load();
+        await uploads.retry();
+      } on Object {
+        // One listing failing must not stop the others; its package stays
+        // queued on the phone for the next resume. Nothing is logged.
+      } finally {
+        uploads.dispose();
+      }
+    }
+  }
+
+  /// Forgets the listings held in memory (used when the session ends). It
+  /// does not touch the offline cache or the upload queue on disk.
+  void reset() {
+    _tab = ListingStatus.draft;
+    _listings = const [];
+    _loadState = ListingsLoadState.loading;
+    _message = null;
+    notifyListeners();
   }
 
   /// Reads the observation of the most recent rejection, if any.

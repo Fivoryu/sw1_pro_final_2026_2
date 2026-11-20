@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -9,7 +11,9 @@ import 'data/services/staff_capture_api.dart';
 import 'data/services/staff_chat_api.dart';
 import 'data/services/staff_notifications_api.dart';
 import 'data/services/staff_reviews_api.dart';
+import 'data/services/offline_listing_store.dart';
 import 'data/services/photo_source.dart';
+import 'data/services/video_capture_channel.dart';
 import 'data/services/staff_credential_store.dart';
 import 'data/services/staff_listing_photos_api.dart';
 import 'data/services/staff_listings_api.dart';
@@ -24,6 +28,7 @@ import 'ui/chat/chat_inbox_screen.dart';
 import 'ui/notifications/staff_notifications_screen.dart';
 import 'ui/reviews/staff_reviews_screen.dart';
 import 'ui/listings/listings_screen.dart';
+import 'ui/listings/offline_capture_view.dart';
 import 'ui/theme/andean_theme.dart';
 
 /// Backend used by the running app. Override it per environment with
@@ -53,6 +58,9 @@ void main() => runApp(
     controller: StaffSessionController(
       api: StaffAuthApi(baseUrl: _apiBaseUrl),
       credentialStore: SecureStaffCredentialStore(),
+      offlineStore: FileOfflineListingStore(
+        root: getApplicationSupportDirectory,
+      ),
     ),
     listingsApi: StaffListingsApi(baseUrl: _apiBaseUrl),
     photosApi: StaffListingPhotosApi(baseUrl: _apiBaseUrl),
@@ -87,6 +95,7 @@ class CaptureApp extends StatelessWidget {
     this.chatApi,
     this.notificationsApi,
     this.reviewsApi,
+    this.videoCapture,
   });
 
   final StaffSessionController controller;
@@ -105,6 +114,9 @@ class CaptureApp extends StatelessWidget {
   final StaffChatApi? chatApi;
   final StaffNotificationsApi? notificationsApi;
   final StaffReviewsApi? reviewsApi;
+
+  /// Native video recorder; the production channel when null.
+  final VideoCapture? videoCapture;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -125,6 +137,7 @@ class CaptureApp extends StatelessWidget {
       chatApi: chatApi,
       notificationsApi: notificationsApi,
       reviewsApi: reviewsApi,
+      videoCapture: videoCapture,
     ),
   );
 }
@@ -147,6 +160,7 @@ class AgentAccessScreen extends StatefulWidget {
     this.chatApi,
     this.notificationsApi,
     this.reviewsApi,
+    this.videoCapture,
   });
 
   final StaffSessionController controller;
@@ -165,6 +179,9 @@ class AgentAccessScreen extends StatefulWidget {
   final StaffChatApi? chatApi;
   final StaffNotificationsApi? notificationsApi;
   final StaffReviewsApi? reviewsApi;
+
+  /// Native video recorder; the production channel when null.
+  final VideoCapture? videoCapture;
 
   @override
   State<AgentAccessScreen> createState() => _AgentAccessScreenState();
@@ -186,15 +203,65 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
           session: widget.controller,
         );
 
+  late final ListingDraftsController _drafts = ListingDraftsController(
+    api: widget.listingsApi,
+    session: widget.controller,
+    photosApi: widget.photosApi,
+    photoSource: widget.photoSource,
+    sceneApi: widget.sceneApi,
+    captureStore: widget.captureStore,
+    guidedStore: widget.guidedStore,
+    arCapture: widget.arCapture,
+    captureApi: widget.captureApi,
+    uploadStore: widget.uploadStore,
+    floorplanInterpreter: widget.floorplanInterpreter,
+  );
+  StaffSessionStatus? _lastStatus;
+  StreamSubscription<dynamic>? _connectivity;
+  DateTime? _lastConnectivityRetry;
+
   @override
   void initState() {
     super.initState();
-    widget.controller.addListener(_syncNotifications);
+    widget.controller.addListener(_onSessionChanged);
     widget.controller.restore();
+    _connectivity = const EventChannel('roomforge/connectivity')
+        .receiveBroadcastStream()
+        .listen((event) {
+          if (event != true) return;
+          if (widget.controller.status == StaffSessionStatus.offline) {
+            widget.controller.restore().catchError((Object _) {});
+            return;
+          }
+          if (widget.controller.status != StaffSessionStatus.signedIn) return;
+          final now = DateTime.now();
+          if (_lastConnectivityRetry != null &&
+              now.difference(_lastConnectivityRetry!).inSeconds < 5)
+            return;
+          _lastConnectivityRetry = now;
+          _drafts.resumePendingUploads().catchError((Object _) {});
+        }, onError: (Object _) {});
   }
 
-  /// The inbox only polls while agency staff are signed in.
-  void _syncNotifications() => _notifications?.sync();
+  void _onSessionChanged() {
+    // The inbox only polls while agency staff are signed in.
+    _notifications?.sync();
+    final status = widget.controller.status;
+    // Packages recorded offline (or left by a closed app) are sent as soon as
+    // the session is real again.
+    if (status == StaffSessionStatus.signedIn &&
+        _lastStatus != StaffSessionStatus.signedIn) {
+      // Never an unhandled async error; failures stay queued for next time.
+      _drafts.resumePendingUploads().catchError((Object _) {});
+    }
+    // The previous account's listings must not outlive its session. The
+    // offline screen reads the session's cache, not these in-memory lists.
+    if (_lastStatus == StaffSessionStatus.signedIn &&
+        status != StaffSessionStatus.signedIn) {
+      _drafts.reset();
+    }
+    _lastStatus = status;
+  }
 
   void _openReviews() {
     final api = widget.reviewsApi;
@@ -228,8 +295,10 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
 
   @override
   void dispose() {
-    widget.controller.removeListener(_syncNotifications);
+    _connectivity?.cancel();
+    widget.controller.removeListener(_onSessionChanged);
     _notifications?.dispose();
+    _drafts.dispose();
     _email.dispose();
     _password.dispose();
     _code.dispose();
@@ -265,6 +334,7 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
         children: switch (widget.controller.status) {
           StaffSessionStatus.restoring => _restoring(context),
           StaffSessionStatus.unavailable => _unavailable(context),
+          StaffSessionStatus.offline => _offline(context),
           StaffSessionStatus.awaitingCode => _codeStep(context),
           StaffSessionStatus.signedOut => _credentialsStep(context),
           StaffSessionStatus.signedIn => _signedIn(context),
@@ -299,6 +369,15 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
       style: FilledButton.styleFrom(minimumSize: _actionMinSize),
       onPressed: widget.controller.restore,
       child: const Text('Reintentar'),
+    ),
+  ];
+
+  List<Widget> _offline(BuildContext context) => [
+    ..._heading(context, 'Sin conexión'),
+    OfflineCaptureView(
+      session: widget.controller,
+      drafts: _drafts,
+      videoCapture: widget.videoCapture,
     ),
   ];
 
@@ -453,21 +532,7 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
         style: FilledButton.styleFrom(minimumSize: _actionMinSize),
         onPressed: () => Navigator.of(context).push<void>(
           MaterialPageRoute<void>(
-            builder: (_) => ListingsScreen(
-              controller: ListingDraftsController(
-                api: widget.listingsApi,
-                session: widget.controller,
-                photosApi: widget.photosApi,
-                photoSource: widget.photoSource,
-                sceneApi: widget.sceneApi,
-                captureStore: widget.captureStore,
-                guidedStore: widget.guidedStore,
-                arCapture: widget.arCapture,
-                captureApi: widget.captureApi,
-                uploadStore: widget.uploadStore,
-                floorplanInterpreter: widget.floorplanInterpreter,
-              ),
-            ),
+            builder: (_) => ListingsScreen(controller: _drafts),
           ),
         ),
         icon: const Icon(Icons.arrow_forward),

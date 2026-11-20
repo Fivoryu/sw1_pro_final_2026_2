@@ -26,6 +26,7 @@ Every threshold below is a heuristic chosen for v1, not a measured tolerance.
 
 from __future__ import annotations
 
+import itertools
 import json
 import math
 import shutil
@@ -58,6 +59,11 @@ OCCUPANCY_COLOR = "#9e9e9e"
 DUPLICATE_WALL_ANGLE_DEG = 3.0
 DUPLICATE_WALL_DISTANCE_M = 0.3
 DUPLICATE_WALL_OVERLAP_M = 0.2
+# Welding the wall two touching rooms share (opt-in, see ``_SceneBuilder``). Their centre lines
+# may differ by up to this much, because each room's face comes from its own observations.
+SHARED_WALL_MAX_GAP_M = 0.3
+# The overlap along the wall must cover at least this share of the shorter of the two edges.
+SHARED_WALL_MIN_OVERLAP_REL = 0.3
 
 # Heights. Same default as the capture app's editor (RoomHeight.assumedDefault), so a room
 # without a ceiling reading gets the same assumed height wherever it is produced.
@@ -86,6 +92,14 @@ _PLANE_TYPES = frozenset({"floor", "wall", "ceiling"})
 
 class InvalidPackage(ValueError):
     """The package cannot be reconstructed no matter how often it is retried."""
+
+
+class ExternalToolMissing(RuntimeError):
+    """An optional external tool (ffmpeg, pycolmap) needed by the schema 2 path is not installed.
+
+    Not an :class:`InvalidPackage`: the package is fine and the job can be retried on a machine
+    that has the tool.
+    """
 
 
 @dataclass(frozen=True)
@@ -474,22 +488,35 @@ def _too_few_walls(count: int) -> ProposalFailed:
     )
 
 
-def propose_contour(
-    walls: list[tuple[Point, Point]], floors: list[list[Point]], trajectory: list[Point]
-) -> ProposedContour | ProposalFailed:
-    """Room contour from observed wall segments; rooms are assumed to have mostly square corners."""
-    walls = [w for w in walls if _dist(w[0], w[1]) >= MIN_WALL_LENGTH_M]
-    if len(walls) < 3:
-        return _too_few_walls(len(walls))
-
-    # Dominant axis: length-weighted circular mean of 4*theta (period of 90 degrees).
+def dominant_axis(walls: list[tuple[Point, Point]]) -> float:
+    """Length-weighted circular mean of 4*theta (period of 90 degrees), in radians."""
     sum_sin = sum_cos = 0.0
     for start, end in walls:
         d = _sub(end, start)
         theta = math.atan2(d[1], d[0])
         sum_sin += _len(d) * math.sin(4 * theta)
         sum_cos += _len(d) * math.cos(4 * theta)
-    axis = math.atan2(sum_sin, sum_cos) / 4
+    return math.atan2(sum_sin, sum_cos) / 4
+
+
+def propose_contour(
+    walls: list[tuple[Point, Point]],
+    floors: list[list[Point]],
+    trajectory: list[Point],
+    axis: float | None = None,
+) -> ProposedContour | ProposalFailed:
+    """Room contour from observed wall segments; rooms are assumed to have mostly square corners.
+
+    ``axis`` is the dominant direction to snap to. Rooms that share coordinates (one connected
+    reconstruction) pass the same axis so their walls stay parallel; without it the room uses
+    its own.
+    """
+    walls = [w for w in walls if _dist(w[0], w[1]) >= MIN_WALL_LENGTH_M]
+    if len(walls) < 3:
+        return _too_few_walls(len(walls))
+
+    if axis is None:
+        axis = dominant_axis(walls)
 
     lines: list[_Line] = []
     quarter = math.pi / 2
@@ -631,6 +658,11 @@ class _Room:
     height: float
     height_source: str  # contract value: ceiling_plane | assumed
     measured: bool
+    # Recognised doors and windows: {"edge", "position", "width", "height", "sill", "kind", "estimated"}
+    # with ``edge`` the index of the contour edge and ``position`` 0..1 along it.
+    openings: list[dict[str, Any]] = field(default_factory=list)
+    # Rooms only share a wall with rooms of the same group (one connected reconstruction).
+    group: int = 0
 
     def centerline(self) -> list[Point]:
         """Interior contour offset outwards by half the wall thickness (miter joints), in mm."""
@@ -662,22 +694,101 @@ class _WallRecord:
     height_source: str
 
 
+def _edge_gap(a: Point, b: Point, c: Point, d: Point) -> tuple[float, Point] | None:
+    """How far the line c-d lies beyond a-b (along a-b's outward normal), if it is the same wall.
+
+    The same wall means anti-parallel (two counter-clockwise rooms traverse it in opposite
+    directions), no further than ``SHARED_WALL_MAX_GAP_M`` and overlapping along most of the
+    shorter edge. Returns the signed gap and a-b's outward normal.
+    """
+    length = _dist(a, b)
+    other = _dist(c, d)
+    if length < 1e-9 or other < 1e-9:
+        return None
+    u, v = _unit(_sub(b, a)), _unit(_sub(d, c))
+    if _dot(u, v) >= 0 or abs(_cross(u, v)) > math.sin(math.radians(DUPLICATE_WALL_ANGLE_DEG)):
+        return None
+    normal = (u[1], -u[0])
+    gap = (_dot(_sub(c, a), normal) + _dot(_sub(d, a), normal)) / 2
+    if abs(gap) > SHARED_WALL_MAX_GAP_M:
+        return None
+    t0, t1 = _dot(_sub(c, a), u), _dot(_sub(d, a), u)
+    overlap = min(length, max(t0, t1)) - max(0.0, min(t0, t1))
+    if overlap < SHARED_WALL_MIN_OVERLAP_REL * min(length, other):
+        return None
+    return gap, normal
+
+
+def _translate_edge(polygon: list[Point], edge: int, shift: Point) -> None:
+    """Move one edge by ``shift``; its ends slide along the neighbouring edges."""
+    count = len(polygon)
+    start, end = polygon[edge], polygon[(edge + 1) % count]
+    direction = _unit(_sub(end, start))
+    anchor = _add(start, shift)
+
+    def meet(vertex: Point, neighbour: Point) -> Point:
+        along = _sub(vertex, neighbour)
+        denominator = _cross(along, direction)
+        if abs(denominator) < 1e-9:
+            return _add(vertex, shift)
+        t = _cross(_sub(anchor, neighbour), direction) / denominator
+        return _add(neighbour, _scale(along, t))
+
+    new_start = meet(start, polygon[(edge - 1) % count])
+    new_end = meet(end, polygon[(edge + 2) % count])
+    polygon[edge] = (_round(new_start[0], 3), _round(new_start[1], 3))
+    polygon[(edge + 1) % count] = (_round(new_end[0], 3), _round(new_end[1], 3))
+
+
+def _snap_shared_walls(rooms: list[_Room], centerlines: list[list[Point]]) -> None:
+    """Make the centre lines of the wall two touching rooms share coincide, in place.
+
+    Each of the two lines moves half the gap towards the other, so neither room gives up more than
+    half of it. Every edge is matched at most once, the closest pairs first.
+    """
+    matches: list[tuple[float, int, int, int, int, Point]] = []
+    for i, j in itertools.combinations(range(len(rooms)), 2):
+        if rooms[i].group != rooms[j].group:
+            continue
+        for ei, a in enumerate(centerlines[i]):
+            b = centerlines[i][(ei + 1) % len(centerlines[i])]
+            for ej, c in enumerate(centerlines[j]):
+                found = _edge_gap(a, b, c, centerlines[j][(ej + 1) % len(centerlines[j])])
+                if found is not None:
+                    matches.append((abs(found[0]), i, ei, j, ej, _scale(found[1], found[0] / 2)))
+    used: set[tuple[int, int]] = set()
+    for _, i, ei, j, ej, shift in sorted(matches):
+        if (i, ei) in used or (j, ej) in used:
+            continue
+        used.update({(i, ei), (j, ej)})
+        _translate_edge(centerlines[i], ei, shift)
+        _translate_edge(centerlines[j], ej, _scale(shift, -1.0))
+
+
 class _SceneBuilder:
-    def __init__(self, rooms: list[_Room], boxes: list[dict[str, Any]]) -> None:
+    def __init__(self, rooms: list[_Room], boxes: list[dict[str, Any]], snap_shared_walls: bool = False) -> None:
         self.rooms = rooms
         self.boxes = boxes
+        self.snap_shared_walls = snap_shared_walls
         self.warnings: list[str] = []
         self._vertices: list[Point] = []
         self._walls: list[_WallRecord] = []
         self._by_endpoints: dict[tuple[int, int], int] = {}
 
     def build(self) -> dict[str, Any]:
-        indexes = [[self._weld(v) for v in room.centerline()] for room in self.rooms]
+        centerlines = [room.centerline() for room in self.rooms]
+        if self.snap_shared_walls:
+            _snap_shared_walls(self.rooms, centerlines)
+        indexes = [[self._weld(v) for v in line] for line in centerlines]
         room_documents: list[dict[str, Any]] = []
+        chains: list[list[list[int]]] = []
         for room, vertex_indexes in zip(self.rooms, indexes, strict=True):
             wall_ids: list[str] = []
+            room_chains: list[list[int]] = []
+            chains.append(room_chains)
             for i, a in enumerate(vertex_indexes):
                 chain = self._split_edge(a, vertex_indexes[(i + 1) % len(vertex_indexes)])
+                room_chains.append(chain)
                 for k in range(len(chain) - 1):
                     wall = self._wall_for(chain[k], chain[k + 1], room)
                     wall_id = self._walls[wall].id
@@ -692,8 +803,7 @@ class _SceneBuilder:
             "version": "2.0",
             "unit": "meters",
             "walls": [self._wall_json(w) for w in self._walls],
-            # Openings are not detected in v1; the agency marks them in the editor.
-            "openings": [],
+            "openings": self._openings(chains),
             "rooms": room_documents,
             "objects": self._objects(),
         }
@@ -701,6 +811,54 @@ class _SceneBuilder:
         self._duplicate_wall_warnings()
         self._overlap_warnings()
         return document
+
+    def _openings(self, chains: list[list[list[int]]]) -> list[dict[str, Any]]:
+        """Recognised openings placed on the wall piece that holds their centre.
+
+        Rooms that share a wall each see its door: the same physical opening is emitted once.
+        """
+        result: list[dict[str, Any]] = []
+        seen: list[tuple[int, float, float]] = []  # wall index, canonical centre, wall length
+        counts = {"door": 0, "window": 0}
+        for room, room_chains in zip(self.rooms, chains, strict=True):
+            for opening in room.openings:
+                chain = room_chains[opening["edge"]]
+                points = [self._vertices[v] for v in chain]
+                cumulative = [0.0]
+                for a, b in itertools.pairwise(points):
+                    cumulative.append(cumulative[-1] + _dist(a, b))
+                if cumulative[-1] <= 0:
+                    continue
+                target = opening["position"] * cumulative[-1]
+                k = next((i for i in range(len(chain) - 1) if target <= cumulative[i + 1]), len(chain) - 2)
+                length = cumulative[k + 1] - cumulative[k]
+                if length <= 0:
+                    continue
+                wall = self._by_endpoints[(min(chain[k], chain[k + 1]), max(chain[k], chain[k + 1]))]
+                record = self._walls[wall]
+                half = min(opening["width"], 0.95 * length) / 2 / length
+                along = min(max((target - cumulative[k]) / length, half), 1 - half)
+                canonical = along if (chain[k], chain[k + 1]) == (record.start, record.end) else 1 - along
+                if any(w == wall and abs(c - canonical) * length < 0.5 * opening["width"] for w, c, _ in seen):
+                    continue
+                seen.append((wall, canonical, length))
+                kind = opening["kind"]
+                counts[kind] += 1
+                sill = min(opening["sill"], 0.9 * record.height)
+                item: dict[str, Any] = {
+                    "id": f"{kind}-{counts[kind]}",
+                    "wallId": record.id,
+                    "position": _round(canonical, 4),
+                    "width": _round(min(opening["width"], 0.95 * length), 3),
+                    "height": _round(max(min(opening["height"], record.height - sill), 0.01), 3),
+                    "type": kind,
+                }
+                if kind == "window":
+                    item["sillHeight"] = _round(sill, 3)
+                if opening.get("estimated"):
+                    item["source"] = "estimated"
+                result.append(item)
+        return result
 
     def _weld(self, point: Point) -> int:
         for i, vertex in enumerate(self._vertices):
@@ -1110,9 +1268,29 @@ def _nearest_room(point: Point, samples: list[tuple[Point, str]]) -> str:
     return min(samples, key=lambda sample: _dist(sample[0], point))[1]
 
 
+def _declared_schema_version(package_dir: Path) -> Any:
+    """``schemaVersion`` of manifest.json, or None when it cannot be read (v1 reports that)."""
+    try:
+        data = json.loads((package_dir / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data.get("schemaVersion") if isinstance(data, dict) else None
+
+
 def reconstruct(package_dir: Path, *, depth_stride: int = DEPTH_PIXEL_STRIDE) -> ReconstructionResult:
-    """Reconstruct an unzipped capture package into a scene v2 draft plus agency warnings."""
+    """Reconstruct an unzipped capture package into a scene v2 draft plus agency warnings.
+
+    Dispatches on ``schemaVersion``: 1 is the ARCore package handled here, 2 is video + sensors
+    (``reconstruct_video``); any other declared version is rejected.
+    """
     package_dir = Path(package_dir)
+    version = _declared_schema_version(package_dir)
+    if version is not None and version != 1:
+        if type(version) is int and version == 2:
+            import reconstruct_video
+
+            return reconstruct_video.reconstruct_video(package_dir)
+        raise InvalidPackage(f"unsupported schemaVersion {version!r}; supported versions are 1 and 2")
     manifest = _read_manifest(package_dir)
     floor_y = float(manifest["floorY"])
     warnings: list[str] = []
@@ -1259,6 +1437,9 @@ def main(argv: list[str] | None = None) -> int:
         result = reconstruct_path(Path(args[0]))
     except InvalidPackage as error:
         print(f"invalid package: {error}", file=sys.stderr)
+        return 1
+    except ExternalToolMissing as error:
+        print(f"missing tool: {error}", file=sys.stderr)
         return 1
     print(json.dumps({"sceneDraft": result.scene_draft, "warnings": result.warnings},
                      ensure_ascii=False, indent=2))

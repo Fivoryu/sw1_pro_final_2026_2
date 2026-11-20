@@ -45,9 +45,13 @@ CaptureUploadText captureUploadText(CaptureUploadItem item) {
     case UploadPhase.uploading:
       final fraction = item.progress ?? 0;
       return CaptureUploadText(
-        title: 'Subiendo el recorrido…',
-        detail:
-            '${(fraction * 100).floor()} % de ${megabytes(upload.sizeBytes)}',
+        title: fraction >= 1
+            ? 'Esperando respuesta del almacenamiento…'
+            : 'Subiendo el recorrido…',
+        detail: fraction >= 1
+            ? 'El envío todavía no está confirmado. Mantené la conexión '
+                  'hasta recibir la respuesta del almacenamiento.'
+            : '${(fraction * 100).floor()} % de ${megabytes(upload.sizeBytes)}',
         progress: fraction,
       );
     case UploadPhase.finishing:
@@ -74,7 +78,9 @@ CaptureUploadText captureUploadText(CaptureUploadItem item) {
   }
   if (!upload.isSent) {
     return CaptureUploadText(
-      title: 'Recorrido guardado en el teléfono',
+      title: problem == null
+          ? 'Recorrido guardado en el teléfono'
+          : 'Subida pendiente: no se completó el envío',
       detail:
           problem ??
           'Se sube cuando haya conexión (${megabytes(upload.sizeBytes)}).',
@@ -108,9 +114,10 @@ CaptureUploadText captureUploadText(CaptureUploadItem item) {
       canRefresh: true,
     ),
     RemoteCaptureStatus.completed => CaptureUploadText(
-      title: 'Borrador listo',
+      title: 'Borrador generado · requiere revisión',
       detail: withProblem(
-        'La agencia lo revisa y lo ajusta en el panel. Desde el teléfono no '
+        'El procesamiento terminó; las medidas aún deben validarse. La agencia '
+        'revisa escala y geometría en el panel o continúa con captura manual. Desde el teléfono no '
         'se muestra el resultado en 3D.',
       ),
       canDismiss: true,
@@ -120,7 +127,7 @@ CaptureUploadText captureUploadText(CaptureUploadItem item) {
       detail: withProblem(
         upload.failureReason == null
             ? 'El servidor no indicó el motivo. Volvé a capturar el ambiente.'
-            : 'Motivo: ${upload.failureReason}. Volvé a capturar el ambiente.',
+            : reconstructionFailureText(upload.failureReason!),
       ),
       canDismiss: true,
     ),
@@ -135,4 +142,38 @@ CaptureUploadText captureUploadText(CaptureUploadItem item) {
       canRefresh: true,
     ),
   };
+}
+
+String reconstructionFailureText(String reason) {
+  final classified = reason.replaceFirst('Invalid package: ', '');
+  final context = [
+    if (classified.contains('Sin referencia métrica.'))
+      'Falta una referencia: confirmá las dimensiones reales medidas del objeto.',
+    if (classified.contains('Referencia sin escala aplicada.'))
+      'Las dimensiones aportadas no pudieron aplicarse al modelo. Mostrá el objeto '
+          'completo con su pared o piso de apoyo alrededor.',
+    if (classified.contains('Piezas desconectadas.'))
+      'Faltan vistas compartidas entre zonas del recorrido; no se conoce su posición relativa.',
+    if (classified.contains('Reloj no verificado.'))
+      'El reloj de cámara no está verificado; las medidas no pueden certificarse.',
+  ].join('\n');
+  if (classified.startsWith('F07_OVERLAP:')) {
+    return 'Se registraron pocas vistas para cerrar el ambiente. Conservá vistas '
+        'superpuestas al pasar por bases y esquinas; incluí detalles con textura. '
+        'También podés usar captura manual.\n$classified\n$context';
+  }
+  if (classified.startsWith('F07_POSES:')) {
+    return 'No se pudieron relacionar suficientes imágenes. Revisá luz, nitidez y '
+        'textura; movete despacio con vistas superpuestas, o usá captura manual.';
+  }
+  if (classified.startsWith('F07_CONTOUR:')) {
+    return 'Las paredes observadas no permiten cerrar el ambiente. Revisá bases y '
+        'esquinas, manteniendo la pared anterior a la vista, o usá captura manual.\n$context';
+  }
+  if (classified.startsWith('F07_FFMPEG:') ||
+      classified.startsWith('F07_SFM')) {
+    return '$classified\nEl video subido se conserva según la política de retención. '
+        'No necesitás grabar otra vez para pedir revisión técnica.';
+  }
+  return 'Motivo: $reason. Podés revisar la captura o usar captura manual.';
 }

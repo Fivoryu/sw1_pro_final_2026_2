@@ -455,6 +455,7 @@ def create_app(
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
         allow_headers=[
+            "X-Scene-Intent",
             "Authorization",
             "Content-Type",
             "X-CSRF-Token",

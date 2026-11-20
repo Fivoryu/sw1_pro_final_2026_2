@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import or_, update
 from sqlalchemy.orm import Session, sessionmaker
@@ -32,6 +32,10 @@ from app.modules.reconstruction.models import (
 
 LOGGER = logging.getLogger("roomforge.reconstruction")
 RETENTION_BATCH_SIZE = 100
+
+
+def _utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
 def capture_object_key(agency_id: str, listing_id: str, capture_id: str) -> str:
@@ -142,6 +146,8 @@ def run_reconstruction_recovery_sweep(
             session.query(ListingCapture)
             .filter(
                 ListingCapture.status == CAPTURE_QUEUED,
+                ListingCapture.frames_deleted_at.is_(None),
+                ListingCapture.frames_delete_after > now,
                 or_(
                     ListingCapture.enqueued_at.is_(None),
                     ListingCapture.enqueued_at <= cutoff,
@@ -154,7 +160,10 @@ def run_reconstruction_recovery_sweep(
             *((c, "Worker lease expired after {n} attempts without completion") for c in expired),
             *((c, "Reconstruction delivery was not claimed after {n} attempts") for c in stale_queued),
         ):
-            capture.attempts += 1
+            # Only an expired execution consumes an attempt. Queue outages and
+            # unclaimed deliveries have not run reconstruction at all.
+            if capture.status == CAPTURE_PROCESSING:
+                capture.attempts += 1
             capture.lease_expires_at = None
             capture.claim_token = None
             capture.enqueued_at = None
@@ -222,13 +231,21 @@ def run_capture_retention_sweep(
                 .with_for_update()
                 .one_or_none()
             )
-            if capture is None or capture.frames_deleted_at is not None:
+            if (capture is None or capture.frames_deleted_at is not None
+                or capture.status == CAPTURE_PROCESSING or _utc(capture.frames_delete_after) > _utc(now)):
                 continue
             try:
                 storage.delete(capture.object_key)
+                staging_key = capture_object_key(capture.agency_id, capture.listing_id, capture.id)
+                if staging_key != capture.object_key:
+                    storage.delete(staging_key)
             except Exception:  # keep the record; the next sweep retries
                 LOGGER.warning("Capture package deletion failed; the next sweep will retry")
                 continue
             capture.frames_deleted_at = now
+            if capture.status in {"awaiting_upload", CAPTURE_QUEUED}:
+                capture.status = CAPTURE_FAILED
+                capture.failure_reason = "Capture retention expired before reconstruction"
+                capture.finished_at = now
             deleted += 1
     return deleted

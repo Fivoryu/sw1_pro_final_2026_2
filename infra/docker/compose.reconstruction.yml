@@ -1,0 +1,34 @@
+# Add to compose.local.yml; no host PATH changes and no GPU required.
+services:
+  api:
+    environment:
+      RECONSTRUCTION_WORKER_TOKEN: ${RECONSTRUCTION_WORKER_TOKEN:?Set a reconstruction worker token}
+      RECONSTRUCTION_QUEUE_NAME: roomforge-local-reconstruction
+      SQS_ENDPOINT_URL: http://floci:4566
+  reconstruction:
+    build:
+      context: ../..
+      dockerfile: infra/docker/inference/Dockerfile.reconstruction
+    environment:
+      RECONSTRUCTION_API_BASE_URL: http://api:8000
+      RECONSTRUCTION_WORKER_TOKEN: ${RECONSTRUCTION_WORKER_TOKEN:?Set a reconstruction worker token}
+      RECONSTRUCTION_QUEUE_NAME: roomforge-local-reconstruction
+      RECONSTRUCTION_RESULT_CACHE: /cache/reconstruction
+      RECONSTRUCTION_CACHE_RETENTION_SECONDS: 2592000
+      RECONSTRUCTION_CACHE_MAX_BYTES: 134217728
+      SQS_ENDPOINT_URL: http://floci:4566
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - reconstruction_cache:/cache/reconstruction
+      - inference_torch_cache:/cache/torch
+    mem_limit: 6g
+    cpus: 4
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      floci:
+        condition: service_healthy
+volumes:
+  reconstruction_cache:
+  inference_torch_cache:

@@ -6,17 +6,19 @@ import {
   useState,
   type PointerEvent,
 } from "react";
-import { acceptCapture } from "../../application/captureReviewApi";
+import { acceptCapture, getCapture } from "../../application/captureReviewApi";
 import {
   getListingScene,
   listAgencyListings,
   putListingScene,
+  sceneRevision,
   StaffListingsApiError,
   type ListingApprovalStatus,
   type StaffListing,
 } from "../../application/staffListingsApi";
 import {
   DEFAULT_SCENE_DOCUMENT,
+  isProportional,
   roomPolygon,
   type SceneDocument,
   type SceneOpeningV2,
@@ -25,6 +27,7 @@ import {
 } from "../../application/sceneContract";
 import { SceneViewer } from "./SceneViewer";
 import { FurnitureReviewPanel } from "./FurnitureReviewPanel";
+import { confirmOpening, confirmWallMeasure } from "../../application/captureWarnings";
 import { CaptureDraftPanel } from "./CaptureDraftPanel";
 
 interface SceneEditorProps {
@@ -530,6 +533,8 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
   const [furnitureBusy, setFurnitureBusy] = useState(false);
   const [showCaptures, setShowCaptures] = useState(false);
   const [loadedCaptureId, setLoadedCaptureId] = useState<string | null>(null);
+  const [pendingAcceptance, setPendingAcceptance] = useState<{ id: string; revision?: string } | null>(null);
+  const revisionRef = useRef<string | null | undefined>(undefined);
   const [captureRefresh, setCaptureRefresh] = useState(0);
   const [listings, setListings] = useState<ListState<StaffListing[]>>({ kind: "loading" });
   const [selectedListingId, setSelectedListingId] = useState("");
@@ -587,6 +592,9 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
     setHasSavedScene(false);
     setLoadedCaptureId(null);
 
+    setPendingAcceptance(null);
+    revisionRef.current = undefined;
+
     if (!selectedListingId) {
       setSceneLoad("idle");
       setScene(DEFAULT_SCENE_DOCUMENT);
@@ -600,6 +608,13 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
     getListingScene(tokenRef.current, agencyId, selectedListingId).then(
       (document) => {
         if (!isCurrent) return;
+        revisionRef.current = sceneRevision(document);
+        setPendingAcceptance(document.captureId ? { id: document.captureId, revision: sceneRevision(document) } : null);
+        if (document.captureId) {
+          getCapture(tokenRef.current, agencyId, selectedListingId, document.captureId).then((capture) => {
+            if (isCurrent && capture.status === "accepted") setPendingAcceptance(null);
+          }, () => { /* Keep retry available; never overwrite an ambiguously accepted scene. */ });
+        }
         setScene(document);
         setHasSavedScene(true);
         setSceneLoad("ready");
@@ -612,6 +627,7 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
           failure.code === "scene_not_defined"
         ) {
           setScene(DEFAULT_SCENE_DOCUMENT);
+          revisionRef.current = null;
           setHasSavedScene(false);
           setSceneLoad("ready");
           return;
@@ -626,7 +642,7 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
   }, [agencyId, selectedListingId, sceneReload]);
 
   function handleEdit(edit: (document: SceneDocument) => SceneDocument) {
-    if (isSaving || furnitureBusy) return;
+    if (isSaving || furnitureBusy || pendingAcceptance) return;
     setScene(edit);
     setIsDirty(true);
     setNotice(null);
@@ -634,14 +650,14 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
   }
 
   function handleLoadDraft(captureId: string, draft: SceneDocument) {
-    if (isSaving || furnitureBusy) return;
+    if (isSaving || furnitureBusy || pendingAcceptance) return;
     if (
       isDirty &&
       !window.confirm("Hay cambios sin guardar en la escena. ¿Reemplazarlos con el borrador de la captura?")
     ) {
       return;
     }
-    setScene(draft);
+    setScene({ ...draft, captureId });
     setIsDirty(true);
     setSelectedObjectId(null);
     setLoadedCaptureId(captureId);
@@ -650,7 +666,11 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
   }
 
   async function handleSave() {
-    if (!selectedListingId || sceneLoad !== "ready" || isSaving || furnitureBusy) return;
+    if (!selectedListingId || sceneLoad !== "ready" || isSaving || furnitureBusy || pendingAcceptance) return;
+    if (isProportional(scene) || scene.unit !== "meters" || scene.measurement?.scale === "unscaled" || scene.measurement?.alignment === "disconnected" || scene.measurement?.clock === "unknown" || (scene.measurement !== undefined && scene.measurement.referenceConfirmed !== true)) {
+      setError("La captura necesita escala, reloj y alineacion validos antes de guardarse.");
+      return;
+    }
     setIsSaving(true);
     setNotice(null);
     setError(null);
@@ -660,20 +680,26 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
         agencyId,
         selectedListingId,
         scene,
+        ...(revisionRef.current === undefined ? [] : [revisionRef.current]),
       );
+      revisionRef.current = sceneRevision(savedDocument);
       setScene(savedDocument);
       setHasSavedScene(true);
       setIsDirty(false);
       setNotice("Cambios guardados correctamente.");
       if (loadedCaptureId) {
         const captureId = loadedCaptureId;
-        setLoadedCaptureId(null);
+        const saved = { id: captureId, revision: sceneRevision(savedDocument) };
+        setPendingAcceptance(saved);
         try {
-          await acceptCapture(tokenRef.current, agencyId, selectedListingId, captureId);
+          await acceptCapture(tokenRef.current, agencyId, selectedListingId, captureId,
+            ...(saved.revision ? [saved.revision] : []));
+          setLoadedCaptureId(null);
+          setPendingAcceptance(null);
           setCaptureRefresh((value) => value + 1);
         } catch {
           setError(
-            "La escena se guardó, pero no se pudo aceptar la captura. Vuelve a cargar el borrador y guarda de nuevo para aceptarla.",
+            "La escena se guardó, pero no se pudo aceptar la captura. Reintenta la aceptación; si cambió la revisión, recarga la escena.",
           );
         }
       }
@@ -682,6 +708,21 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
     } finally {
       setIsSaving(false);
     }
+  }
+
+  async function retryAcceptance() {
+    if (!pendingAcceptance || !selectedListingId || isSaving) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await acceptCapture(tokenRef.current, agencyId, selectedListingId, pendingAcceptance.id,
+        ...(pendingAcceptance.revision ? [pendingAcceptance.revision] : []));
+      setPendingAcceptance(null);
+      setLoadedCaptureId(null);
+      setCaptureRefresh((value) => value + 1);
+    } catch (failure) {
+      setError(errorMessage(failure, "No se pudo aceptar la captura. Recarga si cambió la revisión."));
+    } finally { setIsSaving(false); }
   }
 
   const sceneReady = sceneLoad === "ready";
@@ -694,7 +735,9 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
         </span>
         <h2 id="scene-editor-heading">Editor de escenas</h2>
         <p className="scene-editor__intro">
-          Ajusta el plano en metros; los cambios se reflejan en el visor 3D y solo se guardan cuando
+          {isProportional(scene)
+            ? "Ajusta el plano proporcional (sin medidas reales); los cambios"
+            : "Ajusta el plano en metros; los cambios"} se reflejan en el visor 3D y solo se guardan cuando
           confirmas la acción.
         </p>
       </div>
@@ -720,12 +763,13 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
         </div>
         <button
           className="review-button"
-          disabled={!sceneReady || furnitureBusy || isSaving || (hasSavedScene && !isDirty)}
+          disabled={!sceneReady || furnitureBusy || isSaving || !!pendingAcceptance || (hasSavedScene && !isDirty)}
           onClick={() => void handleSave()}
           type="button"
         >
           {isSaving ? "Guardando…" : "Guardar escena"}
         </button>
+        {pendingAcceptance ? <button type="button" disabled={isSaving} onClick={() => void retryAcceptance()}>Reintentar aceptación</button> : null}
       </div>
 
       {listings.kind === "loading" ? (
@@ -826,7 +870,10 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
         {showCaptures ? <CaptureDraftPanel key={`${agencyId}:${selectedListingId}`}
           accessToken={accessToken} agencyId={agencyId} listingId={selectedListingId}
           disabled={!sceneReady || isSaving || furnitureBusy} refreshKey={captureRefresh}
-          loadedCaptureId={loadedCaptureId} onLoadDraft={handleLoadDraft} /> : null}
+          loadedCaptureId={loadedCaptureId} onLoadDraft={handleLoadDraft}
+          scene={scene}
+          onConfirmMeasure={(wallId, height) => handleEdit((document) => confirmWallMeasure(document, wallId, height))}
+          onConfirmOpening={(openingId) => handleEdit((document) => confirmOpening(document, openingId))} /> : null}
         {showFurniture ? <FurnitureReviewPanel key={`${agencyId}:${selectedListingId}`}
           accessToken={accessToken} agencyId={agencyId} listingId={selectedListingId}
           disabled={!sceneReady || !hasSavedScene || isDirty || isSaving}
