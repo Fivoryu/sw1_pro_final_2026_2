@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'data/services/ar_capture_channel.dart';
 import 'data/services/capture_draft_store.dart';
+import 'data/services/guided_capture_store.dart';
 import 'data/services/staff_auth_api.dart';
 import 'data/services/staff_capture_api.dart';
 import 'data/services/staff_chat_api.dart';
@@ -66,6 +67,7 @@ void main() => runApp(
     photoSource: ImagePickerPhotoSource(),
     sceneApi: StaffSceneApi(baseUrl: _apiBaseUrl),
     captureStore: FileCaptureDraftStore(root: getApplicationSupportDirectory),
+    guidedStore: FileGuidedCaptureStore(root: getApplicationSupportDirectory),
     arCapture: MethodChannelArCapture(),
     captureApi: StaffCaptureApi(baseUrl: _apiBaseUrl),
     floorplanInterpreter: StaffFloorplanInterpretationApi(baseUrl: _apiBaseUrl),
@@ -85,6 +87,7 @@ class CaptureApp extends StatelessWidget {
     required this.photoSource,
     this.sceneApi,
     this.captureStore,
+    this.guidedStore,
     this.arCapture,
     this.captureApi,
     this.uploadStore,
@@ -101,6 +104,9 @@ class CaptureApp extends StatelessWidget {
   final PhotoSource photoSource;
   final StaffSceneApi? sceneApi;
   final CaptureDraftStore? captureStore;
+
+  /// Stores guided capture checklists (F14.2); without it the guide is off.
+  final GuidedCaptureStore? guidedStore;
   final ArCapture? arCapture;
   final StaffCaptureApi? captureApi;
   final PendingUploadStore? uploadStore;
@@ -123,6 +129,7 @@ class CaptureApp extends StatelessWidget {
       photoSource: photoSource,
       sceneApi: sceneApi,
       captureStore: captureStore,
+      guidedStore: guidedStore,
       arCapture: arCapture,
       captureApi: captureApi,
       uploadStore: uploadStore,
@@ -145,6 +152,7 @@ class AgentAccessScreen extends StatefulWidget {
     required this.photoSource,
     this.sceneApi,
     this.captureStore,
+    this.guidedStore,
     this.arCapture,
     this.captureApi,
     this.uploadStore,
@@ -161,6 +169,9 @@ class AgentAccessScreen extends StatefulWidget {
   final PhotoSource photoSource;
   final StaffSceneApi? sceneApi;
   final CaptureDraftStore? captureStore;
+
+  /// Stores guided capture checklists (F14.2); without it the guide is off.
+  final GuidedCaptureStore? guidedStore;
   final ArCapture? arCapture;
   final StaffCaptureApi? captureApi;
   final PendingUploadStore? uploadStore;
@@ -199,6 +210,7 @@ class _AgentAccessScreenState extends State<AgentAccessScreen> {
     photoSource: widget.photoSource,
     sceneApi: widget.sceneApi,
     captureStore: widget.captureStore,
+    guidedStore: widget.guidedStore,
     arCapture: widget.arCapture,
     captureApi: widget.captureApi,
     uploadStore: widget.uploadStore,

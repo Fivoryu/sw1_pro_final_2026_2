@@ -1,7 +1,7 @@
 """Create customer favorites and saved searches (F14.3).
 
-Revision ID: 0035_customer_favorites
-Revises: 0034_listing_reviews
+Revision ID: 0037_customer_favorites
+Revises: 0036_capture_integrity
 """
 
 from __future__ import annotations
@@ -11,8 +11,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0035_customer_favorites"
-down_revision: Union[str, Sequence[str], None] = "0034_listing_reviews"
+revision: str = "0037_customer_favorites"
+down_revision: Union[str, Sequence[str], None] = "0036_capture_integrity"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

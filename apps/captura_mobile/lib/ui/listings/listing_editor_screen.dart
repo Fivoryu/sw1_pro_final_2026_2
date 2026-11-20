@@ -4,6 +4,7 @@ import 'package:latlong2/latlong.dart';
 import '../../data/map_config.dart';
 import '../../data/models/staff_listing.dart';
 import '../../data/services/photo_source.dart';
+import '../../domain/guided_capture_controller.dart';
 import '../../domain/listing_drafts_controller.dart';
 import '../../domain/listing_photos_controller.dart';
 import 'listing_format.dart';
@@ -12,6 +13,7 @@ import 'location_picker.dart';
 import '../theme/andean_theme.dart';
 import '../theme/andean_widgets.dart';
 import '../spatial/spatial_capture_screen.dart';
+import '../guided_capture/guided_capture_screen.dart';
 
 /// Minimum 48 dp touch target for primary actions.
 const _actionMinSize = Size.fromHeight(48);
@@ -60,6 +62,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
   String? _message;
   bool _busy = false;
   ListingPhotosController? _photos;
+  GuidedCaptureController? _guided;
 
   @override
   void initState() {
@@ -98,6 +101,61 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     )..addListener(_onChanged);
     _photos = photos;
     photos.load();
+    final listing = _listing;
+    final guided = widget.controller.guidedCaptureFor(listingId, photos);
+    if (guided != null && listing != null) {
+      guided.addListener(_onChanged);
+      _guided = guided;
+      guided.load(bedrooms: listing.bedrooms, bathrooms: listing.bathrooms);
+    }
+  }
+
+  /// Entry to the guided capture (F14.2); it needs a saved listing.
+  Widget _guidedCaptureSection(BuildContext context) {
+    final guided = _guided;
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Captura guiada', style: theme.textTheme.titleLarge),
+        const SizedBox(height: 8),
+        if (guided == null)
+          const Text(
+            'Guardá el borrador para recorrer sus ambientes con la guía.',
+            key: ValueKey('guided-capture-unsaved'),
+          )
+        else ...[
+          if (guided.state == GuidedCaptureLoadState.ready)
+            Text(
+              guided.isComplete
+                  ? 'Completa: ${guided.progress.finished} de '
+                        '${guided.progress.total} ambientes listos.'
+                  : '${guided.progress.finished} de ${guided.progress.total} '
+                        'ambientes listos.',
+              key: const ValueKey('guided-capture-summary'),
+            )
+          else if (guided.message != null)
+            Text(guided.message!),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            key: const ValueKey('open-guided-capture'),
+            style: OutlinedButton.styleFrom(minimumSize: _actionMinSize),
+            onPressed: () => Navigator.of(context).push<void>(
+              MaterialPageRoute<void>(
+                builder: (_) => GuidedCaptureScreen(
+                  controller: guided,
+                  beforePhotoChange: () async =>
+                      !_reopensReview ||
+                      await _confirmPhotoChange('¿Agregar la foto?', 'Agregar'),
+                ),
+              ),
+            ),
+            icon: const Icon(Icons.checklist),
+            label: const Text('Abrir captura guiada'),
+          ),
+        ],
+      ],
+    );
   }
 
   /// A confirmed photo change returns the listing to draft on the server.
@@ -227,6 +285,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     for (final field in _fields) {
       field.dispose();
     }
+    _guided?.dispose();
     _photos?.dispose();
     super.dispose();
   }
@@ -284,11 +343,17 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
 
   bool get _hasPhoto => _photos?.photos.isNotEmpty ?? false;
 
+  /// Without guided capture storage the guide is off and does not block.
+  bool get _guideComplete =>
+      !widget.controller.supportsGuidedCapture ||
+      (_guided?.isComplete ?? false);
+
   bool get _canSubmit =>
       !_busy &&
       _listing?.status == ListingStatus.draft &&
       !_isDirty &&
       _hasPhoto &&
+      _guideComplete &&
       !(_photos?.isUploading ?? false);
 
   String? get _submitHint {
@@ -302,6 +367,9 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     return switch (listing.status) {
       ListingStatus.draft when !_hasPhoto =>
         'Agregá al menos una foto para enviar a revisión.',
+      ListingStatus.draft when !_guideComplete =>
+        'Completá la captura guiada para enviar a revisión: '
+            '${_guided?.problems.first ?? 'guardá el borrador.'}',
       ListingStatus.draft => null,
       ListingStatus.rejected =>
         'Corregí el inmueble y guardalo para volver a enviarlo.',
@@ -334,6 +402,12 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
       }
     });
     if (saved != null && _photos == null) _attachPhotos(saved.listingId);
+    if (saved != null) {
+      _guided?.updateCounts(
+        bedrooms: saved.bedrooms,
+        bathrooms: saved.bathrooms,
+      );
+    }
     if (saved != null) {
       ScaffoldMessenger.of(
         context,
@@ -606,6 +680,10 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
                       onAdd: _addPhoto,
                       onDelete: _deletePhoto,
                     ),
+                    if (widget.controller.supportsGuidedCapture) ...[
+                      const SizedBox(height: 24),
+                      _guidedCaptureSection(context),
+                    ],
                     if (widget.controller.supportsSpatialCapture) ...[
                       const SizedBox(height: 24),
                       _spatialCaptureSection(context),
