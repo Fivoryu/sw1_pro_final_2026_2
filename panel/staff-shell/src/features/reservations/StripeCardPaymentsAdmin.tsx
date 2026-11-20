@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   createStripeConnectOnboardingLink,
@@ -116,6 +117,7 @@ export function StripeCardPaymentsAdmin({
           Actualizar
         </button>
       </header>
+      <ContextualGuide screenId="card-payments" />
 
       <section className="stripe-card-admin__connect" aria-label="Cuenta de pagos">
         <div>

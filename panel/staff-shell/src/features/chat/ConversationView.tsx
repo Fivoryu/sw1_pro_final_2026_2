@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
   listAgencyAgents,
@@ -138,6 +139,7 @@ export function ConversationView({
       <button className="review-button review-button--link" onClick={onBack} type="button">
         Volver a la bandeja
       </button>
+      <ContextualGuide screenId="chat-conversation" />
       <header className="chat-conversation__header">
         <h3>{conversation.customer_email}</h3>
         <p>Inmueble {conversation.listing_id}</p>

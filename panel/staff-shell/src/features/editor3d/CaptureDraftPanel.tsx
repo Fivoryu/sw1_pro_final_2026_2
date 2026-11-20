@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listCaptures, type CaptureReview, type CaptureStatus } from "../../application/captureReviewApi";
 import { StaffListingsApiError } from "../../application/staffListingsApi";
@@ -65,6 +66,7 @@ export function CaptureDraftPanel({
 
   return <section className="capture-draft" aria-label="Borradores de capturas">
     <h4>Borradores de capturas</h4>
+    <ContextualGuide screenId="capture-drafts" />
     <p>La reconstrucción es un borrador: no se guarda ni se acepta hasta que lo cargues, lo edites y guardes la escena.</p>
     <button className="review-button review-button--secondary" type="button" disabled={busy}
       onClick={() => void refresh()}>Actualizar</button>

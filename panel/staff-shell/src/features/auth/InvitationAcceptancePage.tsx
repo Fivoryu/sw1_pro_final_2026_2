@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import { useEffect, useState, type FormEvent } from "react";
 import {
   acceptStaffInvitation,
@@ -168,6 +169,7 @@ export function InvitationAcceptancePage({
 
             <div className="auth-heading invitation-heading">
               <h1 id="invitation-title">{heading}</h1>
+
               {hasInvitationToken ? (
                 <p>
                   {recoveryCodes !== null
@@ -185,6 +187,7 @@ export function InvitationAcceptancePage({
                 </p>
               )}
             </div>
+            <ContextualGuide screenId="invitation-acceptance" />
 
             {!hasInvitationToken ? (
               <div className="invitation-status" role="status">

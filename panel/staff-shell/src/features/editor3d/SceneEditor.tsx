@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import {
   useEffect,
   useId,
@@ -698,6 +699,7 @@ export function SceneEditor({ accessToken, agencyId }: SceneEditorProps) {
           confirmas la acción.
         </p>
       </div>
+      <ContextualGuide screenId="scene-editor" />
 
       <div className="scene-editor__toolbar">
         <div className="scene-editor__listing-field">

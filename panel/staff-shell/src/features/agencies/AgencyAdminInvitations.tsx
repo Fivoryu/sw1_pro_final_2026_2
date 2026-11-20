@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
   AgencyAdminInvitationsApiError,
@@ -94,6 +95,7 @@ export function AgencyAdminInvitations({ accessToken }: AgencyAdminInvitationsPr
         <h2 id="agency-admin-invitations-heading">Invitar administrador de inmobiliaria</h2>
         <p>La invitación se entrega al outbox local de desarrollo.</p>
       </div>
+      <ContextualGuide screenId="agency-invitations" />
 
       {agencies.kind === "loading" ? (
         <p aria-busy="true" className="review-queue__message" role="status">

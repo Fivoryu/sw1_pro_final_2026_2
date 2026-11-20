@@ -448,6 +448,7 @@ function ListingReviewDetail({
       <button className="review-button review-button--link" onClick={onBack} type="button">
         Volver a la bandeja
       </button>
+      <ContextualGuide screenId="listing-detail" />
 
       {actionError ? (
         <p className="review-queue__message review-queue__message--error" role="alert">

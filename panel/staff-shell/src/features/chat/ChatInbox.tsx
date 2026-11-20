@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   listConversations,
@@ -82,6 +83,7 @@ export function ChatInbox({ accessToken, isAgencyAdmin, openRequest = null }: Ch
         <span className="protected-staff-review-queue__eyebrow">CONTACTO CON CLIENTES</span>
         <h2 id="chat-inbox-heading">Bandeja de chat</h2>
       </div>
+      <ContextualGuide screenId="chat-inbox" />
 
       {notice ? (
         <p className="review-queue__message review-queue__message--error" role="alert">

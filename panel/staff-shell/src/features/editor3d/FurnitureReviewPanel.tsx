@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
   getFurnitureReview, listDetectionJobs, requestPhotoDetection, reviewFurniture,
@@ -166,6 +167,7 @@ export function FurnitureReviewPanel({ accessToken, agencyId, listingId, disable
       <button type="button" className="review-button review-button--secondary" disabled={busy}
         onClick={() => { pending.current = null; setNotice(null); setReload((value) => value + 1); }}>Actualizar revisión</button>
     </header>
+    <ContextualGuide screenId="furniture-review" />
     {disabled ? <p role="status">Guarda la escena y sus cambios antes de confirmar mobiliario.</p> : null}
     {loading ? <p aria-busy="true">Cargando revisión…</p> : null}
     {error ? <p role="alert">{error}</p> : null}

@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import { useState, type FormEvent } from "react";
 import {
   completeStaffLogin,
@@ -133,6 +134,7 @@ export function StaffLoginShell({
                   : "Ingresa con las credenciales de tu cuenta autorizada."}
               </p>
             </div>
+            <ContextualGuide screenId="login" />
 
             {isMfaStep ? (
               <form

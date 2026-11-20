@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   listNotifications,
@@ -121,6 +122,7 @@ export function NotificationBell({ accessToken, onOpenChat }: NotificationBellPr
       </button>
       {isOpen ? (
         <section aria-label="Bandeja de notificaciones" className="notification-bell__panel">
+          <ContextualGuide screenId="notifications" />
           <button
             className="review-button review-button--secondary"
             disabled={unread === 0}

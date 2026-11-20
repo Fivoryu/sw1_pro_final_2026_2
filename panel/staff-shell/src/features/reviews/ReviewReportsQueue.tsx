@@ -1,3 +1,4 @@
+import { ContextualGuide } from "../guide/ContextualGuide";
 import { useEffect, useRef, useState } from "react";
 import {
   listReviewReports,
@@ -56,6 +57,7 @@ export function ReviewReportsQueue({ accessToken }: ReviewReportsQueueProps) {
   return (
     <section aria-labelledby="review-reports-heading" className="chat-reports">
       <h3 id="review-reports-heading">Reportes de reseñas</h3>
+      <ContextualGuide screenId="review-reports" />
       {actionError ? (
         <p className="review-queue__message review-queue__message--error" role="alert">
           {actionError}
