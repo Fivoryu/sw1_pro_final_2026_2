@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 
 import 'package:flutter/services.dart';
 
+import '../../customer_tabs.dart';
 import 'guide_assistant.dart';
 import 'guide_content.dart';
 import 'reservation_conversation.dart';
 
-/// Opens the contextual guide without performing a screen action.
+/// Opens the guide. Only an explicitly chosen tab can be returned by the chat.
 class GuideHelpButton extends StatelessWidget {
   const GuideHelpButton({
     super.key,
@@ -22,12 +23,39 @@ class GuideHelpButton extends StatelessWidget {
   /// When set, uses a compass icon whose tooltip starts with this label.
   final String? label;
 
-  void _open(BuildContext context) => showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
-    builder: (_) => GuideSheet(screen: screen, reservationStep: reservationStep),
-  );
+  Future<void> _open(BuildContext context) async {
+    final tabs = CustomerTabs.maybeOf(context);
+    final page = ModalRoute.of(context);
+    final navigator = Navigator.of(context);
+    final rootNavigator = Navigator.of(context, rootNavigator: true);
+    // Only leave the shell or a read-only listing page. Never discard a
+    // filter, form or other modal just because the engine knows a tab name.
+    bool canVisit(CustomerTab tab) =>
+        tabs != null &&
+        page is PageRoute &&
+        navigator == rootNavigator &&
+        (page.isFirst
+            ? tabs.selected != tab
+            : screen == GuideScreen.listingDetail) &&
+        (tab != CustomerTab.reservations || tabs.canVisitReservations());
+    final tab = await showModalBottomSheet<CustomerTab>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => GuideSheet(
+        screen: screen,
+        reservationStep: reservationStep,
+        canVisit: canVisit,
+      ),
+    );
+    if (!context.mounted ||
+        tab == null ||
+        page?.isCurrent != true ||
+        !canVisit(tab))
+      return;
+    navigator.popUntil((route) => route.isFirst);
+    tabs!.select(tab);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -57,14 +85,16 @@ class _Message {
   final String text;
 }
 
-/// Chat sheet for explaining the next step from the current screen.
+/// Answering a question never navigates. Following a link returns a typed tab.
 class GuideSheet extends StatefulWidget {
   const GuideSheet({
     super.key,
     required this.screen,
+    this.canVisit,
     this.reservationStep,
   });
 
+  final bool Function(CustomerTab)? canVisit;
   final ValueGetter<DetailReservationStep>? reservationStep;
 
   final GuideScreen screen;
@@ -169,6 +199,15 @@ class _GuideSheetState extends State<GuideSheet> {
             child: Wrap(
               spacing: 8,
               children: [
+                if (_reply.destination case final tab?
+                    when widget.canVisit?.call(tab) == true)
+                  ActionChip(
+                    label: Text(
+                      'Llevame',
+                      semanticsLabel: 'Llevame a ${tab.label}',
+                    ),
+                    onPressed: () => Navigator.pop(context, tab),
+                  ),
                 for (final s in _reply.suggestions)
                   ActionChip(label: Text(s), onPressed: () => _ask(s)),
               ],

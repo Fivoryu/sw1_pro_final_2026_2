@@ -14,14 +14,15 @@ import 'support/fake_catalog_backend.dart';
 import 'support/fake_customer_backend.dart';
 
 const _help = ValueKey('guide-help-button');
+const _sheet = ValueKey('guide-sheet');
 const _question = '¿Cómo reservo este inmueble?';
 
-Future<List<String>> _openApp(WidgetTester tester) async {
+Future<List<String>> _openApp(WidgetTester tester, {bool guest = false}) async {
   final writes = <String>[];
   final auth = FakeCustomerBackend();
   final session = CustomerSessionController(
     api: CustomerAuthApi(baseUrl: 'https://local.test', client: auth.client),
-    tokenStore: InMemoryCustomerTokenStore(auth.refreshToken),
+    tokenStore: InMemoryCustomerTokenStore(guest ? null : auth.refreshToken),
   );
   final catalog = FakeCatalogBackend()..seed(id: 'listing-1');
   await tester.pumpWidget(
@@ -82,6 +83,58 @@ Future<void> _dismiss(WidgetTester tester) async {
 
 void main() {
   testWidgets(
+    'guide opens real tabs, never selects a listing or writes a booking',
+    (tester) async {
+      final writes = await _openApp(tester);
+      await _tap(tester, find.byKey(_help));
+      await _ask(tester, 'mis reservas');
+      await _tap(tester, find.bySemanticsLabel('Llevame a Reservas'));
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        1,
+      );
+      expect(find.byKey(_sheet), findsNothing);
+      await _tap(tester, find.byKey(_help));
+      await _ask(tester, _question);
+      await _tap(tester, find.bySemanticsLabel('Llevame a Explorar'));
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        0,
+      );
+      expect(
+        find.byKey(const ValueKey('catalog-listing-listing-1')),
+        findsOneWidget,
+      );
+      expect(writes, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'guest can reach Cuenta from the detail without signing in or reserving',
+    (tester) async {
+      final writes = await _openApp(tester, guest: true);
+      await _tap(tester, find.byKey(_help));
+      await _ask(tester, 'mis reservas');
+      expect(find.text('Llevame'), findsNothing);
+      expect(writes, isEmpty);
+      await _dismiss(tester);
+      await _tap(
+        tester,
+        find.byKey(const ValueKey('catalog-listing-listing-1')),
+      );
+      await _tap(tester, find.byKey(_help));
+      await _ask(tester, _question);
+      await _tap(tester, find.bySemanticsLabel('Llevame a Cuenta'));
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        2,
+      );
+      expect(find.byType(TextFormField), findsWidgets);
+      expect(writes, isEmpty);
+    },
+  );
+
+  testWidgets(
     'guided detail stops at the real method chooser, with no reservation or payment',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(800, 1200));
@@ -112,6 +165,36 @@ void main() {
       expect(writes, [
         'POST /api/v1/quotes',
       ]); // Only the user's explicit quote.
+    },
+  );
+
+  testWidgets(
+    'reply and named destination remain reachable at 320x480 with keyboard',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(320, 480);
+      addTearDown(tester.view.reset);
+      await _openApp(tester);
+      await _tap(tester, find.byKey(_help));
+      tester.view.viewInsets = const FakeViewPadding(bottom: 220);
+      await tester.pumpAndSettle();
+      await _ask(tester, 'mis reservas');
+      final transcript = find.descendant(
+        of: find.byKey(_sheet),
+        matching: find.byType(ListView),
+      );
+      expect(tester.getSize(transcript).height, greaterThanOrEqualTo(48));
+      expect(
+        find.bySemanticsLabel(RegExp('Guía: .*pestaña «Reservas»')),
+        findsOneWidget,
+      );
+      final link = find.bySemanticsLabel('Llevame a Reservas');
+      await _tap(tester, link);
+      expect(tester.takeException(), isNull);
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        1,
+      );
     },
   );
 }
