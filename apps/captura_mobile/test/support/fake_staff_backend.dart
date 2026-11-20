@@ -65,6 +65,12 @@ class FakeStaffBackend {
   bool refreshRejected = false;
   bool logoutRejected = false;
   bool exposeRefreshCookie = true;
+
+  /// False makes the login answer `totp_required: false` (STAFF_REQUIRE_TOTP=false).
+  bool totpRequired = true;
+
+  /// JSON body of the last `/login/totp` request.
+  Map<String, Object?>? lastCompletionBody;
   final List<String> calls = [];
 
   http.Client get client => MockClient(_handle);
@@ -95,6 +101,13 @@ class FakeStaffBackend {
     },
   };
 
+  http.Response _complete(http.Request request, String? cookie) {
+    lastCompletionBody = jsonDecode(request.body) as Map<String, Object?>;
+    return codeRejected
+        ? _failure(401, 'unauthorized')
+        : _json(_grantBody('csrf-1'), 200, cookie: cookie);
+  }
+
   Future<http.Response> _handle(http.Request request) async {
     calls.add(request.url.path);
     if (offline) throw http.ClientException('offline');
@@ -103,11 +116,11 @@ class FakeStaffBackend {
       '/api/v1/auth/login' =>
         loginRejected
             ? _failure(401, 'unauthorized')
-            : _json({'challenge_token': 'challenge-1'}, 200),
-      '/api/v1/auth/login/totp' =>
-        codeRejected
-            ? _failure(401, 'unauthorized')
-            : _json(_grantBody('csrf-1'), 200, cookie: cookie),
+            : _json({
+                'challenge_token': 'challenge-1',
+                if (!totpRequired) 'totp_required': false,
+              }, 200),
+      '/api/v1/auth/login/totp' => _complete(request, cookie),
       '/api/v1/auth/refresh' =>
         refreshRejected
             ? _failure(401, 'unauthorized')
