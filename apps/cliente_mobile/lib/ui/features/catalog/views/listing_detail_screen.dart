@@ -10,6 +10,8 @@ import '../../../../domain/catalog_controller.dart';
 import '../../../../domain/customer_reservations_controller.dart';
 import '../../../../domain/customer_session_controller.dart';
 import 'catalog_format.dart';
+import '../../guide/guide_content.dart';
+import '../../guide/guide_help_button.dart';
 import 'listing_photo.dart';
 import '../../chat/chat_conversation_screen.dart';
 import '../../reservations/customer_reservations_screen.dart';
@@ -128,6 +130,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     appBar: AppBar(
       backgroundColor: EditorialColors.canvas,
       title: const Text('Detalle del inmueble'),
+      actions: const [GuideHelpButton(screen: GuideScreen.listingDetail)],
     ),
     body: Center(
       child: ConstrainedBox(

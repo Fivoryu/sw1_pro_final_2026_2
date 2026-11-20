@@ -12,6 +12,8 @@ import '../../../../domain/customer_reservations_controller.dart';
 import '../../../../domain/customer_session_controller.dart';
 import 'catalog_filters_sheet.dart';
 import 'catalog_format.dart';
+import '../../guide/guide_content.dart';
+import '../../guide/guide_help_button.dart';
 import 'listing_detail_screen.dart';
 import 'listing_photo.dart';
 import '../../../theme/andean_theme.dart';
@@ -125,7 +127,10 @@ class _CatalogScreenState extends State<CatalogScreen> {
               'Explorar inmuebles',
               subtitle: 'Encontrá un espacio que se sienta propio.',
             ),
-            const SizedBox(height: 16),
+            const Align(
+              alignment: Alignment.centerRight,
+              child: GuideHelpButton(screen: GuideScreen.catalog),
+            ),
             DropdownButtonFormField<DisplayCurrency>(
               key: const ValueKey('catalog-currency-selector'),
               initialValue: _controller.displayCurrency,
