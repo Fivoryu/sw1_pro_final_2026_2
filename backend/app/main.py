@@ -38,6 +38,8 @@ from app.modules.chat.router import customer_router as customer_chat_router
 from app.modules.chat.router import staff_router as staff_chat_router
 from app.modules.notifications.router import customer_router as customer_notifications_router
 from app.modules.notifications.router import staff_router as staff_notifications_router
+from app.modules.favorites.router import favorites_router as customer_favorites_router
+from app.modules.favorites.router import saved_searches_router as customer_saved_searches_router
 from app.modules.reviews.router import customer_router as customer_reviews_router
 from app.modules.reviews.router import public_router as public_reviews_router
 from app.modules.reviews.router import staff_router as staff_reviews_router
@@ -455,6 +457,7 @@ def create_app(
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
         allow_headers=[
+            "X-Scene-Intent",
             "Authorization",
             "Content-Type",
             "X-CSRF-Token",
@@ -480,6 +483,8 @@ def create_app(
     app.include_router(customer_notifications_router)
     app.include_router(staff_notifications_router)
     app.include_router(customer_reviews_router)
+    app.include_router(customer_favorites_router)
+    app.include_router(customer_saved_searches_router)
     app.include_router(public_reviews_router)
     app.include_router(staff_reviews_router)
     app.include_router(detection_router)

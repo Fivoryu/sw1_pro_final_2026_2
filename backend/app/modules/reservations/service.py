@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import Settings
 from app.core.money import format_money_amount, validate_currency, TOKEN_UNIT_SCALES
 from app.modules.agencies.models import AgencyWallet
-from app.modules.catalog.models import Listing, QuoteSnapshot
+from app.modules.catalog.models import Listing, ListingExtra, QuoteSnapshot
 from app.modules.customer_identity.models import CustomerWallet
 from app.modules.identity.models import Agency
 from app.modules.customer_identity.session import ActiveCustomer
@@ -352,6 +352,22 @@ def create_reservation(
                     409,
                     "offer_version_mismatch",
                     "The quote no longer matches the listing offer.",
+                )
+            quoted_extra_ids = {
+                line["extra_id"] for line in quote.lines if line.get("kind") == "extra"
+            }
+            included_extra_ids = {
+                extra_id
+                for (extra_id,) in session.query(ListingExtra.id).filter(
+                    ListingExtra.listing_id == listing.id,
+                    ListingExtra.inclusion == "included",
+                )
+            }
+            if not included_extra_ids <= quoted_extra_ids:
+                raise ReservationApiError(
+                    409,
+                    "quote_missing_included_extra",
+                    "The quote does not carry every included furniture item.",
                 )
 
             reservation = Reservation(

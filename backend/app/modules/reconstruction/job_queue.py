@@ -78,7 +78,9 @@ class SqsReconstructionQueue:
                 aws_access_key_id=LOCAL_AWS_ACCESS_KEY_ID,
                 aws_secret_access_key=LOCAL_AWS_SECRET_ACCESS_KEY,
             )
-            self._queue = resource.get_queue_by_name(QueueName=self._queue_name)
+            # This adapter is restricted to Floci. Provision the local queue idempotently;
+            # a clean runtime must not depend on a manual AWS CLI command.
+            self._queue = resource.create_queue(QueueName=self._queue_name)
         return self._queue
 
     def publish(self, message: ReconstructionMessage) -> None:

@@ -27,8 +27,10 @@ ListingApprovalStatus = Literal["draft", "pending", "approved", "rejected"]
 # StrictInt | StrictFloat preserves integer-valued coordinates from the fixture.
 SceneNumber = StrictInt | StrictFloat
 # Optional provenance declared by the F07 spatial capture; "assumed" means not measured.
-SceneWallHeightSource = Literal["ceiling_plane", "wall_point", "manual", "assumed"]
-SceneObjectSource = Literal["depth", "manual"]
+SceneWallHeightSource = Literal[
+    "ceiling_plane", "wall_point", "manual", "assumed", "estimated"
+]
+SceneObjectSource = Literal["depth", "manual", "sfm_estimated"]
 
 
 class SceneContractModel(BaseModel):
@@ -77,6 +79,9 @@ class SceneOpening(SceneContractModel):
     height: Annotated[SceneNumber, Field(gt=0)]
     type: Literal["door", "window"]
     sill_height: Annotated[SceneNumber, Field(ge=0)] = Field(default=0, alias="sillHeight")
+    # F07: set to "estimated" when a capture recognised the opening with a single signal; the
+    # reviewer clears it by confirming. Absent for openings drawn by a person.
+    source: Literal["estimated"] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -110,13 +115,36 @@ class SceneObject(SceneContractModel):
     confidence: Annotated[SceneNumber, Field(ge=0, le=1)] | None = None
 
 
+class SceneScale(SceneContractModel):
+    # "proportional": coordinates keep ratios but are not real meters (no reference).
+    mode: Literal["metric", "proportional"]
+
+
+class SceneMeasurement(SceneContractModel):
+    source: Literal["sfm"]
+    scale: Literal["reference", "unscaled"]
+    alignment: Literal["connected", "disconnected"]
+    clock: Literal["realtime", "unknown"]
+    reference_confirmed: bool = Field(default=False, alias="referenceConfirmed", strict=True)
+
+
 class ListingSceneDocument(SceneContractModel):
     version: Literal["2.0"]
-    unit: Literal["meters"]
+    unit: Literal["meters", "arbitrary"]
+    measurement: SceneMeasurement | None = None
+    capture_id: StrictStr | None = Field(default=None, alias="captureId")
+    scale: SceneScale | None = None
     walls: list[SceneWall]
     openings: list[SceneOpening]
     rooms: list[SceneRoom]
     objects: list[SceneObject]
+
+    @model_validator(mode="after")
+    def canonical_scale_unit(self) -> ListingSceneDocument:
+        # Older proportional drafts declared meters; never expose them as measurements.
+        if self.scale is not None and self.scale.mode == "proportional":
+            self.unit = "arbitrary"
+        return self
 
 
 class CatalogMoney(BaseModel):
@@ -161,6 +189,7 @@ class CatalogExtraItem(BaseModel):
     origin: str | None
     visual_reference: str | None
     quantity: int
+    inclusion: str
 
 
 class CatalogListingDetail(CatalogListingItem):
@@ -282,6 +311,8 @@ class ExtraPayload(BaseModel):
     origin: Annotated[str, Field(min_length=1, max_length=120)] | None = None
     visual_reference: Annotated[str, Field(min_length=1, max_length=255)] | None = None
     quantity: Annotated[StrictInt, Field(ge=1)] = 1
+    # Omitted keeps the stored mode on update and defaults to "optional" on insert.
+    inclusion: Literal["optional", "included"] | None = None
 
 
 class ExtraAuthoringResponse(BaseModel):
@@ -298,6 +329,7 @@ class ExtraAuthoringResponse(BaseModel):
     origin: str | None
     visual_reference: str | None
     quantity: int
+    inclusion: str
 
 
 class ListingAuthoringRequest(BaseModel):

@@ -8,7 +8,9 @@ import '../../../../data/services/quote_api.dart';
 import '../../../../data/services/scene_api.dart';
 import '../../../../domain/catalog_controller.dart';
 import '../../../../domain/customer_reservations_controller.dart';
+import '../../../../domain/customer_favorites_controller.dart';
 import '../../../../domain/customer_session_controller.dart';
+import '../../favorites/favorite_button.dart';
 import 'catalog_format.dart';
 import '../../guide/guide_content.dart';
 import '../../guide/guide_help_button.dart';
@@ -37,7 +39,11 @@ class ListingDetailScreen extends StatefulWidget {
     this.quoteApi,
     this.chatApi,
     this.reviewsApi,
+    this.favoritesController,
   });
+
+  /// When provided, a signed-in customer marks the listing as favorite.
+  final CustomerFavoritesController? favoritesController;
 
   /// When provided, the detail offers a chat with the agency.
   final CustomerChatApi? chatApi;
@@ -130,7 +136,15 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     appBar: AppBar(
       backgroundColor: EditorialColors.canvas,
       title: const Text('Detalle del inmueble'),
-      actions: const [GuideHelpButton(screen: GuideScreen.listingDetail)],
+      actions: [
+        if (widget.favoritesController != null)
+          FavoriteButton(
+            controller: widget.favoritesController!,
+            listingId: widget.listingId,
+            listing: _detail?.listing,
+          ),
+        const GuideHelpButton(screen: GuideScreen.listingDetail),
+      ],
     ),
     body: Center(
       child: ConstrainedBox(
@@ -587,8 +601,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
         _activeReservationId = reservation?.reservationId;
         _bookingMessage = reservation == null
             ? reservations.message
-            : reservations.message ??
-                  'Solicitud guardada. Consultá el estado del depósito en Mis reservas.';
+            : reservations.message ?? 'Solicitud guardada. Consultá el estado del depósito en Mis reservas.';
       });
       return;
     }
@@ -612,9 +625,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     if (!mounted) return;
     setState(() {
       _activeReservationId = reservation?.reservationId;
-      _bookingMessage = reservation == null
-          ? reservations.message
-          : 'Solicitud guardada. Abrí Mis reservas para firmar el depósito con tu wallet.';
+      _bookingMessage = reservation == null ? reservations.message : 'Solicitud guardada. Abrí Mis reservas para firmar el depósito con tu wallet.';
     });
   }
 

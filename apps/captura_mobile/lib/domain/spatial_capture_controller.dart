@@ -1315,10 +1315,10 @@ class SpatialCaptureController extends ChangeNotifier {
         return _fail(failure.detail);
       }
     }
-    await _send(base);
+    await _send(base, manualReplacement: base != null);
   }
 
-  Future<void> _send(String? baseEtag) async {
+  Future<void> _send(String? baseEtag, {bool manualReplacement = false}) async {
     final credentials = _credentials();
     if (credentials == null) return _fail(_noSessionMessage);
     _busy = true;
@@ -1338,6 +1338,7 @@ class SpatialCaptureController extends ChangeNotifier {
         listingId: listingId,
         document: _preview!.document,
         baseEtag: baseEtag,
+        manualReplacement: manualReplacement,
       );
       switch (result) {
         case SceneSaved(:final etag):

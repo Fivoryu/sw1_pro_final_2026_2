@@ -221,10 +221,29 @@ class FilePendingUploadStore implements PendingUploadStore {
 
   final Future<Directory> Function() _root;
 
+  static final _tails = <String, Future<void>>{};
+  static int _temporaryId = 0;
+
+  Future<T> _locked<T>(String ownerId, Future<T> Function() action) async {
+    final key = (await _ownerDir(ownerId)).absolute.path;
+    final previous = _tails[key] ?? Future<void>.value();
+    final run = previous.then((_) => action());
+    final tail = run.then<void>((_) {}, onError: (Object _) {});
+    _tails[key] = tail;
+    try {
+      return await run;
+    } finally {
+      if (identical(_tails[key], tail)) _tails.remove(key);
+    }
+  }
+
   static final _safeId = RegExp(r'^[A-Za-z0-9_-]{1,128}$');
 
   @override
-  Future<List<PendingCaptureUpload>> list(String ownerId) async {
+  Future<List<PendingCaptureUpload>> list(String ownerId) =>
+      _locked(ownerId, () => _listLocked(ownerId));
+
+  Future<List<PendingCaptureUpload>> _listLocked(String ownerId) async {
     final dir = await _ownerDir(ownerId);
     if (!await dir.exists()) return const [];
     final uploads = <PendingCaptureUpload>[];
@@ -236,28 +255,69 @@ class FilePendingUploadStore implements PendingUploadStore {
           uploads.add(PendingCaptureUpload.fromJson(decoded));
           continue;
         }
+        throw const FormatException('Invalid pending upload root');
       } on FormatException {
-        // Falls through: the unreadable record is kept aside below.
+        final backup = File('${entry.path}.bak');
+        if (await backup.exists()) {
+          final decodedBackup = jsonDecode(await backup.readAsString());
+          if (decodedBackup is! Map<String, Object?>) {
+            throw const FormatException('Invalid pending upload backup root');
+          }
+          final restored = PendingCaptureUpload.fromJson(decodedBackup);
+          await entry.rename(
+            '${entry.path}.${DateTime.now().microsecondsSinceEpoch}.corrupt',
+          );
+          await backup.copy(entry.path);
+          uploads.add(restored);
+          continue;
+        }
       }
-      await entry.rename('${entry.path}.corrupt');
+      throw FormatException(
+        'El registro ${entry.path} esta danado; se conserva junto con el ZIP para recuperacion.',
+      );
     }
     uploads.sort((a, b) => a.createdAt.compareTo(b.createdAt));
     return uploads;
   }
 
   @override
-  Future<void> save(String ownerId, PendingCaptureUpload upload) async {
+  Future<void> save(String ownerId, PendingCaptureUpload upload) =>
+      _locked(ownerId, () => _saveLocked(ownerId, upload));
+
+  Future<void> _saveLocked(String ownerId, PendingCaptureUpload upload) async {
     final file = await _file(ownerId, upload.captureId);
     await file.parent.create(recursive: true);
-    final temporary = File('${file.path}.tmp');
+    if (await file.exists()) {
+      final old = PendingCaptureUpload.fromJson(
+        jsonDecode(await file.readAsString()) as Map<String, Object?>,
+      );
+      if (old.listingId != upload.listingId ||
+          old.sizeBytes != upload.sizeBytes ||
+          old.sha256 != upload.sha256) {
+        throw const FormatException(
+          'El captureId ya pertenece a otro archivo.',
+        );
+      }
+      if (old.stage.index > upload.stage.index) return;
+      // A last-known-good state permits recovery after an interrupted/corrupt write.
+      await file.copy('${file.path}.bak');
+    }
+    final temporary = File(
+      '${file.path}.${DateTime.now().microsecondsSinceEpoch}.${_temporaryId++}.tmp',
+    );
     await temporary.writeAsString(jsonEncode(upload.toJson()), flush: true);
     await temporary.rename(file.path);
   }
 
   @override
-  Future<void> delete(String ownerId, String captureId) async {
+  Future<void> delete(String ownerId, String captureId) =>
+      _locked(ownerId, () => _deleteLocked(ownerId, captureId));
+
+  Future<void> _deleteLocked(String ownerId, String captureId) async {
     final file = await _file(ownerId, captureId);
     if (await file.exists()) await file.delete();
+    final backup = File('${file.path}.bak');
+    if (await backup.exists()) await backup.delete();
   }
 
   Future<Directory> _ownerDir(String ownerId) async {

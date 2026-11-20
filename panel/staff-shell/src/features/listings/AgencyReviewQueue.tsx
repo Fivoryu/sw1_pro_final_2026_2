@@ -147,6 +147,12 @@ export function sceneProvenanceNotes(scene: SceneDocument): string[] {
   if (assumed > 0) {
     notes.push(`Altura supuesta (no medida) en ${assumed} de ${scene.walls.length} muros.`);
   }
+  const estimated = scene.walls.filter((wall) => wall.heightSource === "estimated").length;
+  if (estimated > 0) {
+    notes.push(
+      `Altura estimada desde el video (sin confirmar) en ${estimated} de ${scene.walls.length} muros.`,
+    );
+  }
   const volumes = scene.objects.filter((item) => item.type === "occupancy").length;
   if (volumes === 1) {
     notes.push("1 volumen de ocupación capturado, sin etiqueta ni precio publicado.");

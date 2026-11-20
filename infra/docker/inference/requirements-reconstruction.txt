@@ -1,0 +1,7 @@
+# Existing F08 detector remains available; native F07 tools are CPU wheels.
+-r requirements.txt
+boto3==1.44.4
+httpx==0.28.1
+numpy==2.5.5
+pycolmap==4.2.1
+imageio-ffmpeg==0.8.1

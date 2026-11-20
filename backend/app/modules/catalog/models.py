@@ -254,6 +254,9 @@ class ListingExtra(Base):
             "AND (visual_reference IS NULL OR length(trim(visual_reference)) > 0)",
             name="ck_listing_extra_optional_text_nonblank",
         ),
+        CheckConstraint(
+            "inclusion IN ('optional', 'included')", name="ck_listing_extra_inclusion_known"
+        ),
         Index("ix_listing_extra_listing_id", "listing_id"),
     )
 
@@ -263,6 +266,11 @@ class ListingExtra(Base):
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     price: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    # `optional`: the customer picks it when quoting. `included`: part of every quote and
+    # removable for one customer only through an approved exclusion request.
+    inclusion: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="optional", server_default=text("'optional'")
+    )
     category: Mapped[str | None] = mapped_column(String(32), nullable=True)
     room: Mapped[str | None] = mapped_column(String(32), nullable=True)
     width_cm: Mapped[int | None] = mapped_column(Integer, nullable=True)

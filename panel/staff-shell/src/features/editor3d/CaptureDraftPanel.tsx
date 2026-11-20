@@ -2,7 +2,9 @@ import { ContextualGuide } from "../guide/ContextualGuide";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listCaptures, type CaptureReview, type CaptureStatus } from "../../application/captureReviewApi";
 import { StaffListingsApiError } from "../../application/staffListingsApi";
-import type { SceneDocument } from "../../application/sceneContract";
+import { pendingEstimates, pendingOpenings, splitCaptureWarnings, type PendingEstimate } from "../../application/captureWarnings";
+import { isProportional, type SceneDocument } from "../../application/sceneContract";
+import { SceneViewer } from "./SceneViewer";
 import "./CaptureDraftPanel.css";
 
 interface Props {
@@ -14,13 +16,19 @@ interface Props {
   refreshKey?: number;
   loadedCaptureId?: string | null;
   onLoadDraft: (captureId: string, draft: SceneDocument) => void;
+  /** The scene the editor holds; once the draft is loaded, pending measures are read from it. */
+  scene?: SceneDocument;
+  /** Confirms a pending wall height as manual, optionally correcting it (meters). */
+  onConfirmMeasure?: (wallId: string, height?: number) => void;
+  /** Confirms a recognised opening (its estimated mark is cleared). */
+  onConfirmOpening?: (openingId: string) => void;
 }
 
 const STATUS: Record<CaptureStatus, string> = {
   awaiting_upload: "Esperando la subida desde el teléfono.",
   queued: "En cola: esperando para reconstruirse.",
   processing: "Procesando: la reconstrucción sigue en curso.",
-  completed: "Completada: el borrador está listo para revisar.",
+  completed: "Procesamiento terminado: borrador pendiente de revisión.",
   failed: "Fallida.",
   accepted: "Aceptada: el borrador ya fue conservado y los fotogramas se eliminarán.",
 };
@@ -36,16 +44,19 @@ function message(error: unknown): string {
 
 export function CaptureDraftPanel({
   accessToken, agencyId, listingId, disabled, refreshKey = 0, loadedCaptureId = null, onLoadDraft,
+  scene, onConfirmMeasure, onConfirmOpening,
 }: Props) {
   const [captures, setCaptures] = useState<CaptureReview[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ agencyId: string; listingId: string; capture: CaptureReview } | null>(null);
   const tokenRef = useRef(accessToken);
   tokenRef.current = accessToken;
   const requestRef = useRef(0);
 
   const refresh = useCallback(async () => {
     const request = ++requestRef.current;
+    setPreview(null);
     setBusy(true);
     setError(null);
     try {
@@ -59,6 +70,8 @@ export function CaptureDraftPanel({
   }, [agencyId, listingId]);
 
   useEffect(() => {
+    setCaptures(null);
+    setPreview(null);
     void refresh();
     // A newer request (or unmount) makes any pending answer stale.
     return () => { requestRef.current++; };
@@ -79,17 +92,110 @@ export function CaptureDraftPanel({
         <p>{STATUS[capture.status] ?? capture.status}</p>
         {capture.status === "failed"
           ? <p>Motivo: {capture.failureReason ?? "No se informó un motivo."}</p> : null}
-        {capture.status === "completed" && capture.warnings.length > 0
-          ? <ul aria-label={`Advertencias de ${capture.captureId}`}>
-            {capture.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul> : null}
+        {capture.status === "completed" ? <CaptureNotes capture={capture}
+          editable={loadedCaptureId === capture.captureId && scene !== undefined
+            && (onConfirmMeasure !== undefined || onConfirmOpening !== undefined)}
+          scene={scene} onConfirmMeasure={onConfirmMeasure} onConfirmOpening={onConfirmOpening} /> : null}
+        {capture.sceneDraft && (isProportional(capture.sceneDraft) || capture.sceneDraft.measurement?.alignment === "disconnected")
+          ? <p role="alert">Borrador generado — no medible. {isProportional(capture.sceneDraft)
+            ? "Sin escala metrica aplicada: las dimensiones confirmadas no bastan para medir el modelo."
+            : "Las piezas están desconectadas: no se conoce su posición relativa."} Revisa la evidencia o usa captura manual.</p> : null}
+        {capture.status === "completed" && capture.sceneDraft
+          ? <button className="review-button review-button--secondary" type="button"
+            disabled={busy || error !== null}
+            onClick={() => setPreview({ agencyId, listingId, capture })}>Inspeccionar sin editar</button>
+          : null}
         {capture.status === "completed" && capture.sceneDraft
           ? loadedCaptureId === capture.captureId
             ? <p>Borrador cargado en el editor: guarda la escena para aceptarlo.</p>
-            : <button className="review-button" type="button" disabled={disabled}
+            : <button className="review-button" type="button" disabled={disabled || isProportional(capture.sceneDraft) || capture.sceneDraft.unit !== "meters" || capture.sceneDraft.measurement?.alignment === "disconnected" || capture.sceneDraft.measurement?.clock === "unknown" || (capture.sceneDraft.measurement !== undefined && capture.sceneDraft.measurement.referenceConfirmed !== true)}
               onClick={() => onLoadDraft(capture.captureId, capture.sceneDraft as SceneDocument)}>
               Cargar borrador en el editor</button>
           : null}
       </li>)}
     </ul>
+    {preview && preview.agencyId === agencyId && preview.listingId === listingId && !error && preview.capture.sceneDraft
+      ? <section aria-label="Inspección provisional de captura">
+        <h4>Geometría provisional · solo lectura</h4>
+        <p>Mediciones no disponibles en esta vista. La posición relativa de componentes desconectados no está verificada.
+          Inspeccionar no carga el editor, guarda ni acepta la escena. Podés usar captura manual.</p>
+        <button type="button" onClick={() => setPreview(null)}>Cerrar inspección</button>
+        <SceneViewer key={`${agencyId}/${listingId}/${preview.capture.captureId}`}
+          sceneDocument={preview.capture.sceneDraft} />
+      </section> : null}
   </section>;
+}
+
+interface NotesProps {
+  capture: CaptureReview;
+  editable: boolean;
+  scene?: SceneDocument;
+  onConfirmMeasure?: (wallId: string, height?: number) => void;
+  onConfirmOpening?: (openingId: string) => void;
+}
+
+function CaptureNotes({ capture, editable, scene, onConfirmMeasure, onConfirmOpening }: NotesProps) {
+  const { scale, other } = splitCaptureWarnings(capture.warnings);
+  // Once loaded, the editor scene is the source: confirmed measures leave the list.
+  const source = editable && scene ? scene : capture.sceneDraft;
+  const pending = source ? pendingEstimates(source) : [];
+  const openings = source ? pendingOpenings(source) : [];
+  const proportional = source ? isProportional(source) : false;
+  return <>
+    {scale.length > 0
+      ? <ul aria-label={`Advertencias de escala de ${capture.captureId}`} className="capture-draft__scale">
+        {scale.map((warning, index) => <li key={index}>{warning}</li>)}</ul> : null}
+    {other.length > 0
+      ? <ul aria-label={`Advertencias de ${capture.captureId}`}>
+        {other.map((warning, index) => <li key={index}>{warning}</li>)}</ul> : null}
+    {pending.length > 0 ? <>
+      <p>Medidas estimadas pendientes de confirmar (no fueron medidas; no las tomes como exactas):</p>
+      <ul aria-label={`Medidas estimadas pendientes de ${capture.captureId}`}>
+        {pending.map((estimate) => <li key={estimate.wallId}>
+          {proportional
+            ? `Altura relativa del muro ${estimate.wallId}: ${estimate.height.toFixed(2).replace(".", ",")} (unidades del plano, no metros)`
+            : `Altura del muro ${estimate.wallId}: ${estimate.height.toFixed(2).replace(".", ",")} m`}
+          {estimate.source === "estimated" ? " (estimada desde el video)" : " (no medida)"}
+          {editable && onConfirmMeasure
+            ? <PendingMeasureActions estimate={estimate} onConfirm={onConfirmMeasure} proportional={proportional} /> : null}</li>)}
+      </ul></> : null}
+    {openings.length > 0 ? <>
+      <p>Aberturas reconocidas desde el video que faltan confirmar (revisa su posición en el editor):</p>
+      <ul aria-label={`Aberturas reconocidas pendientes de ${capture.captureId}`}>
+        {openings.map((opening) => <li key={opening.openingId}>
+          {opening.type === "door" ? "Puerta" : "Ventana"} {opening.openingId} en el muro {opening.wallId} (reconocida desde el video)
+          {editable && onConfirmOpening
+            ? <>{" "}<button className="review-button review-button--secondary" type="button"
+              onClick={() => onConfirmOpening(opening.openingId)}>Confirmar</button></> : null}</li>)}
+      </ul></> : null}
+  </>;
+}
+
+function PendingMeasureActions({ estimate, onConfirm, proportional }: {
+  estimate: PendingEstimate;
+  proportional: boolean;
+  onConfirm: (wallId: string, height?: number) => void;
+}) {
+  const [value, setValue] = useState("");
+  const [invalid, setInvalid] = useState(false);
+  function correct() {
+    const height = Number(value.trim().replace(",", "."));
+    if (value.trim() === "" || !Number.isFinite(height) || height <= 0) {
+      setInvalid(true);
+      return;
+    }
+    setInvalid(false);
+    onConfirm(estimate.wallId, height);
+  }
+  return <span className="capture-draft__measure-actions">
+    {" "}
+    <button className="review-button review-button--secondary" type="button"
+      onClick={() => onConfirm(estimate.wallId, undefined)}>Confirmar</button>
+    <input type="text" inputMode="decimal" value={value}
+      aria-label={`Altura corregida del muro ${estimate.wallId}${proportional ? "" : " (m)"}`}
+      onChange={(event) => { setValue(event.target.value); setInvalid(false); }} />
+    <button className="review-button review-button--secondary" type="button"
+      onClick={correct}>Corregir y confirmar</button>
+    {invalid ? <span role="alert">La altura debe ser un número mayor que cero{proportional ? "" : " (en metros)"}.</span> : null}
+  </span>;
 }

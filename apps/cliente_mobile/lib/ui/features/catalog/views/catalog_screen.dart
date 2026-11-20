@@ -9,7 +9,10 @@ import '../../../../data/services/quote_api.dart';
 import '../../../../data/services/scene_api.dart';
 import '../../../../domain/catalog_controller.dart';
 import '../../../../domain/customer_reservations_controller.dart';
+import '../../../../domain/customer_favorites_controller.dart';
 import '../../../../domain/customer_session_controller.dart';
+import '../../favorites/favorite_button.dart';
+import '../../favorites/saved_searches_sheet.dart';
 import 'catalog_filters_sheet.dart';
 import 'catalog_format.dart';
 import '../../guide/guide_content.dart';
@@ -32,6 +35,7 @@ class CatalogScreen extends StatefulWidget {
     this.quoteApi,
     this.chatApi,
     this.reviewsApi,
+    this.favoritesController,
     this.deviceLocation = const GeolocatorDeviceLocation(),
     this.mapConfig = MapTileConfig.openStreetMap,
   });
@@ -57,6 +61,9 @@ class CatalogScreen extends StatefulWidget {
 
   /// When provided, the listing detail shows ratings and lets eligible customers rate.
   final CustomerReviewsApi? reviewsApi;
+
+  /// When provided, a signed-in customer marks favorites and saves searches.
+  final CustomerFavoritesController? favoritesController;
 
   @override
   State<CatalogScreen> createState() => _CatalogScreenState();
@@ -87,6 +94,60 @@ class _CatalogScreenState extends State<CatalogScreen> {
     if (filters != null && mounted) await _controller.search(filters);
   }
 
+  Future<void> _openSavedSearches(CustomerFavoritesController favorites) async {
+    final filters = await showModalBottomSheet<CatalogFilters>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => SavedSearchesSheet(controller: favorites),
+    );
+    if (filters != null && mounted) await _controller.search(filters);
+  }
+
+  List<Widget> _savedSearchActions() {
+    final favorites = widget.favoritesController;
+    if (favorites == null || favorites.state != FavoritesLoadState.ready) {
+      return const [];
+    }
+    final filters = _controller.filters;
+    return [
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              key: const ValueKey('catalog-save-search'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+              ),
+              onPressed: hasSavableFilters(filters)
+                  ? () => showSaveSearchDialog(
+                      context,
+                      controller: favorites,
+                      filters: filters,
+                    )
+                  : null,
+              icon: const Icon(Icons.bookmark_add_outlined),
+              label: const Text('Guardar búsqueda'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: OutlinedButton.icon(
+              key: const ValueKey('catalog-saved-searches'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+              ),
+              onPressed: () => _openSavedSearches(favorites),
+              icon: const Icon(Icons.bookmarks_outlined),
+              label: const Text('Mis búsquedas'),
+            ),
+          ),
+        ],
+      ),
+    ];
+  }
+
   void _openListing(CatalogListing listing) {
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
@@ -99,6 +160,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
           quoteApi: widget.quoteApi,
           chatApi: widget.chatApi,
           reviewsApi: widget.reviewsApi,
+          favoritesController: widget.favoritesController,
         ),
       ),
     );
@@ -109,7 +171,10 @@ class _CatalogScreenState extends State<CatalogScreen> {
     child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 720),
       child: ListenableBuilder(
-        listenable: _controller,
+        listenable: Listenable.merge([
+          _controller,
+          ?widget.favoritesController,
+        ]),
         builder: (context, _) => ListView(
           padding: const EdgeInsets.all(20),
           children: [
@@ -169,6 +234,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
               icon: const Icon(Icons.tune),
               label: const Text('Filtrar catálogo'),
             ),
+            ..._savedSearchActions(),
             if (_controller.filters.hasZone) ...[
               const SizedBox(height: 8),
               Align(
@@ -330,6 +396,17 @@ class _CatalogScreenState extends State<CatalogScreen> {
                           fontSize: 11,
                         ),
                       ),
+                    ),
+                  ),
+                if (widget.favoritesController != null)
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: FavoriteButton(
+                      controller: widget.favoritesController!,
+                      listingId: listing.listingId,
+                      listing: listing,
+                      onSurface: true,
                     ),
                   ),
               ],
