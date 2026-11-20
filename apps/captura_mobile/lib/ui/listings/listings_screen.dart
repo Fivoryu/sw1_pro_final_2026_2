@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/map_config.dart';
 import '../../data/models/staff_listing.dart';
 import '../../domain/listing_drafts_controller.dart';
+import '../guide/contextual_guide.dart';
 import 'listing_editor_screen.dart';
 import 'listing_format.dart';
 import '../theme/andean_theme.dart';
@@ -60,7 +61,10 @@ class _ListingsScreenState extends State<ListingsScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Mis inmuebles')),
+    appBar: AppBar(
+      title: const Text('Mis inmuebles'),
+      actions: const [ContextualGuideButton(screen: GuideScreen.listingsList)],
+    ),
     body: ListenableBuilder(
       listenable: widget.controller,
       builder: (context, _) {

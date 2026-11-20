@@ -6,6 +6,7 @@ import '../../data/models/staff_listing.dart';
 import '../../data/services/photo_source.dart';
 import '../../domain/listing_drafts_controller.dart';
 import '../../domain/listing_photos_controller.dart';
+import '../guide/contextual_guide.dart';
 import 'listing_format.dart';
 import 'listing_photos_section.dart';
 import 'location_picker.dart';
@@ -396,6 +397,9 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
         title: Text(
           widget.listing == null ? 'Nuevo inmueble' : 'Editar inmueble',
         ),
+        actions: const [
+          ContextualGuideButton(screen: GuideScreen.listingEditor),
+        ],
       ),
       body: Center(
         child: SafeArea(
