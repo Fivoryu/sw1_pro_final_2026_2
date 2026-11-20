@@ -1,3 +1,4 @@
+import 'package:cliente_mobile/ui/features/guide/guide_assistant.dart';
 import 'package:cliente_mobile/ui/features/guide/guide_content.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -109,5 +110,46 @@ void main() {
         );
       }
     }
+  });
+  test('quote guidance matches the real labels of the flow', () {
+    final detail = _allText(
+      GuideContent.forScreen(GuideScreen.listingDetail),
+    ).join('\n');
+    final welcome = _allText(
+      GuideContent.forScreen(GuideScreen.welcome),
+    ).join('\n');
+    expect(detail, contains('Calcular cotización'));
+    expect(welcome, contains('Calcular cotización'));
+    expect(welcome, isNot(contains('Tocá «Cotizar» ')));
+    final reach = GuideAssistant.reachFor(GuideScreen.quote);
+    expect(reach, contains('Cotizar este inmueble'));
+    expect(reach, isNot(contains('«Cotizar»')));
+  });
+
+  test('«Tu calificación» is never presented as a button', () {
+    for (final s in GuideScreen.values) {
+      final text = _allText(GuideContent.forScreen(s)).join('\n');
+      expect(text, isNot(contains('Abrí «Tu calificación»')), reason: '$s');
+    }
+    final reviews = _allText(
+      GuideContent.forScreen(GuideScreen.reviews),
+    ).join('\n');
+    expect(reviews, contains('«Calificar»'));
+  });
+
+  test('account guide states the 8-character password and real toggle', () {
+    final text = _allText(GuideContent.forScreen(GuideScreen.account));
+    final all = text.join('\n');
+    expect(all, contains('8 caracteres'));
+    expect(all, contains('No tengo cuenta: registrarme'));
+    expect(
+      GuideContent.forScreen(GuideScreen.account).mistakes.join(' '),
+      contains('8 caracteres'),
+    );
+  });
+
+  test('catalog help does not promise an «Entendido» that chat lacks', () {
+    final w = GuideContent.forScreen(GuideScreen.catalog).walkthroughs[2];
+    expect(w.steps.last, contains('Ver guía completa'));
   });
 }

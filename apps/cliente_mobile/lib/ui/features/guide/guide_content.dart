@@ -137,7 +137,7 @@ class GuideContent {
             'Tocá «Filtrar catálogo» para indicar qué buscás: tipo, precio o zona.',
             'Tocá una tarjeta para abrir el detalle del inmueble y mirá sus fotos.',
             'Si hay recorrido 3D, tocá «Recorrer en 3D» para verlo por dentro.',
-            'Tocá «Cotizar» para calcular el costo total con los opcionales que quieras.',
+            'En el detalle del inmueble, tocá «Calcular cotización» para ver el costo total con los opcionales que quieras.',
             'Creá tu cuenta en la pestaña Cuenta, o entrá si ya tenés una.',
             'Volvé al detalle y solicitá la reserva. Seguila después en la pestaña Reservas.',
           ],
@@ -185,7 +185,7 @@ class GuideContent {
           steps: [
             'Tocá el botón «Primeros pasos» de esta pantalla.',
             'Leé el recorrido completo de la app, de la búsqueda a la reserva.',
-            'Tocá «Entendido» para cerrar la ayuda.',
+            'Cuando termines, tocá «Ver guía completa» y después «Entendido», o deslizá la ayuda hacia abajo para cerrarla.',
           ],
         ),
       ],
@@ -243,7 +243,7 @@ class GuideContent {
             'Mirá las fotos y la descripción para conocer el espacio.',
             'Revisá el precio base y las condiciones de la operación.',
             'Si hay recorrido 3D, abrilo para ver el inmueble por dentro.',
-            'Armá una cotización para conocer el costo total.',
+            'Tocá «Calcular cotización» para conocer el costo total con los opcionales que hayas marcado.',
             'Cuando estés seguro, podés solicitar la reserva desde esta pantalla.',
           ],
         ),
@@ -356,7 +356,7 @@ class GuideContent {
           name: 'Dejar tu calificación',
           steps: [
             'Entrá a tu cuenta si todavía no lo hiciste.',
-            'Abrí «Tu calificación» desde el inmueble que reservaste.',
+            'En el detalle del inmueble que reservaste, tocá «Calificar»: se abre la ventana «Tu calificación».',
             'Elegí cuántas estrellas das al inmueble y a la atención de la inmobiliaria.',
             'Escribí un comentario si querés (es opcional) y tocá «Guardar».',
           ],
@@ -422,9 +422,9 @@ class GuideContent {
         GuideWalkthrough(
           name: 'Crear tu cuenta',
           steps: [
-            'Tocá el texto que está debajo del botón para pasar a «Crear cuenta».',
+            'Tocá el texto «No tengo cuenta: registrarme», que está debajo del botón, para pasar a «Crear cuenta».',
             'Escribí tu correo electrónico en el primer campo.',
-            'Escribí una contraseña en el segundo campo.',
+            'Escribí una contraseña de al menos 8 caracteres en el segundo campo.',
             'Tocá «Crear cuenta». Si todo está bien, quedás dentro automáticamente.',
           ],
         ),
@@ -432,8 +432,8 @@ class GuideContent {
           name: 'Entrar a tu cuenta',
           steps: [
             'Escribí el correo con el que te registraste.',
-            'Escribí tu contraseña.',
-            'Tocá «Entrar».',
+            'Escribí tu contraseña (tiene que tener al menos 8 caracteres).',
+            'Tocá «Entrar». Si todavía no tenés cuenta, tocá antes «No tengo cuenta: registrarme»; para volver, «Ya tengo cuenta: iniciar sesión».',
           ],
         ),
         GuideWalkthrough(
@@ -456,6 +456,7 @@ class GuideContent {
       ],
       mistakes: [
         'Te pide un correo: es obligatorio. Ingresá tu correo electrónico completo.',
+        'Dice «La contraseña necesita al menos 8 caracteres»: escribí una contraseña más larga, de 8 caracteres o más.',
         'No podés entrar: revisá que el correo y la contraseña estén bien escritos, sin espacios de más.',
         'Dice que no pudo restaurar la sesión: tocá «Reintentar».',
         'Aparece «Conectá una wallet EVM para continuar»: primero conectá tu wallet y después vinculala.',

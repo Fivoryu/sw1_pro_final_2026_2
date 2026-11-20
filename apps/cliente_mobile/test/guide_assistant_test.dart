@@ -126,4 +126,47 @@ void main() {
     final empty = _assistant.answer('   ', GuideScreen.catalog);
     expect(empty.text, contains('no estoy seguro'));
   });
+  test('login wording reaches «Entrar a tu cuenta», not «Cerrar sesión»', () {
+    for (final q in [
+      '¿cómo inicio sesión?',
+      'ingresar',
+      'iniciar sesión',
+      'cómo accedo a mi cuenta',
+      'quiero entrar',
+    ]) {
+      final r = _assistant.answer(q, GuideScreen.catalog);
+      expect(r.text, contains('Entrar a tu cuenta'), reason: q);
+      expect(r.text, isNot(contains('«Cerrar sesión»')), reason: q);
+    }
+    final out = _assistant.answer('cerrar sesión', GuideScreen.catalog);
+    expect(out.text, contains('«Cerrar sesión»'));
+    expect(out.text, isNot(contains('Entrar a tu cuenta')));
+  });
+
+  test('payment and cost wording use synonyms', () {
+    final pay = _assistant.answer('¿cómo pago?', GuideScreen.reservations);
+    expect(pay.text, contains('Confirmar el depósito de prueba'));
+    final cost = _assistant.answer('cuánto cuesta', GuideScreen.quote);
+    expect(cost.text, contains('Calcular el costo total'));
+  });
+
+  test('light typos are tolerated for words of 5+ letters', () {
+    final r = _assistant.answer('resevar', GuideScreen.catalog);
+    expect(r.text, isNot(contains('no estoy seguro')));
+    expect(r.text.toLowerCase(), contains('reserva'));
+  });
+
+  test('ties are not resolved by enum order (welcome tour)', () {
+    final r = _assistant.answer('¿cómo reservo?', GuideScreen.catalog);
+    expect(r.text, isNot(contains('Recorrido completo')));
+    expect(r.text.toLowerCase(), contains('reserv'));
+  });
+
+  test('a partial match with mostly unmatched words falls back honestly', () {
+    final r = _assistant.answer(
+      'reservar helicoptero submarino',
+      GuideScreen.catalog,
+    );
+    expect(r.text, contains('no estoy seguro'));
+  });
 }

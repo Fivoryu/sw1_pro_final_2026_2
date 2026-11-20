@@ -42,7 +42,11 @@ class GuideAssistant {
     GuideScreen.listingDetail: 'en el Catálogo, tocá la tarjeta de un inmueble',
     GuideScreen.viewer:
         'abrí un inmueble desde el Catálogo y tocá «Recorrer en 3D»',
-    GuideScreen.quote: 'abrí un inmueble desde el Catálogo y tocá «Cotizar»',
+    GuideScreen.quote:
+        'abrí un inmueble desde el Catálogo, tocá «Recorrer en 3D», tocá un '
+        'objeto marcado del recorrido y elegí «Cotizar este inmueble» '
+        '(en el detalle del inmueble, «Calcular cotización» hace el cálculo '
+        'sin salir de esa pantalla)',
     GuideScreen.reviews:
         'abrí un inmueble desde el Catálogo y buscá su sección de reseñas',
     GuideScreen.reservations: 'tocá la pestaña Reservas, abajo',
@@ -51,6 +55,66 @@ class GuideAssistant {
     GuideScreen.chat: 'abrí una conversación desde la lista de conversaciones',
     GuideScreen.notifications:
         'tocá la campana de arriba, una vez que hayas entrado a tu cuenta',
+  };
+
+  /// How to reach [screen] from elsewhere, in plain words.
+  static String reachFor(GuideScreen screen) => _reach[screen]!;
+
+  /// Common novice wording mapped to the words the guide uses.
+  static const Map<String, List<String>> _tokenSynonyms = {
+    'pago': ['pagar', 'deposito'],
+    'pagos': ['pagar', 'deposito'],
+    'pagando': ['pagar', 'deposito'],
+    'pague': ['pagar', 'deposito'],
+    'abonar': ['pagar', 'deposito'],
+    'depositar': ['deposito'],
+    'cuesta': ['costo'],
+    'cuestan': ['costo'],
+    'cuanto': ['costo'],
+    'cuantos': ['costo'],
+    'apartar': ['reservar'],
+    'separar': ['reservar'],
+    'mostrar': [],
+    'mostrame': [],
+    'muestra': [],
+    'muestrame': [],
+    'clave': ['contrasena'],
+    'contrasenia': ['contrasena'],
+    'password': ['contrasena'],
+  };
+
+  static const _loginWords = {
+    'iniciar',
+    'inicio',
+    'inicias',
+    'inicia',
+    'ingresar',
+    'ingreso',
+    'ingresas',
+    'ingresa',
+    'entrar',
+    'entro',
+    'entras',
+    'acceder',
+    'accedo',
+    'accedes',
+    'acceso',
+    'loguear',
+    'loguearme',
+    'logear',
+    'logearme',
+    'login',
+  };
+  static const _logoutWords = {
+    'cerrar',
+    'cierro',
+    'cierras',
+    'salir',
+    'salgo',
+    'sales',
+    'logout',
+    'desloguear',
+    'deslogear',
   };
 
   /// Extra words people use for a glossary term.
@@ -229,6 +293,76 @@ class GuideAssistant {
     for (final t in _tokens(normalized))
       if (!_stopwords.contains(t) && !extraDrop.contains(t)) _stem(t),
   };
+
+  /// Rewrites novice wording into the words the guide uses. «Iniciar sesión»
+  /// and friends mean logging in, which is different from «Cerrar sesión».
+  static String _expand(String normalized) {
+    final tokens = _tokens(normalized);
+    final login =
+        tokens.any(_loginWords.contains) && !tokens.any(_logoutWords.contains);
+    final out = <String>[];
+    for (final t in tokens) {
+      if (login && (t == 'sesion' || _loginWords.contains(t))) continue;
+      out.addAll(_tokenSynonyms[t] ?? [t]);
+    }
+    if (login) out.addAll(const ['entrar', 'cuenta']);
+    return out.join(' ');
+  }
+
+  static bool _withinOneEdit(String a, String b) {
+    if ((a.length - b.length).abs() > 1) return false;
+    var i = 0;
+    var j = 0;
+    var edits = 0;
+    while (i < a.length && j < b.length) {
+      if (a[i] == b[j]) {
+        i++;
+        j++;
+        continue;
+      }
+      if (++edits > 1) return false;
+      if (a.length > b.length) {
+        i++;
+      } else if (a.length < b.length) {
+        j++;
+      } else {
+        i++;
+        j++;
+      }
+    }
+    return edits + (a.length - i) + (b.length - j) <= 1;
+  }
+
+  /// Replaces unknown stems of words with 5+ letters by the most common known
+  /// stem that is one edit away (light typo tolerance).
+  static Set<String> _fuzzy(String normalized, Set<String> stems) {
+    final out = <String>{};
+    final longStems = <String>{
+      for (final t in _tokens(normalized))
+        if (t.length >= 5 && !_stopwords.contains(t)) _stem(t),
+    };
+    for (final s in stems) {
+      if (_df.containsKey(s) || !longStems.contains(s) || s.length < 4) {
+        out.add(s);
+        continue;
+      }
+      final near = [
+        for (final k in _df.keys)
+          if (_withinOneEdit(s, k)) k,
+      ];
+      if (near.isEmpty) {
+        out.add(s);
+      } else {
+        // The most common known stem is the likeliest intended word.
+        near.sort((x, y) {
+          final c = _df[y]!.compareTo(_df[x]!);
+          return c != 0 ? c : x.compareTo(y);
+        });
+        out.add(near.first);
+      }
+    }
+    return out;
+  }
 
   static final List<_Entry> _entries = _buildEntries();
 
@@ -445,8 +579,19 @@ class GuideAssistant {
       }
     }
     if (e.screen == current) s *= 1.4;
+    if (s > 0) {
+      // Tie-breakers: actionable walkthroughs, then more specific names.
+      if (e.kind == _Kind.walkthrough) s += 0.02;
+      if (e.name.isNotEmpty) {
+        s += 0.005 * e.name.where(q.contains).length / e.name.length;
+      }
+    }
     return s;
   }
+
+  /// Meaningful query words found in the entry (name or body).
+  int _matched(_Entry e, Set<String> q) =>
+      q.where((t) => e.name.contains(t) || e.body.contains(t)).length;
 
   _Entry? _best(Set<String> q, GuideScreen current, {_Kind? only}) {
     _Entry? best;
@@ -459,7 +604,10 @@ class GuideAssistant {
         best = e;
       }
     }
-    return top >= 3.0 ? best : null;
+    if (best == null || top < 3.0) return null;
+    // Honest fallback when most meaningful words are not covered.
+    if (q.length >= 2 && _matched(best, q) * 2 < q.length) return null;
+    return best;
   }
 
   /// Answers [question] asked while the person is on [screen].
@@ -506,12 +654,16 @@ class GuideAssistant {
       return _mistakes(screen);
     }
 
-    final q = _stems(norm, {
-      ..._lostWords,
-      ..._purposeWords,
-      ..._mistakeWords,
-      ..._greetingWords,
-    });
+    final expanded = _expand(norm);
+    final q = _fuzzy(
+      expanded,
+      _stems(expanded, {
+        ..._lostWords,
+        ..._purposeWords,
+        ..._mistakeWords,
+        ..._greetingWords,
+      }),
+    );
     if (q.isEmpty) return _fallback(screen);
 
     // 4. Glossary questions: "qué es X".
