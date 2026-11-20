@@ -8,11 +8,18 @@ import 'staff_auth_failure.dart';
 
 export 'staff_auth_failure.dart';
 
-/// The first login step answer: credentials were accepted, a TOTP proof is next.
+/// The first login step answer: credentials were accepted. A TOTP proof is
+/// next, unless the server runs without TOTP (`totp_required: false`).
 class StaffAccessChallenge {
-  const StaffAccessChallenge({required this.challengeToken});
+  const StaffAccessChallenge({
+    required this.challengeToken,
+    this.totpRequired = true,
+  });
 
   final String challengeToken;
+
+  /// False when the challenge is completed with no code.
+  final bool totpRequired;
 }
 
 /// The staff account resolved from `/me`.
@@ -83,17 +90,22 @@ class StaffAuthApi {
     if (challengeToken is! String || challengeToken.isEmpty) {
       throw malformedResponseFailure();
     }
-    return StaffAccessChallenge(challengeToken: challengeToken);
+    return StaffAccessChallenge(
+      challengeToken: challengeToken,
+      totpRequired: json['totp_required'] != false,
+    );
   }
 
+  /// Completes the login. [code] is omitted when the server does not require
+  /// TOTP (see [StaffAccessChallenge.totpRequired]).
   Future<StaffAccessGrant> completeLogin({
     required String challengeToken,
-    required String code,
+    String? code,
   }) async {
     final response = await _send(
       'POST',
       '/api/v1/auth/login/totp',
-      body: {'challenge_token': challengeToken, 'code': code},
+      body: {'challenge_token': challengeToken, 'code': ?code},
     );
     return _grant(response);
   }

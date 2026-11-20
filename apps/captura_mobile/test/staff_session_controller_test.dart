@@ -388,4 +388,41 @@ void main() {
       expect(harness.controller.accessToken, isNull);
     });
   });
+  group('login without TOTP', () {
+    test('opens the session with the password alone', () async {
+      final harness = _build();
+      harness.backend.totpRequired = false;
+
+      await harness.controller.startLogin(
+        email: 'agent@example.test',
+        password: 'secret',
+      );
+
+      expect(harness.controller.status, StaffSessionStatus.signedIn);
+      expect(harness.backend.calls, contains('/api/v1/auth/login/totp'));
+      expect(harness.backend.lastCompletionBody, {
+        'challenge_token': 'challenge-1',
+      });
+    });
+
+    test('still asks for the code when the server requires TOTP', () async {
+      final harness = _build();
+
+      await harness.controller.startLogin(
+        email: 'agent@example.test',
+        password: 'secret',
+      );
+
+      expect(harness.controller.status, StaffSessionStatus.awaitingCode);
+      expect(harness.backend.calls, isNot(contains('/api/v1/auth/login/totp')));
+
+      await harness.controller.submitCode('123456');
+
+      expect(harness.controller.status, StaffSessionStatus.signedIn);
+      expect(harness.backend.lastCompletionBody, {
+        'challenge_token': 'challenge-1',
+        'code': '123456',
+      });
+    });
+  });
 }

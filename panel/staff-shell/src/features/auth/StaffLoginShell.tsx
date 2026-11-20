@@ -69,6 +69,14 @@ export function StaffLoginShell({
       setPassword("");
       setVerificationCode("");
       setIsRecoveryMode(false);
+      if (challenge.totp_required === false) {
+        // The server does not ask for a code: finish the login at once.
+        const session = await completeStaffLogin({
+          challenge_token: challenge.challenge_token,
+        });
+        onAuthenticated?.(session);
+        return;
+      }
       setLoginChallenge(challenge);
     } catch {
       setErrorMessage(

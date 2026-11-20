@@ -38,9 +38,14 @@ class StaffSessionController extends ChangeNotifier {
     required StaffAuthApi api,
     required StaffCredentialStore credentialStore,
     OfflineListingStore? offlineStore,
+    this.beforeSignOut,
   }) : _api = api,
        _credentialStore = credentialStore,
        _offlineStore = offlineStore;
+
+  /// Runs while the access token is still valid, just before the session ends
+  /// (for example to unregister the push token). Failures are ignored.
+  final Future<void> Function()? beforeSignOut;
 
   final StaffAuthApi _api;
   final StaffCredentialStore _credentialStore;
@@ -154,14 +159,25 @@ class StaffSessionController extends ChangeNotifier {
     }
   }
 
-  /// First step: exchanges credentials for a TOTP challenge.
+  /// First step: exchanges credentials for a login challenge. When the server
+  /// does not require TOTP the challenge is completed at once, so the session
+  /// opens with the password alone.
   Future<void> startLogin({
     required String email,
     required String password,
   }) async {
     _message = null;
     try {
-      _challenge = await _api.startLogin(email: email, password: password);
+      final challenge = await _api.startLogin(email: email, password: password);
+      if (!challenge.totpRequired) {
+        _challenge = null;
+        final grant = await _api.completeLogin(
+          challengeToken: challenge.challengeToken,
+        );
+        await _acceptGrant(grant);
+        return;
+      }
+      _challenge = challenge;
       _status = StaffSessionStatus.awaitingCode;
       notifyListeners();
     } on StaffAuthFailure catch (failure) {
@@ -198,6 +214,11 @@ class StaffSessionController extends ChangeNotifier {
   /// Revokes the session. A rejected session still signs out locally; a network
   /// failure keeps it so the agent can retry.
   Future<void> signOut() async {
+    try {
+      await beforeSignOut?.call();
+    } catch (_) {
+      // Signing out must never depend on an optional cleanup step.
+    }
     final refreshCookie = await _credentialStore.readRefreshCookie();
     final csrfToken = await _credentialStore.readCsrfToken();
 

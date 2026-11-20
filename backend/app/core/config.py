@@ -39,6 +39,9 @@ class Settings:
     totp_encryption_key: str
     web_origin: str
     secure_cookies: bool = True
+    # When false, staff sign in and accept invitations with the password only:
+    # no TOTP enrollment and no TOTP step at login (STAFF_REQUIRE_TOTP).
+    require_totp: bool = True
     access_token_minutes: int = 15
     refresh_token_days: int = 30
     invitation_ttl_hours: int = 168
@@ -86,6 +89,8 @@ class Settings:
     groq_api_key: str | None = None
     groq_floorplan_model: str = "qwen/qwen3.8-27b"
     groq_floorplan_timeout_seconds: int = 30
+    # Path to the Firebase service-account key; push notifications stay off when unset.
+    fcm_service_account_file: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -112,6 +117,7 @@ class Settings:
             totp_encryption_key=values["totp_encryption_key"],
             web_origin=origin,
             secure_cookies=os.environ.get("STAFF_SECURE_COOKIES", "true").lower() != "false",
+            require_totp=_boolean_from_env("STAFF_REQUIRE_TOTP", True),
             database_connect_timeout_seconds=_positive_timeout_from_env(
                 "DATABASE_CONNECT_TIMEOUT_SECONDS", 5
             ),
@@ -173,6 +179,7 @@ class Settings:
             groq_floorplan_timeout_seconds=_positive_timeout_from_env(
                 "GROQ_FLOORPLAN_TIMEOUT_SECONDS", 30
             ),
+            fcm_service_account_file=os.environ.get("FCM_SERVICE_ACCOUNT_FILE") or None,
         )
 
     def escrow_address_for(self, currency: str) -> str | None:

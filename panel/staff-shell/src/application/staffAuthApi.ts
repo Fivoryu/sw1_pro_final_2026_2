@@ -5,6 +5,8 @@ export interface StaffCredentials {
 
 export interface LoginChallenge {
   challenge_token: string;
+  /** False when the server runs with STAFF_REQUIRE_TOTP=false. */
+  totp_required?: boolean;
 }
 
 export interface StaffUser {
@@ -26,6 +28,16 @@ export interface InvitationEnrollment {
   provisioning_uri: string;
 }
 
+/** Acceptance when the server does not require TOTP: the account exists already. */
+export interface InvitationAccountCreated {
+  totp_required: false;
+  account: StaffUser;
+}
+
+export type InvitationAcceptanceResult =
+  | InvitationEnrollment
+  | InvitationAccountCreated;
+
 export interface EnrollmentVerification {
   enrollment_token: string;
   code: string;
@@ -38,7 +50,8 @@ export interface EnrollmentCompletion {
 
 export type StaffLoginVerification =
   | { challenge_token: string; code: string; recovery_code?: never }
-  | { challenge_token: string; recovery_code: string; code?: never };
+  | { challenge_token: string; recovery_code: string; code?: never }
+  | { challenge_token: string; code?: never; recovery_code?: never };
 
 export interface LoginCompletion {
   access_token: string;
@@ -117,8 +130,8 @@ export function startStaffLogin(
 
 export function acceptStaffInvitation(
   acceptance: InvitationAcceptance,
-): Promise<InvitationEnrollment> {
-  return requestJson<InvitationEnrollment>(
+): Promise<InvitationAcceptanceResult> {
+  return requestJson<InvitationAcceptanceResult>(
     "/invitations/accept",
     jsonPost(acceptance),
   );

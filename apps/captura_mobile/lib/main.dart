@@ -5,6 +5,8 @@ import 'package:path_provider/path_provider.dart';
 
 import 'data/services/ar_capture_channel.dart';
 import 'data/services/capture_draft_store.dart';
+import 'data/services/device_push_registrar.dart';
+import 'data/services/push_messaging.dart';
 import 'data/services/guided_capture_store.dart';
 import 'data/services/staff_auth_api.dart';
 import 'data/services/staff_capture_api.dart';
@@ -54,29 +56,48 @@ const _actionMinSize = Size.fromHeight(48);
 /// Readable content width on tablets and resizable windows.
 const double _contentMaxWidth = 720;
 
-void main() => runApp(
-  CaptureApp(
-    controller: StaffSessionController(
-      api: StaffAuthApi(baseUrl: _apiBaseUrl),
-      credentialStore: SecureStaffCredentialStore(),
-      offlineStore: FileOfflineListingStore(
-        root: getApplicationSupportDirectory,
-      ),
-    ),
-    listingsApi: StaffListingsApi(baseUrl: _apiBaseUrl),
-    photosApi: StaffListingPhotosApi(baseUrl: _apiBaseUrl),
-    photoSource: ImagePickerPhotoSource(),
-    sceneApi: StaffSceneApi(baseUrl: _apiBaseUrl),
-    captureStore: FileCaptureDraftStore(root: getApplicationSupportDirectory),
-    guidedStore: FileGuidedCaptureStore(root: getApplicationSupportDirectory),
-    arCapture: MethodChannelArCapture(),
-    captureApi: StaffCaptureApi(baseUrl: _apiBaseUrl),
-    floorplanInterpreter: StaffFloorplanInterpretationApi(baseUrl: _apiBaseUrl),
-    uploadStore: FilePendingUploadStore(root: getApplicationSupportDirectory),
-    chatApi: StaffChatApi(baseUrl: _apiBaseUrl),
-    notificationsApi: StaffNotificationsApi(baseUrl: _apiBaseUrl),
-    reviewsApi: StaffReviewsApi(baseUrl: _apiBaseUrl),
-  ),
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Registers this device for push notifications while agency staff is signed
+  // in; stays null when Firebase is not configured.
+  DevicePushRegistrar? push;
+  final controller = StaffSessionController(
+    api: StaffAuthApi(baseUrl: _apiBaseUrl),
+    credentialStore: SecureStaffCredentialStore(),
+    offlineStore: FileOfflineListingStore(root: getApplicationSupportDirectory),
+    beforeSignOut: () async => push?.unregister(),
+  );
+  final messaging = await FirebasePushMessaging.initialize();
+  if (messaging != null) {
+    push =
+        DevicePushRegistrar(
+          baseUrl: _apiBaseUrl,
+          accessTokenProvider: () async =>
+              controller.accessToken ?? (throw StateError('No staff session')),
+          messaging: messaging,
+        )..attach(
+          controller,
+          isSignedIn: () => controller.status == StaffSessionStatus.signedIn,
+        );
+  }
+  runApp(_app(controller));
+}
+
+CaptureApp _app(StaffSessionController controller) => CaptureApp(
+  controller: controller,
+  listingsApi: StaffListingsApi(baseUrl: _apiBaseUrl),
+  photosApi: StaffListingPhotosApi(baseUrl: _apiBaseUrl),
+  photoSource: ImagePickerPhotoSource(),
+  sceneApi: StaffSceneApi(baseUrl: _apiBaseUrl),
+  captureStore: FileCaptureDraftStore(root: getApplicationSupportDirectory),
+  guidedStore: FileGuidedCaptureStore(root: getApplicationSupportDirectory),
+  arCapture: MethodChannelArCapture(),
+  captureApi: StaffCaptureApi(baseUrl: _apiBaseUrl),
+  floorplanInterpreter: StaffFloorplanInterpretationApi(baseUrl: _apiBaseUrl),
+  uploadStore: FilePendingUploadStore(root: getApplicationSupportDirectory),
+  chatApi: StaffChatApi(baseUrl: _apiBaseUrl),
+  notificationsApi: StaffNotificationsApi(baseUrl: _apiBaseUrl),
+  reviewsApi: StaffReviewsApi(baseUrl: _apiBaseUrl),
 );
 
 class CaptureApp extends StatelessWidget {

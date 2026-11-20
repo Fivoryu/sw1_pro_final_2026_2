@@ -28,8 +28,13 @@ class CustomerSessionController extends ChangeNotifier {
   CustomerSessionController({
     required CustomerAuthApi api,
     required CustomerTokenStore tokenStore,
+    this.beforeSignOut,
   }) : _api = api,
        _tokenStore = tokenStore;
+
+  /// Runs while the access token is still valid, just before the session ends
+  /// (for example to unregister the push token). Failures are ignored.
+  final Future<void> Function()? beforeSignOut;
 
   final CustomerAuthApi _api;
   final CustomerTokenStore _tokenStore;
@@ -159,6 +164,11 @@ class CustomerSessionController extends ChangeNotifier {
   /// Revokes the session. A rejected token still signs out locally; a network
   /// failure keeps the session so the customer can retry.
   Future<void> signOut() async {
+    try {
+      await beforeSignOut?.call();
+    } catch (_) {
+      // Signing out must never depend on an optional cleanup step.
+    }
     final refreshToken = await _tokenStore.readRefreshToken();
     if (refreshToken != null) {
       try {
