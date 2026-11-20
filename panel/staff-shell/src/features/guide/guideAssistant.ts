@@ -39,7 +39,7 @@ const SYNONYMS: string[][] = [
 ];
 
 /** Domain words so common that matching only them must not count as understanding. */
-const GENERIC = new Set(["inmueble", "inmuebles", "cliente", "clientes", "sistema", "panel", "ver"].map((w) => w.slice(0, 5)));
+const GENERIC = new Set(["inmueble", "inmuebles", "cliente", "clientes", "sistema", "panel", "ver", "error", "fallo", "falla", "problema"].map((w) => w.slice(0, 5)));
 
 /** Words that only carry an intent (greeting, thanks, lost, purpose, errors, more). */
 const GREETING_WORDS = new Set(["hola", "buenas", "buenos", "dias", "tardes", "noches", "hey", "saludos"]);
@@ -240,7 +240,10 @@ function otherScreens(screenId: GuideScreenId): AssistantAnswer {
 function answerWithEntry(entry: Entry, screenId: GuideScreenId, asked: string): AssistantAnswer {
   let text = entry.text;
   const chips: string[] = [...entry.followUps];
-  if (entry.screen && entry.screen !== screenId) {
+  const sharedAcrossScreens =
+    entry.screen !== null &&
+    getKnowledgeBase().some((other) => other !== entry && other.kind === entry.kind && other.text === entry.text);
+  if (entry.screen && entry.screen !== screenId && !sharedAcrossScreens) {
     const target = GUIDE_TOPICS[entry.screen];
     text =
       `Eso se hace en otra pantalla: «${target.heading}». ` +
@@ -273,8 +276,9 @@ function scoreEntry(
   groups: QueryGroup[],
   normalized: string,
   glossaryBoost: boolean,
-): { score: number; coverage: number } {
-  if (groups.length === 0) return { score: 0, coverage: 0 };
+): { score: number; coverage: number; missedStrict: number } {
+  if (groups.length === 0) return { score: 0, coverage: 0, missedStrict: 0 };
+  let missedStrict = 0;
   let score = 0;
   let matched = 0;
   let coveredWeight = 0;
@@ -290,6 +294,8 @@ function scoreEntry(
     if (best > 0) {
       matched += 1;
       coveredWeight += group.generic ? 0.5 : 1;
+    } else if (!group.generic) {
+      missedStrict += 1;
     }
     score += best;
   }
@@ -297,7 +303,7 @@ function scoreEntry(
   if (entry.label === normalized) score += 10;
   if (entry.kind === "glossary") score *= glossaryBoost ? 2 : 0.5;
   if (entry.kind === "purpose") score *= 0.6;
-  return { score, coverage: coveredWeight / groups.length };
+  return { score, coverage: coveredWeight / groups.length, missedStrict };
 }
 
 const MIN_SCORE = 2;
@@ -370,14 +376,16 @@ export function answerQuestion(question: string, screenId: GuideScreenId): Assis
   const glossaryBoost =
     purposeAsked || /\b(que es|que son|significa|significan|quiere decir|definicion)\b/.test(raw);
   const normalized = query.join(" ");
-  let best: { entry: Entry; score: number; coverage: number } | null = null;
+  let best: { entry: Entry; score: number; coverage: number; missedStrict: number } | null = null;
   for (const entry of getKnowledgeBase()) {
     const scored = scoreEntry(entry, groups, normalized, glossaryBoost);
     let score = scored.score;
     if (entry.screen === screenId) score *= 1.5;
-    if (score > (best?.score ?? 0)) best = { entry, score, coverage: scored.coverage };
+    if (score > (best?.score ?? 0)) best = { entry, score, coverage: scored.coverage, missedStrict: scored.missedStrict };
   }
   if (!best || best.score < MIN_SCORE) return fallback(screenId, question);
   if (groups.length >= 2 && best.coverage < MIN_COVERAGE) return fallback(screenId, question);
+  // With exactly two meaningful words both must match (a generic one may be skipped only if the other matches).
+  if (groups.length === 2 && best.missedStrict > 0) return fallback(screenId, question);
   return answerWithEntry(best.entry, screenId, question);
 }

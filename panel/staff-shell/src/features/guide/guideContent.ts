@@ -800,12 +800,13 @@ export const GUIDE_TOPICS = {
 
   "chat-reports": {
     heading: "Cómo atender reportes de conversaciones",
-    audience: "Administradores de plataforma.",
+    audience: "Administradores de plataforma y administradores de inmobiliaria.",
     purpose:
-      "Aquí llegan los reportes que el personal de las inmobiliarias hizo sobre clientes. Esta lista es para leerlos y decidir qué hacer; no tiene botones para actuar sobre los clientes.",
+      "Aquí aparecen los reportes que el personal de las inmobiliarias hizo sobre clientes. La lista de reportes es para leerlos y decidir qué hacer. Solo los administradores de inmobiliaria ven además, debajo, la lista «Clientes bloqueados» con el botón «Desbloquear»; el administrador de plataforma no la ve.",
     canDo: [
       "Leer cada reporte: quién lo hizo, en qué inmueble y por qué.",
       "Ver los agentes involucrados.",
+      "Si eres administrador de inmobiliaria: revisar «Clientes bloqueados» y pulsar «Desbloquear» junto al cliente.",
     ],
     walkthroughs: [
       {
@@ -813,12 +814,12 @@ export const GUIDE_TOPICS = {
         steps: [
           { title: "Lee el motivo", detail: "Cada reporte muestra la razón escrita por quien lo envió." },
           { title: "Valora la situación", detail: "Decide si el cliente actuó mal o fue un error." },
-          { title: "Anota tu decisión", detail: "Aquí solo se leen los reportes; la inmobiliaria es quien decide sobre el cliente desde su propia bandeja de chat." },
+          { title: "Anota tu decisión", detail: "La lista de reportes solo se lee. Solo los administradores de inmobiliaria pueden actuar sobre un cliente, desde «Clientes bloqueados» con «Desbloquear»; el administrador de plataforma no puede." },
         ],
       },
     ],
     mistakes: [
-      { problem: "Busco cómo actuar sobre un cliente reportado.", fix: "Las acciones sobre clientes las hace el administrador de la inmobiliaria desde su bandeja de chat; esta lista solo muestra reportes." },
+      { problem: "Busco cómo actuar sobre un cliente reportado.", fix: "Solo los administradores de inmobiliaria pueden desbloquear a un cliente, desde «Clientes bloqueados» en su bandeja de chat. El administrador de plataforma no ve esa lista y esta pantalla solo muestra reportes." },
       { problem: "La lista aparece vacía.", fix: "«No hay reportes» significa que no hay nada pendiente." },
     ],
     glossary: ["reporte", "conversacion", "administrador_plataforma"],

@@ -159,3 +159,26 @@ describe("answerQuestion: partial matches fall back (J8)", () => {
   });
 });
 
+
+describe("answerQuestion: final round 2 fixes", () => {
+  it("answers a cross-screen logout question without sending the user to the platform admin screen (R2-1)", () => {
+    for (const id of ["chat-inbox", "landing"] as const) {
+      const r = answerQuestion("cómo cierro sesión", id);
+      expect(r.text, id).toContain("Cerrar sesión");
+      expect(r.text, id).toMatch(/1\./);
+      expect(r.text, id).not.toContain("administración de plataforma");
+      expect(r.text, id).not.toContain("otra pantalla");
+    }
+  });
+
+  it("falls back on a two-word question with one unmatched word (R2-3)", () => {
+    expect(answerQuestion("borrar reseña", "agency-reviews").text).toContain("No estoy seguro");
+    expect(answerQuestion("borrar reseña", "login").text).toContain("No estoy seguro");
+  });
+
+  it("still answers legitimate short questions (R2-3)", () => {
+    expect(answerQuestion("cerrar sesión", "welcome-agent").text).toContain("Cerrar sesión");
+    expect(answerQuestion("cómo publico", "welcome-agency-admin").text.toLowerCase()).toContain("publica");
+    expect(answerQuestion("qué es escrow", "login").text).not.toContain("No estoy seguro");
+  });
+});

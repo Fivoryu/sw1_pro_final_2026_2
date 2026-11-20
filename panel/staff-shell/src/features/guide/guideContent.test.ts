@@ -69,10 +69,17 @@ describe("guide content accuracy against the panel (J2, J3, J9)", () => {
     expect(allText("welcome-agent")).toMatch(/campana/i);
   });
 
-  it("platform admin chat reports guide has no blocked-clients list or unblock", () => {
+  it("chat reports guide says only agency admins see the blocked clients list (R2-2)", () => {
     const text = allText("chat-reports");
-    expect(text).not.toMatch(/Clientes bloqueados/);
-    expect(text).not.toMatch(/Desbloquear/i);
+    expect(text).toMatch(/Clientes bloqueados/);
+    expect(text).toMatch(/Desbloquear/);
+    expect(text).toMatch(/solo los administradores de (la )?inmobiliaria/i);
+    expect(text).toMatch(/administrador de plataforma no/i);
+  });
+
+  it("platform admin welcome and chat guides do not claim the platform admin can unblock", () => {
+    expect(allText("welcome-platform-admin")).not.toMatch(/Desbloquear/i);
+    expect(allText("chat-conversation")).not.toMatch(/administrador de plataforma.{0,40}desbloque/i);
   });
 
   it("the agency admin chat inbox guide explains blocked clients and unblocking", () => {
