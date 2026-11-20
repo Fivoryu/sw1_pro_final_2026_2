@@ -9,6 +9,8 @@ import 'data/services/customer_reviews_api.dart';
 import 'data/services/local_wallet_connect.dart';
 import 'data/services/customer_auth_api.dart';
 import 'data/services/customer_token_store.dart';
+import 'data/services/device_push_registrar.dart';
+import 'data/services/push_messaging.dart';
 import 'data/services/quote_api.dart';
 import 'data/services/scene_api.dart';
 import 'domain/catalog_controller.dart';
@@ -34,32 +36,52 @@ const _apiBaseUrl = String.fromEnvironment(
   defaultValue: 'http://10.0.2.2:8000',
 );
 
-void main() => runApp(
-  RoomForgeApp(
-    sessionController: _customerSession,
-    catalogApi: CatalogApi(baseUrl: _apiBaseUrl),
-    bookingApi: CustomerBookingApi(
-      baseUrl: _apiBaseUrl,
-      accessTokenProvider: () => _customerSession.obtainAccessToken(),
-    ),
-    sceneApi: SceneApi(baseUrl: _apiBaseUrl),
-    quoteApi: QuoteApi(baseUrl: _apiBaseUrl),
-    chatApi: CustomerChatApi(
-      baseUrl: _apiBaseUrl,
-      accessTokenProvider: () => _customerSession.obtainAccessToken(),
-    ),
-    notificationsApi: CustomerNotificationsApi(
-      baseUrl: _apiBaseUrl,
-      accessTokenProvider: () => _customerSession.obtainAccessToken(),
-    ),
-    reviewsApi: CustomerReviewsApi(
-      baseUrl: _apiBaseUrl,
-      accessTokenProvider: () => _customerSession.obtainAccessToken(),
-    ),
-    favoritesApi: CustomerFavoritesApi(
-      baseUrl: _apiBaseUrl,
-      accessTokenProvider: () => _customerSession.obtainAccessToken(),
-    ),
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final messaging = await FirebasePushMessaging.initialize();
+  if (messaging != null) {
+    _push =
+        DevicePushRegistrar(
+          baseUrl: _apiBaseUrl,
+          accessTokenProvider: () => _customerSession.obtainAccessToken(),
+          messaging: messaging,
+        )..attach(
+          _customerSession,
+          isSignedIn: () =>
+              _customerSession.status == CustomerSessionStatus.signedIn,
+        );
+  }
+  runApp(_app());
+}
+
+/// Registers this device for push notifications while a customer is signed in;
+/// stays null when Firebase is not configured.
+DevicePushRegistrar? _push;
+
+RoomForgeApp _app() => RoomForgeApp(
+  sessionController: _customerSession,
+  catalogApi: CatalogApi(baseUrl: _apiBaseUrl),
+  bookingApi: CustomerBookingApi(
+    baseUrl: _apiBaseUrl,
+    accessTokenProvider: () => _customerSession.obtainAccessToken(),
+  ),
+  sceneApi: SceneApi(baseUrl: _apiBaseUrl),
+  quoteApi: QuoteApi(baseUrl: _apiBaseUrl),
+  chatApi: CustomerChatApi(
+    baseUrl: _apiBaseUrl,
+    accessTokenProvider: () => _customerSession.obtainAccessToken(),
+  ),
+  notificationsApi: CustomerNotificationsApi(
+    baseUrl: _apiBaseUrl,
+    accessTokenProvider: () => _customerSession.obtainAccessToken(),
+  ),
+  reviewsApi: CustomerReviewsApi(
+    baseUrl: _apiBaseUrl,
+    accessTokenProvider: () => _customerSession.obtainAccessToken(),
+  ),
+  favoritesApi: CustomerFavoritesApi(
+    baseUrl: _apiBaseUrl,
+    accessTokenProvider: () => _customerSession.obtainAccessToken(),
   ),
 );
 
@@ -67,6 +89,7 @@ late final CustomerSessionController _customerSession =
     CustomerSessionController(
       api: CustomerAuthApi(baseUrl: _apiBaseUrl),
       tokenStore: SecureCustomerTokenStore(),
+      beforeSignOut: () async => _push?.unregister(),
     );
 
 class RoomForgeApp extends StatelessWidget {
@@ -96,7 +119,8 @@ class RoomForgeApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
     builder: (_, navigator) => CustomerTabHost(
-      canVisitReservations: () => bookingApi != null &&
+      canVisitReservations: () =>
+          bookingApi != null &&
           sessionController.status == CustomerSessionStatus.signedIn,
       child: navigator!,
     ),
@@ -197,20 +221,20 @@ class _CustomerShellState extends State<CustomerShell> {
 
   void _openFavorites() {
     void openListing(String listingId) => Navigator.of(context).push<void>(
-          MaterialPageRoute<void>(
-            builder: (_) => ListingDetailScreen(
-              controller: _catalog,
-              listingId: listingId,
-              reservationsController: _reservations,
-              sessionController: widget.sessionController,
-              sceneApi: widget.sceneApi,
-              quoteApi: widget.quoteApi,
-              chatApi: widget.chatApi,
-              reviewsApi: widget.reviewsApi,
-              favoritesController: _favorites,
-            ),
-          ),
-        );
+      MaterialPageRoute<void>(
+        builder: (_) => ListingDetailScreen(
+          controller: _catalog,
+          listingId: listingId,
+          reservationsController: _reservations,
+          sessionController: widget.sessionController,
+          sceneApi: widget.sceneApi,
+          quoteApi: widget.quoteApi,
+          chatApi: widget.chatApi,
+          reviewsApi: widget.reviewsApi,
+          favoritesController: _favorites,
+        ),
+      ),
+    );
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => FavoritesScreen(
@@ -251,7 +275,8 @@ class _CustomerShellState extends State<CustomerShell> {
     // CustomerShell can also be embedded without RoomForgeApp.
     if (tabs == null) {
       return CustomerTabHost(
-        canVisitReservations: () => widget.bookingApi != null &&
+        canVisitReservations: () =>
+            widget.bookingApi != null &&
             widget.sessionController.status == CustomerSessionStatus.signedIn,
         child: Builder(
           builder: (context) => _shell(CustomerTabs.maybeOf(context)!),
