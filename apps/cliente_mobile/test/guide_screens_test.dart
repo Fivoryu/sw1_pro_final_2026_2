@@ -22,8 +22,12 @@ CustomerSessionController _session() => CustomerSessionController(
 
 Future<void> _openGuide(WidgetTester tester) async {
   await tester.tap(find.byKey(_help));
+  await tester.pump();
   await tester.pump(const Duration(milliseconds: 600));
   expect(find.byKey(const ValueKey('guide-sheet')), findsOneWidget);
+  // The sheet now opens as a chat; the structured guide is one tap away.
+  await tester.tap(find.byKey(const ValueKey('guide-full-toggle')));
+  await tester.pump(const Duration(milliseconds: 300));
   expect(find.text('Para qué sirve'), findsOneWidget);
   expect(find.text('Paso a paso'), findsOneWidget);
   expect(find.text('Errores comunes'), findsOneWidget);

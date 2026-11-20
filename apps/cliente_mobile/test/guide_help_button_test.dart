@@ -30,6 +30,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('guide-sheet')), findsOneWidget);
+    // The sheet opens as a chat; the full guide is behind the toggle.
+    await tester.tap(find.byKey(const ValueKey('guide-full-toggle')));
+    await tester.pumpAndSettle();
     for (final step in GuideContent.forScreen(GuideScreen.catalog).steps) {
       expect(find.text(step), findsOneWidget);
     }
@@ -51,6 +54,8 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('guide-help-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('guide-full-toggle')));
     await tester.pumpAndSettle();
     for (final step in GuideContent.forScreen(
       GuideScreen.listingDetail,
