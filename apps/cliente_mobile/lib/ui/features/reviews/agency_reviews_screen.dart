@@ -1,3 +1,5 @@
+import '../guide/guide_content.dart';
+import '../guide/guide_help_button.dart';
 import 'package:flutter/material.dart';
 
 import '../../../data/services/customer_reviews_api.dart';
@@ -41,7 +43,10 @@ class _AgencyReviewsScreenState extends State<AgencyReviewsScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(widget.agencyName)),
+    appBar: AppBar(
+      title: Text(widget.agencyName),
+      actions: const [GuideHelpButton(screen: GuideScreen.reviews)],
+    ),
     body: Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 720),

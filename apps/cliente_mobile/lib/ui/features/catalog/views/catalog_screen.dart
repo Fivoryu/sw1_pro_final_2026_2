@@ -127,9 +127,16 @@ class _CatalogScreenState extends State<CatalogScreen> {
               'Explorar inmuebles',
               subtitle: 'Encontrá un espacio que se sienta propio.',
             ),
-            const Align(
-              alignment: Alignment.centerRight,
-              child: GuideHelpButton(screen: GuideScreen.catalog),
+            const Wrap(
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                GuideHelpButton(
+                  screen: GuideScreen.welcome,
+                  label: 'Primeros pasos',
+                ),
+                GuideHelpButton(screen: GuideScreen.catalog),
+              ],
             ),
             DropdownButtonFormField<DisplayCurrency>(
               key: const ValueKey('catalog-currency-selector'),

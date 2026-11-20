@@ -1,3 +1,5 @@
+import '../guide/guide_content.dart';
+import '../guide/guide_help_button.dart';
 import 'package:flutter/material.dart';
 
 import '../../../data/models/notification_models.dart';
@@ -125,6 +127,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     appBar: AppBar(
       title: const Text('Notificaciones'),
       actions: [
+        const GuideHelpButton(screen: GuideScreen.notifications),
         ListenableBuilder(
           listenable: widget.controller,
           builder: (context, _) => TextButton(

@@ -1,3 +1,5 @@
+import '../guide/guide_content.dart';
+import '../guide/guide_help_button.dart';
 import 'package:flutter/material.dart';
 
 import '../../../data/models/chat_models.dart';
@@ -48,6 +50,7 @@ class _ChatConversationsScreenState extends State<ChatConversationsScreen> {
     appBar: AppBar(
       title: const Text('Mis conversaciones'),
       actions: [
+        const GuideHelpButton(screen: GuideScreen.chats),
         IconButton(
           key: const ValueKey('refresh-conversations'),
           tooltip: 'Actualizar',

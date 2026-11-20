@@ -1,3 +1,5 @@
+import '../guide/guide_content.dart';
+import '../guide/guide_help_button.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../data/models/reservation_models.dart';
@@ -60,35 +62,51 @@ class _CustomerReservationsScreenState
   Widget build(BuildContext context) => Center(
     child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 720),
-      child: ListenableBuilder(
-        listenable: widget.sessionController,
-        builder: (context, _) {
-          final session = widget.sessionController.status;
-          if (session == CustomerSessionStatus.restoring) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (session != CustomerSessionStatus.signedIn) {
-            return _message(
-              context,
-              'Iniciá sesión para consultar tus reservas.',
-              key: const ValueKey('reservations-sign-in-required'),
-            );
-          }
-          final controller = widget.controller;
-          if (controller == null) {
-            return _message(
-              context,
-              'El servicio de reservas no está configurado.',
-              key: const ValueKey('reservations-unavailable'),
-            );
-          }
-          return ListenableBuilder(
-            listenable: controller,
-            builder: (context, _) => _content(context, controller),
-          );
-        },
-      ),
+      child: _body(),
     ),
+  );
+
+  Widget _withHelp(Widget child) => Column(
+    children: [
+      const Align(
+        alignment: Alignment.centerRight,
+        child: GuideHelpButton(screen: GuideScreen.reservations),
+      ),
+      Expanded(child: child),
+    ],
+  );
+
+  Widget _body() => ListenableBuilder(
+    listenable: widget.sessionController,
+    builder: (context, _) {
+      final session = widget.sessionController.status;
+      if (session == CustomerSessionStatus.restoring) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      if (session != CustomerSessionStatus.signedIn) {
+        return _withHelp(
+          _message(
+            context,
+            'Iniciá sesión para consultar tus reservas.',
+            key: const ValueKey('reservations-sign-in-required'),
+          ),
+        );
+      }
+      final controller = widget.controller;
+      if (controller == null) {
+        return _withHelp(
+          _message(
+            context,
+            'El servicio de reservas no está configurado.',
+            key: const ValueKey('reservations-unavailable'),
+          ),
+        );
+      }
+      return ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) => _content(context, controller),
+      );
+    },
   );
 
   Widget _content(
@@ -104,6 +122,7 @@ class _CustomerReservationsScreenState
         Row(
           children: [
             const Expanded(child: AndeanSectionHeading('Mis reservas')),
+            const GuideHelpButton(screen: GuideScreen.reservations),
             if (widget.chatApi != null)
               IconButton(
                 key: const ValueKey('open-conversations'),

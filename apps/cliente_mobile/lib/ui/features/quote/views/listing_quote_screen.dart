@@ -1,3 +1,5 @@
+import '../../guide/guide_content.dart';
+import '../../guide/guide_help_button.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../data/models/catalog_models.dart';
@@ -30,7 +32,9 @@ class ListingQuoteScreen extends StatefulWidget {
 }
 
 class _ListingQuoteScreenState extends State<ListingQuoteScreen> {
-  late final QuoteController _controller = QuoteController(api: widget.quoteApi);
+  late final QuoteController _controller = QuoteController(
+    api: widget.quoteApi,
+  );
   late final Set<String> _selectedExtraIds = {
     if (widget.preselectedExtraId != null) widget.preselectedExtraId!,
   };
@@ -55,7 +59,10 @@ class _ListingQuoteScreenState extends State<ListingQuoteScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Cotización')),
+      appBar: AppBar(
+        title: const Text('Cotización'),
+        actions: const [GuideHelpButton(screen: GuideScreen.quote)],
+      ),
       body: AnimatedBuilder(
         animation: _controller,
         builder: (context, _) => ListView(
@@ -64,7 +71,10 @@ class _ListingQuoteScreenState extends State<ListingQuoteScreen> {
             Text('Precio base', style: AndeanTypography.headlineMd),
             const SizedBox(height: 4),
             Text(
-              chargeLabel(widget.detail.listing.basePrice, widget.detail.listing.operation),
+              chargeLabel(
+                widget.detail.listing.basePrice,
+                widget.detail.listing.operation,
+              ),
             ),
             const SizedBox(height: 16),
             if (widget.detail.extras.isEmpty)
@@ -115,8 +125,9 @@ class _ListingQuoteScreenState extends State<ListingQuoteScreen> {
             else
               FilledButton(
                 key: const ValueKey('quote-create'),
-                onPressed:
-                    _controller.state == QuoteState.creating ? null : _createQuote,
+                onPressed: _controller.state == QuoteState.creating
+                    ? null
+                    : _createQuote,
                 child: _controller.state == QuoteState.creating
                     ? const SizedBox(
                         width: 18,
@@ -151,7 +162,10 @@ class _QuoteSnapshotCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Cotización ${snapshot.quoteId}', style: AndeanTypography.headlineMd),
+            Text(
+              'Cotización ${snapshot.quoteId}',
+              style: AndeanTypography.headlineMd,
+            ),
             const SizedBox(height: 8),
             Text('Vigencia de precios: oferta v${snapshot.offerVersion}'),
             const SizedBox(height: 8),
