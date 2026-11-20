@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'guide_assistant.dart';
 import 'guide_content.dart';
@@ -197,6 +198,7 @@ class _GuideSheetState extends State<_GuideSheet> {
                 controller: _input,
                 textInputAction: TextInputAction.send,
                 onSubmitted: _ask,
+                inputFormatters: [LengthLimitingTextInputFormatter(200)],
                 decoration: const InputDecoration(
                   labelText: 'Escribí tu pregunta',
                   hintText: 'Por ejemplo: ¿cómo envío a revisión?',
@@ -227,22 +229,25 @@ class _GuideSheetState extends State<_GuideSheet> {
       alignment: message.fromUser
           ? Alignment.centerRight
           : Alignment.centerLeft,
-      child: Container(
-        key: ValueKey(
-          message.fromUser ? 'guide-user-$i' : 'guide-assistant-$i',
+      child: Semantics(
+        liveRegion: !message.fromUser && i == _messages.length - 1,
+        child: Container(
+          key: ValueKey(
+            message.fromUser ? 'guide-user-$i' : 'guide-assistant-$i',
+          ),
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.all(12),
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width * 0.85,
+          ),
+          decoration: BoxDecoration(
+            color: message.fromUser
+                ? scheme.primaryContainer
+                : scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(message.text, style: theme.textTheme.bodyMedium),
         ),
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.all(12),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.sizeOf(context).width * 0.85,
-        ),
-        decoration: BoxDecoration(
-          color: message.fromUser
-              ? scheme.primaryContainer
-              : scheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text(message.text, style: theme.textTheme.bodyMedium),
       ),
     );
   }

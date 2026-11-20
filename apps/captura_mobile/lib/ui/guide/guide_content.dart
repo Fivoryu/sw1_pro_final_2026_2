@@ -164,6 +164,8 @@ List<GuideWalkthrough> guideWalkthroughs(GuideScreen screen) =>
           'Controlá que tenga precio, ubicación y fotos.',
           'Tocá «Enviar a revisión» y confirmá.',
           'Verás «Inmueble enviado a revisión» y cambia su estado.',
+          'No se publica solo: un administrador de tu inmobiliaria lo '
+              'aprueba y lo publica.',
         ]),
       ],
       GuideScreen.listingEditor => const [
@@ -195,6 +197,8 @@ List<GuideWalkthrough> guideWalkthroughs(GuideScreen screen) =>
           'Tocá «Guardar borrador» para conservar tus cambios.',
           'Cuando todo esté completo, tocá «Enviar a revisión».',
           'Confirmá en el aviso: la agencia revisará el inmueble.',
+          'No se publica solo: un administrador de tu inmobiliaria lo '
+              'aprueba y lo publica.',
         ]),
       ],
       GuideScreen.spatialCapture => const [

@@ -39,44 +39,66 @@ class GuideAssistant {
   ];
 
   /// Answers [question] with the guide content; falls back honestly.
+  ///
+  /// Social and orientation intents fire only when the question holds no
+  /// meaningful word beyond the intent words, so "hola, cómo entro" or "qué
+  /// hago con una foto oscura" are answered with the specific content.
   GuideAnswer answer(String question) {
     final normalized = guideNormalize(question);
-    final tokens = _tokens(normalized);
     final words = normalized.split(' ').where((w) => w.isNotEmpty).toList();
-
     if (words.isEmpty) return _fallback();
-    if (_isGreeting(words)) {
+
+    final meaningful = [
+      for (final w in words)
+        if (!_stopwords.contains(w)) w,
+    ];
+    if (meaningful.isNotEmpty && meaningful.every(_greetingWords.contains)) {
       return GuideAnswer(
         'Hola, ¿en qué te ayudo? Estás en «${guideTitle(screen)}».',
         _initialChips(),
       );
     }
-    if (words.contains('gracias') && words.length <= 5) {
+    if (meaningful.isNotEmpty && meaningful.every(_thanksWords.contains)) {
       return GuideAnswer(
         'Con gusto. Si te surge otra duda, preguntame cuando quieras.',
         _initialChips(),
       );
     }
-    if (_isLost(normalized, words)) return _lost();
-    if (normalized.contains('para que sirve') ||
-        normalized.contains('esta pantalla')) {
+    // A greeting or thanks prefix followed by a real question is dropped.
+    final content = [
+      for (final w in meaningful)
+        if (!_greetingWords.contains(w) && !_thanksWords.contains(w)) w,
+    ];
+    bool only(Set<String> intentWords) => content.every(intentWords.contains);
+
+    final lost =
+        _lostPhrase.hasMatch(normalized) && only(_lostWords) ||
+        content.isNotEmpty &&
+            _helpWords.contains(content.first) &&
+            only({..._lostWords, ..._helpWords});
+    if (lost) return _lost();
+    if (_purposePhrase.hasMatch(normalized) && only(_purposeWords)) {
       return GuideAnswer(guidePurpose(screen), [
         ...guideWalkthroughs(screen).map((w) => w.title).take(3),
       ]);
     }
-    if (normalized.contains('que mas') || normalized.contains('opciones')) {
-      return _more();
-    }
-    if (words.any(_errorWords.contains) &&
-        words.every((w) => _errorWords.contains(w) || _stopwords.contains(w))) {
+    if (_morePhrase.hasMatch(normalized) && only(_moreWords)) return _more();
+    if (content.any(_errorWords.contains) && only(_errorWords)) {
       return _errors();
     }
-    if (RegExp(r'^(que (es|son|significa)|significa)\b').hasMatch(normalized)) {
-      final term = _best(tokens, termsOnly: true);
-      if (term != null) return _reply(term, tokens);
+
+    final query = [
+      for (final w in _fuzzy(content))
+        if (!_intentWords.contains(w)) _canon(w),
+    ];
+    if (query.isEmpty) return _fallback();
+
+    if (_definePhrase.hasMatch(normalized)) {
+      final term = _best(query, termsOnly: true);
+      if (term != null) return _reply(term, query);
     }
-    final best = _best(tokens);
-    return best == null ? _fallback() : _reply(best, tokens);
+    final best = _best(query);
+    return best == null ? _fallback() : _reply(best, query);
   }
 
   // ---- intents ----
@@ -89,25 +111,54 @@ class GuideAssistant {
     'problemas',
     'fallas',
   };
-
-  bool _isGreeting(List<String> words) =>
-      words.length <= 3 &&
-      const {
-        'hola',
-        'buenas',
-        'buenos',
-        'buen',
-        'hey',
-        'saludos',
-      }.contains(words.first);
-
-  bool _isLost(String normalized, List<String> words) =>
-      normalized.contains('perdi') ||
-      normalized.contains('no se que hacer') ||
-      normalized.contains('que hago') ||
-      normalized.contains('no entiendo') ||
-      const {'ayuda', 'ayudame', 'help', 'socorro'}.contains(words.first) &&
-          words.length <= 3;
+  static const _greetingWords = {
+    'hola',
+    'buenas',
+    'buenos',
+    'buen',
+    'hey',
+    'saludos',
+    'dia',
+    'dias',
+    'tardes',
+    'noches',
+  };
+  static const _thanksWords = {
+    'gracias',
+    'muchas',
+    'mil',
+    'genial',
+    'perfecto',
+    'excelente',
+  };
+  static const _helpWords = {'ayuda', 'ayudame', 'help', 'socorro'};
+  static const _lostWords = {
+    'perdi',
+    'perdido',
+    'perdida',
+    'entiendo',
+    'nada',
+    'ayuda',
+    'ayudame',
+    'help',
+    'socorro',
+  };
+  static const _purposeWords = {'sirve', 'pantalla', 'aqui', 'aca', 'ahi'};
+  static const _moreWords = {'opciones', 'otra', 'otras', 'cosas', 'ademas'};
+  static final _intentWords = {
+    ..._lostWords,
+    ..._purposeWords,
+    ..._errorWords,
+    ..._moreWords,
+  };
+  static final _lostPhrase = RegExp(
+    r'\b(perdi|perdido|perdida|no se que hacer|que hago|no entiendo)\b',
+  );
+  static final _purposePhrase = RegExp(r'\b(para que sirve|esta pantalla)\b');
+  static final _morePhrase = RegExp(r'\b(que mas|opciones)\b');
+  static final _definePhrase = RegExp(
+    r'\b(que (es|son|significa)|significa|para que sirve)\b',
+  );
 
   GuideAnswer _lost() {
     final list = _numbered(guideWalkthroughs(screen).map((w) => w.title));
@@ -152,7 +203,7 @@ class GuideAssistant {
 
   // ---- replies ----
 
-  GuideAnswer _reply(_Entry entry, List<String> tokens) {
+  GuideAnswer _reply(_Entry entry, _Query query) {
     final buffer = StringBuffer();
     final own = entry.screen == null || entry.screen == screen;
     if (!own) {
@@ -164,19 +215,16 @@ class GuideAssistant {
       buffer.writeln();
     }
     buffer.write(entry.answer);
-    return GuideAnswer(
-      buffer.toString().trimRight(),
-      _followUps(entry, tokens),
-    );
+    return GuideAnswer(buffer.toString().trimRight(), _followUps(entry, query));
   }
 
-  List<String> _followUps(_Entry answered, List<String> tokens) {
+  List<String> _followUps(_Entry answered, _Query query) {
     final chips = <String>[];
     void add(String chip) {
       if (chip != answered.chip && !chips.contains(chip)) chips.add(chip);
     }
 
-    for (final e in _ranked(tokens).skip(1).take(6)) {
+    for (final e in _ranked(query).skip(1).take(6)) {
       add(e.chip);
     }
     for (final w in guideWalkthroughs(answered.screen ?? screen)) {
@@ -189,35 +237,60 @@ class GuideAssistant {
 
   // ---- matching ----
 
-  _Entry? _best(List<String> tokens, {bool termsOnly = false}) {
-    final ranked = _ranked(tokens, termsOnly: termsOnly);
+  _Entry? _best(_Query query, {bool termsOnly = false}) {
+    final ranked = _ranked(query, termsOnly: termsOnly);
     return ranked.isEmpty ? null : ranked.first;
   }
 
-  List<_Entry> _ranked(List<String> tokens, {bool termsOnly = false}) {
-    final stems = tokens.map(_stem).toSet();
-    final scored = <(_Entry, double)>[];
+  List<_Entry> _ranked(_Query query, {bool termsOnly = false}) {
+    final stems = {for (final w in query) ...w};
+    final scored = <(_Entry, double, bool, int)>[];
     for (final e in _knowledge.entries) {
       if (termsOnly && e.kind != _Kind.term) continue;
       var score = 0.0;
+      var titleHits = 0;
       for (final s in stems) {
         final idf = _knowledge.idf(s);
         if (e.titleStems.contains(s)) {
           score += 3 * idf;
+          titleHits++;
         } else if (!termsOnly && e.bodyStems.contains(s)) {
           score += idf;
         }
       }
       if (score < 2.0) continue;
+      // The matched words must cover at least half of the question.
+      final matchedWords = query
+          .where(
+            (w) => w.any(
+              (s) =>
+                  e.titleStems.contains(s) ||
+                  (!termsOnly && e.bodyStems.contains(s)),
+            ),
+          )
+          .length;
+      if (query.length >= 2 && matchedWords * 2 < query.length) continue;
+      if (e.titleStems.isNotEmpty) {
+        score *= 1 + 0.5 * titleHits / e.titleStems.length;
+      }
       final isOwn =
           e.screen == screen ||
           (e.kind == _Kind.term &&
               guideGlossary(screen).any((t) => t.term == e.title));
-      scored.add((e, isOwn ? score * 1.4 : score));
+      scored.add((
+        e,
+        isOwn ? score * 1.4 : score,
+        e.screen == screen,
+        titleHits,
+      ));
     }
+    // Ties: the current screen first, then relevance, then content order.
     scored.sort((a, b) {
       final byScore = b.$2.compareTo(a.$2);
-      return byScore != 0 ? byScore : a.$1.order.compareTo(b.$1.order);
+      if (byScore != 0) return byScore;
+      if (a.$3 != b.$3) return a.$3 ? -1 : 1;
+      final byHits = b.$4.compareTo(a.$4);
+      return byHits != 0 ? byHits : a.$1.order.compareTo(b.$1.order);
     });
     return [for (final s in scored) s.$1];
   }
@@ -254,12 +327,96 @@ List<String> _tokens(String normalized) => [
     if (w.isNotEmpty && !_stopwords.contains(w)) w,
 ];
 
-/// Light stemming: the first four letters absorb verb and plural endings.
-String _stem(String word) => word.length > 4 ? word.substring(0, 4) : word;
+/// The canonical stems of every word of a question: one list per word.
+typedef _Query = List<List<String>>;
+
+/// Light stemming: the first four letters absorb verb and plural endings. The
+/// "cont" family (contraseña, contorno, controlá, continuar) needs six letters
+/// to stay apart.
+String _stem(String word) {
+  if (word.length <= 4) return word;
+  if (word.startsWith('cont')) {
+    return word.substring(0, math.min(6, word.length));
+  }
+  return word.substring(0, 4);
+}
+
+/// Synonym groups: every word of a group stands for the listed stems.
+const _synonymGroups = <(List<String>, List<String>)>[
+  (
+    [
+      'entrar', 'entro', 'entras', 'entra', 'entran', 'entrando', 'ingresar',
+      'ingreso', 'ingresas', 'ingresa', 'ingresando', 'acceder', 'acceso',
+      'accedo', 'accedes', 'accede', 'loguear', 'logueo', 'loguearme',
+      'loguearse', 'logear', 'logeo', 'login', 'iniciar', 'inicia', 'sesion',
+      'sesiones', //
+    ],
+    ['login'],
+  ),
+  (
+    [
+      'publicar', 'publico', 'publica', 'publicas', 'publicando', 'publicado',
+      'publicarlo', 'publicacion', //
+    ],
+    ['envi', 'revi'],
+  ),
+  (['subir', 'subo', 'sube', 'subirlo'], ['envi']),
+  (
+    [
+      'habitacion', 'habitaciones', 'cuarto', 'cuartos', 'pieza', 'piezas',
+      'dormitorio', 'dormitorios', //
+    ],
+    ['ambi'],
+  ),
+  (['mido', 'mides', 'mide', 'midiendo', 'midan'], ['medi']),
+  (['imagen', 'imagenes'], ['foto']),
+  (['totp', 'verificacion', 'autenticador', 'autenticacion'], ['codi']),
+  (['clave', 'claves', 'password', 'pass', 'pwd'], ['contra']),
+  (['salgo', 'salgas', 'salimos'], ['sali']),
+];
+
+final _synonyms = <String, List<String>>{
+  for (final (words, stems) in _synonymGroups)
+    for (final w in words) w: stems,
+};
+
+/// Canonical stems of [word]: its synonym concept, or its light stem.
+List<String> _canon(String word) => _synonyms[word] ?? [_stem(word)];
 
 Set<String> _stems(String text) => {
-  for (final t in _tokens(guideNormalize(text))) _stem(t),
+  for (final t in _tokens(guideNormalize(text))) ..._canon(t),
 };
+
+/// 0 when equal, 1 when [a] and [b] differ by one edit, else 2.
+int _editDistanceUpTo1(String a, String b) {
+  if ((a.length - b.length).abs() > 1) return 2;
+  var i = 0;
+  while (i < a.length && i < b.length && a[i] == b[i]) {
+    i++;
+  }
+  if (i == a.length && i == b.length) return 0;
+  final restA = a.substring(i);
+  final restB = b.substring(i);
+  if (restA.length == restB.length) {
+    return restA.substring(1) == restB.substring(1) ? 1 : 2;
+  }
+  return restA.length > restB.length
+      ? (restA.substring(1) == restB ? 1 : 2)
+      : (restB.substring(1) == restA ? 1 : 2);
+}
+
+/// Corrects typos: a word of five or more letters that is unknown becomes the
+/// known word at edit distance one, if any (alphabetical order on ties).
+List<String> _fuzzy(List<String> words) => [
+  for (final w in words)
+    if (w.length < 5 || _knowledge.known.contains(w))
+      w
+    else
+      _knowledge.vocabulary.firstWhere(
+        (v) => _editDistanceUpTo1(w, v) == 1,
+        orElse: () => w,
+      ),
+];
 
 enum _Kind { purpose, walkthrough, mistake, term }
 
@@ -273,7 +430,8 @@ class _Entry {
     required this.chip,
     required this.order,
   }) : titleStems = _stems(title),
-       bodyStems = _stems(body);
+       bodyStems = _stems(body),
+       rawBody = body;
 
   final _Kind kind;
   final GuideScreen? screen;
@@ -283,6 +441,7 @@ class _Entry {
   final int order;
   final Set<String> titleStems;
   final Set<String> bodyStems;
+  final String rawBody;
 }
 
 class _Knowledge {
@@ -345,15 +504,26 @@ class _Knowledge {
         );
       }
     }
+    final words = <String>{};
     for (final e in entries) {
       for (final s in {...e.titleStems, ...e.bodyStems}) {
         _df[s] = (_df[s] ?? 0) + 1;
       }
+      for (final t in _tokens(guideNormalize('${e.title} ${e.rawBody}'))) {
+        if (t.length >= 5) words.add(t);
+      }
     }
+    words.addAll(_synonyms.keys.where((k) => k.length >= 5));
+    known = words;
+    vocabulary = words.toList()..sort();
   }
 
   final entries = <_Entry>[];
   final _df = <String, int>{};
+
+  /// Every word of five or more letters of the guide, and the synonym words.
+  late final Set<String> known;
+  late final List<String> vocabulary;
 
   double idf(String stem) =>
       math.log(1 + entries.length / (_df[stem] ?? entries.length));

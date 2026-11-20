@@ -127,6 +127,118 @@ void main() {
     });
   });
 
+  group('GuideAssistant intents do not hijack real questions (J4)', () {
+    test('a greeting followed by a question answers the question', () {
+      expectWalkthrough(
+        ask(GuideScreen.access, 'hola como entro'),
+        GuideScreen.access,
+        'Iniciar sesión',
+      );
+      expectWalkthrough(
+        ask(GuideScreen.listingsList, 'gracias, cómo publico un inmueble'),
+        GuideScreen.listingsList,
+        'Enviar un inmueble a revisión',
+      );
+      expect(ask(GuideScreen.access, 'hola').text, contains('en qué te ayudo'));
+    });
+
+    test('lost phrases with a real topic reach the specific answer', () {
+      final dark = ask(
+        GuideScreen.listingEditor,
+        'qué hago con una foto oscura',
+      );
+      expect(dark.text, contains('Fotos oscuras o movidas'));
+      final code = ask(GuideScreen.access, 'perdí el código');
+      expect(code.text, isNot(contains('te ubico')));
+      expect(code.text, contains('Número temporal'));
+      final term = ask(
+        GuideScreen.spatialCapture,
+        'no entiendo qué es un ambiente',
+      );
+      expect(term.text, contains('Una habitación o espacio'));
+    });
+
+    test('purpose and more phrases with a topic are not hijacked', () {
+      final purpose = ask(
+        GuideScreen.spatialCapture,
+        '¿para qué sirve medir ambientes?',
+      );
+      expect(purpose.text, isNot(guidePurpose(GuideScreen.spatialCapture)));
+      expect(purpose.text, contains('Una habitación o espacio'));
+      expectWalkthrough(
+        ask(GuideScreen.floorplanTrace, 'cómo salgo de esta pantalla'),
+        GuideScreen.floorplanTrace,
+        'Salir sin perder trabajo',
+      );
+    });
+  });
+
+  group('GuideAssistant synonyms and typos (J5)', () {
+    test('login synonyms resolve to Iniciar sesión', () {
+      for (final q in [
+        'no puedo entrar',
+        'cómo entro',
+        'ingreso',
+        'quiero acceder',
+        'logueo',
+      ]) {
+        expectWalkthrough(
+          ask(GuideScreen.access, q),
+          GuideScreen.access,
+          'Iniciar sesión',
+        );
+      }
+      expectWalkthrough(
+        ask(GuideScreen.access, 'qué veo después de entrar'),
+        GuideScreen.access,
+        'Después de entrar',
+      );
+    });
+
+    test('publishing resolves to the review flow and names who publishes', () {
+      for (final q in [
+        'cómo publico un inmueble',
+        'pubicar',
+        'subir un inmueble',
+      ]) {
+        final a = ask(GuideScreen.listingsList, q);
+        expectWalkthrough(
+          a,
+          GuideScreen.listingsList,
+          'Enviar un inmueble a revisión',
+        );
+        expect(a.text, contains('administrador'));
+      }
+    });
+
+    test('typos, room and measure synonyms', () {
+      expect(
+        ask(GuideScreen.access, 'contraceña incorrecta').text,
+        contains('correo o la contraseña'),
+      );
+      expectWalkthrough(
+        ask(GuideScreen.spatialCapture, 'cómo mido una habitación'),
+        GuideScreen.spatialCapture,
+        'Medir un ambiente nuevo',
+      );
+    });
+
+    test('password does not collide with contour or control', () {
+      final a = ask(GuideScreen.floorplanTrace, 'cómo controlo la contraseña');
+      expect(a.text, isNot(contains('contorno')));
+    });
+  });
+
+  group('GuideAssistant partial matches (J8)', () {
+    test('a single weak word out of many falls back honestly', () {
+      final a = ask(
+        GuideScreen.listingsList,
+        'cómo emito una factura electrónica del inmueble',
+      );
+      expect(a.text, contains('no estoy seguro'));
+    });
+  });
+
   group('GuideAssistant opening', () {
     test('greets in Spanish naming the screen and its purpose', () {
       for (final screen in GuideScreen.values) {

@@ -99,6 +99,42 @@ void main() {
     expect(find.byKey(const ValueKey('guide-user-3')), findsOneWidget);
   });
 
+  testWidgets('the input is limited to 200 characters (J10)', (tester) async {
+    await _pump(tester);
+    await _open(tester);
+    await tester.enterText(
+      find.byKey(const ValueKey('guide-input')),
+      List.filled(300, 'a').join(),
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('guide-input')))
+          .controller!
+          .text
+          .length,
+      200,
+    );
+  });
+
+  testWidgets('only the last assistant message is a live region (J10)', (
+    tester,
+  ) async {
+    await _pump(tester);
+    await _open(tester);
+    await tester.tap(find.text('Crear un inmueble nuevo').first);
+    await tester.pumpAndSettle();
+
+    Finder live(String key) => find.ancestor(
+      of: find.byKey(ValueKey(key)),
+      matching: find.byWidgetPredicate(
+        (w) => w is Semantics && w.properties.liveRegion == true,
+      ),
+    );
+    expect(live('guide-assistant-2'), findsOneWidget);
+    expect(live('guide-assistant-0'), findsNothing);
+  });
+
   testWidgets('the chat never runs a screen action', (tester) async {
     var runs = 0;
     await _pump(tester, onAction: () => runs++);
