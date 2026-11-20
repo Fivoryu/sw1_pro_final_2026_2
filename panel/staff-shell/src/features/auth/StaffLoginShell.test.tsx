@@ -149,3 +149,41 @@ describe("StaffLoginShell credentials view", () => {
     expect(onAuthenticated).not.toHaveBeenCalled();
   });
 });
+
+describe("StaffLoginShell without TOTP", () => {
+  it("signs in with the password only when the server does not ask for a code", async () => {
+    const user = userEvent.setup();
+    const onAuthenticated = vi.fn();
+    const session = {
+      access_token: "access",
+      csrf_token: "csrf",
+      user: {
+        id: "account-1",
+        email: "owner@example.test",
+        role: "platform_admin",
+        tenant_id: null,
+      },
+    };
+    vi.mocked(startStaffLogin).mockResolvedValue({
+      challenge_token: "one-time-login-challenge",
+      totp_required: false,
+    });
+    vi.mocked(completeStaffLogin).mockResolvedValue(session);
+    render(<StaffLoginShell onAuthenticated={onAuthenticated} />);
+
+    await user.type(
+      screen.getByLabelText("Correo electrónico"),
+      "owner@example.test",
+    );
+    await user.type(screen.getByLabelText("Contraseña"), "correct-password");
+    await user.click(screen.getByRole("button", { name: "Continuar" }));
+
+    await waitFor(() => expect(onAuthenticated).toHaveBeenCalledWith(session));
+    expect(completeStaffLogin).toHaveBeenCalledWith({
+      challenge_token: "one-time-login-challenge",
+    });
+    expect(
+      screen.queryByRole("textbox", { name: "Código de autenticación" }),
+    ).not.toBeInTheDocument();
+  });
+});

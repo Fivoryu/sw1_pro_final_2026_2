@@ -99,6 +99,11 @@ export function InvitationAcceptancePage({
       });
       setPassword("");
       setPasswordConfirmation("");
+      if ("account" in setup) {
+        // The server does not require TOTP: the account is ready already.
+        setIsComplete(true);
+        return;
+      }
       setEnrollment(setup);
     } catch {
       setErrorMessage(

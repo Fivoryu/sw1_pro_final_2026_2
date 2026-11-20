@@ -145,7 +145,7 @@ def _reject_foreign_origin(request: Request, settings: Settings) -> None:
 @router.post("/invitations/accept", response_model=None)
 def accept_invitation(
     acceptance: InvitationAcceptance, request: Request
-) -> dict[str, str]:
+) -> dict[str, object]:
     if not acceptance.password.strip() or not acceptance.password_confirmation.strip():
         raise HTTPException(status_code=422, detail="Password must not be blank")
     if acceptance.password != acceptance.password_confirmation:
@@ -154,7 +154,7 @@ def accept_invitation(
     settings: Settings = request.app.state.settings
     session_factory: sessionmaker[Session] = request.app.state.session_factory
     now = _as_utc(request.app.state.clock())
-    enrollment_response: dict[str, str] | None = None
+    enrollment_response: dict[str, object] | None = None
     invalid_invitation = False
 
     try:
@@ -226,6 +226,29 @@ def accept_invitation(
                     )
                     if claimed != 1:
                         invalid_invitation = True
+                    elif not settings.require_totp:
+                        # Without TOTP the password alone creates the account.
+                        account = StaffAccount(
+                            email=normalized_email,
+                            password_hash=challenge.password_hash,
+                            role=invitation.role,
+                            tenant_id=invitation.tenant_id,
+                            active=True,
+                            totp_secret_encrypted=None,
+                            totp_enabled=False,
+                            created_at=now,
+                        )
+                        session.add(account)
+                        session.flush()
+                        enrollment_response = {
+                            "totp_required": False,
+                            "account": {
+                                "id": account.id,
+                                "email": account.email,
+                                "role": account.role,
+                                "tenant_id": account.tenant_id,
+                            },
+                        }
                     else:
                         session.add(challenge)
                         enrollment_response = {
@@ -372,7 +395,7 @@ def verify_totp_enrollment(
 
 
 @router.post("/login", response_model=None)
-def login(credentials: LoginCredentials, request: Request) -> dict[str, str]:
+def login(credentials: LoginCredentials, request: Request) -> dict[str, object]:
     settings: Settings = request.app.state.settings
     session_factory: sessionmaker[Session] = request.app.state.session_factory
     now = _as_utc(request.app.state.clock())
@@ -380,16 +403,13 @@ def login(credentials: LoginCredentials, request: Request) -> dict[str, str]:
     challenge_token: str | None = None
 
     with session_factory.begin() as session:
-        account = (
-            session.query(StaffAccount)
-            .filter(
-                StaffAccount.email == normalized_email,
-                StaffAccount.active.is_(True),
-                StaffAccount.totp_enabled.is_(True),
-            )
-            .with_for_update()
-            .one_or_none()
+        query = session.query(StaffAccount).filter(
+            StaffAccount.email == normalized_email,
+            StaffAccount.active.is_(True),
         )
+        if settings.require_totp:
+            query = query.filter(StaffAccount.totp_enabled.is_(True))
+        account = query.with_for_update().one_or_none()
         if account is None or not verify_password(account.password_hash, credentials.password):
             unauthorized = True
         else:
@@ -407,6 +427,10 @@ def login(credentials: LoginCredentials, request: Request) -> dict[str, str]:
 
     if unauthorized or challenge_token is None:
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not settings.require_totp:
+        # The client completes the challenge at once, with no proof. The field
+        # is only sent then, so the TOTP contract stays as it was.
+        return {"challenge_token": challenge_token, "totp_required": False}
     return {"challenge_token": challenge_token}
 
 
@@ -414,10 +438,15 @@ def login(credentials: LoginCredentials, request: Request) -> dict[str, str]:
 def complete_login_challenge(
     verification: TotpLoginVerification, request: Request, response: Response
 ) -> dict[str, object]:
-    if (verification.code is None) == (verification.recovery_code is None):
-        raise HTTPException(status_code=422, detail="Provide exactly one login proof")
-
     settings: Settings = request.app.state.settings
+    no_proof = verification.code is None and verification.recovery_code is None
+    if settings.require_totp and (verification.code is None) == (
+        verification.recovery_code is None
+    ):
+        raise HTTPException(status_code=422, detail="Provide exactly one login proof")
+    if not settings.require_totp and not no_proof:
+        raise HTTPException(status_code=422, detail="TOTP is not required")
+
     _reject_foreign_origin(request, settings)
 
     session_factory: sessionmaker[Session] = request.app.state.session_factory
@@ -455,13 +484,19 @@ def complete_login_challenge(
             if (
                 account is None
                 or not account.active
-                or not account.totp_enabled
-                or account.totp_secret_encrypted is None
+                or (
+                    settings.require_totp
+                    and (not account.totp_enabled or account.totp_secret_encrypted is None)
+                )
             ):
                 unauthorized = True
             else:
-                if verification.code is not None:
+                if not settings.require_totp:
+                    valid_proof = True
+                elif verification.code is not None:
                     try:
+                        if account.totp_secret_encrypted is None:
+                            raise ValueError("TOTP is not configured")
                         totp_secret = decrypt_totp_secret(
                             account.totp_secret_encrypted,
                             settings.totp_encryption_key,

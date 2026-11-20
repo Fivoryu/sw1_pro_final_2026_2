@@ -79,7 +79,11 @@ def get_active_staff(request: Request) -> ActiveStaff:
                 .with_for_update()
                 .one_or_none()
             )
-            if account is None or not account.active or not account.totp_enabled:
+            if (
+                account is None
+                or not account.active
+                or (settings.require_totp and not account.totp_enabled)
+            ):
                 staff_session.revoked_at = now
                 unauthorized = True
             else:

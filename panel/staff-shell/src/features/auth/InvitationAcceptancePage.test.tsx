@@ -148,3 +148,33 @@ describe("invitation-only staff enrollment", () => {
     expect(onComplete).toHaveBeenCalledOnce();
   });
 });
+
+describe("invitation acceptance without TOTP", () => {
+  it("finishes right after the password when the server does not require TOTP", async () => {
+    const user = userEvent.setup();
+    vi.mocked(acceptStaffInvitation).mockResolvedValue({
+      totp_required: false,
+      account: {
+        id: "account-1",
+        email: "owner@example.test",
+        role: "agency_admin",
+        tenant_id: "agency-1",
+      },
+    });
+    render(
+      <InvitationAcceptancePage invitationToken="single-use-invitation" />,
+    );
+
+    await user.type(screen.getByLabelText("Nueva contraseña"), "correct-secret");
+    await user.type(screen.getByLabelText("Confirmar contraseña"), "correct-secret");
+    await user.click(screen.getByRole("button", { name: "Continuar" }));
+
+    expect(
+      await screen.findByText(
+        "La configuración terminó correctamente. Ya puedes iniciar sesión.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText("Clave de configuración")).not.toBeInTheDocument();
+    expect(verifyStaffEnrollment).not.toHaveBeenCalled();
+  });
+});

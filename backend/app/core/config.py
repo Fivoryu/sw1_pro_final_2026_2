@@ -39,6 +39,9 @@ class Settings:
     totp_encryption_key: str
     web_origin: str
     secure_cookies: bool = True
+    # When false, staff sign in and accept invitations with the password only:
+    # no TOTP enrollment and no TOTP step at login (STAFF_REQUIRE_TOTP).
+    require_totp: bool = True
     access_token_minutes: int = 15
     refresh_token_days: int = 30
     invitation_ttl_hours: int = 168
@@ -112,6 +115,7 @@ class Settings:
             totp_encryption_key=values["totp_encryption_key"],
             web_origin=origin,
             secure_cookies=os.environ.get("STAFF_SECURE_COOKIES", "true").lower() != "false",
+            require_totp=_boolean_from_env("STAFF_REQUIRE_TOTP", True),
             database_connect_timeout_seconds=_positive_timeout_from_env(
                 "DATABASE_CONNECT_TIMEOUT_SECONDS", 5
             ),
