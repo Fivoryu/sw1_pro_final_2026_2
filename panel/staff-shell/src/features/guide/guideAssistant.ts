@@ -239,12 +239,16 @@ function otherScreens(screenId: GuideScreenId): AssistantAnswer {
 
 function answerWithEntry(entry: Entry, screenId: GuideScreenId, asked: string): AssistantAnswer {
   let text = entry.text;
-  const chips: string[] = [...entry.followUps];
   const sharedAcrossScreens =
     entry.screen !== null &&
     getKnowledgeBase().some((other) => other !== entry && other.kind === entry.kind && other.text === entry.text);
-  if (entry.screen && entry.screen !== screenId && !sharedAcrossScreens) {
-    const target = GUIDE_TOPICS[entry.screen];
+  const redirectScreen = entry.screen !== null && entry.screen !== screenId && !sharedAcrossScreens ? entry.screen : null;
+  const redirected = redirectScreen !== null;
+  // Follow-ups of an entry that lives on another screen (shared answers included) must
+  // not be offered here: only the current screen's suggestions are role-correct.
+  const chips: string[] = entry.screen !== null && entry.screen !== screenId && !redirected ? [] : [...entry.followUps];
+  if (redirectScreen) {
+    const target = GUIDE_TOPICS[redirectScreen];
     text =
       `Eso se hace en otra pantalla: «${target.heading}». ` +
       "Para llegar, búscala en la navegación del panel y, cuando estés ahí, abre la Guía de esa pantalla.\n\n" +

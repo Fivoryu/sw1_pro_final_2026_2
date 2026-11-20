@@ -182,3 +182,20 @@ describe("answerQuestion: final round 2 fixes", () => {
     expect(answerQuestion("qué es escrow", "login").text).not.toContain("No estoy seguro");
   });
 });
+
+describe("answerQuestion: chips of shared answers stay on the current screen", () => {
+  it.each(["chat-inbox", "landing"] as const)("%s: no chip leads to another role's welcome guide", (screen) => {
+    const answer = answerQuestion("cómo cierro sesión", screen);
+    expect(answer.text).not.toContain("otra pantalla");
+    expect(answer.chips.length).toBeGreaterThan(0);
+    for (const chip of answer.chips) {
+      expect(chip).not.toContain("administración de plataforma");
+      if (chip === "¿Qué más puedo hacer en el sistema?") continue; // lists every screen by design
+      const next = answerQuestion(chip, screen);
+      expect(next.text).not.toMatch(/administración de plataforma/);
+    }
+    const own = GUIDE_TOPICS[screen].walkthroughs.map((w) => w.title);
+    const firstWalk = answer.chips.find((c) => own.includes(c) || c === "Tu primer día");
+    if (firstWalk) expect(answerQuestion(firstWalk, screen).text).not.toContain("otra pantalla");
+  });
+});
