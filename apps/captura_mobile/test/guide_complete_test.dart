@@ -129,6 +129,9 @@ void main() {
       );
       await tester.tap(find.byKey(const ValueKey('guide-button')));
       await tester.pumpAndSettle();
+      // The guide opens as a chat; the structured guide is one tap away.
+      await tester.tap(find.byKey(const ValueKey('guide-full-toggle')));
+      await tester.pumpAndSettle();
 
       expect(find.text('Para qué sirve'), findsOneWidget);
       expect(find.text('Paso a paso'), findsOneWidget);

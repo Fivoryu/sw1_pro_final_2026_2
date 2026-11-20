@@ -40,6 +40,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const ValueKey('guide-sheet')), findsOneWidget);
+      // The guide opens as a chat; the structured guide is one tap away.
+      await tester.tap(find.byKey(const ValueKey('guide-full-toggle')));
+      await tester.pumpAndSettle();
       final steps = guideSteps(GuideScreen.listingsList);
       expect(steps, isNotEmpty);
       for (var i = 0; i < steps.length; i++) {
